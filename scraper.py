@@ -1205,6 +1205,104 @@ def scrape_leilosoc(db: sqlite3.Connection, max_price: float = 50000):
     return total_scraped
 
 
+def scrape_bcp(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape BCP Millennium bank repossession listings."""
+    LOG.info("Scraping BCP Millennium imoveis...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    url = "https://millenniumimoveis.janeladigital.com/Search.aspx"
+    try:
+        resp = session.get(url, timeout=15)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"BCP error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    links = soup.select('a[href*="Detail.aspx"][href*="obp=1"]')
+    total_scraped = 0
+
+    for a in links:
+        href = a.get("href", "")
+        m = re.search(r"UID=([a-f0-9-]+)", href)
+        if not m:
+            continue
+        eid = m.group(1)
+        text = a.get_text(" ", strip=True)
+
+        # Extract price: "€ 102 000" or "€ 24 000"
+        price = None
+        pm = re.search(r"€\s*([\d\s]+)", text)
+        if pm:
+            try:
+                price = float(pm.group(1).replace(" ", ""))
+            except ValueError:
+                pass
+        if price and price > max_price:
+            continue
+
+        # Extract tipo from start: "Moradia T2", "Apartamento T3", "Loja", "Terreno"
+        tipo_m = re.match(r"([\w\s]+?)(?:\s*€)", text)
+        title_part = tipo_m.group(1).strip() if tipo_m else "BCP property"
+
+        # Extract concelho/freguesia
+        concelho = None
+        freguesia = None
+        cm = re.search(r"Concelho\s*:\s*(\S[\w\s]+?)(?:\s*Freguesia|$)", text)
+        if cm:
+            concelho = cm.group(1).strip()
+        fm = re.search(r"Freguesia\s*:\s*(\S[\w\s]+?)(?:\s*Im[oó]vel|$)", text)
+        if fm:
+            freguesia = fm.group(1).strip()
+
+        # Extract area
+        area = None
+        am = re.search(r"(\d[\d\s]*)\s*m", text)
+        if am:
+            try:
+                area = float(am.group(1).replace(" ", ""))
+            except ValueError:
+                pass
+
+        location = ", ".join(filter(None, [freguesia, concelho]))
+        title = f"{title_part} - {location}" if location else title_part
+
+        full_url = f"https://millenniumimoveis.janeladigital.com{href}"
+
+        listing = {
+            "id": f"bcp:{eid}",
+            "source": "bcp",
+            "country": "PT",
+            "external_id": eid,
+            "title": title[:120],
+            "description": f"Bank repossession (BCP Millennium)",
+            "tipo": "imovel",
+            "area_m2": area,
+            "price": price,
+            "current_bid": None,
+            "min_price": None,
+            "district": None,
+            "concelho": concelho,
+            "freguesia": freguesia,
+            "url": full_url,
+            "image_url": None,
+            "date_end": None,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("bcp", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"BCP: {total_scraped} Portuguese bank repo listings scraped")
+    return total_scraped
+
+
 # ─── e-leiloes detail fetch ──────────────────────────────────────────
 
 def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 20):
@@ -1727,7 +1825,7 @@ def main():
     parser = argparse.ArgumentParser(description="EU Auction Scanner")
     parser.add_argument("--source", choices=[
         "eleiloes", "idealista", "croatia", "fina", "spain", "france", "italy",
-        "netherlands", "veilingnotaris", "leilosoc", "all"
+        "netherlands", "veilingnotaris", "leilosoc", "bcp", "all"
     ], default="all")
     parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "all"], default=None,
                         help="Scrape all sources for a country")
@@ -1749,7 +1847,7 @@ def main():
         db.commit()
 
     COUNTRY_SOURCES = {
-        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc)],
+        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp)],
         "HR": [("croatia", scrape_croatia), ("fina", scrape_fina_csv)],
         "ES": [("spain", scrape_spain)],
         "FR": [("france", scrape_france)],
@@ -1779,6 +1877,7 @@ def main():
                 "netherlands": ("netherlands", scrape_netherlands),
                 "veilingnotaris": ("veilingnotaris", scrape_veilingnotaris),
                 "leilosoc": ("leilosoc", scrape_leilosoc),
+                "bcp": ("bcp", scrape_bcp),
             }
             if args.source in source_map:
                 sources_to_run.append(source_map[args.source])
