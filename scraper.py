@@ -888,14 +888,19 @@ def scrape_netherlands(db: sqlite3.Connection, max_price: float = 50000):
                 if not eid:
                     continue
 
-                price_str = obj.get("veilingkosten", "")
+                # NL auctions don't publish the property price upfront;
+                # "veilingkosten" is the auction FEE, not the property value.
                 price = None
-                pm = re.search(r"[\d.,]+", price_str.replace("€", "").replace("€", ""))
-                if pm:
-                    try:
-                        price = float(pm.group().replace(".", "").replace(",", "."))
-                    except ValueError:
-                        pass
+                for field in ("inzet", "afslag"):
+                    val = obj.get(field, "")
+                    if val:
+                        pm = re.search(r"[\d.,]+", val.replace("€", ""))
+                        if pm:
+                            try:
+                                price = float(pm.group().replace(".", "").replace(",", "."))
+                            except ValueError:
+                                pass
+                            break
 
                 title = obj.get("kavelNaam", "")
                 wtype = obj.get("woningtype", "")
@@ -910,13 +915,14 @@ def scrape_netherlands(db: sqlite3.Connection, max_price: float = 50000):
                 if img and not img.startswith("http"):
                     img = f"{base}{img}"
 
+                vtype = obj.get("veilingwijze", "")
                 listing = {
                     "id": f"netherlands:{eid}",
                     "source": "netherlands",
                     "country": "NL",
                     "external_id": eid,
                     "title": title,
-                    "description": None,
+                    "description": f"Executieveiling ({vtype})" if vtype else "Executieveiling",
                     "tipo": "vastgoed",
                     "area_m2": None,
                     "price": price,
