@@ -83,15 +83,53 @@ def init_db(db: sqlite3.Connection):
     db.commit()
 
 
+def _parse_euro(text) -> float | None:
+    """Parse European euro amounts like 36.163,00 € / 36 163,00 / 36163."""
+    if text is None:
+        return None
+    s = str(text).replace("\xa0", " ").replace("\u202f", " ").strip()
+    if not s or re.search(r"\bsin\s+(puja|lotes|tramos|m[ií]nima)", s, re.I):
+        return None
+    m = re.search(
+        r"(\d{1,3}(?:[.\s]\d{3})+,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:[.\s]\d{3})+|\d+)",
+        s,
+    )
+    if not m:
+        return None
+    num = m.group(1).replace(" ", "")
+    if "," in num:
+        num = num.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", num):
+        num = num.replace(".", "")
+    try:
+        return float(num)
+    except ValueError:
+        return None
+
+
 def upsert_listing(db: sqlite3.Connection, row: dict):
     now = datetime.now(timezone.utc).isoformat()
     existing = db.execute("SELECT first_seen FROM listings WHERE id = ?", (row["id"],)).fetchone()
     if existing:
+        # COALESCE: do not wipe enriched fields when a later search scrape sends None
         db.execute("""
             UPDATE listings SET
-                title=?, description=?, tipo=?, area_m2=?, price=?, current_bid=?,
-                min_price=?, district=?, concelho=?, freguesia=?, url=?, image_url=?,
-                date_end=?, raw_json=?, last_seen=?, is_new=0
+                title=COALESCE(?, title),
+                description=COALESCE(?, description),
+                tipo=COALESCE(?, tipo),
+                area_m2=COALESCE(?, area_m2),
+                price=COALESCE(?, price),
+                current_bid=COALESCE(?, current_bid),
+                min_price=COALESCE(?, min_price),
+                district=COALESCE(?, district),
+                concelho=COALESCE(?, concelho),
+                freguesia=COALESCE(?, freguesia),
+                url=COALESCE(?, url),
+                image_url=COALESCE(?, image_url),
+                date_end=COALESCE(?, date_end),
+                raw_json=COALESCE(?, raw_json),
+                last_seen=?,
+                is_new=0
             WHERE id=?
         """, (
             row.get("title"), row.get("description"), row.get("tipo"),
@@ -581,6 +619,8 @@ def scrape_spain(db: sqlite3.Connection, max_price: float = 50000):
                 break
             time.sleep(1)
 
+    enrich_spain_details(db, session, limit=200)
+
     db.execute(
         "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
         ("spain", datetime.now(timezone.utc).isoformat(), total_scraped, "ok")
@@ -645,7 +685,7 @@ def _spain_parse_page(soup, db, max_price) -> int:
             "description": description,
             "tipo": "inmueble",
             "area_m2": None,
-            "price": None,  # price is on detail page, not search results
+            "price": None,  # filled later from detalleSubasta.php
             "current_bid": None,
             "min_price": None,
             "district": location,
@@ -660,6 +700,147 @@ def _spain_parse_page(soup, db, max_price) -> int:
         count += 1
 
     return count
+
+
+def _spain_table_fields(soup) -> dict:
+    data = {}
+    for tr in soup.select("tr"):
+        cells = tr.find_all(["th", "td"])
+        if len(cells) >= 2:
+            key = cells[0].get_text(" ", strip=True)
+            val = cells[1].get_text(" ", strip=True)
+            if key:
+                data[key] = val
+    for dt in soup.select("dt"):
+        dd = dt.find_next_sibling("dd")
+        if dd:
+            key = dt.get_text(" ", strip=True)
+            if key:
+                data[key] = dd.get_text(" ", strip=True)
+    return data
+
+
+def _spain_field(data: dict, *needles: str) -> str | None:
+    for key, val in data.items():
+        kl = key.lower()
+        if any(n.lower() in kl for n in needles):
+            return val
+    return None
+
+
+def _spain_parse_end_date(text: str | None) -> str | None:
+    if not text:
+        return None
+    iso = re.search(r"ISO:\s*([0-9T:+-]+)", text)
+    if iso:
+        return iso.group(1)
+    dm = re.search(r"(\d{2})-(\d{2})-(\d{4})\s+(\d{2}:\d{2}:\d{2})", text)
+    if dm:
+        try:
+            return datetime.strptime(
+                f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)} {dm.group(4)}",
+                "%Y-%m-%d %H:%M:%S",
+            ).isoformat()
+        except ValueError:
+            return None
+    return None
+
+
+def _spain_parse_detail(html: str) -> dict:
+    """Extract price, min bid, dates, and locality from a BOE detail page."""
+    soup = BeautifulSoup(html, "html.parser")
+    fields = _spain_table_fields(soup)
+    text = soup.get_text(" ", strip=True)
+
+    price = _parse_euro(_spain_field(fields, "Valor subasta", "Valor de subasta"))
+    if price is None:
+        m = re.search(r"Valor subasta\s+([\d.\s]+,\d{2}\s*€)", text, re.I)
+        if m:
+            price = _parse_euro(m.group(1))
+    if price is None:
+        price = _parse_euro(_spain_field(fields, "Tasación", "tasacion"))
+
+    min_price = _parse_euro(_spain_field(fields, "Puja mínima", "Puja minima"))
+
+    date_end = _spain_parse_end_date(
+        _spain_field(fields, "Fecha de conclusión", "Fecha de conclusion")
+    )
+    if not date_end:
+        date_end = _spain_parse_end_date(text)
+
+    concelho = _spain_field(fields, "Localidad", "Municipio")
+    district = _spain_field(fields, "Provincia")
+
+    title = None
+    desc = None
+    for label in ("Descripción", "Descripcion", "Dirección", "Direccion"):
+        val = _spain_field(fields, label)
+        if val and len(val) > 20:
+            desc = val[:500]
+            title = val[:120]
+            break
+    if not title:
+        h = soup.select_one("#contenido h3, h3")
+        if h:
+            ht = h.get_text(" ", strip=True)
+            if ht and not ht.upper().startswith("SUBASTA SUB-"):
+                title = ht[:120]
+
+    area = None
+    am = re.search(r"(\d{1,3}(?:[.\s]\d{3})+,\d{1,2}|\d+,\d{1,2}|\d+)\s*m[²2]", text, re.I)
+    if am:
+        area = _parse_euro(am.group(1))
+
+    return {
+        "price": price,
+        "min_price": min_price,
+        "date_end": date_end,
+        "concelho": concelho.strip() if concelho else None,
+        "district": district.strip() if district else None,
+        "title": title,
+        "description": desc,
+        "area_m2": area,
+    }
+
+
+def enrich_spain_details(db: sqlite3.Connection, session: requests.Session, limit: int = 200):
+    """Fetch BOE detail pages for Spanish listings still missing a price."""
+    cols = [r[1] for r in db.execute("PRAGMA table_info(listings)").fetchall()]
+    rows = db.execute("""
+        SELECT * FROM listings
+        WHERE source='spain' AND price IS NULL
+        LIMIT ?
+    """, (limit,)).fetchall()
+    if not rows:
+        LOG.info("  Spain details: nothing to enrich")
+        return 0
+
+    LOG.info(f"  Spain details: fetching {len(rows)} listings missing price")
+    filled = 0
+    for row in rows:
+        item = dict(zip(cols, row))
+        sub_id = item["external_id"]
+        url = item.get("url") or f"https://subastas.boe.es/detalleSubasta.php?idSub={sub_id}"
+        try:
+            resp = session.get(url, timeout=30)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.debug(f"  Spain detail {sub_id} error: {e}")
+            time.sleep(0.5)
+            continue
+
+        parsed = _spain_parse_detail(resp.text)
+        for key, val in parsed.items():
+            if val is not None:
+                item[key] = val
+        upsert_listing(db, item)
+        if parsed.get("price") is not None:
+            filled += 1
+        db.commit()
+        time.sleep(0.6)
+
+    LOG.info(f"  Spain details: filled price for {filled}/{len(rows)}")
+    return filled
 
 
 # ─── France: licitor.com (HTML — tribunal-based) ────────────────────
@@ -722,9 +903,7 @@ def scrape_france(db: sqlite3.Connection, max_price: float = 50000):
             parent = a.parent
             if parent:
                 txt = parent.get_text(" ", strip=True)
-                m = re.search(r'([\d\s.,]+)\s*€', txt)
-                if m:
-                    price = float(m.group(1).replace(" ", "").replace(" ", "").replace(".", "").replace(",", "."))
+                price = _parse_euro(txt)
 
             if price and price > max_price:
                 continue
@@ -1309,6 +1488,27 @@ def scrape_bcp(db: sqlite3.Connection, max_price: float = 50000):
     return total_scraped
 
 
+def _citius_extract_location(desc: str) -> tuple[str | None, str | None, str | None]:
+    """Return (district, concelho, freguesia) parsed from a Citius description."""
+    if not desc:
+        return None, None, None
+    freguesia = concelho = district = None
+    fm = re.search(r"freguesia(?:\s+de)?\s+([^,.;]+)", desc, re.I)
+    if fm:
+        freguesia = fm.group(1).strip()
+    cm = re.search(r"concelho(?:\s+de)?\s+([^,.;]+)", desc, re.I)
+    if cm:
+        concelho = cm.group(1).strip()
+    dm = re.search(r"distrito(?:\s+de)?\s+([^,.;]+)", desc, re.I)
+    if dm:
+        district = dm.group(1).strip()
+    if not concelho:
+        sm = re.search(r"sito\s+(?:em|na|no)\s+([^,.;]+)", desc, re.I)
+        if sm:
+            concelho = sm.group(1).strip()
+    return district, concelho, freguesia
+
+
 def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
     """Scrape Portuguese judicial forced-sale listings from citius.mj.pt."""
     LOG.info("Scraping Citius judicial sales...")
@@ -1380,23 +1580,22 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
             item_soup = BeautifulSoup(item_html, "html.parser")
             item_text = item_soup.get_text(" ", strip=True)
 
-            valor_m = re.search(r"Valor Base:\s*([\d\s.,]+)\s*€", item_text)
             price = None
-            if valor_m:
-                try:
-                    price = float(
-                        valor_m.group(1).replace("\xa0", "").replace(" ", "")
-                        .replace(".", "").replace(",", ".")
-                    )
-                except ValueError:
-                    pass
-            if price == 0:
-                price = None
+            base_m = re.search(r"Valor Base:\s*([\d\s.,]+)\s*€", item_text, re.I)
+            if base_m:
+                price = _parse_euro(base_m.group(1))
+            if not price:
+                for lab in ("Valor mínimo", "Valor minimo", "Valor da venda"):
+                    extra = re.search(lab + r":\s*([\d\s.,]+)\s*€", item_text, re.I)
+                    if extra:
+                        price = _parse_euro(extra.group(1))
+                        if price:
+                            break
             if price and price > max_price:
                 continue
 
             desc_m = re.search(r"Descrição do Bem:\s*(.+?)(?:Processo|$)", item_text)
-            desc = desc_m.group(1).strip()[:200] if desc_m else ""
+            desc = desc_m.group(1).strip() if desc_m else ""
 
             proc_m = re.search(r"Processo:\s*(.+?)(?:Espécie|$)", item_text)
             processo = proc_m.group(1).strip() if proc_m else ""
@@ -1407,6 +1606,27 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
             eid = re.sub(r"[^A-Za-z0-9]", "", processo)[:40] if processo else str(hash(desc))
 
             title = desc[:120] if desc else f"Citius judicial sale {processo}"
+            district, concelho, freguesia = _citius_extract_location(desc)
+
+            area = None
+            am = re.search(r"(\d[\d\s.]*)\s*m[²2]", desc, re.I)
+            if am:
+                area = _parse_euro(am.group(1))
+
+            date_end = None
+            end_m = re.search(
+                r"(?:Data(?:\s+da)?(?:\s+venda)?|Até|Prazo)[^:]{0,30}:\s*(\d{2}/\d{2}/\d{4})",
+                item_text,
+                re.I,
+            )
+            if end_m:
+                try:
+                    date_end = datetime.strptime(end_m.group(1), "%d/%m/%Y").isoformat()
+                except ValueError:
+                    date_end = None
+
+            proc_q = urllib.parse.quote(processo) if processo else eid
+            desc_parts = [p for p in (desc[:500], modalidade, f"Processo: {processo}" if processo else None) if p]
 
             listing = {
                 "id": f"citius:{eid}",
@@ -1414,18 +1634,18 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
                 "country": "PT",
                 "external_id": eid,
                 "title": title,
-                "description": f"{modalidade}. Processo: {processo}",
+                "description": ". ".join(desc_parts) if desc_parts else None,
                 "tipo": "imovel",
-                "area_m2": None,
+                "area_m2": area,
                 "price": price,
                 "current_bid": None,
                 "min_price": price,
-                "district": None,
-                "concelho": None,
-                "freguesia": None,
-                "url": f"https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx",
+                "district": district,
+                "concelho": concelho,
+                "freguesia": freguesia,
+                "url": f"https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo={proc_q}",
                 "image_url": None,
-                "date_end": None,
+                "date_end": date_end,
                 "raw_json": None,
             }
             upsert_listing(db, listing)
@@ -1450,7 +1670,7 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
 
 # ─── e-leiloes detail fetch ──────────────────────────────────────────
 
-def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 20):
+def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 80, max_price: float = 50000):
     """Fetch full details for interesting e-leiloes listings missing descriptions."""
     session = requests.Session()
     session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -1459,13 +1679,19 @@ def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 20):
     rows = db.execute("""
         SELECT external_id FROM listings
         WHERE source='eleiloes' AND description IS NULL
-          AND price <= 50000
-          AND (current_bid <= 50000 OR current_bid IS NULL OR current_bid = 0)
+          AND price <= ?
+          AND (current_bid <= ? OR current_bid IS NULL OR current_bid = 0)
           AND date_end > ?
           AND tipo NOT IN ('outro','direitos')
-        ORDER BY price DESC
+        ORDER BY CASE
+            WHEN LOWER(title) LIKE '%moradia%'
+              OR LOWER(title) LIKE '%apartamento%'
+              OR LOWER(title) LIKE '%casa%'
+              OR LOWER(title) LIKE '%vivenda%' THEN 0
+            ELSE 1
+        END, price DESC
         LIMIT ?
-    """, (datetime.now(timezone.utc).isoformat(), limit)).fetchall()
+    """, (max_price, max_price, datetime.now(timezone.utc).isoformat(), limit)).fetchall()
 
     count = 0
     for (eid,) in rows:
@@ -1653,10 +1879,15 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
     items = [dict(zip(cols, r)) for r in rows]
 
     categories = {"imoveis": [], "ouro_joias": [], "outros": []}
+    unknown_imoveis = []
     for item in items:
         cat = _categorize(item)
-        price = item["price"] or 0
+        price = item["price"]
         bid = item["current_bid"] or 0
+        if price is None:
+            if cat == "imoveis":
+                unknown_imoveis.append(item)
+            continue
         if price <= max_price and bid <= max_bid:
             ratio = bid / price if price > 0 and bid > 0 else None
             categories[cat].append((item, ratio))
@@ -1691,8 +1922,11 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
         lines.append("")
 
         if not cat_items:
-            lines.append("_None found._\n")
-            continue
+            if not (cat == "imoveis" and unknown_imoveis):
+                lines.append("_None found._\n")
+                continue
+            lines.append("_No priced listings in budget._\n")
+            lines.append("")
 
         # Group by country
         by_country = {}
@@ -1723,6 +1957,31 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
                     f"| {i} | {inv_score:.0f} | [{title_short}]({url}) | {price_str} | {bid_str} | {loc} | {ends} | {flags} |"
                 )
             lines.append("")
+
+        if cat == "imoveis" and unknown_imoveis:
+            by_unknown = {}
+            for item in unknown_imoveis:
+                by_unknown.setdefault(item.get("country", "PT"), []).append(item)
+            lines.append("### Price unknown — open to check")
+            lines.append("")
+            lines.append("_These listings have no published price and are not scored._")
+            lines.append("")
+            for country_code in ["PT", "ES", "FR", "IT", "HR", "NL"]:
+                u_items = by_unknown.get(country_code, [])
+                if not u_items:
+                    continue
+                cname = COUNTRY_NAMES.get(country_code, country_code)
+                lines.append(f"#### {cname} ({len(u_items)})")
+                lines.append("")
+                lines.append("| # | Title | Location | Ends |")
+                lines.append("|---|-------|----------|------|")
+                for i, item in enumerate(u_items[:15], 1):
+                    loc = ", ".join(filter(None, [item["concelho"], item["district"]]))
+                    ends = item["date_end"][:10] if item["date_end"] else "-"
+                    title_short = (item["title"] or "?")[:50]
+                    url = item["url"] or ""
+                    lines.append(f"| {i} | [{title_short}]({url}) | {loc} | {ends} |")
+                lines.append("")
 
     # LLM-ready compact summary for the top imóveis (saves tokens)
     lines.append("## Top Imóveis — Compact (for LLM analysis)")
@@ -1810,8 +2069,79 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
         docx_path = os.path.join(os.path.dirname(__file__), "report.docx")
         doc.save(docx_path)
         desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "Auction-Report.docx")
-        doc.save(desktop_path)
+        try:
+            doc.save(desktop_path)
+        except PermissionError:
+            LOG.warning(f"Could not write {desktop_path} (file open?), skipping desktop copy")
         LOG.info(f"Word report written to {docx_path} and {desktop_path}")
+
+        # Generate PDF directly with fpdf2
+        try:
+            from fpdf import FPDF
+
+            pdf = FPDF(orientation="L", format="A4")
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.add_page()
+            pdf.set_font("Helvetica", "B", 16)
+            pdf.cell(0, 10, "EU Investment Scanner Report", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(0, 6, f"Generated: {now_str}    Budget: EUR {max_price:,.0f}    Listings: {len(items)}", new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(4)
+
+            for cat, label in section_names.items():
+                cat_items = categories[cat]
+                pdf.set_font("Helvetica", "B", 12)
+                pdf.cell(0, 8, f"{label} - {len(cat_items)} listings", new_x="LMARGIN", new_y="NEXT")
+
+                if not cat_items:
+                    pdf.set_font("Helvetica", "I", 9)
+                    pdf.cell(0, 6, "None found.", new_x="LMARGIN", new_y="NEXT")
+                    continue
+
+                by_country = {}
+                for item, ratio, inv_score, inv_reasons in cat_items:
+                    by_country.setdefault(item.get("country", "PT"), []).append((item, ratio, inv_score, inv_reasons))
+
+                for cc in ["PT", "ES", "FR", "IT", "HR", "NL"]:
+                    c_items = by_country.get(cc, [])
+                    if not c_items:
+                        continue
+                    cname = COUNTRY_NAMES.get(cc, cc)
+                    pdf.set_font("Helvetica", "B", 10)
+                    pdf.cell(0, 7, f"{cname} ({len(c_items)})", new_x="LMARGIN", new_y="NEXT")
+
+                    # Table header
+                    pdf.set_font("Helvetica", "B", 7)
+                    col_w = [8, 12, 80, 22, 45, 50, 55]
+                    headers = ["#", "Score", "Title", "Price", "Location", "URL", "Flags"]
+                    for j, h in enumerate(headers):
+                        pdf.cell(col_w[j], 5, h, border=1)
+                    pdf.ln()
+
+                    pdf.set_font("Helvetica", "", 7)
+                    show = c_items[:30] if cat == "imoveis" else c_items[:15]
+                    for idx, (item, ratio, inv_score, inv_reasons) in enumerate(show, 1):
+                        cells = [
+                            str(idx),
+                            f"{inv_score:.0f}",
+                            (item["title"] or "?")[:45].encode("latin-1", "replace").decode("latin-1"),
+                            f"EUR {item['price']:,.0f}" if item["price"] else "?",
+                            ", ".join(filter(None, [item["concelho"], item["district"]]))[:25].encode("latin-1", "replace").decode("latin-1"),
+                            (item["url"] or "")[:30],
+                            ", ".join(inv_reasons)[:30],
+                        ]
+                        for j, c in enumerate(cells):
+                            pdf.cell(col_w[j], 4, c, border=1)
+                        pdf.ln()
+                    pdf.ln(3)
+
+            pdf_path = os.path.join(os.path.dirname(__file__), "report.pdf")
+            pdf.output(pdf_path)
+            desktop_pdf = os.path.join(os.path.expanduser("~"), "Desktop", "Auction-Report.pdf")
+            pdf.output(desktop_pdf)
+            LOG.info(f"PDF report written to {pdf_path} and {desktop_pdf}")
+        except Exception as e2:
+            LOG.warning(f"PDF generation failed: {e2}")
     except Exception as e:
         LOG.warning(f"Word report generation failed: {e}")
 
@@ -2001,7 +2331,8 @@ def print_console_summary(db: sqlite3.Connection, max_price: float = 50000):
             SELECT *
             FROM listings
             WHERE country = ?
-              AND (price <= ? OR price IS NULL)
+              AND price IS NOT NULL
+              AND price <= ?
               AND (date_end IS NULL OR date_end > ?)
               AND ({tipo_filter})
         """, (code, max_price, now.isoformat())).fetchall()
@@ -2106,7 +2437,7 @@ def main():
                 LOG.error(f"Source {name} failed: {e}")
 
         if any(n == "eleiloes" for n, _ in sources_to_run):
-            fetch_eleiloes_details(db, limit=30)
+            fetch_eleiloes_details(db, limit=80, max_price=args.max_price)
 
     report_path = generate_report(db, max_price=args.max_price)
 

@@ -2,3 +2,8 @@ auctions.db
 __pycache__/
 *.pyc
 .env
+*.docx
+*.pdf
+~$*
+analysis.md
+analysis_prompt.txt
