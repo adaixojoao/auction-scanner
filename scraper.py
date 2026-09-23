@@ -28,7 +28,7 @@ import sqlite3
 import sys
 import time
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import re
 
@@ -1309,6 +1309,145 @@ def scrape_bcp(db: sqlite3.Connection, max_price: float = 50000):
     return total_scraped
 
 
+def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Portuguese judicial forced-sale listings from citius.mj.pt."""
+    LOG.info("Scraping Citius judicial sales...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    url = "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx"
+    try:
+        r = session.get(url, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        LOG.error(f"Citius initial load error: {e}")
+        return 0
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    tribunais = [
+        o["value"] for o in soup.select("#ctl00_ContentPlaceHolder1_ddlTribunais option")
+        if o["value"] != "0"
+    ]
+    LOG.info(f"  Found {len(tribunais)} tribunais to query")
+
+    today = datetime.now().strftime("%d/%m/%Y")
+    past = (datetime.now() - timedelta(days=180)).strftime("%d/%m/%Y")
+
+    total_scraped = 0
+    for i, trib_id in enumerate(tribunais):
+        try:
+            r0 = session.get(url, timeout=15)
+            s0 = BeautifulSoup(r0.text, "html.parser")
+            vs = s0.select_one("#__VIEWSTATE")["value"]
+            ev = s0.select_one("#__EVENTVALIDATION")["value"]
+            vsg = s0.select_one("#__VIEWSTATEGENERATOR")["value"]
+        except Exception:
+            continue
+
+        data = {
+            "__EVENTTARGET": "",
+            "__EVENTARGUMENT": "",
+            "__VIEWSTATE": vs,
+            "__VIEWSTATEGENERATOR": vsg,
+            "__VIEWSTATEENCRYPTED": "",
+            "__EVENTVALIDATION": ev,
+            "ctl00$ContentPlaceHolder1$ddlTribunais": trib_id,
+            "ctl00$ContentPlaceHolder1$txtCalendarDesde": past,
+            "ctl00$ContentPlaceHolder1$txtCalendarAte": today,
+            "ctl00$ContentPlaceHolder1$chkDatas": "on",
+            "ctl00$ContentPlaceHolder1$ddlTiposBem": "1",
+            "ctl00$ContentPlaceHolder1$ddlModalidades": "0",
+            "ctl00$ContentPlaceHolder1$ddlEstados": "927",
+            "ctl00$ContentPlaceHolder1$btnSearch": "Pesquisar",
+        }
+
+        try:
+            r2 = session.post(url, data=data, timeout=30)
+        except Exception as e:
+            LOG.debug(f"  Tribunal {trib_id} error: {e}")
+            continue
+
+        soup2 = BeautifulSoup(r2.text, "html.parser")
+        dl = soup2.select_one("[id*='dlVenda']")
+        if not dl:
+            continue
+
+        label_html = str(dl)
+        items = re.findall(r"Tipo de Bem:(.*?)(?=Tipo de Bem:|$)", label_html, re.S)
+
+        trib_count = 0
+        for item_html in items:
+            item_soup = BeautifulSoup(item_html, "html.parser")
+            item_text = item_soup.get_text(" ", strip=True)
+
+            valor_m = re.search(r"Valor Base:\s*([\d\s.,]+)\s*€", item_text)
+            price = None
+            if valor_m:
+                try:
+                    price = float(
+                        valor_m.group(1).replace("\xa0", "").replace(" ", "")
+                        .replace(".", "").replace(",", ".")
+                    )
+                except ValueError:
+                    pass
+            if price == 0:
+                price = None
+            if price and price > max_price:
+                continue
+
+            desc_m = re.search(r"Descrição do Bem:\s*(.+?)(?:Processo|$)", item_text)
+            desc = desc_m.group(1).strip()[:200] if desc_m else ""
+
+            proc_m = re.search(r"Processo:\s*(.+?)(?:Espécie|$)", item_text)
+            processo = proc_m.group(1).strip() if proc_m else ""
+
+            mod_m = re.search(r"Modalidade:\s*(.+?)(?:Descrição|$)", item_text)
+            modalidade = mod_m.group(1).strip() if mod_m else ""
+
+            eid = re.sub(r"[^A-Za-z0-9]", "", processo)[:40] if processo else str(hash(desc))
+
+            title = desc[:120] if desc else f"Citius judicial sale {processo}"
+
+            listing = {
+                "id": f"citius:{eid}",
+                "source": "citius",
+                "country": "PT",
+                "external_id": eid,
+                "title": title,
+                "description": f"{modalidade}. Processo: {processo}",
+                "tipo": "imovel",
+                "area_m2": None,
+                "price": price,
+                "current_bid": None,
+                "min_price": price,
+                "district": None,
+                "concelho": None,
+                "freguesia": None,
+                "url": f"https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx",
+                "image_url": None,
+                "date_end": None,
+                "raw_json": None,
+            }
+            upsert_listing(db, listing)
+            trib_count += 1
+
+        if trib_count:
+            total_scraped += trib_count
+            db.commit()
+
+        if (i + 1) % 20 == 0:
+            LOG.info(f"  Citius: {i+1}/{len(tribunais)} tribunais, {total_scraped} listings so far")
+        time.sleep(0.3)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("citius", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Citius: {total_scraped} Portuguese judicial sale listings scraped")
+    return total_scraped
+
+
 # ─── e-leiloes detail fetch ──────────────────────────────────────────
 
 def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 20):
@@ -1831,7 +1970,7 @@ def main():
     parser = argparse.ArgumentParser(description="EU Auction Scanner")
     parser.add_argument("--source", choices=[
         "eleiloes", "idealista", "croatia", "fina", "spain", "france", "italy",
-        "netherlands", "veilingnotaris", "leilosoc", "bcp", "all"
+        "netherlands", "veilingnotaris", "leilosoc", "bcp", "citius", "all"
     ], default="all")
     parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "all"], default=None,
                         help="Scrape all sources for a country")
@@ -1853,7 +1992,7 @@ def main():
         db.commit()
 
     COUNTRY_SOURCES = {
-        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp)],
+        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius)],
         "HR": [("croatia", scrape_croatia), ("fina", scrape_fina_csv)],
         "ES": [("spain", scrape_spain)],
         "FR": [("france", scrape_france)],
@@ -1884,6 +2023,7 @@ def main():
                 "veilingnotaris": ("veilingnotaris", scrape_veilingnotaris),
                 "leilosoc": ("leilosoc", scrape_leilosoc),
                 "bcp": ("bcp", scrape_bcp),
+                "citius": ("citius", scrape_citius),
             }
             if args.source in source_map:
                 sources_to_run.append(source_map[args.source])
