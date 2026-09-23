@@ -943,6 +943,268 @@ def scrape_netherlands(db: sqlite3.Connection, max_price: float = 50000):
     return total_scraped
 
 
+# ─── Croatia: FINA Ocevidnik CSV (open data) ───────────────────────
+
+def scrape_fina_csv(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Croatian forced-sale property registry from FINA open CSV."""
+    import csv
+    import io
+
+    LOG.info("Downloading FINA Ocevidnik CSV (~10MB)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0"
+
+    try:
+        resp = session.get("https://ponip.fina.hr/ocevidnik-web/preuzmi/csv", timeout=60)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"FINA CSV error: {e}")
+        return 0
+
+    text = resp.content.decode("utf-8-sig")
+    reader = csv.reader(io.StringIO(text), delimiter=";")
+    header = next(reader)
+    col = {h: i for i, h in enumerate(header)}
+
+    now = datetime.now(timezone.utc)
+    total_scraped = 0
+
+    for row in reader:
+        d = {h: row[i] if i < len(row) else "" for h, i in col.items()}
+
+        end_str = d.get("Datum i vrijeme završetka nadmetanja", "")
+        if not end_str or end_str < now.strftime("%Y-%m-%d"):
+            continue
+
+        tipo = d.get("Vrsta predmeta prodaje", "").lower()
+        if "nekretnina" not in tipo and "imovina" not in tipo:
+            continue
+
+        price_str = d.get("Početna cijena za nadmetanje", "").replace(",", ".")
+        try:
+            price = float(price_str)
+        except (ValueError, TypeError):
+            price = None
+
+        if price and price > max_price:
+            continue
+
+        bid_id = d.get("ID nadmetanja", "")
+        eid = bid_id or hashlib.md5(f"{d.get('Poslovni broj spisa','')}{end_str}".encode()).hexdigest()[:12]
+        title = d.get("Opis", "")[:120]
+        court = d.get("Nadležno tijelo", "")
+
+        min_price_str = d.get("Minimalna zakonska cijena ispod koje se predmet prodaje ne može prodati", "").replace(",", ".")
+        try:
+            min_price = float(min_price_str)
+        except (ValueError, TypeError):
+            min_price = None
+
+        listing = {
+            "id": f"fina:{eid}",
+            "source": "fina",
+            "country": "HR",
+            "external_id": str(eid),
+            "title": title if title else f"Nekretnina {eid}",
+            "description": d.get("Napomena uz detalje predmeta prodaje", "")[:500] or None,
+            "tipo": "nekretnina",
+            "area_m2": None,
+            "price": price,
+            "current_bid": None,
+            "min_price": min_price,
+            "district": court,
+            "concelho": None,
+            "freguesia": None,
+            "url": f"https://ponip.fina.hr/ocevidnik-web/#/predmet-prodaje/{eid}" if bid_id else None,
+            "image_url": None,
+            "date_end": end_str.replace(" ", "T") if end_str else None,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("fina", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"FINA CSV: {total_scraped} Croatian listings scraped")
+    return total_scraped
+
+
+# ─── Netherlands: veilingnotaris.nl (HTML) ──────────────────────────
+
+def scrape_veilingnotaris(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Dutch execution auctions from veilingnotaris.nl."""
+    LOG.info("Scraping veilingnotaris.nl...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    base = "https://veilingnotaris.nl"
+    total_scraped = 0
+
+    try:
+        resp = session.get(f"{base}/veilingen/", timeout=15)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"Veilingnotaris error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    for a in soup.select("a[href]"):
+        href = a.get("href", "")
+        m = re.search(r"/veilingen/(\d+)/([^/]+)/", href)
+        if not m:
+            continue
+
+        eid = m.group(1)
+        slug = m.group(2)
+        text = a.get_text(" ", strip=True)
+
+        # Parse address from slug
+        address = slug.replace("_", " ").replace("-", " ").title()
+
+        # Extract type from text (Appartement, Woonhuis, etc.)
+        wtype = ""
+        for t in ["Appartement", "Woonhuis", "Tussenwoning", "Hoekwoning", "Bovenwoning",
+                   "Twee-onder-een-kap", "Vrijstaand", "Bedrijfspand", "Winkel", "Kantoor"]:
+            if t.lower() in text.lower():
+                wtype = t
+                break
+
+        title = f"{address} ({wtype})" if wtype else address
+        url = href if href.startswith("http") else f"{base}{href}"
+
+        listing = {
+            "id": f"veilingnotaris:{eid}",
+            "source": "veilingnotaris",
+            "country": "NL",
+            "external_id": eid,
+            "title": title,
+            "description": None,
+            "tipo": "vastgoed",
+            "area_m2": None,
+            "price": None,
+            "current_bid": None,
+            "min_price": None,
+            "district": None,
+            "concelho": None,
+            "freguesia": None,
+            "url": url,
+            "image_url": None,
+            "date_end": None,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("veilingnotaris", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Veilingnotaris: {total_scraped} Dutch listings scraped")
+    return total_scraped
+
+
+# ─── Portugal: leilosoc.com (HTML) ─────────────────────────────────
+
+def scrape_leilosoc(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Portuguese auction house listings from leilosoc.com."""
+    LOG.info("Scraping leilosoc.com...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    base = "https://leilosoc.com"
+    total_scraped = 0
+
+    for page in range(1, 10):
+        url = f"{base}/en/category/5-real-estate/?page={page}"
+        try:
+            resp = session.get(url, timeout=15)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Leilosoc page {page} error: {e}")
+            break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        lot_links = soup.select("a[href*='/lot/']")
+        if not lot_links:
+            break
+
+        seen = set()
+        for a in lot_links:
+            href = a.get("href", "")
+            if not href or href in seen:
+                continue
+            seen.add(href)
+
+            m = re.search(r"/lot/(\d+)/", href)
+            if not m:
+                continue
+            eid = m.group(1)
+
+            text = a.get_text(" ", strip=True)
+            # Try to extract title (skip "Lot N" prefix)
+            title = re.sub(r"^Lot\s+\d+\s*", "", text).strip()[:120]
+            if not title:
+                title = f"Leilosoc lot {eid}"
+
+            # Extract price if visible
+            price = None
+            parent = a.parent
+            if parent:
+                pm = re.search(r"€\s*([\d\s.,]+)", parent.get_text(" "))
+                if pm:
+                    try:
+                        price = float(pm.group(1).replace(" ", "").replace(".", "").replace(",", "."))
+                    except ValueError:
+                        pass
+
+            if price and price > max_price:
+                continue
+
+            full_url = href if href.startswith("http") else f"{base}{href}"
+
+            listing = {
+                "id": f"leilosoc:{eid}",
+                "source": "leilosoc",
+                "country": "PT",
+                "external_id": eid,
+                "title": title,
+                "description": None,
+                "tipo": "imovel",
+                "area_m2": None,
+                "price": price,
+                "current_bid": None,
+                "min_price": None,
+                "district": None,
+                "concelho": None,
+                "freguesia": None,
+                "url": full_url,
+                "image_url": None,
+                "date_end": None,
+                "raw_json": None,
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        db.commit()
+        LOG.info(f"  Leilosoc page {page}: {len(seen)} lots")
+        time.sleep(0.5)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("leilosoc", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Leilosoc: {total_scraped} Portuguese listings scraped")
+    return total_scraped
+
+
 # ─── e-leiloes detail fetch ──────────────────────────────────────────
 
 def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 20):
@@ -1018,6 +1280,113 @@ def _categorize(item: dict) -> str:
     return "outros"
 
 
+def investment_score(item: dict) -> tuple[float, list[str]]:
+    """Score a property 0-100 for investment value. Returns (score, [reasons])."""
+    score = 50.0
+    reasons = []
+    title = (item.get("title") or "").lower()
+    price = item.get("price") or 0
+    bid = item.get("current_bid") or 0
+    area = item.get("area_m2") or 0
+    country = item.get("country", "PT")
+
+    # --- PENALTIES (red flags) ---
+
+    # Fractional ownership
+    frac_patterns = ["1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/12",
+                     "avos", "quota", "quinhão", "quinhao"]
+    if any(p in title for p in frac_patterns):
+        score -= 25
+        reasons.append("fractional share")
+
+    # Usufruct / limited rights
+    if "usufruto" in title or "usufruct" in title or "nue-propri" in title:
+        score -= 30
+        reasons.append("usufruct only")
+
+    if "direito" in title and ("herança" in title or "heranca" in title):
+        score -= 20
+        reasons.append("inheritance right")
+
+    # Ruins / uninhabitable
+    if "ruína" in title or "ruina" in title or "ruine" in title or "rudere" in title:
+        score -= 10
+        reasons.append("ruins")
+
+    # Very cheap = likely worthless
+    if price and price < 500:
+        score -= 15
+        reasons.append("suspiciously cheap")
+
+    # Overbid (bid > 150% of asking)
+    if bid and price and bid > price * 1.5:
+        score -= 15
+        reasons.append(f"overbid {bid/price:.0%}")
+
+    # Rural/rustic with no area info
+    if ("rústico" in title or "rustico" in title or "agricole" in title) and not area:
+        score -= 5
+        reasons.append("rural/no area")
+
+    # Parking / storage only
+    if any(w in title for w in ["parking", "garagem", "garage", "box", "emplacement", "magazzino"]):
+        score -= 10
+        reasons.append("parking/storage")
+
+    # --- BONUSES ---
+
+    # Full house/apartment
+    house_words = ["moradia", "apartamento", "vivienda", "appartement", "maison",
+                   "woonhuis", "appartamento", "casa", "logement", "tussenwoning"]
+    if any(w in title for w in house_words):
+        score += 15
+        reasons.append("full dwelling")
+
+    # Discount: bid well below asking
+    if bid and price and bid < price * 0.7:
+        bonus = min(20, (1 - bid / price) * 40)
+        score += bonus
+        reasons.append(f"discount {1-bid/price:.0%}")
+    elif not bid and price:
+        score += 5
+        reasons.append("no bids yet")
+
+    # Good size
+    if area and area > 50:
+        score += 5
+        reasons.append(f"{area:.0f}m2")
+    if area and area > 100:
+        score += 5
+
+    # Urban location signals
+    urban_kw = ["lisboa", "porto", "madrid", "barcelona", "valencia", "paris",
+                "lyon", "marseille", "amsterdam", "rotterdam", "den haag",
+                "roma", "milano", "zagreb", "split"]
+    loc = " ".join(filter(None, [item.get("concelho",""), item.get("district","")])).lower()
+    full_text = f"{title} {loc}"
+    if any(c in full_text for c in urban_kw):
+        score += 10
+        reasons.append("urban location")
+
+    # Price sweet spot (5k-40k for habitable property)
+    if price and 5000 <= price <= 40000 and any(w in title for w in house_words):
+        score += 10
+        reasons.append("price sweet spot")
+
+    # Ending soon = urgency (within 7 days)
+    if item.get("date_end"):
+        try:
+            end = datetime.fromisoformat(item["date_end"].replace("Z", "+00:00"))
+            days_left = (end - datetime.now(timezone.utc)).days
+            if 0 < days_left <= 7:
+                score += 5
+                reasons.append(f"{days_left}d left")
+        except (ValueError, TypeError):
+            pass
+
+    return max(0, min(100, score)), reasons
+
+
 def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: float = 50000):
     """Generate a Markdown investment report from the DB."""
     now = datetime.now(timezone.utc)
@@ -1043,8 +1412,14 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
             ratio = bid / price if price > 0 and bid > 0 else None
             categories[cat].append((item, ratio))
 
+    # Score and sort by investment value
     for cat in categories:
-        categories[cat].sort(key=lambda x: (x[1] or 999, x[0]["price"] or 999))
+        scored = []
+        for item, ratio in categories[cat]:
+            inv_score, inv_reasons = investment_score(item)
+            scored.append((item, ratio, inv_score, inv_reasons))
+        scored.sort(key=lambda x: (-x[2], x[1] or 999))
+        categories[cat] = scored
 
     COUNTRY_NAMES = {"PT": "Portugal", "HR": "Croatia", "ES": "Spain", "FR": "France", "IT": "Italy", "NL": "Netherlands"}
 
@@ -1072,9 +1447,9 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
 
         # Group by country
         by_country = {}
-        for item, ratio in cat_items:
+        for item, ratio, inv_score, inv_reasons in cat_items:
             c = item.get("country", "PT")
-            by_country.setdefault(c, []).append((item, ratio))
+            by_country.setdefault(c, []).append((item, ratio, inv_score, inv_reasons))
 
         for country_code in ["PT", "ES", "FR", "IT", "HR", "NL"]:
             c_items = by_country.get(country_code, [])
@@ -1083,20 +1458,20 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
             cname = COUNTRY_NAMES.get(country_code, country_code)
             lines.append(f"### {cname} ({len(c_items)})")
             lines.append("")
-            lines.append("| # | Title | VB | Bid | Bid/VB | Location | Ends |")
-            lines.append("|---|-------|-----|-----|--------|----------|------|")
+            lines.append("| # | Score | Title | Price | Bid | Location | Ends | Flags |")
+            lines.append("|---|-------|-------|-------|-----|----------|------|-------|")
 
             show = c_items[:30] if cat == "imoveis" else c_items[:15]
-            for i, (item, ratio) in enumerate(show, 1):
+            for i, (item, ratio, inv_score, inv_reasons) in enumerate(show, 1):
                 price_str = f"€{item['price']:,.0f}" if item['price'] else "?"
                 bid_str = f"€{item['current_bid']:,.0f}" if item['current_bid'] else "-"
-                ratio_str = f"{ratio:.0%}" if ratio else "-"
                 loc = ", ".join(filter(None, [item["concelho"], item["district"]]))
                 ends = item["date_end"][:10] if item["date_end"] else "-"
-                title_short = (item["title"] or "?")[:55]
+                title_short = (item["title"] or "?")[:50]
                 url = item["url"] or ""
+                flags = ", ".join(inv_reasons)[:40]
                 lines.append(
-                    f"| {i} | [{title_short}]({url}) | {price_str} | {bid_str} | {ratio_str} | {loc} | {ends} |"
+                    f"| {i} | {inv_score:.0f} | [{title_short}]({url}) | {price_str} | {bid_str} | {loc} | {ends} | {flags} |"
                 )
             lines.append("")
 
@@ -1104,7 +1479,7 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
     lines.append("## Top Imóveis — Compact (for LLM analysis)")
     lines.append("```json")
     compact = []
-    for item, ratio in categories["imoveis"][:15]:
+    for item, ratio, inv_score, inv_reasons in categories["imoveis"][:15]:
         compact.append({
             "t": item["title"][:60],
             "vb": item["price"],
@@ -1307,20 +1682,22 @@ def print_console_summary(db: sqlite3.Connection, max_price: float = 50000):
     for code in ["PT", "ES", "FR", "IT", "HR", "NL"]:
         # Build tipo filter for property-only results
         tipo_filter = " OR ".join(f"LOWER(tipo) LIKE '%{t}%'" for t in IMOVEL_TIPOS)
+        cols = [d[1] for d in db.execute("PRAGMA table_info(listings)").fetchall()]
         rows = db.execute(f"""
-            SELECT title, price, current_bid, url, concelho, district, date_end
+            SELECT *
             FROM listings
             WHERE country = ?
               AND (price <= ? OR price IS NULL)
               AND (date_end IS NULL OR date_end > ?)
               AND ({tipo_filter})
-            ORDER BY
-                CASE WHEN current_bid > 0 AND price > 0 THEN CAST(current_bid AS REAL)/price ELSE 999 END ASC,
-                price ASC
-            LIMIT 5
         """, (code, max_price, now.isoformat())).fetchall()
 
-        if not rows:
+        items = [dict(zip(cols, r)) for r in rows]
+        scored = [(it, *investment_score(it)) for it in items]
+        scored.sort(key=lambda x: -x[1])
+        top5 = scored[:5]
+
+        if not top5:
             continue
 
         count = db.execute("SELECT COUNT(*) FROM listings WHERE country = ?", (code,)).fetchone()[0]
@@ -1328,14 +1705,17 @@ def print_console_summary(db: sqlite3.Connection, max_price: float = 50000):
         _safe_print(f"\n  {name} ({count} total)")
         _safe_print(f"  {'-'*56}")
 
-        for i, (title, price, bid, url, concelho, district, date_end) in enumerate(rows, 1):
-            title_short = (title or "?")[:45]
+        for i, (item, score, reasons) in enumerate(top5, 1):
+            title_short = (item["title"] or "?")[:40]
+            price = item["price"]
             price_str = f"EUR {price:,.0f}" if price else "?"
-            loc = ", ".join(filter(None, [concelho, district]))[:20]
-            ends = date_end[:10] if date_end else ""
-            _safe_print(f"  {i}. {title_short}")
+            loc = ", ".join(filter(None, [item["concelho"], item["district"]]))[:20]
+            ends = item["date_end"][:10] if item["date_end"] else ""
+            flags = ", ".join(reasons)[:30]
+            _safe_print(f"  {i}. [{score:.0f}] {title_short}")
             _safe_print(f"     {price_str}  {loc}  {ends}")
-            _safe_print(f"     {url}")
+            _safe_print(f"     {flags}")
+            _safe_print(f"     {item['url']}")
 
     _safe_print(f"\n{'='*60}\n")
 
@@ -1346,7 +1726,8 @@ def main():
 
     parser = argparse.ArgumentParser(description="EU Auction Scanner")
     parser.add_argument("--source", choices=[
-        "eleiloes", "idealista", "croatia", "spain", "france", "italy", "netherlands", "all"
+        "eleiloes", "idealista", "croatia", "fina", "spain", "france", "italy",
+        "netherlands", "veilingnotaris", "leilosoc", "all"
     ], default="all")
     parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "all"], default=None,
                         help="Scrape all sources for a country")
@@ -1368,12 +1749,12 @@ def main():
         db.commit()
 
     COUNTRY_SOURCES = {
-        "PT": [("eleiloes", scrape_eleiloes)],
-        "HR": [("croatia", scrape_croatia)],
+        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc)],
+        "HR": [("croatia", scrape_croatia), ("fina", scrape_fina_csv)],
         "ES": [("spain", scrape_spain)],
         "FR": [("france", scrape_france)],
         "IT": [("italy", scrape_italy)],
-        "NL": [("netherlands", scrape_netherlands)],
+        "NL": [("netherlands", scrape_netherlands), ("veilingnotaris", scrape_veilingnotaris)],
     }
 
     if not args.report_only and not args.analyze:
@@ -1391,10 +1772,13 @@ def main():
                 "eleiloes": ("eleiloes", scrape_eleiloes),
                 "idealista": ("idealista", scrape_idealista),
                 "croatia": ("croatia", scrape_croatia),
+                "fina": ("fina", scrape_fina_csv),
                 "spain": ("spain", scrape_spain),
                 "france": ("france", scrape_france),
                 "italy": ("italy", scrape_italy),
                 "netherlands": ("netherlands", scrape_netherlands),
+                "veilingnotaris": ("veilingnotaris", scrape_veilingnotaris),
+                "leilosoc": ("leilosoc", scrape_leilosoc),
             }
             if args.source in source_map:
                 sources_to_run.append(source_map[args.source])
