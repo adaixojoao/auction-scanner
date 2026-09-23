@@ -1,8 +1,7 @@
 @echo off
 cd /d "%~dp0"
-echo === EU Auction Scanner ===
+python scraper.py --source all --max-price 50000
 echo.
-python scraper.py --source all --max-price 50000 --analyze
-echo.
-echo Done. Reports: report.md + analysis.md
+echo Opening full report...
+start "" "%~dp0report.md"
 pause

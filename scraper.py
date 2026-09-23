@@ -1278,6 +1278,68 @@ def analyze_with_llm(db: sqlite3.Connection, max_price: float = 50000, category:
 
 
 
+def _safe_print(text: str):
+    """Print text, replacing unencodable characters."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        print(text.encode("ascii", errors="replace").decode("ascii"))
+
+
+def print_console_summary(db: sqlite3.Connection, max_price: float = 50000):
+    """Print a quick top-5-per-country summary to the console."""
+    COUNTRY_NAMES = {"PT": "Portugal", "ES": "Spain", "FR": "France", "IT": "Italy", "HR": "Croatia", "NL": "Netherlands"}
+    IMOVEL_TIPOS = {"imovel", "moradia", "apartamento", "terreno", "fracao", "armazem",
+                    "garagem", "loja", "escritorio", "rustico", "urbano", "misto", "predio",
+                    "inmueble", "nekretnina", "immobilier", "immobile", "vastgoed"}
+    now = datetime.now(timezone.utc)
+
+    counts = db.execute(
+        "SELECT country, COUNT(*) FROM listings GROUP BY country ORDER BY COUNT(*) DESC"
+    ).fetchall()
+    total = sum(c for _, c in counts)
+
+    _safe_print(f"\n{'='*60}")
+    _safe_print(f"  EU AUCTION SCANNER - {now.strftime('%d %b %Y %H:%M')} UTC")
+    _safe_print(f"  {total} listings across {len(counts)} countries (budget EUR {max_price:,.0f})")
+    _safe_print(f"{'='*60}")
+
+    for code in ["PT", "ES", "FR", "IT", "HR", "NL"]:
+        # Build tipo filter for property-only results
+        tipo_filter = " OR ".join(f"LOWER(tipo) LIKE '%{t}%'" for t in IMOVEL_TIPOS)
+        rows = db.execute(f"""
+            SELECT title, price, current_bid, url, concelho, district, date_end
+            FROM listings
+            WHERE country = ?
+              AND (price <= ? OR price IS NULL)
+              AND (date_end IS NULL OR date_end > ?)
+              AND ({tipo_filter})
+            ORDER BY
+                CASE WHEN current_bid > 0 AND price > 0 THEN CAST(current_bid AS REAL)/price ELSE 999 END ASC,
+                price ASC
+            LIMIT 5
+        """, (code, max_price, now.isoformat())).fetchall()
+
+        if not rows:
+            continue
+
+        count = db.execute("SELECT COUNT(*) FROM listings WHERE country = ?", (code,)).fetchone()[0]
+        name = COUNTRY_NAMES.get(code, code)
+        _safe_print(f"\n  {name} ({count} total)")
+        _safe_print(f"  {'-'*56}")
+
+        for i, (title, price, bid, url, concelho, district, date_end) in enumerate(rows, 1):
+            title_short = (title or "?")[:45]
+            price_str = f"EUR {price:,.0f}" if price else "?"
+            loc = ", ".join(filter(None, [concelho, district]))[:20]
+            ends = date_end[:10] if date_end else ""
+            _safe_print(f"  {i}. {title_short}")
+            _safe_print(f"     {price_str}  {loc}  {ends}")
+            _safe_print(f"     {url}")
+
+    _safe_print(f"\n{'='*60}\n")
+
+
 def main():
     import warnings
     warnings.filterwarnings("ignore", message="Unverified HTTPS request")
@@ -1347,12 +1409,15 @@ def main():
             fetch_eleiloes_details(db, limit=30)
 
     report_path = generate_report(db, max_price=args.max_price)
-    print(f"Report: {report_path}")
 
     if args.analyze:
         analysis_path = analyze_with_llm(db, max_price=args.max_price, category=args.analyze_category)
         if analysis_path:
             print(f"Analysis: {analysis_path}")
+
+    # Console summary: top 5 properties per country
+    print_console_summary(db, max_price=args.max_price)
+    print(f"\nFull report: {report_path}")
 
     db.close()
 
