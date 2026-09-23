@@ -2365,6 +2365,53 @@ def print_console_summary(db: sqlite3.Connection, max_price: float = 50000):
     _safe_print(f"\n{'='*60}\n")
 
 
+def apply_filters(db: sqlite3.Connection, filters: dict):
+    """Delete listings that don't match user filters (runs post-scrape)."""
+    if not filters:
+        return
+
+    conditions = []
+    params = []
+
+    countries = filters.get("countries", [])
+    if countries:
+        placeholders = ",".join("?" * len(countries))
+        conditions.append(f"country NOT IN ({placeholders})")
+        params.extend(countries)
+
+    exclude_kw = filters.get("exclude_keywords", [])
+    for kw in exclude_kw:
+        conditions.append("(title NOT LIKE ? AND (description IS NULL OR description NOT LIKE ?))")
+        params.extend([f"%{kw}%", f"%{kw}%"])
+
+    min_area = filters.get("min_area_m2", 0)
+    if min_area and min_area > 0:
+        conditions.append("(area_m2 IS NULL OR area_m2 >= ?)")
+        params.append(min_area)
+
+    types = filters.get("types", [])
+    if types:
+        placeholders = ",".join("?" * len(types))
+        conditions.append(f"(tipo IN ({placeholders}) OR tipo IS NULL)")
+        params.extend(types)
+
+    districts = filters.get("districts", [])
+    if districts:
+        district_conds = " OR ".join(["district LIKE ?" for _ in districts])
+        conditions.append(f"({district_conds} OR district IS NULL)")
+        params.extend([f"%{d}%" for d in districts])
+
+    if not conditions:
+        return
+
+    where = " OR ".join(f"NOT ({c})" for c in conditions)
+    count = db.execute(f"SELECT COUNT(*) FROM listings WHERE {where}", params).fetchone()[0]
+    if count > 0:
+        db.execute(f"DELETE FROM listings WHERE {where}", params)
+        db.commit()
+        LOG.info(f"Filters removed {count} listings that didn't match criteria")
+
+
 def main():
     import warnings
     warnings.filterwarnings("ignore", message="Unverified HTTPS request")
@@ -2376,13 +2423,24 @@ def main():
     ], default="all")
     parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "all"], default=None,
                         help="Scrape all sources for a country")
-    parser.add_argument("--max-price", type=float, default=50000)
+    parser.add_argument("--max-price", type=float, default=None)
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument("--analyze", action="store_true", help="Run LLM analysis on top listings")
     parser.add_argument("--analyze-category", default="imoveis", choices=["imoveis", "ouro_joias", "outros"])
+    parser.add_argument("--notify", action="store_true", help="Send email alerts for high-scoring listings")
+    parser.add_argument("--dashboard", action="store_true", help="Launch web dashboard after scraping")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+    # Load config
+    try:
+        from config import load_config
+        cfg = load_config()
+    except ImportError:
+        cfg = {"max_price": 50000, "filters": {}, "proxies": {}, "notifications": {}}
+
+    max_price = args.max_price or cfg.get("max_price", 50000)
 
     db = sqlite3.connect(DB_PATH)
     init_db(db)
@@ -2432,25 +2490,50 @@ def main():
 
         for name, func in sources_to_run:
             try:
-                func(db, max_price=args.max_price)
+                func(db, max_price=max_price)
             except Exception as e:
                 LOG.error(f"Source {name} failed: {e}")
 
         if any(n == "eleiloes" for n, _ in sources_to_run):
-            fetch_eleiloes_details(db, limit=80, max_price=args.max_price)
+            fetch_eleiloes_details(db, limit=80, max_price=max_price)
 
-    report_path = generate_report(db, max_price=args.max_price)
+        # Apply user filters
+        apply_filters(db, cfg.get("filters", {}))
+
+    report_path = generate_report(db, max_price=max_price)
 
     if args.analyze:
-        analysis_path = analyze_with_llm(db, max_price=args.max_price, category=args.analyze_category)
+        analysis_path = analyze_with_llm(db, max_price=max_price, category=args.analyze_category)
         if analysis_path:
             print(f"Analysis: {analysis_path}")
 
-    # Console summary: top 5 properties per country
-    print_console_summary(db, max_price=args.max_price)
+    # Send notifications
+    if args.notify or cfg.get("notifications", {}).get("enabled"):
+        try:
+            from notifications import send_alerts
+            send_alerts(db, cfg.get("notifications", {}), investment_score, max_price=max_price)
+        except ImportError:
+            LOG.warning("notifications module not found")
+
+    # Console summary
+    print_console_summary(db, max_price=max_price)
     print(f"\nFull report: {report_path}")
 
+    # Mark all listings as not-new after a full run
+    db.execute("UPDATE listings SET is_new = 0")
+    db.commit()
+
     db.close()
+
+    # Launch dashboard if requested
+    if args.dashboard:
+        try:
+            from dashboard import app
+            dash_cfg = cfg.get("dashboard", {})
+            print(f"\n  Starting dashboard at http://{dash_cfg.get('host', '127.0.0.1')}:{dash_cfg.get('port', 8050)}")
+            app.run(host=dash_cfg.get("host", "127.0.0.1"), port=dash_cfg.get("port", 8050))
+        except ImportError:
+            LOG.error("Flask not installed. Run: pip install flask")
 
 
 if __name__ == "__main__":

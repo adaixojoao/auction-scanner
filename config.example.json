@@ -1,0 +1,42 @@
+{
+  "max_price": 50000,
+  "max_bid": 50000,
+
+  "filters": {
+    "countries": [],
+    "types": [],
+    "exclude_keywords": ["usufruto", "1/12"],
+    "min_area_m2": 0,
+    "min_score": 0,
+    "districts": []
+  },
+
+  "proxies": {
+    "enabled": false,
+    "list": [],
+    "rotate_every": 5
+  },
+
+  "notifications": {
+    "enabled": false,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_user": "",
+    "smtp_password": "",
+    "from_email": "",
+    "to_emails": [],
+    "min_score": 60,
+    "send_on": "new"
+  },
+
+  "schedule": {
+    "enabled": false,
+    "interval_hours": 6,
+    "sources": "all"
+  },
+
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8050
+  }
+}

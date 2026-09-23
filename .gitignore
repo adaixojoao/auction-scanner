@@ -7,3 +7,5 @@ __pycache__/
 ~$*
 analysis.md
 analysis_prompt.txt
+config.json
+scheduler.log
