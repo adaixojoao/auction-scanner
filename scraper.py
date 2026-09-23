@@ -2,13 +2,19 @@
 Auction Scanner — scrapes EU auction/real estate platforms.
 Stores results in SQLite, generates investment reports.
 
-Supported platforms:
-  PT: e-leiloes.pt (REST API), idealista.pt (Selenium)
-  HR: e-oglasna.pravosudje.hr (REST API)
-  ES: subastas.boe.es (HTML scraping)
-  FR: licitor.com (HTML scraping)
-  IT: astegiudiziarie.it (HTML scraping)
-  NL: openbareverkoop.nl (HTML scraping)
+Supported platforms (22 sources, 12 countries):
+  PT: e-leiloes.pt, leilosoc.com, citius.mj.pt, BCP, Portal das Finanças (tax seizures)
+  ES: subastas.boe.es, AEAT (tax seizures)
+  FR: licitor.com
+  IT: astegiudiziarie.it, PVP Giustizia (official judicial portal)
+  HR: e-oglasna.pravosudje.hr, FINA Ocevidnik
+  NL: openbareverkoop.nl, veilingnotaris.nl
+  DE: zvg-portal.de (forced auctions), justiz-auktion.de
+  GR: eauction.gr (judicial e-auctions)
+  BE: biddit.be (notary auctions)
+  RO: ANAF (tax seizures)
+  PL: licytacje.komornik.pl (bailiff auctions)
+  CY: Cyprus DLS (forced sales)
 
 Usage:
   python scraper.py                  # scrape all, generate report
@@ -1668,6 +1674,888 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
     return total_scraped
 
 
+# ─── PT: Autoridade Tributária (tax seizures) ───────────────────────
+
+def scrape_financas(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Portuguese tax authority forced sales — vendas.portaldasfinancas.gov.pt.
+    These are tax-debt seizures: often no minimum bid, legally must sell."""
+    LOG.info("Scraping Portal das Finanças (AT tax seizures)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    base = "https://vendas.portaldasfinancas.gov.pt/bens/rest"
+    total_scraped = 0
+
+    for page in range(1, 30):
+        params = {
+            "tipoVenda": "VI",
+            "tipoBem": "I",
+            "pagina": page,
+            "tamanhoPagina": 50,
+            "ordenacao": "dataFimDesc",
+        }
+        try:
+            resp = session.get(f"{base}/listaVendas", params=params, timeout=20)
+            if resp.status_code == 404 or not resp.text.strip():
+                break
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            LOG.error(f"Finanças page {page} error: {e}")
+            break
+
+        items = data if isinstance(data, list) else data.get("vendas", data.get("items", []))
+        if not items:
+            break
+
+        for item in items:
+            eid = str(item.get("idVenda", item.get("id", "")))
+            if not eid:
+                continue
+            price = item.get("valorBase") or item.get("valorMinimo") or 0
+            if price > max_price:
+                continue
+
+            title = item.get("descricao", item.get("designacao", f"AT tax sale {eid}"))[:200]
+            district = item.get("distrito") or item.get("localidade")
+            concelho = item.get("concelho")
+            freguesia = item.get("freguesia")
+            date_end = item.get("dataFim") or item.get("dataLimite")
+
+            listing = {
+                "id": f"financas:{eid}",
+                "source": "financas",
+                "country": "PT",
+                "external_id": eid,
+                "title": title,
+                "description": item.get("observacoes") or item.get("descricaoCompleta"),
+                "tipo": "imovel",
+                "area_m2": item.get("area"),
+                "price": price,
+                "current_bid": item.get("melhorProposta"),
+                "min_price": item.get("valorMinimo") or price,
+                "district": district,
+                "concelho": concelho,
+                "freguesia": freguesia,
+                "url": f"https://vendas.portaldasfinancas.gov.pt/bens/detalheVenda.action?idVenda={eid}",
+                "image_url": None,
+                "date_end": date_end,
+                "raw_json": json.dumps(item, ensure_ascii=False)[:2000],
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        db.commit()
+        LOG.info(f"  Finanças page {page}: {len(items)} items (total: {total_scraped})")
+        if len(items) < 50:
+            break
+        time.sleep(1)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("financas", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Finanças: {total_scraped} tax seizure listings scraped")
+    return total_scraped
+
+
+# ─── DE: ZVG-Portal (forced auctions) ──────────────────────────────
+
+def scrape_zvg(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape German forced auctions from zvg-portal.de.
+    Zwangsversteigerungen — court-ordered, no minimum bid by default."""
+    LOG.info("Scraping zvg-portal.de (German forced auctions)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    try:
+        resp = session.get(
+            "https://www.zvg-portal.de/index.php?button=Suchen&all=1",
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"ZVG portal error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    rows = soup.select("table.table-bordered tr")[1:]
+    LOG.info(f"  ZVG: {len(rows)} rows found")
+
+    for row in rows:
+        cells = row.select("td")
+        if len(cells) < 5:
+            continue
+
+        aktenzeichen = cells[0].get_text(strip=True)
+        objekt = cells[1].get_text(strip=True)
+        ort = cells[2].get_text(strip=True)
+        termin = cells[3].get_text(strip=True)
+        verkehrswert = cells[4].get_text(strip=True) if len(cells) > 4 else ""
+
+        price = _parse_euro(verkehrswert)
+        if price and price > max_price:
+            continue
+
+        link_tag = row.select_one("a[href]")
+        detail_url = ""
+        if link_tag:
+            href = link_tag["href"]
+            if not href.startswith("http"):
+                href = f"https://www.zvg-portal.de/{href}"
+            detail_url = href
+
+        eid = re.sub(r"[^A-Za-z0-9]", "", aktenzeichen)[:50] or str(hash(objekt))
+
+        date_end = None
+        dm = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", termin)
+        if dm:
+            try:
+                date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+            except ValueError:
+                pass
+
+        listing = {
+            "id": f"zvg:{eid}",
+            "source": "zvg",
+            "country": "DE",
+            "external_id": eid,
+            "title": f"{objekt} — {ort}"[:200],
+            "description": f"Aktenzeichen: {aktenzeichen}. {objekt}. Verkehrswert: {verkehrswert}",
+            "tipo": "imovel",
+            "area_m2": None,
+            "price": price,
+            "current_bid": None,
+            "min_price": None,
+            "district": ort,
+            "concelho": None,
+            "freguesia": None,
+            "url": detail_url,
+            "image_url": None,
+            "date_end": date_end,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("zvg", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"ZVG: {total_scraped} German forced auction listings scraped")
+    return total_scraped
+
+
+# ─── DE: Justiz-Auktion (government surplus) ───────────────────────
+
+def scrape_justiz_auktion(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape German government auctions from justiz-auktion.de.
+    Surplus/seized assets from courts and authorities."""
+    LOG.info("Scraping justiz-auktion.de...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    for page in range(1, 15):
+        try:
+            resp = session.get(
+                "https://www.justiz-auktion.de/categories.php",
+                params={"parent": 1, "page": page},
+                timeout=20,
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Justiz-Auktion page {page} error: {e}")
+            break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        items = soup.select("div.article-item, div.lot-item, tr.lot")
+        if not items:
+            items = soup.select("table.auctions tr")[1:]
+        if not items:
+            break
+
+        for item_el in items:
+            link = item_el.select_one("a[href]")
+            if not link:
+                continue
+            title = link.get_text(strip=True)[:200]
+            href = link["href"]
+            if not href.startswith("http"):
+                href = f"https://www.justiz-auktion.de/{href.lstrip('/')}"
+
+            eid_m = re.search(r'id[=_](\d+)', href)
+            eid = eid_m.group(1) if eid_m else str(hash(title))
+
+            price_text = item_el.get_text()
+            price = _parse_euro(price_text)
+            if price and price > max_price:
+                continue
+
+            listing = {
+                "id": f"justiz:{eid}",
+                "source": "justiz_auktion",
+                "country": "DE",
+                "external_id": eid,
+                "title": title,
+                "description": item_el.get_text(" ", strip=True)[:500],
+                "tipo": "imovel",
+                "area_m2": None,
+                "price": price,
+                "current_bid": None,
+                "min_price": None,
+                "district": None,
+                "concelho": None,
+                "freguesia": None,
+                "url": href,
+                "image_url": None,
+                "date_end": None,
+                "raw_json": None,
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        db.commit()
+        LOG.info(f"  Justiz-Auktion page {page}: {total_scraped} total")
+        time.sleep(1)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("justiz_auktion", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Justiz-Auktion: {total_scraped} listings scraped")
+    return total_scraped
+
+
+# ─── GR: eAuction.gr (Greek judicial e-auctions) ───────────────────
+
+def scrape_greece(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Greek electronic judicial auctions from eauction.gr.
+    Court-mandated sales, often very low starting prices."""
+    LOG.info("Scraping eauction.gr (Greek judicial auctions)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    try:
+        resp = session.get(
+            "https://www.eauction.gr/Auction/SearchResult",
+            params={
+                "AssetCategory": "REAL_ESTATE",
+                "AuctionStatus": "ACTIVE",
+                "PageSize": 100,
+                "PageNumber": 1,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"eAuction.gr error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    items = soup.select("div.auction-result-item, div.card, tr.auction-row")
+    if not items:
+        items = soup.select("table tr")[1:]
+    LOG.info(f"  Greece: {len(items)} items found")
+
+    for item_el in items:
+        link = item_el.select_one("a[href*='Auction']")
+        if not link:
+            link = item_el.select_one("a[href]")
+        if not link:
+            continue
+
+        title = link.get_text(strip=True)[:200]
+        href = link["href"]
+        if not href.startswith("http"):
+            href = f"https://www.eauction.gr{href}"
+
+        eid_m = re.search(r'[/=](\d+)', href)
+        eid = eid_m.group(1) if eid_m else str(hash(title))
+
+        text = item_el.get_text(" ", strip=True)
+        price = _parse_euro(text)
+        if price and price > max_price:
+            continue
+
+        date_end = None
+        dm = re.search(r"(\d{2})[/.](\d{2})[/.](\d{4})", text)
+        if dm:
+            try:
+                date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+            except ValueError:
+                pass
+
+        location = None
+        loc_m = re.search(r"(?:Τοποθεσία|Location|Περιοχή)[:\s]+([^\n,]+)", text)
+        if loc_m:
+            location = loc_m.group(1).strip()
+
+        listing = {
+            "id": f"greece:{eid}",
+            "source": "greece",
+            "country": "GR",
+            "external_id": eid,
+            "title": title or f"Greek auction {eid}",
+            "description": text[:500],
+            "tipo": "imovel",
+            "area_m2": None,
+            "price": price,
+            "current_bid": None,
+            "min_price": price,
+            "district": location,
+            "concelho": None,
+            "freguesia": None,
+            "url": href,
+            "image_url": None,
+            "date_end": date_end,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("greece", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Greece: {total_scraped} auction listings scraped")
+    return total_scraped
+
+
+# ─── BE: Biddit.be (Belgian notary auctions) ───────────────────────
+
+def scrape_biddit(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Belgian online notary auctions from biddit.be.
+    Public/judicial sales via notaries — legally mandated."""
+    LOG.info("Scraping biddit.be (Belgian auctions)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    session.headers["Accept"] = "application/json"
+
+    total_scraped = 0
+
+    for page in range(0, 20):
+        try:
+            resp = session.get(
+                "https://www.biddit.be/api/v1/properties",
+                params={
+                    "page": page,
+                    "size": 50,
+                    "sort": "endDate,asc",
+                    "status": "OPEN",
+                    "maxPrice": int(max_price),
+                },
+                timeout=20,
+            )
+            if resp.status_code in (404, 400):
+                break
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            if "json" not in str(type(e).__name__).lower():
+                LOG.error(f"Biddit page {page} error: {e}")
+            break
+
+        items = data if isinstance(data, list) else data.get("content", data.get("properties", []))
+        if not items:
+            break
+
+        for item in items:
+            eid = str(item.get("id", item.get("propertyId", "")))
+            if not eid:
+                continue
+            price = item.get("minimumBid") or item.get("startingPrice") or item.get("price") or 0
+            if price > max_price:
+                continue
+
+            title = item.get("title") or item.get("description", f"Biddit {eid}")
+            addr = item.get("address", {})
+            city = addr.get("city") or addr.get("municipality") or item.get("city")
+            postal = addr.get("postalCode", "")
+
+            listing = {
+                "id": f"biddit:{eid}",
+                "source": "biddit",
+                "country": "BE",
+                "external_id": eid,
+                "title": str(title)[:200],
+                "description": item.get("description") or item.get("shortDescription"),
+                "tipo": item.get("type", "imovel"),
+                "area_m2": item.get("livingArea") or item.get("area"),
+                "price": price,
+                "current_bid": item.get("currentBid") or item.get("highestBid"),
+                "min_price": item.get("minimumBid") or price,
+                "district": city,
+                "concelho": postal,
+                "freguesia": None,
+                "url": item.get("url") or f"https://www.biddit.be/catalog/detail/{eid}",
+                "image_url": item.get("imageUrl") or item.get("mainImage"),
+                "date_end": item.get("endDate"),
+                "raw_json": json.dumps(item, ensure_ascii=False)[:2000],
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        db.commit()
+        LOG.info(f"  Biddit page {page}: {len(items)} items (total: {total_scraped})")
+        if len(items) < 50:
+            break
+        time.sleep(1)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("biddit", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Biddit: {total_scraped} Belgian auction listings scraped")
+    return total_scraped
+
+
+# ─── RO: ANAF (Romanian tax seizures) ──────────────────────────────
+
+def scrape_anaf(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Romanian tax authority forced sales from ANAF.
+    Tax-debt seizures — must sell by law."""
+    LOG.info("Scraping ANAF (Romanian tax seizures)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+    url = "https://www.anaf.ro/BunuriSechestrate/rest/bunuri"
+
+    for page in range(1, 20):
+        try:
+            resp = session.get(url, params={
+                "tipBun": "I",
+                "pagina": page,
+                "nrBunuriPagina": 50,
+            }, timeout=20)
+            if resp.status_code in (404, 500):
+                break
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            LOG.error(f"ANAF page {page} error: {e}")
+            break
+
+        items = data if isinstance(data, list) else data.get("bunuri", data.get("items", []))
+        if not items:
+            break
+
+        for item in items:
+            eid = str(item.get("id", item.get("idBun", "")))
+            if not eid:
+                continue
+            price = item.get("pretVanzare") or item.get("pretEvaluare") or 0
+            if price > max_price:
+                continue
+
+            listing = {
+                "id": f"anaf:{eid}",
+                "source": "anaf",
+                "country": "RO",
+                "external_id": eid,
+                "title": (item.get("denumire") or item.get("descriere") or f"ANAF sale {eid}")[:200],
+                "description": item.get("descriere") or item.get("observatii"),
+                "tipo": "imovel",
+                "area_m2": item.get("suprafata"),
+                "price": price,
+                "current_bid": None,
+                "min_price": item.get("pretMinim") or price,
+                "district": item.get("judet") or item.get("localitate"),
+                "concelho": item.get("localitate"),
+                "freguesia": None,
+                "url": item.get("url") or f"https://www.anaf.ro/BunuriSechestrate/detalii.html?id={eid}",
+                "image_url": None,
+                "date_end": item.get("dataLicitatie") or item.get("dataLimita"),
+                "raw_json": json.dumps(item, ensure_ascii=False)[:2000],
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        db.commit()
+        LOG.info(f"  ANAF page {page}: {len(items)} items (total: {total_scraped})")
+        if len(items) < 50:
+            break
+        time.sleep(1)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("anaf", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"ANAF: {total_scraped} Romanian tax seizure listings scraped")
+    return total_scraped
+
+
+# ─── PL: Licytacje komornicze (Polish bailiff auctions) ─────────────
+
+def scrape_poland(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Polish bailiff forced auctions from licytacje.komornik.pl.
+    Court-ordered seizures — legally must sell at 2/3 or 1/2 of value."""
+    LOG.info("Scraping licytacje.komornik.pl (Polish bailiff auctions)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    for page in range(1, 20):
+        try:
+            resp = session.get(
+                "https://licytacje.komornik.pl/nieruchomosci",
+                params={"page": page},
+                timeout=20,
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Poland page {page} error: {e}")
+            break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        items = soup.select("div.listing-item, div.card, article.auction")
+        if not items:
+            items = soup.select("table.auctions tr")[1:]
+        if not items:
+            break
+
+        for item_el in items:
+            link = item_el.select_one("a[href]")
+            if not link:
+                continue
+            title = link.get_text(strip=True)[:200]
+            href = link["href"]
+            if not href.startswith("http"):
+                href = f"https://licytacje.komornik.pl{href}"
+
+            eid_m = re.search(r'[/=](\d+)', href)
+            eid = eid_m.group(1) if eid_m else str(hash(title))
+
+            text = item_el.get_text(" ", strip=True)
+            price = _parse_euro(text)
+            if price and price > max_price:
+                continue
+
+            date_end = None
+            dm = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", text)
+            if dm:
+                try:
+                    date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+                except ValueError:
+                    pass
+
+            location = None
+            loc_m = re.search(r"(?:Lokalizacja|Miasto|Adres)[:\s]+([^\n,]+)", text)
+            if loc_m:
+                location = loc_m.group(1).strip()
+
+            listing = {
+                "id": f"poland:{eid}",
+                "source": "poland",
+                "country": "PL",
+                "external_id": eid,
+                "title": title or f"Polish auction {eid}",
+                "description": text[:500],
+                "tipo": "imovel",
+                "area_m2": None,
+                "price": price,
+                "current_bid": None,
+                "min_price": price,
+                "district": location,
+                "concelho": None,
+                "freguesia": None,
+                "url": href,
+                "image_url": None,
+                "date_end": date_end,
+                "raw_json": None,
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        db.commit()
+        LOG.info(f"  Poland page {page}: {total_scraped} total")
+        if len(items) < 20:
+            break
+        time.sleep(1)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("poland", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Poland: {total_scraped} bailiff auction listings scraped")
+    return total_scraped
+
+
+# ─── ES: AEAT (Spanish tax seizures) ───────────────────────────────
+
+def scrape_aeat(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Spanish tax authority auctions from sede.agenciatributaria.gob.es.
+    Tax-debt forced sales — legally obligated, often below market."""
+    LOG.info("Scraping AEAT (Spanish tax seizures)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    try:
+        resp = session.get(
+            "https://sede.agenciatributaria.gob.es/Sede/procedimientos/subastas-electronicas.html",
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"AEAT error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    links = soup.select("a[href*='subasta'], a[href*='lote']")
+    LOG.info(f"  AEAT: {len(links)} auction links found")
+
+    seen = set()
+    for link in links:
+        href = link.get("href", "")
+        if href in seen:
+            continue
+        seen.add(href)
+        if not href.startswith("http"):
+            href = f"https://sede.agenciatributaria.gob.es{href}"
+
+        title = link.get_text(strip=True)[:200]
+        eid = re.sub(r"[^A-Za-z0-9]", "", href[-40:]) or str(hash(title))
+
+        text = link.parent.get_text(" ", strip=True) if link.parent else title
+        price = _parse_euro(text)
+        if price and price > max_price:
+            continue
+
+        listing = {
+            "id": f"aeat:{eid}",
+            "source": "aeat",
+            "country": "ES",
+            "external_id": eid,
+            "title": title or f"AEAT tax sale {eid}",
+            "description": text[:500],
+            "tipo": "inmueble",
+            "area_m2": None,
+            "price": price,
+            "current_bid": None,
+            "min_price": price,
+            "district": None,
+            "concelho": None,
+            "freguesia": None,
+            "url": href,
+            "image_url": None,
+            "date_end": None,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("aeat", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"AEAT: {total_scraped} Spanish tax seizure listings scraped")
+    return total_scraped
+
+
+# ─── IT: Astetelematiche (Italian judicial e-auctions) ─────────────
+
+def scrape_italy_pvp(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Italian judicial auctions from pvp.giustizia.it (Portale Vendite Pubbliche).
+    Official government portal — all Italian forced sales must be listed here."""
+    LOG.info("Scraping pvp.giustizia.it (Italian judicial sales portal)...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    for page in range(1, 20):
+        try:
+            resp = session.get(
+                "https://pvp.giustizia.it/pvp/it/risultati_ricerca.page",
+                params={
+                    "tipoBene": "Immobile",
+                    "pag": page,
+                    "num": 50,
+                    "ord": "dataVendita",
+                    "dir": "asc",
+                    "prezzoMax": int(max_price),
+                },
+                timeout=20,
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"PVP page {page} error: {e}")
+            break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        items = soup.select("div.risultato, div.card-risultato, div.bene-item")
+        if not items:
+            items = soup.select("table.risultati tr")[1:]
+        if not items:
+            break
+
+        for item_el in items:
+            link = item_el.select_one("a[href]")
+            if not link:
+                continue
+            title = link.get_text(strip=True)[:200]
+            href = link["href"]
+            if not href.startswith("http"):
+                href = f"https://pvp.giustizia.it{href}"
+
+            eid_m = re.search(r'[/=](\d+)', href)
+            eid = eid_m.group(1) if eid_m else str(hash(title))
+
+            text = item_el.get_text(" ", strip=True)
+            price = _parse_euro(text)
+            if price and price > max_price:
+                continue
+
+            date_end = None
+            dm = re.search(r"(\d{2})/(\d{2})/(\d{4})", text)
+            if dm:
+                try:
+                    date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+                except ValueError:
+                    pass
+
+            location = None
+            loc_m = re.search(r"(?:Ubicazione|Comune|Provincia)[:\s]+([^\n,]+)", text, re.I)
+            if loc_m:
+                location = loc_m.group(1).strip()
+
+            listing = {
+                "id": f"pvp:{eid}",
+                "source": "pvp_giustizia",
+                "country": "IT",
+                "external_id": eid,
+                "title": title or f"Italian judicial sale {eid}",
+                "description": text[:500],
+                "tipo": "immobile",
+                "area_m2": None,
+                "price": price,
+                "current_bid": None,
+                "min_price": price,
+                "district": location,
+                "concelho": None,
+                "freguesia": None,
+                "url": href,
+                "image_url": None,
+                "date_end": date_end,
+                "raw_json": None,
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        db.commit()
+        LOG.info(f"  PVP page {page}: {total_scraped} total")
+        if len(items) < 50:
+            break
+        time.sleep(1)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("pvp_giustizia", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"PVP Giustizia: {total_scraped} Italian judicial sale listings scraped")
+    return total_scraped
+
+
+# ─── CY: Cyprus forced sales ───────────────────────────────────────
+
+def scrape_cyprus(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Cyprus forced sales from eProcurement/DLS portals.
+    Bank-mandated sales of foreclosed properties."""
+    LOG.info("Scraping Cyprus forced sales...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    try:
+        resp = session.get(
+            "https://www.mof.gov.cy/mof/dls/dls.nsf/All/AllSales",
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"Cyprus DLS error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    items = soup.select("table tr")[1:]
+    LOG.info(f"  Cyprus: {len(items)} rows found")
+
+    for row in items:
+        cells = row.select("td")
+        if len(cells) < 3:
+            continue
+
+        link = row.select_one("a[href]")
+        title = link.get_text(strip=True) if link else cells[0].get_text(strip=True)
+        title = title[:200]
+        href = ""
+        if link:
+            href = link["href"]
+            if not href.startswith("http"):
+                href = f"https://www.mof.gov.cy{href}"
+
+        text = row.get_text(" ", strip=True)
+        price = _parse_euro(text)
+        if price and price > max_price:
+            continue
+
+        eid = str(hash(title + text[:100]))
+
+        listing = {
+            "id": f"cyprus:{eid}",
+            "source": "cyprus",
+            "country": "CY",
+            "external_id": eid,
+            "title": title or f"Cyprus sale {eid}",
+            "description": text[:500],
+            "tipo": "imovel",
+            "area_m2": None,
+            "price": price,
+            "current_bid": None,
+            "min_price": None,
+            "district": None,
+            "concelho": None,
+            "freguesia": None,
+            "url": href,
+            "image_url": None,
+            "date_end": None,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("cyprus", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Cyprus: {total_scraped} forced sale listings scraped")
+    return total_scraped
+
+
 # ─── e-leiloes detail fetch ──────────────────────────────────────────
 
 def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 80, max_price: float = 50000):
@@ -1724,6 +2612,7 @@ IMOVEL_TYPES = {
     "terreno_urbano", "terreno_rustico", "armazem", "outro_imovel",
     "hotel", "industrial", "garagem", "terreno",
     "inmueble", "nekretnina", "immobilier", "immobile", "vastgoed",
+    "nieruchomosc", "akinito",
 }
 GOLD_KEYWORDS = {"ouro", "joalharia", "bijutaria", "relojoaria", "cautela"}
 VEHICLE_KEYWORDS = {
@@ -1858,6 +2747,24 @@ def investment_score(item: dict) -> tuple[float, list[str]]:
     if source == "citius" and (not price or price == 0):
         score += 15
         reasons.append("no minimum (court sale)")
+
+    # Forced/tax sale bonus — legally must sell, often no reserve
+    forced_sources = {"financas", "zvg", "anaf", "aeat", "pvp_giustizia", "poland", "greece", "cyprus"}
+    if source in forced_sources:
+        score += 10
+        reasons.append("forced sale (must sell)")
+    if source in ("financas", "anaf", "aeat"):
+        score += 5
+        reasons.append("tax seizure")
+
+    # No minimum or very low minimum = can bid almost anything
+    min_p = item.get("min_price") or 0
+    if min_p and min_p <= 500 and price and price > 1000:
+        score += 15
+        reasons.append(f"min bid only €{min_p:.0f}")
+    elif not min_p and source in forced_sources:
+        score += 10
+        reasons.append("no minimum bid")
 
     return max(0, min(100, score)), reasons
 
@@ -2428,6 +3335,7 @@ def main():
     parser.add_argument("--analyze", action="store_true", help="Run LLM analysis on top listings")
     parser.add_argument("--analyze-category", default="imoveis", choices=["imoveis", "ouro_joias", "outros"])
     parser.add_argument("--notify", action="store_true", help="Send email alerts for high-scoring listings")
+    parser.add_argument("--digest", action="store_true", help="Send weekly top-15 digest email")
     parser.add_argument("--dashboard", action="store_true", help="Launch web dashboard after scraping")
     args = parser.parse_args()
 
@@ -2452,12 +3360,18 @@ def main():
         db.commit()
 
     COUNTRY_SOURCES = {
-        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius)],
+        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius), ("financas", scrape_financas)],
         "HR": [("croatia", scrape_croatia), ("fina", scrape_fina_csv)],
-        "ES": [("spain", scrape_spain)],
+        "ES": [("spain", scrape_spain), ("aeat", scrape_aeat)],
         "FR": [("france", scrape_france)],
-        "IT": [("italy", scrape_italy)],
+        "IT": [("italy", scrape_italy), ("pvp_giustizia", scrape_italy_pvp)],
         "NL": [("netherlands", scrape_netherlands), ("veilingnotaris", scrape_veilingnotaris)],
+        "DE": [("zvg", scrape_zvg), ("justiz_auktion", scrape_justiz_auktion)],
+        "GR": [("greece", scrape_greece)],
+        "BE": [("biddit", scrape_biddit)],
+        "RO": [("anaf", scrape_anaf)],
+        "PL": [("poland", scrape_poland)],
+        "CY": [("cyprus", scrape_cyprus)],
     }
 
     if not args.report_only and not args.analyze:
@@ -2484,6 +3398,16 @@ def main():
                 "leilosoc": ("leilosoc", scrape_leilosoc),
                 "bcp": ("bcp", scrape_bcp),
                 "citius": ("citius", scrape_citius),
+                "financas": ("financas", scrape_financas),
+                "zvg": ("zvg", scrape_zvg),
+                "justiz_auktion": ("justiz_auktion", scrape_justiz_auktion),
+                "greece": ("greece", scrape_greece),
+                "biddit": ("biddit", scrape_biddit),
+                "anaf": ("anaf", scrape_anaf),
+                "poland": ("poland", scrape_poland),
+                "aeat": ("aeat", scrape_aeat),
+                "pvp_giustizia": ("pvp_giustizia", scrape_italy_pvp),
+                "cyprus": ("cyprus", scrape_cyprus),
             }
             if args.source in source_map:
                 sources_to_run.append(source_map[args.source])
@@ -2512,6 +3436,14 @@ def main():
         try:
             from notifications import send_alerts
             send_alerts(db, cfg.get("notifications", {}), investment_score, max_price=max_price)
+        except ImportError:
+            LOG.warning("notifications module not found")
+
+    # Send weekly digest
+    if args.digest:
+        try:
+            from notifications import send_weekly_digest
+            send_weekly_digest(db, cfg.get("notifications", {}), investment_score, max_price=max_price)
         except ImportError:
             LOG.warning("notifications module not found")
 

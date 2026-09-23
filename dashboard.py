@@ -18,6 +18,8 @@ app = Flask(__name__)
 COUNTRY_NAMES = {
     "PT": "Portugal", "ES": "Spain", "FR": "France",
     "IT": "Italy", "HR": "Croatia", "NL": "Netherlands",
+    "DE": "Germany", "GR": "Greece", "BE": "Belgium",
+    "RO": "Romania", "PL": "Poland", "CY": "Cyprus",
 }
 
 HTML_TEMPLATE = """
@@ -143,6 +145,12 @@ a:hover { text-decoration: underline; }
                 <option value="IT">Italy</option>
                 <option value="HR">Croatia</option>
                 <option value="NL">Netherlands</option>
+                <option value="DE">Germany</option>
+                <option value="GR">Greece</option>
+                <option value="BE">Belgium</option>
+                <option value="RO">Romania</option>
+                <option value="PL">Poland</option>
+                <option value="CY">Cyprus</option>
             </select>
         </div>
         <div>
@@ -191,7 +199,7 @@ a:hover { text-decoration: underline; }
 </div>
 
 <script>
-const FLAGS = {"PT":"&#x1F1F5;&#x1F1F9;","ES":"&#x1F1EA;&#x1F1F8;","FR":"&#x1F1EB;&#x1F1F7;","IT":"&#x1F1EE;&#x1F1F9;","HR":"&#x1F1ED;&#x1F1F7;","NL":"&#x1F1F3;&#x1F1F1;"};
+const FLAGS = {"PT":"&#x1F1F5;&#x1F1F9;","ES":"&#x1F1EA;&#x1F1F8;","FR":"&#x1F1EB;&#x1F1F7;","IT":"&#x1F1EE;&#x1F1F9;","HR":"&#x1F1ED;&#x1F1F7;","NL":"&#x1F1F3;&#x1F1F1;","DE":"&#x1F1E9;&#x1F1EA;","GR":"&#x1F1EC;&#x1F1F7;","BE":"&#x1F1E7;&#x1F1EA;","RO":"&#x1F1F7;&#x1F1F4;","PL":"&#x1F1F5;&#x1F1F1;","CY":"&#x1F1E8;&#x1F1FE;"};
 let currentSort = "score";
 let currentDir = "desc";
 let currentPage = 1;
