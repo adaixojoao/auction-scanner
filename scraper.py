@@ -253,7 +253,7 @@ def _eleiloes_to_listing(item: dict) -> dict:
         "district": item.get("moradaDistrito"),
         "concelho": item.get("moradaConcelho"),
         "freguesia": item.get("moradaFreguesia"),
-        "url": f"https://e-leiloes.pt/item/{item.get('referencia', eid)}",
+        "url": f"https://e-leiloes.pt/evento/{item.get('referencia', eid)}",
         "image_url": f"https://e-leiloes.pt/api/{item['capa']}" if item.get("capa") else None,
         "date_end": item.get("dataFim"),
         "raw_json": json.dumps(item, ensure_ascii=False),
