@@ -16,7 +16,13 @@ DEFAULTS = {
     "filters": {
         "countries": [],          # empty = all; e.g. ["PT", "ES"]
         "types": [],              # empty = all; e.g. ["apartamento", "moradia"]
-        "exclude_keywords": [],   # e.g. ["usufruto", "1/12", "ruína"]
+        "exclude_keywords": [
+            "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
+            "1/10", "1/11", "1/12", "1/14", "1/16",
+            "avos", "quota", "quinhão", "quinhao", "quota-parte",
+            "fração ideal", "fracao ideal", "parte indivisa",
+            "usufruto",
+        ],
         "min_area_m2": 0,
         "min_score": 0,           # minimum investment score to include in alerts
         "districts": [],          # empty = all; e.g. ["Lisboa", "Porto"]

@@ -2661,12 +2661,13 @@ def investment_score(item: dict) -> tuple[float, list[str]]:
 
     # --- PENALTIES (red flags) ---
 
-    # Fractional ownership
-    frac_patterns = ["1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/12",
-                     "avos", "quota", "quinhão", "quinhao"]
+    # Fractional ownership — worthless, score 0
+    frac_patterns = ["1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
+                     "1/10", "1/11", "1/12", "1/14", "1/16",
+                     "avos", "quota", "quinhão", "quinhao", "quota-parte",
+                     "fração ideal", "fracao ideal", "parte indivisa"]
     if any(p in title for p in frac_patterns):
-        score -= 25
-        reasons.append("fractional share")
+        return 0, ["fractional share — skip"]
 
     # Usufruct / limited rights
     if "usufruto" in title or "usufruct" in title or "nue-propri" in title:
