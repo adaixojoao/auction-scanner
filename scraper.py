@@ -1627,6 +1627,12 @@ def investment_score(item: dict) -> tuple[float, list[str]]:
         except (ValueError, TypeError):
             pass
 
+    # Citius zero-price = court dropped the minimum, motivated seller
+    source = item.get("source", "")
+    if source == "citius" and (not price or price == 0):
+        score += 15
+        reasons.append("no minimum (court sale)")
+
     return max(0, min(100, score)), reasons
 
 
@@ -1744,6 +1750,71 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
 
     LOG.info(f"Report: {len(categories['imoveis'])} imóveis, {len(categories['ouro_joias'])} ouro/joias, {len(categories['outros'])} outros")
     LOG.info(f"Report written to {report_path}")
+
+    # Generate Word document
+    try:
+        from docx import Document
+        from docx.shared import Pt, Inches, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+        doc = Document()
+        style = doc.styles["Normal"]
+        style.font.name = "Calibri"
+        style.font.size = Pt(10)
+
+        doc.add_heading("EU Investment Scanner Report", level=0)
+        p = doc.add_paragraph()
+        p.add_run(f"Generated: {now_str}    Budget: €{max_price:,.0f}    Listings: {len(items)}")
+
+        for cat, label in section_names.items():
+            cat_items = categories[cat]
+            doc.add_heading(f"{label} — {len(cat_items)} listings", level=1)
+            if not cat_items:
+                doc.add_paragraph("None found.")
+                continue
+
+            by_country = {}
+            for item, ratio, inv_score, inv_reasons in cat_items:
+                c = item.get("country", "PT")
+                by_country.setdefault(c, []).append((item, ratio, inv_score, inv_reasons))
+
+            for cc in ["PT", "ES", "FR", "IT", "HR", "NL"]:
+                c_items = by_country.get(cc, [])
+                if not c_items:
+                    continue
+                cname = COUNTRY_NAMES.get(cc, cc)
+                doc.add_heading(f"{cname} ({len(c_items)})", level=2)
+
+                table = doc.add_table(rows=1, cols=6)
+                table.style = "Light Grid Accent 1"
+                for i, hdr in enumerate(["#", "Score", "Title", "Price", "Location", "Flags"]):
+                    table.rows[0].cells[i].text = hdr
+
+                show = c_items[:30] if cat == "imoveis" else c_items[:15]
+                for idx, (item, ratio, inv_score, inv_reasons) in enumerate(show, 1):
+                    row = table.add_row().cells
+                    row[0].text = str(idx)
+                    row[1].text = f"{inv_score:.0f}"
+                    row[2].text = (item["title"] or "?")[:50]
+                    row[3].text = f"€{item['price']:,.0f}" if item["price"] else "?"
+                    row[4].text = ", ".join(filter(None, [item["concelho"], item["district"]]))[:30]
+                    row[5].text = ", ".join(inv_reasons)[:35]
+
+                    # Add URL as hyperlink in title cell
+                    if item.get("url"):
+                        p = row[2].paragraphs[0]
+                        p.clear()
+                        run = p.add_run((item["title"] or "?")[:50])
+                        run.font.size = Pt(9)
+
+        docx_path = os.path.join(os.path.dirname(__file__), "report.docx")
+        doc.save(docx_path)
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "Auction-Report.docx")
+        doc.save(desktop_path)
+        LOG.info(f"Word report written to {docx_path} and {desktop_path}")
+    except Exception as e:
+        LOG.warning(f"Word report generation failed: {e}")
+
     return report_path
 
 
