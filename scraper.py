@@ -1,15 +1,21 @@
 """
-Auction Scanner — scrapes Portuguese auction/real estate platforms.
+Auction Scanner — scrapes EU auction/real estate platforms.
 Stores results in SQLite, generates investment reports.
 
 Supported platforms:
-  - e-leiloes.pt (REST API, no auth needed)
-  - idealista.pt (HTML scraping)
-  - Portal Finanças (requires manual session cookie)
+  PT: e-leiloes.pt (REST API), idealista.pt (Selenium)
+  HR: e-oglasna.pravosudje.hr (REST API)
+  ES: subastas.boe.es (HTML scraping)
+  FR: licitor.com (HTML scraping)
+  IT: astegiudiziarie.it (HTML scraping)
+  NL: openbareverkoop.nl (HTML scraping)
 
 Usage:
   python scraper.py                  # scrape all, generate report
   python scraper.py --source eleiloes
+  python scraper.py --source croatia
+  python scraper.py --source spain
+  python scraper.py --country PT     # scrape all PT sources
   python scraper.py --report-only    # just re-generate report from DB
 """
 
@@ -24,7 +30,10 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 
+import re
+
 import requests
+from bs4 import BeautifulSoup
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "auctions.db")
 LOG = logging.getLogger("auction-scanner")
@@ -35,7 +44,8 @@ def init_db(db: sqlite3.Connection):
     db.executescript("""
         CREATE TABLE IF NOT EXISTS listings (
             id          TEXT PRIMARY KEY,  -- source:external_id
-            source      TEXT NOT NULL,     -- eleiloes, idealista, financas, bank_*
+            source      TEXT NOT NULL,     -- eleiloes, idealista, croatia, spain, france, italy, netherlands
+            country     TEXT NOT NULL DEFAULT 'PT',  -- ISO 3166-1 alpha-2
             external_id TEXT NOT NULL,
             title       TEXT,
             description TEXT,
@@ -59,6 +69,7 @@ def init_db(db: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_price ON listings(price);
         CREATE INDEX IF NOT EXISTS idx_district ON listings(district);
         CREATE INDEX IF NOT EXISTS idx_date_end ON listings(date_end);
+        CREATE INDEX IF NOT EXISTS idx_country ON listings(country);
 
         CREATE TABLE IF NOT EXISTS scrape_log (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,12 +102,12 @@ def upsert_listing(db: sqlite3.Connection, row: dict):
         ))
     else:
         db.execute("""
-            INSERT INTO listings (id, source, external_id, title, description, tipo,
+            INSERT INTO listings (id, source, country, external_id, title, description, tipo,
                 area_m2, price, current_bid, min_price, district, concelho, freguesia,
                 url, image_url, date_end, raw_json, first_seen, last_seen, is_new)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
         """, (
-            row["id"], row["source"], row["external_id"],
+            row["id"], row["source"], row.get("country", "PT"), row["external_id"],
             row.get("title"), row.get("description"), row.get("tipo"),
             row.get("area_m2"), row.get("price"), row.get("current_bid"),
             row.get("min_price"), row.get("district"), row.get("concelho"),
@@ -269,7 +280,6 @@ def scrape_idealista(db: sqlite3.Connection, max_price: float = 50000):
                 LOG.warning(f"idealista: CAPTCHA/block on page {page}. Stopping.")
                 break
 
-            from bs4 import BeautifulSoup
             soup = BeautifulSoup(driver.page_source, "html.parser")
             articles = soup.select("article.item")
 
@@ -328,7 +338,6 @@ def _idealista_parse_article(art) -> dict | None:
         detail_text = detail_el.get_text(" ", strip=True) if detail_el else ""
 
         area = None
-        import re
         area_match = re.search(r"(\d+)\s*m[²2]", detail_text)
         if area_match:
             area = float(area_match.group(1))
@@ -380,6 +389,560 @@ def _guess_tipo_from_title(title: str) -> str:
     return "outro"
 
 
+# ─── Croatia: e-oglasna.pravosudje.hr (REST API) ────────────────────
+
+CROATIA_API = "https://e-oglasna.pravosudje.hr/api/v1/court-notice"
+CROATIA_PROPERTY_KW = [
+    "nekretnin", "stan", "kuć", "zemljišt", "poslovn", "garaž",
+    "zgrada", "etaž", "parcela", "objekt", "dražb",
+]
+
+def scrape_croatia(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Croatian judicial auction notices via official API."""
+    LOG.info("Scraping e-oglasna.pravosudje.hr...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "AuctionScanner/1.0"
+
+    total_scraped = 0
+    max_pages = 50  # limit to avoid rate-limiting
+
+    for page in range(max_pages):
+        try:
+            resp = session.get(CROATIA_API, params={
+                "filter": "",
+                "page": page,
+                "sort": "datePublished",
+            }, timeout=30)
+            if resp.status_code == 429:
+                LOG.warning(f"Croatia: rate limited at page {page}, stopping")
+                break
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            LOG.error(f"Croatia API error page {page}: {e}")
+            break
+
+        items = data.get("content", [])
+        if not items:
+            break
+
+        for item in items:
+            listing = _croatia_to_listing(item)
+            if listing:
+                upsert_listing(db, listing)
+                total_scraped += 1
+
+        db.commit()
+        total_pages = data.get("totalPages", 1)
+        LOG.info(f"  ... page {page+1}/{min(total_pages, max_pages)} ({total_scraped} property notices)")
+
+        if page + 1 >= total_pages:
+            break
+        time.sleep(1.5)  # respect rate limits
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("croatia", datetime.now(timezone.utc).isoformat(), total_scraped, "ok")
+    )
+    db.commit()
+    LOG.info(f"Croatia: {total_scraped} property notices scraped")
+    return total_scraped
+
+
+def _croatia_to_listing(item: dict) -> dict | None:
+    uuid = item.get("uuid", "")
+    title = item.get("title", "")
+    t_lower = title.lower()
+    if not any(kw in t_lower for kw in CROATIA_PROPERTY_KW):
+        return None
+
+    return {
+        "id": f"croatia:{uuid}",
+        "source": "croatia",
+        "country": "HR",
+        "external_id": uuid,
+        "title": title,
+        "description": None,
+        "tipo": "nekretnina",
+        "area_m2": None,
+        "price": None,
+        "current_bid": None,
+        "min_price": None,
+        "district": None,
+        "concelho": None,
+        "freguesia": None,
+        "url": item.get("publicUrl") or f"https://e-oglasna.pravosudje.hr/objava/{uuid}",
+        "image_url": None,
+        "date_end": item.get("expirationDate"),
+        "raw_json": json.dumps(item, ensure_ascii=False),
+    }
+
+
+# ─── Spain: subastas.boe.es (HTML POST) ─────────────────────────────
+
+def scrape_spain(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Spanish judicial auctions from subastas.boe.es."""
+    LOG.info("Scraping subastas.boe.es...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    try:
+        session.get("https://subastas.boe.es/subastas_ava.php", timeout=15)
+    except Exception as e:
+        LOG.error(f"Spain session init failed: {e}")
+        return 0
+
+    total_scraped = 0
+    page_size = 50
+
+    # POST the search form — exact field layout from the live form
+    form_data = [
+        ("campo[0]", "SUBASTA.ORIGEN"), ("dato[0]", ""),
+        ("campo[1]", "SUBASTA.AUTORIDAD"), ("dato[1]", ""),
+        ("campo[2]", "SUBASTA.ESTADO.CODIGO"), ("dato[2]", "EJ"),
+        ("campo[3]", "BIEN.TIPO"), ("dato[3]", "I"),
+        ("dato[4]", ""),  # subtype radio — no campo[4] hidden field
+        ("campo[5]", "BIEN.DIRECCION"), ("dato[5]", ""),
+        ("campo[6]", "BIEN.CODPOSTAL"), ("dato[6]", ""),
+        ("campo[7]", "BIEN.LOCALIDAD"), ("dato[7]", ""),
+        ("campo[8]", "BIEN.COD_PROVINCIA"), ("dato[8]", ""),
+        ("campo[9]", "SUBASTA.POSTURA_MINIMA_MINIMA_LOTES"), ("dato[9]", ""),
+        ("campo[10]", "SUBASTA.NUM_CUENTA_EXPEDIENTE_1"), ("dato[10]", ""),
+        ("campo[11]", "SUBASTA.NUM_CUENTA_EXPEDIENTE_2"), ("dato[11]", ""),
+        ("campo[12]", "SUBASTA.NUM_CUENTA_EXPEDIENTE_3"), ("dato[12]", ""),
+        ("campo[13]", "SUBASTA.NUM_CUENTA_EXPEDIENTE_4"), ("dato[13]", ""),
+        ("campo[14]", "SUBASTA.NUM_CUENTA_EXPEDIENTE_5"), ("dato[14]", ""),
+        ("campo[15]", "SUBASTA.ID_SUBASTA_BUSCAR"), ("dato[15]", ""),
+        ("campo[16]", "SUBASTA.ACREEDORES"), ("dato[16]", ""),
+        ("campo[17]", "SUBASTA.FECHA_FIN"),
+        ("dato[17][0]", ""), ("dato[17][1]", ""),
+        ("campo[18]", "SUBASTA.FECHA_INICIO"),
+        ("dato[18][0]", ""), ("dato[18][1]", ""),
+        ("page_hits", str(page_size)),
+        ("sort_field[0]", "SUBASTA.FECHA_FIN"),
+        ("sort_order[0]", "asc"),
+        ("accion", "Buscar"),
+    ]
+
+    try:
+        resp = session.post("https://subastas.boe.es/subastas_ava.php", data=form_data, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"Spain POST search failed: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    # Extract id_busqueda from pagination/nav links
+    id_busqueda = None
+    for link in soup.select("a[href*='id_busqueda']"):
+        m = re.search(r'id_busqueda=([^&,]+)', link.get("href", ""))
+        if m:
+            id_busqueda = m.group(1)
+            break
+
+    # Extract total results
+    total_text = soup.select_one(".paginar")
+    total_results = 0
+    if total_text:
+        m = re.search(r'de\s+(\d+)', total_text.get_text())
+        if m:
+            total_results = int(m.group(1))
+    LOG.info(f"  Spain: {total_results} total active inmuebles")
+
+    # Parse first page
+    total_scraped += _spain_parse_page(soup, db, max_price)
+    db.commit()
+    LOG.info(f"  Spain page 1: {total_scraped} items")
+
+    # Paginate using id_busqueda
+    if id_busqueda and total_results > page_size:
+        max_pages = min((total_results // page_size) + 1, 20)
+        for page_num in range(1, max_pages):
+            offset = page_num * page_size
+            page_url = (
+                f"https://subastas.boe.es/subastas_ava.php"
+                f"?accion=Mas&id_busqueda={id_busqueda},-{offset}-{page_size}"
+            )
+            try:
+                resp = session.get(page_url, timeout=30)
+                resp.raise_for_status()
+            except Exception as e:
+                LOG.error(f"Spain page {page_num+1} error: {e}")
+                break
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            count = _spain_parse_page(soup, db, max_price)
+            db.commit()
+            total_scraped += count
+            LOG.info(f"  Spain page {page_num+1}: {count} items (total: {total_scraped})")
+
+            if count == 0:
+                break
+            time.sleep(1)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("spain", datetime.now(timezone.utc).isoformat(), total_scraped, "ok")
+    )
+    db.commit()
+    LOG.info(f"Spain: {total_scraped} listings scraped")
+    return total_scraped
+
+
+def _spain_parse_page(soup, db, max_price) -> int:
+    """Parse one page of Spain search results. Returns count."""
+    count = 0
+    h3s = soup.select("#contenido h3")
+    for h3 in h3s:
+        text = h3.get_text(strip=True)
+        m = re.match(r'SUBASTA\s+(SUB-\S+-\d+-\d+)', text)
+        if not m:
+            continue
+        sub_id = m.group(1)
+
+        # Gather sibling info
+        court = ""
+        description = ""
+        date_end = None
+        sib = h3.next_sibling
+        while sib:
+            if hasattr(sib, 'name'):
+                if sib.name == "h3":
+                    break
+                txt = sib.get_text(strip=True)
+                if sib.name == "h4":
+                    court = txt
+                elif "Conclusión prevista" in txt:
+                    dm = re.search(r'(\d{2}/\d{2}/\d{4})\s+a\s+las\s+(\d{2}:\d{2})', txt)
+                    if dm:
+                        try:
+                            date_end = datetime.strptime(
+                                f"{dm.group(1)} {dm.group(2)}", "%d/%m/%Y %H:%M"
+                            ).isoformat()
+                        except ValueError:
+                            pass
+                elif len(txt) > 40 and "Expediente" not in txt:
+                    description = txt[:500]
+            sib = sib.next_sibling
+
+        # Find detail link
+        detail_link = None
+        for a in (h3.parent or soup).select(f'a[href*="idSub={sub_id}"]'):
+            detail_link = a.get("href", "")
+            break
+
+        url = f"https://subastas.boe.es/detalleSubasta.php?idSub={sub_id}"
+        title_short = description[:120] if description else f"Subasta {sub_id}"
+        location = court.split(" - ")[-1].strip() if " - " in court else court
+
+        listing = {
+            "id": f"spain:{sub_id}",
+            "source": "spain",
+            "country": "ES",
+            "external_id": sub_id,
+            "title": title_short,
+            "description": description,
+            "tipo": "inmueble",
+            "area_m2": None,
+            "price": None,  # price is on detail page, not search results
+            "current_bid": None,
+            "min_price": None,
+            "district": location,
+            "concelho": None,
+            "freguesia": None,
+            "url": url,
+            "image_url": None,
+            "date_end": date_end,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        count += 1
+
+    return count
+
+
+# ─── France: licitor.com (HTML — tribunal-based) ────────────────────
+
+LICITOR_BASE = "https://www.licitor.com"
+
+def scrape_france(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape French judicial auctions from licitor.com."""
+    LOG.info("Scraping licitor.com...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    total_scraped = 0
+
+    # Step 1: get list of tribunal pages from the main listing
+    try:
+        resp = session.get(f"{LICITOR_BASE}/ventes-aux-encheres-immobilieres/france.html", timeout=15)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"France index error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    tribunal_links = []
+    for a in soup.select("a[href*='/ventes-judiciaires-immobilieres/']"):
+        href = a.get("href", "")
+        if href and ".html" in href:
+            full = href if href.startswith("http") else f"{LICITOR_BASE}{href}"
+            tribunal_links.append(full)
+
+    LOG.info(f"  France: {len(tribunal_links)} tribunal pages found")
+
+    # Step 2: scrape each tribunal page for individual lots
+    for i, trib_url in enumerate(tribunal_links[:60]):  # limit to 60 tribunals
+        try:
+            resp = session.get(trib_url, timeout=15)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.debug(f"France tribunal error: {e}")
+            continue
+
+        trib_soup = BeautifulSoup(resp.text, "html.parser")
+        count = 0
+
+        # Find individual lot entries — links to /annonce/ detail pages
+        for a in trib_soup.select("a[href*='/annonce/'], a[href*='/vente-aux-encheres']"):
+            href = a.get("href", "")
+            if not href:
+                continue
+            title = a.get_text(strip=True)[:120]
+            if not title or len(title) < 5:
+                continue
+
+            m_id = re.search(r"/(\d+)\.html", href)
+            eid = m_id.group(1) if m_id else href.strip("/").split("/")[-1].replace(".html", "")
+            full_url = href if href.startswith("http") else f"{LICITOR_BASE}{href}"
+
+            # Try to extract price from surrounding text
+            price = None
+            parent = a.parent
+            if parent:
+                txt = parent.get_text(" ", strip=True)
+                m = re.search(r'([\d\s.,]+)\s*€', txt)
+                if m:
+                    price = float(m.group(1).replace(" ", "").replace(" ", "").replace(".", "").replace(",", "."))
+
+            if price and price > max_price:
+                continue
+
+            listing = {
+                "id": f"france:{eid}",
+                "source": "france",
+                "country": "FR",
+                "external_id": eid,
+                "title": title,
+                "description": None,
+                "tipo": "immobilier",
+                "area_m2": None,
+                "price": price,
+                "current_bid": None,
+                "min_price": None,
+                "district": None,
+                "concelho": None,
+                "freguesia": None,
+                "url": full_url,
+                "image_url": None,
+                "date_end": None,
+                "raw_json": None,
+            }
+            upsert_listing(db, listing)
+            count += 1
+            total_scraped += 1
+
+        if count > 0:
+            db.commit()
+            LOG.info(f"  France tribunal {i+1}/{len(tribunal_links)}: {count} lots")
+
+        time.sleep(0.5)
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("france", datetime.now(timezone.utc).isoformat(), total_scraped, "ok")
+    )
+    db.commit()
+    LOG.info(f"France: {total_scraped} listings scraped")
+    return total_scraped
+
+
+# ─── Italy: astegiudiziarie.it (HTML) ───────────────────────────────
+
+def scrape_italy(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Italian judicial auctions from astegiudiziarie.it."""
+    LOG.info("Scraping astegiudiziarie.it...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    session.headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    session.headers["Accept-Language"] = "it-IT,it;q=0.9,en;q=0.8"
+
+    total_scraped = 0
+    base = "https://www.astegiudiziarie.it"
+
+    # The main /immobili page lists properties; detail links have pattern
+    # /vendita-asta-TYPE-LOCATION-...-lNNNNNNN-pNNNNNNN
+    try:
+        resp = session.get(f"{base}/immobili", timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"Italy main page error: {e}")
+        return 0
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    # Find all property detail links
+    for a in soup.select("a[href*='/vendita-asta-']"):
+        href = a.get("href", "")
+        if not href:
+            continue
+
+        # Extract IDs from URL pattern -lNNNNNNN-pNNNNNNN
+        m = re.search(r'-l(\d+)-p(\d+)', href)
+        if not m:
+            continue
+        eid = f"{m.group(1)}-{m.group(2)}"
+
+        title = a.get_text(strip=True)[:120]
+        if not title:
+            img = a.select_one("img")
+            title = img.get("alt", "")[:120] if img else ""
+
+        # Extract price from surrounding elements
+        price = None
+        parent = a.parent
+        if parent:
+            txt = parent.get_text(" ", strip=True)
+            pm = re.search(r'€\s*([\d.,]+)', txt) or re.search(r'([\d.,]+)\s*€', txt)
+            if pm:
+                try:
+                    price = float(pm.group(1).replace(".", "").replace(",", "."))
+                except ValueError:
+                    pass
+
+        full_url = href if href.startswith("http") else f"{base}{href}"
+
+        listing = {
+            "id": f"italy:{eid}",
+            "source": "italy",
+            "country": "IT",
+            "external_id": eid,
+            "title": title if title else f"Immobile {eid}",
+            "description": None,
+            "tipo": "immobile",
+            "area_m2": None,
+            "price": price,
+            "current_bid": None,
+            "min_price": None,
+            "district": None,
+            "concelho": None,
+            "freguesia": None,
+            "url": full_url,
+            "image_url": None,
+            "date_end": None,
+            "raw_json": None,
+        }
+        upsert_listing(db, listing)
+        total_scraped += 1
+
+    db.commit()
+
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("italy", datetime.now(timezone.utc).isoformat(), total_scraped, "ok")
+    )
+    db.commit()
+    LOG.info(f"Italy: {total_scraped} listings scraped from main page")
+    return total_scraped
+
+
+# ─── Netherlands: openbareverkoop.nl (JSON API) ────────────────────
+
+def scrape_netherlands(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape Dutch public property auctions from openbareverkoop.nl."""
+    LOG.info("Scraping openbareverkoop.nl...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    base = "https://www.openbareverkoop.nl"
+    total_scraped = 0
+
+    try:
+        session.get(f"{base}/kavels?view=resultaten", timeout=30)
+        resp = session.post(
+            f"{base}/kavels/searchresults",
+            data={"text": "", "view": "", "periode": "alles", "woningtype": ""},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        LOG.error(f"Netherlands error: {e}")
+        return 0
+
+    for zitting in data.get("results", []):
+        for opr in zitting.get("objectenPerRegio", []):
+            for obj in opr.get("objects", []):
+                eid = str(obj.get("id", ""))
+                if not eid:
+                    continue
+
+                price_str = obj.get("veilingkosten", "")
+                price = None
+                pm = re.search(r"[\d.,]+", price_str.replace("€", "").replace("€", ""))
+                if pm:
+                    try:
+                        price = float(pm.group().replace(".", "").replace(",", "."))
+                    except ValueError:
+                        pass
+
+                title = obj.get("kavelNaam", "")
+                wtype = obj.get("woningtype", "")
+                if wtype:
+                    title = f"{title} ({wtype})"
+
+                url = obj.get("url", "")
+                if url and not url.startswith("http"):
+                    url = f"{base}{url}"
+
+                img = obj.get("image", "")
+                if img and not img.startswith("http"):
+                    img = f"{base}{img}"
+
+                listing = {
+                    "id": f"netherlands:{eid}",
+                    "source": "netherlands",
+                    "country": "NL",
+                    "external_id": eid,
+                    "title": title,
+                    "description": None,
+                    "tipo": "vastgoed",
+                    "area_m2": None,
+                    "price": price,
+                    "current_bid": None,
+                    "min_price": None,
+                    "district": None,
+                    "concelho": None,
+                    "freguesia": None,
+                    "url": url,
+                    "image_url": img or None,
+                    "date_end": None,
+                    "raw_json": json.dumps(obj, ensure_ascii=False, default=str),
+                }
+                upsert_listing(db, listing)
+                total_scraped += 1
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("netherlands", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"Netherlands: {total_scraped} listings scraped")
+    return total_scraped
+
+
 # ─── e-leiloes detail fetch ──────────────────────────────────────────
 
 def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 20):
@@ -429,6 +992,7 @@ IMOVEL_TYPES = {
     "apartamento/moradia", "apartamento", "moradia", "loja/escritorio",
     "terreno_urbano", "terreno_rustico", "armazem", "outro_imovel",
     "hotel", "industrial", "garagem", "terreno",
+    "inmueble", "nekretnina", "immobilier", "immobile", "vastgoed",
 }
 GOLD_KEYWORDS = {"ouro", "joalharia", "bijutaria", "relojoaria", "cautela"}
 VEHICLE_KEYWORDS = {
@@ -482,15 +1046,17 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
     for cat in categories:
         categories[cat].sort(key=lambda x: (x[1] or 999, x[0]["price"] or 999))
 
+    COUNTRY_NAMES = {"PT": "Portugal", "HR": "Croatia", "ES": "Spain", "FR": "France", "IT": "Italy", "NL": "Netherlands"}
+
     lines = [
-        f"# Investment Scanner Report",
+        f"# EU Investment Scanner Report",
         f"**Generated**: {now_str}  ",
         f"**Budget**: €{max_price:,.0f}  ",
         "",
     ]
 
     section_names = {
-        "imoveis": "Imóveis (Real Estate)",
+        "imoveis": "Imóveis / Real Estate",
         "ouro_joias": "Ouro & Joias (Gold & Jewelry)",
         "outros": "Outros (Vehicles, Equipment, etc.)",
     }
@@ -504,23 +1070,35 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
             lines.append("_None found._\n")
             continue
 
-        lines.append("| # | Title | VB | Bid | Bid/VB | Location | Ends |")
-        lines.append("|---|-------|-----|-----|--------|----------|------|")
+        # Group by country
+        by_country = {}
+        for item, ratio in cat_items:
+            c = item.get("country", "PT")
+            by_country.setdefault(c, []).append((item, ratio))
 
-        show = cat_items[:30] if cat == "imoveis" else cat_items[:15]
-        for i, (item, ratio) in enumerate(show, 1):
-            price_str = f"€{item['price']:,.0f}" if item['price'] else "?"
-            bid_str = f"€{item['current_bid']:,.0f}" if item['current_bid'] else "-"
-            ratio_str = f"{ratio:.0%}" if ratio else "-"
-            loc = ", ".join(filter(None, [item["concelho"], item["district"]]))
-            ends = item["date_end"][:10] if item["date_end"] else "-"
-            title_short = (item["title"] or "?")[:55]
-            url = item["url"] or ""
-            lines.append(
-                f"| {i} | [{title_short}]({url}) | {price_str} | {bid_str} | {ratio_str} | {loc} | {ends} |"
-            )
+        for country_code in ["PT", "ES", "FR", "IT", "HR", "NL"]:
+            c_items = by_country.get(country_code, [])
+            if not c_items:
+                continue
+            cname = COUNTRY_NAMES.get(country_code, country_code)
+            lines.append(f"### {cname} ({len(c_items)})")
+            lines.append("")
+            lines.append("| # | Title | VB | Bid | Bid/VB | Location | Ends |")
+            lines.append("|---|-------|-----|-----|--------|----------|------|")
 
-        lines.append("")
+            show = c_items[:30] if cat == "imoveis" else c_items[:15]
+            for i, (item, ratio) in enumerate(show, 1):
+                price_str = f"€{item['price']:,.0f}" if item['price'] else "?"
+                bid_str = f"€{item['current_bid']:,.0f}" if item['current_bid'] else "-"
+                ratio_str = f"{ratio:.0%}" if ratio else "-"
+                loc = ", ".join(filter(None, [item["concelho"], item["district"]]))
+                ends = item["date_end"][:10] if item["date_end"] else "-"
+                title_short = (item["title"] or "?")[:55]
+                url = item["url"] or ""
+                lines.append(
+                    f"| {i} | [{title_short}]({url}) | {price_str} | {bid_str} | {ratio_str} | {loc} | {ends} |"
+                )
+            lines.append("")
 
     # LLM-ready compact summary for the top imóveis (saves tokens)
     lines.append("## Top Imóveis — Compact (for LLM analysis)")
@@ -704,8 +1282,12 @@ def main():
     import warnings
     warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
-    parser = argparse.ArgumentParser(description="Auction Scanner")
-    parser.add_argument("--source", choices=["eleiloes", "idealista", "all"], default="all")
+    parser = argparse.ArgumentParser(description="EU Auction Scanner")
+    parser.add_argument("--source", choices=[
+        "eleiloes", "idealista", "croatia", "spain", "france", "italy", "netherlands", "all"
+    ], default="all")
+    parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "all"], default=None,
+                        help="Scrape all sources for a country")
     parser.add_argument("--max-price", type=float, default=50000)
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument("--analyze", action="store_true", help="Run LLM analysis on top listings")
@@ -717,12 +1299,52 @@ def main():
     db = sqlite3.connect(DB_PATH)
     init_db(db)
 
+    # Migrate: add country column if missing
+    cols = [r[1] for r in db.execute("PRAGMA table_info(listings)").fetchall()]
+    if "country" not in cols:
+        db.execute("ALTER TABLE listings ADD COLUMN country TEXT NOT NULL DEFAULT 'PT'")
+        db.commit()
+
+    COUNTRY_SOURCES = {
+        "PT": [("eleiloes", scrape_eleiloes)],
+        "HR": [("croatia", scrape_croatia)],
+        "ES": [("spain", scrape_spain)],
+        "FR": [("france", scrape_france)],
+        "IT": [("italy", scrape_italy)],
+        "NL": [("netherlands", scrape_netherlands)],
+    }
+
     if not args.report_only and not args.analyze:
-        if args.source in ("eleiloes", "all"):
-            scrape_eleiloes(db, max_price=args.max_price)
+        sources_to_run = []
+
+        if args.country:
+            countries = COUNTRY_SOURCES.keys() if args.country == "all" else [args.country]
+            for c in countries:
+                sources_to_run.extend(COUNTRY_SOURCES.get(c, []))
+        elif args.source == "all":
+            for c_sources in COUNTRY_SOURCES.values():
+                sources_to_run.extend(c_sources)
+        else:
+            source_map = {
+                "eleiloes": ("eleiloes", scrape_eleiloes),
+                "idealista": ("idealista", scrape_idealista),
+                "croatia": ("croatia", scrape_croatia),
+                "spain": ("spain", scrape_spain),
+                "france": ("france", scrape_france),
+                "italy": ("italy", scrape_italy),
+                "netherlands": ("netherlands", scrape_netherlands),
+            }
+            if args.source in source_map:
+                sources_to_run.append(source_map[args.source])
+
+        for name, func in sources_to_run:
+            try:
+                func(db, max_price=args.max_price)
+            except Exception as e:
+                LOG.error(f"Source {name} failed: {e}")
+
+        if any(n == "eleiloes" for n, _ in sources_to_run):
             fetch_eleiloes_details(db, limit=30)
-        if args.source in ("idealista", "all"):
-            scrape_idealista(db, max_price=args.max_price)
 
     report_path = generate_report(db, max_price=args.max_price)
     print(f"Report: {report_path}")

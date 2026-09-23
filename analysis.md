@@ -1,77 +1,77 @@
 # Investment Analysis (rule-based)
-**Generated**: 2026-09-23 08:46 UTC  
+**Generated**: 2026-09-23 09:51 UTC  
 
-**[1/2 (metade) de prédio rústico em Lordosa - Viseu](https://e-leiloes.pt/item/NP1254992026)** — €1,000
-  Score: 4/10 | SKIP | FRACTIONAL SHARE — limited utility; CHEAP RURAL — probably remote/inaccessible
+**[Prédio Rústico sito em Rossas, Vieira do Minho](https://e-leiloes.pt/item/LO1513192026)** — €500
+  Score: 4/10 | SKIP | BID 202% of VB — overheated; CHEAP RURAL — probably remote/inaccessible
 
-**[Prédio Rústico sito em Assentiz, Torres Novas](https://e-leiloes.pt/item/LO1513212026)** — €1,000
+**[1/7 Prédio urbano (ruínas) em Vila de Rei](https://e-leiloes.pt/item/NP1251802026)** — €714
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[TERRENO RÚSTICO, AS QUINTAS, CANO, SOUSEL](https://e-leiloes.pt/item/LO1503442026)** — €1,900
   Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
 
-**[Terreno em São João da Pesqueira](https://e-leiloes.pt/item/LO1508082026)** — €1,976
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[960/7540 avos de prédio rústico no Estoril - Casca](https://e-leiloes.pt/item/LO1508272026)** — €2,000
-  Score: 3/10 | SKIP | FRACTIONAL SHARE — limited utility; BID 250% of VB — overheated; CHEAP RURAL — probably remote/inaccessible
-
-**[Maquinas de Costura e outras](https://e-leiloes.pt/item/LO1511062026)** — €2,302
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[1/2 de artigo rústico com 2690m2 em Febres, Cantan](https://e-leiloes.pt/item/NP1238882026)** — €2,700
-  Score: 4/10 | SKIP | FRACTIONAL SHARE — limited utility; CHEAP RURAL — probably remote/inaccessible
-
-**[1/12 avos de casa térrea](https://e-leiloes.pt/item/NP1242222026)** — €3,000
+**[1/2 NO PRÉDIO RUSTICO - PINHAL](https://e-leiloes.pt/item/NP1230462026)** — €2,260
   Score: 5/10 | SKIP | FRACTIONAL SHARE — limited utility
 
-**[Prédio rústico](https://e-leiloes.pt/item/LO1508112026)** — €3,150
+**[1/3 de predio em ruinas em Vilar Torpim, Figueira ](https://e-leiloes.pt/item/NP1240052026)** — €2,866
+  Score: 5/10 | SKIP | FRACTIONAL SHARE — limited utility
+
+**[1/6 NO PRÉDIO RÚSTICO - PINHAL E MATA](https://e-leiloes.pt/item/NP1230452026)** — €2,916
+  Score: 4/10 | SKIP | FRACTIONAL SHARE — limited utility; CHEAP RURAL — probably remote/inaccessible
+
+**[Prédio rústico com 2960 m2 em Sosa - Vagos](https://e-leiloes.pt/item/LO1505702026)** — €3,000
   Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
 
-**[Prédio rústico em Lordosa - Viseu](https://e-leiloes.pt/item/NP1255002026)** — €3,200
+**[Prédio Rústico situado em Fervença, Freguesia de P](https://e-leiloes.pt/item/NP1237182026)** — €4,500
   Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
 
-**[Direito ao Usufruto sobre prédio urbano, Ajuda - L](https://e-leiloes.pt/item/LO1504382026)** — €3,952
+**[1/5 de loja - Fração "B" -em Maceira, Torres Vedra](https://e-leiloes.pt/item/LO1514562026)** — €5,541
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[1/2 DE DOIS ARTIGOS URBANOS QUE SE ENCONTRAM FISIC](https://e-leiloes.pt/item/NP1241402026)** — €5,698
+  Score: 5/10 | SKIP | FRACTIONAL SHARE — limited utility
+
+**[35/490 do prédio urbano em ruínas](https://e-leiloes.pt/item/NP1239872026)** — €6,350
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Direito (quota ideal) de 1/3 indivisos de prédio u](https://e-leiloes.pt/item/NP1237602026)** — €8,529
+  Score: 5/10 | SKIP | FRACTIONAL SHARE — limited utility
+
+**[Terreno Agrícola](https://e-leiloes.pt/item/NP1237532026)** — €10,000
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[1/5 de loja - Fração "A" - em Maceira, Torres Vedr](https://e-leiloes.pt/item/LO1514572026)** — €12,169
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Prédio rústico](https://e-leiloes.pt/item/NP1241282026)** — €17,000
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Lote único de prédios rústicos](https://e-leiloes.pt/item/NP1247632026)** — €18,000
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Terra de semeadura em Campos, Maceira Liz](https://e-leiloes.pt/item/NP1240022026)** — €20,000
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Expectativa de aquisição sobre imovel em centro co](https://e-leiloes.pt/item/NP1237452026)** — €20,732
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Moradia em ruína para reconstrução -  Sabacheira (](https://e-leiloes.pt/item/NP1244792026)** — €23,381
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Terra de vinha](https://e-leiloes.pt/item/NP1248722026)** — €24,971
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Rústico em Chosendo](https://e-leiloes.pt/item/NP1232602026)** — €26,300
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Prédio rústico, em Sobreiro, São Tomé do Castelo e](https://e-leiloes.pt/item/NP1255922026)** — €26,950
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[Prédio Rústico sito em vilarinho da Castanheira](https://e-leiloes.pt/item/NP1256652026)** — €32,000
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[LICENÇA DE TÁXI + VIATURA](https://e-leiloes.pt/item/NP1256862026)** — €35,294
+  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
+
+**[METADE DO USUFRUTO DE UMA MORADIA](https://e-leiloes.pt/item/NP1239902026)** — €36,923
   Score: 5/10 | SKIP | USUFRUCT ONLY — not full ownership
-
-**[Prédio rústico sito em Brejo da Bica - Penhascoso ](https://e-leiloes.pt/item/NP1229592026)** — €4,000
-  Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
-
-**[Terreno em S. João da Pesqueira](https://e-leiloes.pt/item/LO1508042026)** — €4,295
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[Posto de Transformação em Valongo](https://e-leiloes.pt/item/NP1257772026)** — €4,614
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[Prédio rústico em Mouriscas (Abrantes)](https://e-leiloes.pt/item/LO1508582026)** — €4,850
-  Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
-
-**[1/4 do Prédio rústico sito em Pombal](https://e-leiloes.pt/item/LO1508142026)** — €5,000
-  Score: 4/10 | SKIP | FRACTIONAL SHARE — limited utility; CHEAP RURAL — probably remote/inaccessible
-
-**[Prédio rústico sito em Vale da Macieira - Penhasco](https://e-leiloes.pt/item/NP1229612026)** — €5,000
-  Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
-
-**[Olival em São João da Pesqueira](https://e-leiloes.pt/item/LO1508052026)** — €5,648
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[1/10 de prédio rústico em Boa Ventura - S. Vicente](https://e-leiloes.pt/item/NP1236302026)** — €7,000
-  Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
-
-**[1/2 de artigo rústico com 1980m2 na freguesia da P](https://e-leiloes.pt/item/NP1256082026)** — €7,000
-  Score: 4/10 | SKIP | FRACTIONAL SHARE — limited utility; CHEAP RURAL — probably remote/inaccessible
-
-**[Terreno em S. João da Pesqueira](https://e-leiloes.pt/item/LO1508072026)** — €7,177
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[Prédio rústico sito em S. Facundo, Abrantes](https://e-leiloes.pt/item/LO1513162026)** — €7,500
-  Score: 5/10 | SKIP | CHEAP RURAL — probably remote/inaccessible
-
-**[1/7 Moradia sita em Vilarandelo /  Valpaços](https://e-leiloes.pt/item/NP1257752026)** — €8,500
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[1/3 de Prédio Misto em S. Pedro de Tomar](https://e-leiloes.pt/item/LO1503902026)** — €8,895
-  Score: 5/10 | SKIP | FRACTIONAL SHARE — limited utility
-
-**[1/10 Prédio Urbano em Beira da Rocha](https://e-leiloes.pt/item/NP1250892026)** — €9,500
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
-
-**[Prédio rústico sito em Carocho - Penhascoso - Maçã](https://e-leiloes.pt/item/NP1229582026)** — €10,000
-  Score: 6/10 | INVESTIGATE | No obvious red flags — worth checking details
