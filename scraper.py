@@ -1531,7 +1531,8 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
 
     soup = BeautifulSoup(r.text, "html.parser")
     tribunais = [
-        o["value"] for o in soup.select("#ctl00_ContentPlaceHolder1_ddlTribunais option")
+        (o["value"], o.get_text(strip=True))
+        for o in soup.select("#ctl00_ContentPlaceHolder1_ddlTribunais option")
         if o["value"] != "0"
     ]
     LOG.info(f"  Found {len(tribunais)} tribunais to query")
@@ -1540,7 +1541,7 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
     past = (datetime.now() - timedelta(days=180)).strftime("%d/%m/%Y")
 
     total_scraped = 0
-    for i, trib_id in enumerate(tribunais):
+    for i, (trib_id, trib_name) in enumerate(tribunais):
         try:
             r0 = session.get(url, timeout=15)
             s0 = BeautifulSoup(r0.text, "html.parser")
@@ -1631,8 +1632,18 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
                 except ValueError:
                     date_end = None
 
-            proc_q = urllib.parse.quote(processo) if processo else eid
-            desc_parts = [p for p in (desc[:500], modalidade, f"Processo: {processo}" if processo else None) if p]
+            desc_parts = [p for p in (
+                desc[:500],
+                modalidade,
+                f"Processo: {processo}" if processo else None,
+                f"Tribunal: {trib_name}",
+            ) if p]
+
+            search_url = (
+                f"https://www.google.com/search?q={urllib.parse.quote(f'citius venda {processo} {trib_name}')}"
+                if processo else
+                "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx"
+            )
 
             listing = {
                 "id": f"citius:{eid}",
@@ -1649,10 +1660,10 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
                 "district": district,
                 "concelho": concelho,
                 "freguesia": freguesia,
-                "url": f"https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo={proc_q}",
+                "url": search_url,
                 "image_url": None,
                 "date_end": date_end,
-                "raw_json": None,
+                "raw_json": json.dumps({"processo": processo, "tribunal": trib_name, "modalidade": modalidade}, ensure_ascii=False),
             }
             upsert_listing(db, listing)
             trib_count += 1

@@ -1,43 +1,43 @@
 # EU Investment Scanner Report
-**Generated**: 2026-09-23 16:56 UTC  
+**Generated**: 2026-09-23 17:10 UTC  
 **Budget**: €50,000  
 
-## Imóveis / Real Estate — 789 listings
+## Imóveis / Real Estate — 787 listings
 
-### Portugal (273)
+### Portugal (271)
 
 | # | Score | Title | Price | Bid | Location | Ends | Flags |
 |---|-------|-------|-------|-----|----------|------|-------|
 | 1 | 95 | [Moradia em Monte Redondo - Folques](https://e-leiloes.pt/item/LO1504732026) | €30,000 | €15,000 | Arganil, Coimbra | 2026-09-24 | full dwelling, discount 50%, price sweet |
 | 2 | 95 | [1 / 2 (Um Meio) Prédio Urbano, casas baixas  e qui](https://e-leiloes.pt/item/NP1240192026) | €30,900 | €15,450 | Almeirim, Santarém | 2026-10-20 | full dwelling, discount 50%, price sweet |
 | 3 | 94 | [Casa Ferreira do Alentejo](https://e-leiloes.pt/item/LO1510382026) | €40,000 | €20,606 | Ferreira do Alentejo, Beja | 2026-10-14 | full dwelling, discount 48%, price sweet |
-| 4 | 90 | [- prédio rústico denominado Fontainhas - Casal do ](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=24802/02.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%204) | ? | - |  | - | full dwelling, 732m2, no minimum (court  |
-| 5 | 90 | [Prédio urbano, compostode casa de um pavimento, si](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=366/10.4TBVLN%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Valen%C3%A7a) | €7,500 | - | lugar de Lage | - | full dwelling, no bids yet, 142m2, price |
+| 4 | 90 | [- prédio rústico denominado Fontainhas - Casal do ](https://www.google.com/search?q=citius%20venda%2024802/02.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%204%20Lisboa%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Lisboa) | ? | - |  | - | full dwelling, 732m2, no minimum (court  |
+| 5 | 90 | [Prédio urbano, compostode casa de um pavimento, si](https://www.google.com/search?q=citius%20venda%20366/10.4TBVLN%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Valen%C3%A7a%20Valen%C3%A7a%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viana%20do%20Castelo) | €7,500 | - | lugar de Lage | - | full dwelling, no bids yet, 142m2, price |
 | 6 | 85 | [Moradia em ruína para reconstrução -  Sabacheira (](https://e-leiloes.pt/item/NP1244792026) | €23,381 | €11,700 | Tomar, Santarém | 2026-09-29 | ruins, full dwelling, discount 50%, pric |
-| 7 | 80 | [Prédio misto sito no "Casal do José Joaquim" ou "V](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=298/03.2TBRMR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%201) | ? | - | Rio Maior | - | full dwelling, no minimum (court sale) |
-| 8 | 80 | [Prédio urbano sito em Póvoa de Santarém, freguesia](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=1897/05.3TBSTR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%203) | ? | - | Santarém | - | full dwelling, no minimum (court sale) |
-| 9 | 80 | [Prédio Urbano sito em Galegas - Vila Fernando Gare](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=4413/09.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%203) | ? | - | Galegas - Vila Fernando Gare - Guarda | - | full dwelling, no minimum (court sale) |
-| 10 | 80 | [Prédio urbano, sito na Rua do Canto das Naves, lug](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=165/10.3TBMRA%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Moura) | ? | - | Moura | - | full dwelling, no minimum (court sale) |
-| 11 | 80 | [Prédio urbano constituído por casa de habitação de](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=1469/22.8T8STR%2C%20Ju%C3%ADzo%20de%20Com%C3%A9rcio%20de%20Santar%C3%A9m%20-%20Juiz%201) | ? | - | lugar de Bonvisinho | - | full dwelling, no minimum (court sale) |
-| 12 | 80 | [Prédio urbano sito no Lugar do Forno de Cima, freg](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=4206/17.5T8PRT%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Porto%20-%20Juiz%202) | €6,500 | - | Lugar do Forno de Cima | - | full dwelling, no bids yet, price sweet  |
-| 13 | 80 | [Prédio urbano sito na Rua do Eiró, freguesia de Lo](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=468/17.6T8MBR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Viseu%20%E2%80%93%20Juiz%202) | €9,000 | - | Tabuaço | - | full dwelling, no bids yet, price sweet  |
+| 7 | 80 | [Prédio misto sito no "Casal do José Joaquim" ou "V](https://www.google.com/search?q=citius%20venda%20298/03.2TBRMR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%201%20Entroncamento%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m) | ? | - | Rio Maior | - | full dwelling, no minimum (court sale) |
+| 8 | 80 | [Prédio urbano sito em Póvoa de Santarém, freguesia](https://www.google.com/search?q=citius%20venda%201897/05.3TBSTR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%203%20Entroncamento%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m) | ? | - | Santarém | - | full dwelling, no minimum (court sale) |
+| 9 | 80 | [Prédio Urbano sito em Galegas - Vila Fernando Gare](https://www.google.com/search?q=citius%20venda%204413/09.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%203%20Lisboa%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Lisboa) | ? | - | Galegas - Vila Fernando Gare - Guarda | - | full dwelling, no minimum (court sale) |
+| 10 | 80 | [Prédio urbano, sito na Rua do Canto das Naves, lug](https://www.google.com/search?q=citius%20venda%20165/10.3TBMRA%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Moura%20Moura%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Beja) | ? | - | Moura | - | full dwelling, no minimum (court sale) |
+| 11 | 80 | [Prédio urbano constituído por casa de habitação de](https://www.google.com/search?q=citius%20venda%201469/22.8T8STR%2C%20Ju%C3%ADzo%20de%20Com%C3%A9rcio%20de%20Santar%C3%A9m%20-%20Juiz%201%20Santar%C3%A9m%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m) | ? | - | lugar de Bonvisinho | - | full dwelling, no minimum (court sale) |
+| 12 | 80 | [Prédio urbano sito no Lugar do Forno de Cima, freg](https://www.google.com/search?q=citius%20venda%204206/17.5T8PRT%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Porto%20-%20Juiz%202%20Porto%20-%20Tribunal%20Judicial%20da%20Comarca%20do%20Porto) | €6,500 | - | Lugar do Forno de Cima | - | full dwelling, no bids yet, price sweet  |
+| 13 | 80 | [Prédio urbano sito na Rua do Eiró, freguesia de Lo](https://www.google.com/search?q=citius%20venda%20468/17.6T8MBR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Viseu%20%E2%80%93%20Juiz%202%20Viseu%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viseu) | €9,000 | - | Tabuaço | - | full dwelling, no bids yet, price sweet  |
 | 14 | 80 | [Casa de R/C e 1º andar, em Tourém, Montalegre](https://e-leiloes.pt/item/NP1245772026) | €28,616 | - | Montalegre, Vila Real | 2026-11-17 | full dwelling, no bids yet, price sweet  |
 | 15 | 80 | [Moradia, Paredes, São Lourenço de Ribapinhão](https://e-leiloes.pt/item/NP1230122026) | €35,000 | - | Sabrosa, Vila Real | 2026-09-29 | full dwelling, no bids yet, price sweet  |
 | 16 | 79 | [LOTE TERRENO CONSTRUÇÃO - Cadaval](https://e-leiloes.pt/item/LO1503872026) | €28,650 | €15,206 | Cadaval, Lisboa | 2026-09-30 | discount 47%, urban location |
-| 17 | 75 | [PREDIO RUSTICO - denominado prédio da Veiga, com á](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=22/22.0T9AMR%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Amares) | ? | - |  | - | 950m2, no minimum (court sale) |
-| 18 | 75 | [Prédio rústico de pastagem, inscrito na matriz sob](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=1219/13.0TTBCL.1%2C%20Ju%C3%ADzo%20do%20Trabalho%20de%20Barcelos%20-%20Juiz%201) | ? | - | Vimi | - | 3000m2, no minimum (court sale) |
-| 19 | 75 | [Um prédio rústico de cultura arvense de sequeiro e](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=1107/21.6T8LMG%2C%20Ju%C3%ADzo%20Local%20C%C3%ADvel%20de%20Lamego) | ? | - |  | - | 530m2, no minimum (court sale) |
-| 20 | 75 | [Prédio Rustico - pinhal e mato, com 110 m2, sito e](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=3960/03.6TVPRT%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Porto%20-%20Juiz%202) | ? | - | Valeira | - | 110m2, no minimum (court sale) |
-| 21 | 75 | [Prédio rústico composto de terra de semeadura, com](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=610/09.0TBACB-A%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Santar%C3%A9m%20-%20Juiz%201) | ? | - | Charneca da Moita- Turquel-Alcobaça | - | 525m2, no minimum (court sale) |
-| 22 | 75 | [Predio rustico composto de  terreno de cultivo com](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=33/09.1TBVFL%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Vila%20Fl%C3%B4r) | ? | - |  | - | 490m2, no minimum (court sale) |
-| 23 | 75 | [Prédio rústico, sito em Parede da Torre, composto ](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=496/00.0GBPRG-C%2C%20Ju%C3%ADzo%20Central%20Criminal%20de%20Vila%20Real%20-%20Juiz%202) | ? | - | Parede da Torre | - | 18000m2, no minimum (court sale) |
-| 24 | 75 | [Prédio rústico denominado "Algar", composto por te](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=339/03.3TBSCD%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Viseu%20%E2%80%93%20Juiz%202) | ? | - |  | - | 9035m2, no minimum (court sale) |
+| 17 | 75 | [PREDIO RUSTICO - denominado prédio da Veiga, com á](https://www.google.com/search?q=citius%20venda%2022/22.0T9AMR%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Amares%20Amares%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Braga) | ? | - |  | - | 950m2, no minimum (court sale) |
+| 18 | 75 | [Prédio rústico de pastagem, inscrito na matriz sob](https://www.google.com/search?q=citius%20venda%201219/13.0TTBCL.1%2C%20Ju%C3%ADzo%20do%20Trabalho%20de%20Barcelos%20-%20Juiz%201%20Barcelos%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Braga) | ? | - | Vimi | - | 3000m2, no minimum (court sale) |
+| 19 | 75 | [Um prédio rústico de cultura arvense de sequeiro e](https://www.google.com/search?q=citius%20venda%201107/21.6T8LMG%2C%20Ju%C3%ADzo%20Local%20C%C3%ADvel%20de%20Lamego%20Lamego%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viseu) | ? | - |  | - | 530m2, no minimum (court sale) |
+| 20 | 75 | [Prédio Rustico - pinhal e mato, com 110 m2, sito e](https://www.google.com/search?q=citius%20venda%203960/03.6TVPRT%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Porto%20-%20Juiz%202%20Porto%20-%20Tribunal%20Judicial%20da%20Comarca%20do%20Porto) | ? | - | Valeira | - | 110m2, no minimum (court sale) |
+| 21 | 75 | [Prédio rústico composto de terra de semeadura, com](https://www.google.com/search?q=citius%20venda%20610/09.0TBACB-A%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Santar%C3%A9m%20-%20Juiz%201%20Santar%C3%A9m%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m) | ? | - | Charneca da Moita- Turquel-Alcobaça | - | 525m2, no minimum (court sale) |
+| 22 | 75 | [Predio rustico composto de  terreno de cultivo com](https://www.google.com/search?q=citius%20venda%2033/09.1TBVFL%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Vila%20Fl%C3%B4r%20Vila%20Flor%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Bragan%C3%A7a) | ? | - |  | - | 490m2, no minimum (court sale) |
+| 23 | 75 | [Prédio rústico, sito em Parede da Torre, composto ](https://www.google.com/search?q=citius%20venda%20496/00.0GBPRG-C%2C%20Ju%C3%ADzo%20Central%20Criminal%20de%20Vila%20Real%20-%20Juiz%202%20Vila%20Real%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Vila%20Real) | ? | - | Parede da Torre | - | 18000m2, no minimum (court sale) |
+| 24 | 75 | [Prédio rústico denominado "Algar", composto por te](https://www.google.com/search?q=citius%20venda%20339/03.3TBSCD%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Viseu%20%E2%80%93%20Juiz%202%20Viseu%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viseu) | ? | - |  | - | 9035m2, no minimum (court sale) |
 | 25 | 70 | [Terreno agricola em Ferreira do Zêzere](https://e-leiloes.pt/item/NP1251232026) | €3,000 | €1,500 | Ferreira do Zêzere, Santarém | 2026-12-03 | discount 50% |
 | 26 | 70 | [Imóvel composto de 2 divisões para arrumos em Vila](https://e-leiloes.pt/item/NP1256272026) | €5,015 | €2,508 | Macedo de Cavaleiros, Bragança | 2026-12-15 | discount 50% |
 | 27 | 70 | [Terreno em Paialvo](https://e-leiloes.pt/item/LO1506532026) | €9,000 | €4,500 | Tomar, Santarém | 2026-09-30 | discount 50% |
-| 28 | 70 | [Prédio urbano constituída por Casa de r/c e 1º and](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=154/09.0TATNV%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Torres%20Novas) | ? | - |  | - | parking/storage, full dwelling, no minim |
-| 29 | 70 | [Prédio urbano sito na freguesia de Matela, na Rua ](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=158/14.1GBMGL-A%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20S%C3%A1t%C3%A3o) | €4,692 | - | freguesia de Matela | - | full dwelling, no bids yet |
-| 30 | 70 | [Lote 69, terreno para construção urbana, situado e](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=343/12.0TULMG%2C%20Ju%C3%ADzo%20do%20Trabalho%20de%20Lamego) | €40,302 | - |  | - | full dwelling, no bids yet |
+| 28 | 70 | [Prédio urbano constituída por Casa de r/c e 1º and](https://www.google.com/search?q=citius%20venda%20154/09.0TATNV%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Torres%20Novas%20Torres%20Novas%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m) | ? | - |  | - | parking/storage, full dwelling, no minim |
+| 29 | 70 | [Prédio urbano sito na freguesia de Matela, na Rua ](https://www.google.com/search?q=citius%20venda%20158/14.1GBMGL-A%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20S%C3%A1t%C3%A3o%20S%C3%A1t%C3%A3o%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viseu) | €4,692 | - | freguesia de Matela | - | full dwelling, no bids yet |
+| 30 | 70 | [Lote 69, terreno para construção urbana, situado e](https://www.google.com/search?q=citius%20venda%20343/12.0TULMG%2C%20Ju%C3%ADzo%20do%20Trabalho%20de%20Lamego%20Lamego%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viseu) | €40,302 | - |  | - | full dwelling, no bids yet |
 
 ### Spain (29)
 
@@ -220,8 +220,8 @@ _These listings have no published price and are not scored._
 
 | # | Score | Title | Price | Bid | Location | Ends | Flags |
 |---|-------|-------|-------|-----|----------|------|-------|
-| 1 | 90 | [Prédio Urbano , composto  por uma casa de rés-do-c](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=1153/14.6T8GMR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Guimar%C3%A3es%20-%20Juiz%201) | ? | - |  | - | full dwelling, 575m2, no minimum (court  |
-| 2 | 90 | [Prédio misto, composto por casa de rés do chão e s](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=2694/20.1T8STR%2C%20Ju%C3%ADzo%20de%20Com%C3%A9rcio%20de%20Santar%C3%A9m%20-%20Juiz%201) | ? | - |  | - | full dwelling, 1500m2, no minimum (court |
+| 1 | 90 | [Prédio Urbano , composto  por uma casa de rés-do-c](https://www.google.com/search?q=citius%20venda%201153/14.6T8GMR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Guimar%C3%A3es%20-%20Juiz%201%20Guimar%C3%A3es%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Braga) | ? | - |  | - | full dwelling, 575m2, no minimum (court  |
+| 2 | 90 | [Prédio misto, composto por casa de rés do chão e s](https://www.google.com/search?q=citius%20venda%202694/20.1T8STR%2C%20Ju%C3%ADzo%20de%20Com%C3%A9rcio%20de%20Santar%C3%A9m%20-%20Juiz%201%20Santar%C3%A9m%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m) | ? | - |  | - | full dwelling, 1500m2, no minimum (court |
 | 3 | 80 | [Lote de objetos em ouro amarelo de 800‰.](https://e-leiloes.pt/item/LO1509802026) | €15,644 | €7,900 | Lisboa, Lisboa | 2026-10-07 | discount 49%, urban location |
 | 4 | 80 | [Lote de objetos em ouro, prata e cobre](https://e-leiloes.pt/item/LO1509882026) | €16,903 | €8,536 | Lisboa, Lisboa | 2026-10-07 | discount 49%, urban location |
 | 5 | 80 | [Peças de Ouro e Relojoaria - Lisboa (V.6 - Cautela](https://e-leiloes.pt/item/LO1510642026) | €1,506 | €763 | Lisboa, Lisboa | 2026-10-14 | discount 49%, urban location |
@@ -261,7 +261,7 @@ _These listings have no published price and are not scored._
 | 10 | 80 | [Mercedes-Benz - Classe A (245G) - Gasóleo](https://e-leiloes.pt/item/NP1253372026) | €9,800 | €4,900 | Matosinhos, Porto | 2026-10-13 | discount 50%, urban location |
 | 11 | 80 | [BMW Serie-4 - de 2015](https://e-leiloes.pt/item/LO1513422026) | €9,900 | €4,950 | Sintra, Lisboa | 2026-10-14 | discount 50%, urban location |
 | 12 | 80 | [CITROEN Grand C4 SpaceTourer Dlesel - ANO 2018](https://e-leiloes.pt/item/NP1257112026) | €10,000 | €5,000 | Azambuja, Lisboa | 2026-10-20 | discount 50%, urban location |
-| 13 | 80 | [1/14 da casa de habitação  de r/c com 3 divisões ,](https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=148/05.5PAENT-A%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Torres%20Novas) | ? | - |  | - | full dwelling, no minimum (court sale) |
+| 13 | 80 | [1/14 da casa de habitação  de r/c com 3 divisões ,](https://www.google.com/search?q=citius%20venda%20148/05.5PAENT-A%2C%20Ju%C3%ADzo%20Local%20Criminal%20de%20Torres%20Novas%20Torres%20Novas%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m) | ? | - |  | - | full dwelling, no minimum (court sale) |
 | 14 | 80 | [Veículo da marca VOLVO, Modelo S40](https://e-leiloes.pt/item/LO1512762026) | €1,471 | €735 | Paredes, Porto | 2026-10-13 | discount 50%, urban location |
 | 15 | 80 | [BMW G5K de 2017](https://e-leiloes.pt/item/NP1253332026) | €19,500 | €9,755 | Gondomar, Porto | 2026-10-13 | discount 50%, urban location |
 
@@ -306,7 +306,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": 732.0,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=24802/02.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%204"
+  "url": "https://www.google.com/search?q=citius%20venda%2024802/02.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%204%20Lisboa%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Lisboa"
  },
  {
   "t": "Prédio urbano, compostode casa de um pavimento, sito no luga",
@@ -316,7 +316,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": 142.0,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=366/10.4TBVLN%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Valen%C3%A7a"
+  "url": "https://www.google.com/search?q=citius%20venda%20366/10.4TBVLN%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Valen%C3%A7a%20Valen%C3%A7a%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viana%20do%20Castelo"
  },
  {
   "t": "Vivienda situada en Vilamarxant (Valencia),  planta baja al ",
@@ -346,7 +346,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": null,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=298/03.2TBRMR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%201"
+  "url": "https://www.google.com/search?q=citius%20venda%20298/03.2TBRMR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%201%20Entroncamento%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m"
  },
  {
   "t": "Prédio urbano sito em Póvoa de Santarém, freguesia da Póvoa ",
@@ -356,7 +356,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": null,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=1897/05.3TBSTR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%203"
+  "url": "https://www.google.com/search?q=citius%20venda%201897/05.3TBSTR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Entroncamento%20-%20Juiz%203%20Entroncamento%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m"
  },
  {
   "t": "Prédio Urbano sito em Galegas - Vila Fernando Gare - Guarda,",
@@ -366,7 +366,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": null,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=4413/09.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%203"
+  "url": "https://www.google.com/search?q=citius%20venda%204413/09.4TVLSB%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Lisboa%20-%20Juiz%203%20Lisboa%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Lisboa"
  },
  {
   "t": "Prédio urbano, sito na Rua do Canto das Naves, lugar e fregu",
@@ -376,7 +376,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": null,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=165/10.3TBMRA%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Moura"
+  "url": "https://www.google.com/search?q=citius%20venda%20165/10.3TBMRA%2C%20Ju%C3%ADzo%20de%20Compet%C3%AAncia%20Gen%C3%A9rica%20de%20Moura%20Moura%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Beja"
  },
  {
   "t": "Prédio urbano constituído por casa de habitação de r/c para ",
@@ -386,7 +386,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": null,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=1469/22.8T8STR%2C%20Ju%C3%ADzo%20de%20Com%C3%A9rcio%20de%20Santar%C3%A9m%20-%20Juiz%201"
+  "url": "https://www.google.com/search?q=citius%20venda%201469/22.8T8STR%2C%20Ju%C3%ADzo%20de%20Com%C3%A9rcio%20de%20Santar%C3%A9m%20-%20Juiz%201%20Santar%C3%A9m%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Santar%C3%A9m"
  },
  {
   "t": "Prédio urbano sito no Lugar do Forno de Cima, freguesia de R",
@@ -396,7 +396,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": null,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=4206/17.5T8PRT%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Porto%20-%20Juiz%202"
+  "url": "https://www.google.com/search?q=citius%20venda%204206/17.5T8PRT%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20do%20Porto%20-%20Juiz%202%20Porto%20-%20Tribunal%20Judicial%20da%20Comarca%20do%20Porto"
  },
  {
   "t": "Prédio urbano sito na Rua do Eiró, freguesia de Longa, conce",
@@ -406,7 +406,7 @@ _These listings have no published price and are not scored._
   "tipo": "imovel",
   "area": null,
   "ends": "",
-  "url": "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx?processo=468/17.6T8MBR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Viseu%20%E2%80%93%20Juiz%202"
+  "url": "https://www.google.com/search?q=citius%20venda%20468/17.6T8MBR%2C%20Ju%C3%ADzo%20de%20Execu%C3%A7%C3%A3o%20de%20Viseu%20%E2%80%93%20Juiz%202%20Viseu%20-%20Tribunal%20Judicial%20da%20Comarca%20de%20Viseu"
  },
  {
   "t": "Casa de R/C e 1º andar, em Tourém, Montalegre",
