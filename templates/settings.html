@@ -75,6 +75,16 @@
   <label class="check" style="margin-top:10px"><input type="checkbox" id="tg_source_alerts"> Tell me when a site stops working, and when it works again</label>
 </div>
 
+<div class="card" id="requests">
+  <h2>Information requests</h2>
+  <p class="small muted" style="margin-bottom:10px">After a scan, for strong sales where the agente, court or lawyer's e-mail is known, the app prepares the information request (is the sale still on, deadline, deposit, charges, occupancy, visits) and offers it on Telegram with <b>Send</b>, <b>Show letter</b> and <b>Skip</b>. Nothing is sent until you tap Send; sent requests appear under Offers → Sent. Needs Telegram, the e-mail account and your name and e-mail above.</p>
+  <label class="check"><input type="checkbox" id="ar_enabled"> Prepare information requests for me</label>
+  <div class="form-grid" style="margin-top:12px">
+    <div class="field"><label>For sales scoring at least</label><input type="number" id="ar_min_score" min="0" max="100"></div>
+    <div class="field"><label>At most this many new ones per day</label><input type="number" id="ar_per_day" min="1" max="50"></div>
+  </div>
+</div>
+
 <div class="card" id="email">
   <h2>E-mail</h2>
   <p class="small muted" style="margin-bottom:10px">The account the app sends from: alerts, and letters sent with <b>Send by e-mail</b> on Offers (a copy of each letter comes back to this account). Gmail: smtp.gmail.com, port 587, and an app password.</p>
@@ -126,6 +136,10 @@ async function load() {
   setv("while_app_open", s.while_app_open); setv("pt_every_hours", s.pt_every_hours); setv("eu_every_hours", s.eu_every_hours);
   ["enabled", "token", "chat_id", "min_score", "deadline_min_score"].forEach(k => setv("tg_" + k, t[k]));
   $("tg_source_alerts").checked = t.source_alerts !== false;
+  const ar = c.auto_requests || {};
+  $("ar_enabled").checked = ar.enabled !== false;
+  setv("ar_min_score", ar.min_score ?? 75);
+  setv("ar_per_day", ar.per_day ?? 5);
   ["enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password", "min_score"].forEach(k => setv("em_" + k, e[k]));
   setv("em_to_emails", (e.to_emails || []).join(", "));
   setv("desktop_copy", (c.report || {}).desktop_copy);
@@ -192,6 +206,7 @@ async function save() {
     telegram: {enabled: $("tg_enabled").checked, token: $("tg_token").value.trim(), chat_id: $("tg_chat_id").value.trim(),
                min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score"),
                source_alerts: $("tg_source_alerts").checked},
+    auto_requests: {enabled: $("ar_enabled").checked, min_score: num("ar_min_score"), per_day: num("ar_per_day")},
     notifications: {enabled: $("em_enabled").checked, smtp_host: $("em_smtp_host").value.trim(), smtp_port: num("em_smtp_port"),
                     smtp_user: $("em_smtp_user").value.trim(), smtp_password: $("em_smtp_password").value,
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},

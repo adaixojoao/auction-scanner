@@ -29,7 +29,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -214,8 +214,24 @@ def _migrate_v6(db: sqlite3.Connection):
     """)
 
 
+def _migrate_v7(db: sqlite3.Connection):
+    """Information requests the app prepared by itself, waiting for your OK
+    (outbox.py). A request is sent only when you tap Send."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS letter_queue (
+            listing_id  TEXT PRIMARY KEY,
+            letter_type TEXT NOT NULL,
+            to_email    TEXT,
+            status      TEXT NOT NULL,      -- waiting | sent | skipped
+            note        TEXT,
+            created_at  TEXT NOT NULL,
+            decided_at  TEXT
+        );
+    """)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
-               6: _migrate_v6}
+               6: _migrate_v6, 7: _migrate_v7}
 
 
 def init_db(db: sqlite3.Connection):

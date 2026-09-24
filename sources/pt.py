@@ -88,7 +88,7 @@ def scrape_eleiloes(db, max_price: float = 50000, page_size: int = 100, **_):
             break
 
         for item in items:
-            upsert_listing(db, _eleiloes_to_listing(item))
+            upsert_listing(db, _keep_details(db, _eleiloes_to_listing(item)))
             total_scraped += 1
 
         db.commit()
@@ -121,16 +121,60 @@ def _eleiloes_to_listing(item: dict) -> dict:
     )
 
 
+# Fields the detail pass adds to raw_json. The next search-page scrape replaces
+# raw_json with the thin list item, so these are carried over (_keep_details).
+ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
+                        "valor_abertura", "detail_checked")
+_NOT_PROPERTY = ("outro", "direitos", "veiculo", "equipamento", "mobiliario")
+
+
+def _keep_details(db, row: dict) -> dict:
+    old = db.execute("SELECT raw_json FROM listings WHERE id = ?", (row["id"],)).fetchone()
+    if not old or not old[0] or '"detail_checked"' not in old[0]:
+        return row
+    try:
+        kept = {k: v for k, v in json.loads(old[0]).items() if k in ELEILOES_DETAIL_KEYS}
+        row["raw_json"] = json.dumps({**json.loads(row["raw_json"] or "{}"), **kept}, ensure_ascii=False)
+    except (TypeError, ValueError):
+        pass
+    return row
+
+
+def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
+    """GET /api/Eventos/<referencia> → (listing fields, extra raw_json keys).
+    Leaves out the executados: the people whose property is sold."""
+    fields = {
+        "description": (item.get("descricao") or "").strip() or None,
+        "area_m2": to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None,
+        "freguesia": item.get("moradaFreguesia") or None,
+    }
+    extra = {
+        "processo": item.get("processoNumero") or None,
+        "tribunal": item.get("processoTribunal") or item.get("processoComarca") or None,
+        "agente_nome": item.get("gestorNome") or None,
+        "agente_email": (item.get("gestorEmail") or "").strip() or None,
+        "valor_abertura": to_number(item.get("valorAbertura")),
+        "detail_checked": True,
+    }
+    return fields, {k: v for k, v in extra.items() if v is not None}
+
+
 def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
-    """Fetch descriptions/areas for the most interesting e-leiloes listings."""
+    """Description, area, court and the agente de execução's contact for the
+    most interesting e-leilões property sales, once each.
+
+    The detail API takes the sale's reference ("NP1229582026"), not its numeric
+    id: asked by id it answers "Evento não disponível", which is why no detail
+    had ever been read."""
     session = _eleiloes_session()
-    rows = db.execute("""
-        SELECT external_id FROM listings
-        WHERE source='eleiloes' AND description IS NULL
+    rows = db.execute(f"""
+        SELECT id, raw_json FROM listings
+        WHERE source='eleiloes'
+          AND (raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
           AND price <= ?
           AND (current_bid <= ? OR current_bid IS NULL OR current_bid = 0)
           AND date_end > ?
-          AND tipo NOT IN ('outro','direitos')
+          AND tipo NOT IN ({",".join("?" * len(_NOT_PROPERTY))})
         ORDER BY CASE
             WHEN LOWER(title) LIKE '%moradia%'
               OR LOWER(title) LIKE '%apartamento%'
@@ -139,29 +183,30 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
             ELSE 1
         END, price DESC
         LIMIT ?
-    """, (max_price, max_price, utcnow_iso()[:10], limit)).fetchall()
+    """, (max_price, max_price, utcnow_iso()[:10], *_NOT_PROPERTY, limit)).fetchall()
 
     count = 0
-    for (eid,) in rows:
+    for listing_id, raw_text in rows:
         try:
-            resp = session.get(ELEILOES_DETAIL_API.format(id=eid), timeout=15)
+            raw = json.loads(raw_text or "{}")
+            ref = raw.get("referencia") or listing_id.split(":", 1)[1]
+            resp = session.get(ELEILOES_DETAIL_API.format(id=ref), timeout=15)
             resp.raise_for_status()
-            data = resp.json()
-            desc_parts = []
-            for v in data.get("verbas", []):
-                if v.get("descricao"):
-                    desc_parts.append(v["descricao"])
-                area = to_number(v.get("area"))
-                if area:
-                    db.execute("UPDATE listings SET area_m2=? WHERE id=?", (area, f"eleiloes:{eid}"))
-            if desc_parts:
-                db.execute("UPDATE listings SET description=? WHERE id=?",
-                           ("\n".join(desc_parts), f"eleiloes:{eid}"))
+            item = resp.json().get("item")
+            if not item:
+                raw["detail_checked"] = True           # gone or withdrawn: do not ask again
+                db.execute("UPDATE listings SET raw_json=? WHERE id=?",
+                           (json.dumps(raw, ensure_ascii=False), listing_id))
+                continue
+            fields, extra = eleiloes_detail_fields(item)
+            sets = {k: v for k, v in fields.items() if v is not None}
+            sets["raw_json"] = json.dumps({**raw, **extra}, ensure_ascii=False)
+            db.execute(f"UPDATE listings SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?",
+                       (*sets.values(), listing_id))
             count += 1
             time.sleep(0.3)
         except Exception as e:
-            LOG.debug(f"Detail fetch failed for {eid}: {e}")
-
+            LOG.debug(f"Detail fetch failed for {listing_id}: {e}")
     db.commit()
     LOG.info(f"Fetched details for {count} e-leiloes listings")
     return count
