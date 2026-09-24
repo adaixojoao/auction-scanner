@@ -169,6 +169,10 @@ function renderDetail(){
     </div>
     <div class="dlabel" style="margin-bottom:4px">RAZOES DO SCORE</div>
     <div style="display:flex;gap:4px;flex-wrap:wrap">${(c.reasons||[]).map(r=>`<span class="rtag">${esc(r)}</span>`).join("")}</div>
+    <div style="margin-top:12px;border-top:1px solid #334155;padding-top:12px">
+      <button class="abtn btn-b" id="ai-btn" onclick="analyzeAI()">Analisar com IA</button>
+      <div id="ai-panel" style="display:none;margin-top:12px"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -236,6 +240,56 @@ function copyCarta(){const ta=document.getElementById("carta-ta");if(!ta)return;
 function dlCarta(){const c=items.find(x=>x.id===selId);const ta=document.getElementById("carta-ta");if(!ta||!c)return;const b=new Blob([ta.value],{type:"text/plain;charset=utf-8"}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=`carta_${(c.processo||"unknown").replace(/\//g,"-")}.txt`;a.click();URL.revokeObjectURL(u);}
 function copyBody(){const ta=document.getElementById("carta-ta");if(!ta)return;navigator.clipboard.writeText(ta.value).then(()=>toast("Corpo copiado!"));}
 function copyAddr(addr){navigator.clipboard.writeText(addr).then(()=>toast("Email copiado!"));}
+
+function analyzeAI(){
+  const c=items.find(x=>x.id===selId);
+  if(!c)return;
+  const btn=document.getElementById("ai-btn"),panel=document.getElementById("ai-panel");
+  btn.textContent="A analisar...";btn.disabled=true;panel.style.display="none";
+  fetch('/api/analyze-property',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)})
+  .then(r=>r.json())
+  .then(d=>{
+    btn.textContent="Analisar com IA";btn.disabled=false;
+    if(d.error){panel.innerHTML=`<div style="color:#ef4444;font-size:11px">Erro: ${esc(d.error)}</div>`;panel.style.display="block";return;}
+    const vCol=d.veredicto==="COMPRAR"?"#22c55e":d.veredicto==="PASSAR"?"#ef4444":"#eab308";
+    const vBg=d.veredicto==="COMPRAR"?"rgba(34,197,94,.15)":d.veredicto==="PASSAR"?"rgba(239,68,68,.1)":"rgba(234,179,8,.15)";
+    panel.innerHTML=`
+      <div style="background:#0a1120;border-radius:8px;padding:14px;border:1px solid #334155">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+          <span style="background:${vBg};color:${vCol};font-size:13px;font-weight:800;padding:4px 14px;border-radius:6px">${esc(d.veredicto)}</span>
+          <span style="color:#64748b;font-size:11px">Confianca: ${d.confianca}/10</span>
+          <span style="color:#94a3b8;font-size:11px;font-style:italic">${esc(d.resumo)}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          <div>
+            <div style="font-size:9px;color:#22c55e;font-weight:700;margin-bottom:5px">PONTOS POSITIVOS</div>
+            ${(d.pontos_positivos||[]).map(p=>'<div style="font-size:10px;color:#86efac;margin-bottom:3px">- '+esc(p)+'</div>').join("")}
+          </div>
+          <div>
+            <div style="font-size:9px;color:#ef4444;font-weight:700;margin-bottom:5px">RISCOS</div>
+            ${(d.riscos||[]).map(r=>'<div style="font-size:10px;color:#fca5a5;margin-bottom:3px">- '+esc(r)+'</div>').join("")}
+          </div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:10px;margin-bottom:10px">
+          <div style="font-size:9px;color:#64748b;margin-bottom:4px">BID RECOMENDADO PELA IA</div>
+          <div style="font-size:16px;font-weight:800;color:#22c55e">EUR ${esc(d.bid_recomendado)}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:3px">${esc(d.bid_justificacao)}</div>
+          <button style="margin-top:8px;background:rgba(34,197,94,.2);color:#22c55e;border:1px solid #22c55e;border-radius:5px;padding:5px 12px;font-size:10px;font-weight:700;cursor:pointer"
+            onclick="setPreset('${esc(d.bid_recomendado)}')">Usar este bid</button>
+        </div>
+        <div>
+          <div style="font-size:9px;color:#64748b;margin-bottom:5px">PROXIMOS PASSOS</div>
+          ${(d.proximos_passos||[]).map((p,i)=>'<div style="font-size:10px;color:#94a3b8;margin-bottom:3px">'+(i+1)+'. '+esc(p)+'</div>').join("")}
+        </div>
+      </div>`;
+    panel.style.display="block";
+    if(d.bid_recomendado){c.bid=d.bid_recomendado;const inp=document.getElementById("inp-bid");if(inp)inp.value=d.bid_recomendado;refreshCarta();}
+  })
+  .catch(e=>{
+    btn.textContent="Analisar com IA";btn.disabled=false;
+    panel.innerHTML=`<div style="color:#ef4444;font-size:11px">Erro: ${esc(e.message)}</div>`;panel.style.display="block";
+  });
+}
 
 renderList();
 </script>

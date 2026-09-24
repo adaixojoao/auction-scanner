@@ -558,6 +558,74 @@ def api_cartas_candidates():
     return jsonify(candidates[:100])
 
 
+@app.route("/api/analyze-property", methods=["POST"])
+def api_analyze_property():
+    try:
+        import anthropic
+    except ImportError:
+        return jsonify({"error": "anthropic not installed. Run: pip install anthropic"}), 500
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return jsonify({"error": "ANTHROPIC_API_KEY not set"}), 500
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    prompt = f"""És um especialista em imóveis portugueses e leilões judiciais.
+Analisa este imóvel em venda judicial e dá uma avaliação honesta e prática.
+
+DADOS DO IMÓVEL:
+- Título: {data.get('title','')}
+- Localização: {data.get('location','')}
+- Área: {data.get('area_m2','')} m²
+- Valor base (VB): €{data.get('price','')}
+- Lance atual: €{data.get('current_bid','Sem lances')}
+- Modalidade: {data.get('modalidade','')}
+- Categoria: {data.get('categoria','')}
+- Prazo: {data.get('date_end','')}
+- Tribunal: {data.get('tribunal','')}
+- Processo: {data.get('processo','')}
+- Descrição: {data.get('description','')}
+- Score automático: {data.get('score','')}/100
+- Razões do score: {', '.join(data.get('reasons',[]))}
+
+PROPOSTA SUGERIDA: EUR {data.get('bid','')} ({data.get('bidText','')})
+
+Responde em português com EXATAMENTE este formato JSON (sem mais nada):
+{{
+  "veredicto": "COMPRAR" | "INVESTIGAR" | "PASSAR",
+  "confianca": 1-10,
+  "resumo": "Uma frase direta sobre esta oportunidade",
+  "pontos_positivos": ["ponto 1", "ponto 2"],
+  "riscos": ["risco 1", "risco 2"],
+  "bid_recomendado": "valor em formato 1.000,00",
+  "bid_justificacao": "Uma frase explicando o bid recomendado",
+  "proximos_passos": ["passo 1", "passo 2", "passo 3"]
+}}"""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+        import re as _re
+        m = _re.search(r'\{.*\}', text, _re.DOTALL)
+        if m:
+            result = json.loads(m.group())
+        else:
+            result = {"veredicto": "INVESTIGAR", "resumo": text, "confianca": 5,
+                      "pontos_positivos": [], "riscos": [], "bid_recomendado": data.get('bid', ''),
+                      "bid_justificacao": "", "proximos_passos": []}
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 def main():
     from config import load_config
     cfg = load_config()
