@@ -170,7 +170,7 @@ land, bid-to-value ratio, price cuts and days left each move the score along
 a curve (`scoring.py`, the `*_POINTS` lists), so €20,000 scores a little more
 than €20,001 instead of jumping at a step.
 
-- **Skip (score 0):** fractional shares (`1/2`, `29/84`, `4986/100000`, *metade*, quota-parte, avos…) and usufruct.
+- **Skip (score 0):** fractional shares (`1/2`, `29/84`, `4986/100000`, *metade*, quota-parte, avos…), usufruct, and timeshares (*habitação periódica*, *multipropriedade*, *semana 37 de cada año*, *aprovechamiento por turno*, *multipropriété*…).
 - **Homes:** up for good condition (*bom estado*, *renovado*…), a great
   location (*centro*, near the beach…) or a town we have local prices for,
   size up to about 150 m², and the discount to local prices per m². Down for
