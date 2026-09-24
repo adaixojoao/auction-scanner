@@ -5,3 +5,4 @@ fpdf2>=2.7
 anthropic>=0.40
 selenium>=4.20
 flask>=3.0
+tzdata; sys_platform == 'win32'   # time zones for calendar files (Windows has none built in)

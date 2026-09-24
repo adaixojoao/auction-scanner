@@ -31,6 +31,9 @@ def _money(v) -> str:
     return f"€{v:,.0f}" if v else "?"
 
 
+FOLLOW_UP_CHANNEL = "telegram-followup"   # alert_log channel: each unanswered letter is mentioned once
+
+
 def _dashboard_url(cfg: dict, path: str = "") -> str:
     d = cfg.get("dashboard", {})
     return f"http://{d.get('host', '127.0.0.1')}:{d.get('port', 8050)}{path}"
@@ -165,17 +168,25 @@ def expire_pending_cartas(db, now=None) -> int:
 
 
 def alert_carta_deadlines(db, cfg: dict, score_fn=None):
-    """One message listing the sales ending in the next 4 days with no offer sent."""
+    """One message: sales ending in the next 4 days with no offer sent, and
+    letters still unanswered after db.FOLLOW_UP_DAYS (each mentioned once)."""
+    from db import FOLLOW_UP_DAYS, awaiting_reply, mark_alerted, not_yet_alerted
+
     now = utcnow()
     expire_pending_cartas(db, now)
     tg = _tg(cfg)
     if not tg:
         return
     items = upcoming_deadlines(db, cfg, min_score=tg.get("deadline_min_score", 60), now=now)
-    if not items:
+    waiting = awaiting_reply(db, now=now)
+    fresh = not_yet_alerted(db, FOLLOW_UP_CHANNEL, [f"carta_log:{r['id']}" for r in waiting])
+    waiting = [r for r in waiting if f"carta_log:{r['id']}" in fresh]
+    if not items and not waiting:
         return
 
-    lines = [f"⏰ <b>{len(items)} sale(s) ending within 4 days — no offer sent</b>\n"]
+    lines = []
+    if items:
+        lines.append(f"⏰ <b>{len(items)} sale(s) ending within 4 days — no offer sent</b>\n")
     for it in items[:12]:
         urgency = "\U0001f6a8" if it["hours_left"] <= 24 else "⚠️"
         flag = FLAGS.get(it.get("country") or "PT", "")
@@ -186,8 +197,16 @@ def alert_carta_deadlines(db, cfg: dict, score_fn=None):
                      f"{_money(it.get('price'))}\n    {link}\n    \U0001f4cd {_esc(loc)}")
     if len(items) > 12:
         lines.append(f"\n…and {len(items) - 12} more.")
-    lines.append(f"\nReview: {_dashboard_url(cfg, '/cartas-review')}")
-    send_telegram(tg["token"], tg["chat_id"], "\n".join(lines))
+    if waiting:
+        lines.append(f"\n\U0001f4ed <b>{len(waiting)} letter(s) unanswered after {FOLLOW_UP_DAYS}+ days</b> "
+                     "— time for a call or a reminder:")
+        for r in waiting[:12]:
+            to = f" to {_esc(r['sent_to'])}" if r.get("sent_to") else ""
+            lines.append(f"• {_esc(r.get('processo') or r.get('listing_id') or '?')} — sent "
+                         f"{_esc(r.get('sent_date'))}{to}")
+    lines.append(f"\nOffers: {_dashboard_url(cfg, '/offers')}")
+    if send_telegram(tg["token"], tg["chat_id"], "\n".join(lines)) and waiting:
+        mark_alerted(db, FOLLOW_UP_CHANNEL, [f"carta_log:{r['id']}" for r in waiting])
 
 
 def alert_carta_won(token: str, chat_id: str, processo: str, bid: float, estado: str):

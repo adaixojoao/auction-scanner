@@ -372,6 +372,19 @@ def listing_statuses(db: sqlite3.Connection) -> dict[str, str]:
     return dict(db.execute("SELECT listing_id, status FROM listing_status").fetchall())
 
 
+FOLLOW_UP_DAYS = 10   # a letter with no answer after this long deserves a phone call or a reminder
+
+
+def awaiting_reply(db: sqlite3.Connection, *, days: int = FOLLOW_UP_DAYS,
+                   now: datetime | None = None) -> list[dict]:
+    """Letters sent at least `days` ago that are still marked pending, oldest
+    first. Bids logged for online auctions expect no answer and are left out."""
+    cutoff = ((now or utcnow()) - timedelta(days=days)).strftime("%Y-%m-%d")
+    return [dict(r) for r in db.execute(
+        "SELECT * FROM carta_log WHERE outcome = 'pending' AND COALESCE(method, '') != 'online' "
+        "AND sent_date IS NOT NULL AND sent_date <= ? ORDER BY sent_date, id", (cutoff,))]
+
+
 def latest_offers(db: sqlite3.Connection) -> dict[str, dict]:
     """Most recent offer (not information request) per listing, from carta_log."""
     out = {}

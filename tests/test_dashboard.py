@@ -246,6 +246,28 @@ def test_bid_warnings_follow_the_sale(client, add):
     assert [t["key"] for t in z["letter_types"]] == ["de_info"]
 
 
+def test_sale_dates_export_to_a_calendar(client, add):
+    add("france", "f1", "FR", title="Maison", price=40000, date_end="2099-10-15T14:00:00",
+        raw_json=json.dumps({"tribunal": "Tribunal Judiciaire de Nîmes", "avocat_nom": "Jean Dupont"}))
+    add("zvg", "z1", "DE", title="Haus", price=90000, date_end="2099-11-12")
+    add("citius", "old", title="Moradia", price=9000, date_end="2000-01-01T10:00:00")
+    add("citius", "nodate", title="Moradia sem data", price=9000)
+
+    one = client.get("/api/offers/calendar.ics?id=france:f1")
+    text = one.get_data(as_text=True)
+    assert one.mimetype == "text/calendar" and "sale-france-f1.ics" in one.headers["Content-Disposition"]
+    assert "DTSTART:20991015T120000Z" in text              # 14:00 in Paris
+    assert "SUMMARY:Court hearing (FR): Maison" in text and "LOCATION:Tribunal Judiciaire de Nîmes" in text
+    assert "Seller's lawyer: Jean Dupont" in text.replace("\r\n ", "") and "TRIGGER:-P1D" in text
+    assert client.get("/api/offers/calendar.ics?id=citius:nodate").status_code == 404
+
+    for lid in ("france:f1", "zvg:z1", "citius:old"):
+        client.post("/api/listings/status", json={"id": lid, "status": "shortlisted"})
+    everything = client.get("/api/offers/calendar.ics").get_data(as_text=True)
+    assert everything.count("BEGIN:VEVENT") == 2 and "DTSTART;VALUE=DATE:20991112" in everything
+    assert "citius:old" not in everything                   # past sales are left out
+
+
 def test_scan_api(client, monkeypatch):
     started = []
     monkeypatch.setattr(dashboard, "_start_scan", lambda **kw: started.append(kw))

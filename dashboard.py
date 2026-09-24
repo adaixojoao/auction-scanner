@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -127,7 +128,8 @@ def listings_page():
 def offers_page():
     cfg = _config()
     p, smtp = cfg.get("proponente", {}), cfg.get("notifications", {})
-    return _page("offers.html", "offers", "Offers",
+    from db import FOLLOW_UP_DAYS
+    return _page("offers.html", "offers", "Offers", follow_up_days=FOLLOW_UP_DAYS,
                  proponente_ok=all(p.get(k) for k in ("nome", "nif", "morada")),
                  smtp_ok=all(smtp.get(k) for k in ("smtp_host", "smtp_user", "smtp_password")))
 
@@ -679,6 +681,52 @@ def api_offer_email():
         return jsonify({"error": error}), 400
     log_id = _log_sent(item, letter=letter, bid=data.get("bid", ""), method="email", sent_to=to)
     return jsonify({"ok": True, "log_id": log_id, "to": to})
+
+
+def _calendar_event(it: dict):
+    from ics_export import WHAT, event
+    from letters import channel, guidance, place_of
+    raw = _raw(it)
+    contact = _contact(it, raw)
+    notes = [guidance(it)]
+    if contact:
+        notes.append(f"{contact['role']}: " + " · ".join(v for v in (contact["name"], contact["phone"],
+                                                                       contact["email"]) if v))
+    if raw.get("visite") or raw.get("visitable"):
+        notes.append(f"Visits: {raw.get('visite') or raw.get('visitable')}")
+    notes.append(f"Listing: {it.get('url') or it['id']}")
+    return event(it, what=WHAT[channel(it)], description="\n\n".join(notes),
+                 location=raw.get("tribunal") or place_of(it))
+
+
+@app.route("/api/offers/calendar.ics")
+def api_offers_calendar():
+    """Sale dates as a calendar file: one listing (?id=), or everything you are
+    working on: shortlisted listings and offers waiting for an answer."""
+    from common import effective_end, utcnow
+    from ics_export import calendar
+    listing_id = request.args.get("id")
+    db = get_db()
+    try:
+        if listing_id:
+            items = load_listings(db, include_hidden=True, where="id = ?", params=(listing_id,))
+        else:
+            pending = {r[0] for r in db.execute(
+                "SELECT listing_id FROM carta_log WHERE outcome = 'pending' AND listing_id IS NOT NULL")}
+            items = [it for it in load_listings(db, include_hidden=True)
+                     if it["status"] == "shortlisted" or it["id"] in pending]
+    finally:
+        db.close()
+    now = utcnow()
+    events = [ev for it in items
+              if (listing_id or (effective_end(it.get("date_end")) or now) > now)
+              and (ev := _calendar_event(it))]
+    if listing_id and not events:
+        return jsonify({"error": "this listing has no sale date"}), 404
+    name = (f"sale-{re.sub(r'[^A-Za-z0-9.-]+', '-', listing_id)}.ics" if listing_id
+            else "auction-deadlines.ics")
+    return Response(calendar(events), mimetype="text/calendar",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.route("/api/analyze-property", methods=["POST"])

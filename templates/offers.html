@@ -5,6 +5,7 @@
     <h1>Offers</h1>
     <p>Prepare, send and track your letters (offers, information requests, instructions to a lawyer) and the bids you place online. <b>To review</b> has strong sales where the offer is a letter, plus anything you ☆ on Listings.</p>
   </div>
+  <a class="btn" href="/api/offers/calendar.ics" title="Sale dates of your shortlist and of offers waiting for an answer, with a reminder the day before">📅 Deadlines to my calendar</a>
 </div>
 {% if not proponente_ok %}
 <div class="notice bad" style="margin:0 0 14px">Your name, NIF and address are not set, so letters will be incomplete. <a href="/settings#details">Fill them in under Settings</a>.</div>
@@ -27,6 +28,7 @@
 {% block scripts %}
 <script>
 const SMTP_OK = {{ "true" if smtp_ok else "false" }};
+const FOLLOW_UP_DAYS = {{ follow_up_days }};
 let data = {review: [], sent: [], closed: [], rejected: []}, tab = "review", sel = null;
 const $ = id => document.getElementById(id);
 const drafts = {};   // per listing: {type, bid, bidText, to, online}
@@ -59,6 +61,13 @@ async function load() {
 function current() { return data[tab].find(x => x.key === sel); }
 function typeOf(c, key) { return c.letter_types.find(t => t.key === key) || null; }
 
+// Days since a letter went out while still unanswered, when it is time to chase it (else 0).
+function overdue(o) {
+  if (!o || o.outcome !== "pending" || o.method === "online" || !o.sent_date) return 0;
+  const days = Math.floor((Date.now() - new Date(o.sent_date + "T00:00:00")) / 86400000);
+  return days >= FOLLOW_UP_DAYS ? days : 0;
+}
+
 function offerSummary(o) {
   if (!o.is_offer) return `info requested · <b>${AS.esc(o.outcome)}</b>`;
   return `${o.method === "online" ? "bid" : "offered"} EUR ${AS.esc(o.bid)} · <b>${AS.esc(o.outcome)}</b>`;
@@ -75,7 +84,7 @@ function renderList() {
       <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start">
         <div class="t" style="flex:1">${AS.flag(c.country)} ${AS.esc(c.title)}</div>${AS.scoreBadge(c.score)}
       </div>
-      <div class="m">${AS.esc(c.sale)}${c.status === "shortlisted" ? ' · <span class="warn">★ shortlisted</span>' : ""} · ${AS.esc(c.location || "")}</div>
+      <div class="m">${AS.esc(c.sale)}${c.status === "shortlisted" ? ' · <span class="warn">★ shortlisted</span>' : ""} · ${AS.esc(c.location || "")}${overdue(c.offer) ? ` · <span class="warn">no answer for ${overdue(c.offer)} days</span>` : ""}</div>
       <div class="m">${c.price ? AS.esc(PRICE_LABEL[c.country] || "Price") + " " + AS.money(c.price) : "no price"}${c.offer ? " · " + offerSummary(c.offer) : (c.bid ? ` · suggested EUR ${AS.esc(c.bid)}` : "")}
         ${c.date_end ? " · ends " + AS.esc(c.date_end.slice(0, 10)) : ""}</div>
     </div>`).join("");
@@ -124,7 +133,8 @@ function renderDetail() {
           ${c.status === "shortlisted" ? '<span class="badge b-short">★ shortlisted</span>' : ""}
         </div>
       </div>
-      ${c.url ? AS.link(c.url, "Open listing ↗") : ""}
+      <div style="text-align:right">${c.url ? AS.link(c.url, "Open listing ↗") : ""}
+        ${c.date_end ? `<div class="small" style="margin-top:4px"><a href="/api/offers/calendar.ics?id=${encodeURIComponent(c.id)}">📅 Add to calendar</a></div>` : ""}</div>
     </div>
     <div class="grid" style="margin-top:12px">${facts.map(([k, v]) => `<div class="cell"><div class="k">${k}</div><div class="v">${AS.esc(v || "–")}</div></div>`).join("")}</div>
     ${c.description ? `<p class="small muted" style="margin-top:10px">${AS.esc(c.description)}</p>` : ""}
@@ -214,6 +224,7 @@ function outcomeCard(c) {
   const what = o.is_offer ? (o.method === "online" ? `bid EUR ${AS.esc(o.bid)} online` : `offer of EUR ${AS.esc(o.bid)}`) : "information request";
   return `<div class="card"><h2>Outcome</h2>
     <p class="small muted">Sent ${AS.esc(o.sent_date || "")} · ${what}${o.sent_to ? " · to " + AS.esc(o.sent_to) : ""} · currently <b>${AS.esc(o.outcome)}</b></p>
+    ${overdue(o) ? `<div class="notice bad">No answer after ${overdue(o)} days. Time to phone${o.sent_to ? " or write again to " + AS.esc(o.sent_to) : ""}${c.contact && c.contact.phone ? " (" + AS.esc(c.contact.phone) + ")" : ""}.</div>` : ""}
     ${o.is_offer ? "" : `<p class="small faint">When they answer, mark it answered: the listing goes back to To review so you can make an offer.</p>`}
     <div class="row" style="margin-top:10px">
       ${choices.filter(x => x !== o.outcome).map(x =>

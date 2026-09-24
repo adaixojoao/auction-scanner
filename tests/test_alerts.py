@@ -90,3 +90,21 @@ def test_email_alerts_only_new_and_escaped(db, add, monkeypatch):
     notifications.send_alerts(db, cfg, max_price=100000)
     assert len(mails) == 1
     assert "Casa &lt;b&gt;grande&lt;/b&gt;" in mails[0][1]
+
+
+def test_unanswered_letters_are_followed_up_once(db, add, sent):
+    old = (datetime.now(timezone.utc) - timedelta(days=12)).strftime("%Y-%m-%d")
+    recent = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+    rows = [("citius:a", "1/20.0T", old, "email", "ae@solic.pt", "pending"),
+            ("citius:b", "2/20.0T", recent, "email", None, "pending"),     # too recent
+            ("eleiloes:c", None, old, "online", None, "pending"),          # online bid: no reply expected
+            ("citius:d", "4/20.0T", old, "post", None, "answered")]        # already answered
+    db.executemany("INSERT INTO carta_log (listing_id, processo, sent_date, method, sent_to, outcome, created_at) "
+                   "VALUES (?,?,?,?,?,?, '2026-01-01')", rows)
+    db.commit()
+    telegram_alert.alert_carta_deadlines(db, CFG)
+    assert len(sent) == 1 and "1 letter(s) unanswered" in sent[0]
+    assert "1/20.0T" in sent[0] and "ae@solic.pt" in sent[0] and "2/20.0T" not in sent[0]
+    assert "/offers" in sent[0]
+    telegram_alert.alert_carta_deadlines(db, CFG)
+    assert len(sent) == 1          # mentioned once, not every morning
