@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from common import (LOG, find_price, make_listing, make_session, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number)
 from db import upsert_listing
-from sources import register
+from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
 
 BOE_SEARCH = "https://subastas.boe.es/subastas_ava.php"
@@ -355,38 +355,14 @@ def enrich_spain_details(db, session, limit: int = 100):
     return filled
 
 
-@register("aeat", "ES")
+@register("aeat", "ES", default=False)
 def scrape_aeat(db, max_price: float = 50000, **_):
-    """sede.agenciatributaria.gob.es — Spanish tax-authority auctions."""
-    session = make_session()
-    base = "https://sede.agenciatributaria.gob.es"
-    resp = session.get(f"{base}/Sede/procedimientos/subastas-electronicas.html")
-    resp.raise_for_status()
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-    links = soup.select("a[href*='subasta'], a[href*='lote']")
-    LOG.info(f"  AEAT: {len(links)} auction links found")
-
-    total_scraped = 0
-    seen = set()
-    for link in links:
-        url = safe_url(link.get("href"), base)
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        title = link.get_text(strip=True)[:200]
-        text = link.parent.get_text(" ", strip=True) if link.parent else title
-        price = find_price(text)
-        if price and price > max_price:
-            continue
-        eid = re.sub(r"[^A-Za-z0-9]", "", url[-40:]) or stable_id(url)
-        upsert_listing(db, make_listing(
-            "aeat", eid, "ES",
-            title=title or f"AEAT tax sale {eid}", description=text[:500],
-            tipo="inmueble", price=price, min_price=price, url=url,
-        ))
-        total_scraped += 1
-    return total_scraped
+    """Spanish tax-authority (AEAT) auctions — already in the BOE scan, so not scanned twice."""
+    # AEAT's old list page is gone (404). Its auctions are published on
+    # subastas.boe.es, which the "spain" source scans in full (IDs "SUB-AT-…").
+    raise SourceUnavailable(
+        "AEAT's own auction page is gone; its auctions are on subastas.boe.es and "
+        "come in through the Spain (BOE) source")
 
 
 @register("sareb", "ES")
@@ -403,6 +379,9 @@ def scrape_sareb(db, max_price: float = 100000, **_):
             if resp.status_code == 404:
                 break
             resp.raise_for_status()
+            if "_Incapsula_Resource" in resp.text:
+                raise SourceUnavailable("sareb.es answers scripts with an Incapsula bot check "
+                                        "instead of listings; look at it in a browser")
             data = resp.json()
         except Exception:
             if page == 1:
@@ -447,16 +426,6 @@ HAYA = CardSite(
     params={"precio_max": "{max_price}"}, max_pages=29,
     description="Haya Real Estate (Sareb/BBVA)", tipo="inmueble", price_is_min_price=True,
 )
-SERVIHABITAT = CardSite(
-    source="servihabitat", country="ES", base="https://www.servihabitat.com", path="/en/buy-houses/",
-    card_selector="div.property, article, div[class*='property'], li[class*='property']",
-    title_selector="h2,h3,.title",
-    location_selector=".location,.city,.municipio",
-    params={"price_to": "{max_price}"}, max_pages=29,
-    description="Servihabitat (CaixaBank)", tipo="inmueble", price_is_min_price=True,
-)
-
-
 @register("haya", "ES")
 def scrape_haya(db, max_price: float = 100000, **_):
     """haya.es — Sareb/BBVA repossessions."""
@@ -465,8 +434,13 @@ def scrape_haya(db, max_price: float = 100000, **_):
 
 @register("servihabitat", "ES")
 def scrape_servihabitat(db, max_price: float = 100000, **_):
-    """servihabitat.com — CaixaBank repossessions."""
-    return scrape_cards(db, SERVIHABITAT, max_price)
+    """servihabitat.com — CaixaBank repossessions (needs a rewrite)."""
+    # /en/buy-houses is gone (404) and /en/ is disallowed in robots.txt. Listings
+    # are now per province (/es/venta/vivienda/<provincia>?delta=20&start=N),
+    # 20 at a time, and the price filter is a form POST with a session token.
+    raise SourceUnavailable(
+        "Servihabitat moved its listings to per-province pages with no price filter "
+        "in the address; this scraper needs rewriting for the new site")
 
 
 @register("subastasactivas", "ES")

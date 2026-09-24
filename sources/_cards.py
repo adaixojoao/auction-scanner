@@ -44,6 +44,7 @@ class CardSite:
     tipo: str = "imovel"
     price_is_min_price: bool = False
     id_prefix: str | None = None              # only to keep IDs from before CardSite
+    id_pattern: str | None = None             # regex on the URL; group 1 is the site's ID
 
 
 def listing_id_from_url(url: str) -> str:
@@ -85,13 +86,15 @@ def scrape_cards(db, site: CardSite, max_price: float) -> int:
             break
 
         for card in cards:
-            link = card.select_one("a[href]")
+            # Some sites make the whole card one <a>; select_one only looks inside it.
+            link = card if card.name == "a" and card.get("href") else card.select_one("a[href]")
             if not link:
                 continue
             url = safe_url(link.get("href"), site.base)
             if not url:
                 continue
-            eid = listing_id_from_url(url)
+            m = re.search(site.id_pattern, url) if site.id_pattern else None
+            eid = m.group(1) if m else listing_id_from_url(url)
             if eid in seen:  # nested card selectors hit the same card twice
                 continue
             seen.add(eid)

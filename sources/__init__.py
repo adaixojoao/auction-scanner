@@ -30,6 +30,11 @@ class Source:
     description: str = ""
 
 
+class SourceUnavailable(RuntimeError):
+    """The site cannot be scraped (closed, login-only, bot wall). Its message
+    is shown as-is on the Sources page."""
+
+
 REGISTRY: dict[str, Source] = {}
 
 _MODULES = ("pt", "es", "fr", "it", "nl", "hr", "de", "gr", "be", "ro", "pl", "cy", "eu")
@@ -71,6 +76,8 @@ def describe_error(e: Exception) -> str:
     import requests
     from urllib.parse import urlsplit
 
+    if isinstance(e, SourceUnavailable):
+        return str(e)
     url = getattr(getattr(e, "request", None), "url", None) or ""
     host = urlsplit(url).netloc or ""
     if isinstance(e, requests.HTTPError) and e.response is not None:
@@ -78,6 +85,8 @@ def describe_error(e: Exception) -> str:
     if isinstance(e, requests.Timeout):
         return f"{host or 'The site'} did not answer in time"
     if isinstance(e, (requests.ConnectionError, requests.exceptions.ProxyError)):
+        if "10013" in str(e):   # WinError 10013: a local firewall rule refused the socket
+            return f"Could not connect to {host or 'the site'}: blocked by this PC's firewall"
         return f"Could not connect to {host or 'the site'} (site down, moved, or blocked)"
     if isinstance(e, ValueError) and "JSON" in str(e):
         return "The site did not return the expected data (JSON) — its API may have changed"

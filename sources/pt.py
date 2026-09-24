@@ -14,8 +14,8 @@ from bs4 import BeautifulSoup
 from common import (LOG, find_price, make_listing, make_session, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, utcnow_iso)
 from db import upsert_listing
-from sources import register
-from sources._cards import CardSite, listing_id_from_url, scrape_cards
+from sources import SourceUnavailable, register
+from sources._cards import CardSite, scrape_cards
 
 # ─── e-leiloes.pt ───────────────────────────────────────────────────
 
@@ -573,62 +573,16 @@ def scrape_citius(db, max_price: float = 50000, **_):
 
 # ─── Portal das Finanças (tax seizures) ─────────────────────────────
 
-@register("financas", "PT")
+@register("financas", "PT", default=False)
 def scrape_financas(db, max_price: float = 50000, **_):
-    """vendas.portaldasfinancas.gov.pt — tax-debt seizures."""
-    session = make_session()
-    base = "https://vendas.portaldasfinancas.gov.pt/bens/rest"
-    total_scraped = 0
-
-    for page in range(1, 30):
-        params = {"tipoVenda": "VI", "tipoBem": "I", "pagina": page,
-                  "tamanhoPagina": 50, "ordenacao": "dataFimDesc"}
-        try:
-            resp = session.get(f"{base}/listaVendas", params=params)
-            if resp.status_code == 404 or not resp.text.strip():
-                break
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception:
-            if page == 1:
-                raise
-            break
-
-        items = data if isinstance(data, list) else data.get("vendas", data.get("items", []))
-        if not items:
-            break
-
-        for item in items:
-            eid = str(item.get("idVenda", item.get("id", "")) or "")
-            if not eid:
-                continue
-            price = to_number(item.get("valorBase")) or to_number(item.get("valorMinimo")) or 0
-            if price > max_price:
-                continue
-            upsert_listing(db, make_listing(
-                "financas", eid, "PT",
-                title=str(item.get("descricao") or item.get("designacao") or f"AT tax sale {eid}")[:200],
-                description=item.get("observacoes") or item.get("descricaoCompleta"),
-                tipo="imovel",
-                area_m2=item.get("area"),
-                price=price,
-                current_bid=item.get("melhorProposta"),
-                min_price=item.get("valorMinimo") or price,
-                district=item.get("distrito") or item.get("localidade"),
-                concelho=item.get("concelho"),
-                freguesia=item.get("freguesia"),
-                url=f"https://vendas.portaldasfinancas.gov.pt/bens/detalheVenda.action?idVenda={eid}",
-                date_end=item.get("dataFim") or item.get("dataLimite"),
-                raw_json=json.dumps(item, ensure_ascii=False)[:2000],
-            ))
-            total_scraped += 1
-
-        db.commit()
-        LOG.info(f"  Finanças page {page}: {len(items)} items (total: {total_scraped})")
-        if len(items) < 50:
-            break
-        time.sleep(1)
-    return total_scraped
+    """Portal das Finanças tax-debt seizures — needs a login, so not scanned."""
+    # The public REST list (vendas.portaldasfinancas.gov.pt/bens/rest) is gone
+    # (404); "Venda de bens" (/vendasat) now redirects to the acesso.gov.pt
+    # login. Signing in needs the owner's NIF or Cartão de Cidadão, which a
+    # scraper must not hold, so this source stays out of the default scan.
+    raise SourceUnavailable(
+        "Portal das Finanças now shows its sales only after signing in on acesso.gov.pt; "
+        "check them there by hand")
 
 
 # ─── Whitestar (NPL bank portfolios) ────────────────────────────────
@@ -721,51 +675,235 @@ def scrape_whitestar(db, max_price: float = 50000, **_):
     return total_scraped
 
 
-# ─── Bank portals & auction houses (card grids) ─────────────────────
+# ─── Bank portals & auction houses ──────────────────────────────────
 
-NOVOBANCO = CardSite(
-    source="novobanco", country="PT", base="https://www.novobancoimoveis.pt", path="/imoveis",
-    card_selector="div.property-card, div.imovel-card, article.property, div[class*='property'], div[class*='imovel']",
-    title_selector="h2,h3,.title,.property-title",
-    price_selector=".price,.preco,[class*='price']",
-    location_selector=".location,.localizacao,[class*='location']",
-    area_selector=".area,[class*='area']",
-    params={"preco_max": "{max_price}"}, max_pages=29, min_cards=10,
-    description="NPL Novo Banco", price_is_min_price=True,
-)
-CGD = CardSite(
-    source="cgd", country="PT", base="https://www.caixaimobiliario.pt", path="/imoveis",
-    card_selector="div.imovel, article.property, div[class*='imovel'], li.property-item",
-    title_selector="h2,h3,.titulo,.title",
-    price_selector=".preco,.price,[class*='preco'],[class*='price']",
-    location_selector=".localizacao,.location,.concelho",
-    page_param="pagina", max_pages=19,
-    description="Imóvel Caixa Geral de Depósitos", price_is_min_price=True,
-)
+@register("novobanco", "PT", default=False)
+def scrape_novobanco(db, max_price: float = 100000, **_):
+    """Novo Banco repossessions — its portal closed, so not scanned."""
+    raise SourceUnavailable(
+        "novobancoimoveis.pt no longer exists (the domain is gone) and no public "
+        "Novo Banco property list was found to replace it")
+
+
+# Caixa Imobiliário is an Angular app. Its listings come from CGD's API, which
+# wants the site's public API key plus a 10-minute token the site hands out.
+CGD_SITE = "https://www.caixaimobiliario.pt"
+CGD_API = "https://api.cgd.pt/cross-channel/drupal-cms/v2/rest/pt/rest/pesquisa-imoveis"
+CGD_PAGE_SIZE = 50
+_CGD_KEY_RE = re.compile(r'apigee:\{[^}]*clientId:"([^"]+)"')
+
+
+def _cgd_api_key(session) -> str:
+    """The API key the site's own scripts send. Read at run time, not stored:
+    it is the site's, and it changes when the site is redeployed."""
+    home = session.get(f"{CGD_SITE}/pt")
+    home.raise_for_status()
+    main = re.search(r'src="(main-[\w-]+\.js)"', home.text)
+    if not main:
+        raise SourceUnavailable("Caixa Imobiliário changed its page (main script not found)")
+    js = session.get(f"{CGD_SITE}/{main.group(1)}").text
+    m = _CGD_KEY_RE.search(js)
+    for chunk in dict.fromkeys(re.findall(r"chunk-[A-Z0-9]+\.js", js)):
+        if m:
+            break
+        m = _CGD_KEY_RE.search(session.get(f"{CGD_SITE}/{chunk}").text)
+    if not m:
+        raise SourceUnavailable("Caixa Imobiliário changed its page (API key not found)")
+    return m.group(1)
+
+
+def cgd_listing(item: dict, max_price: float) -> dict | None:
+    """One pesquisa-imoveis result → listing row (None when over budget or not for sale)."""
+    if item.get("field_objective") not in (None, "", "Comprar"):
+        return None
+    url = safe_url(item.get("field_url"), CGD_SITE)
+    eid = url.rstrip("/").rsplit("/", 1)[-1] if url else str(item.get("nid") or "")
+    if not eid:
+        return None
+    price = to_number(item.get("field_preco_venda_int")) or None   # 0 means "no price"
+    if price and price > max_price:
+        return None
+    # "Alcoentre, Azambuja, Lisboa" is freguesia, concelho, distrito
+    place = [p.strip() for p in (item.get("field_localizacao") or "").split(",") if p.strip()]
+    place = [None] * (3 - len(place)) + place[-3:]
+    title = " ".join((item.get("field_titulo") or "").split()).strip(" /") or f"Caixa #{eid}"
+    notes = [item.get("field_morada_completa"), item.get("field_tarja_tarja")]
+    return make_listing(
+        "cgd", eid, "PT",
+        title=title[:200],
+        description=" · ".join(n.strip() for n in notes if n and n.strip()) or "Imóvel Caixa Geral de Depósitos",
+        tipo=title.split()[0].lower(),
+        area_m2=to_number(item.get("field_area_bruta_int")),
+        price=price, min_price=price,
+        freguesia=place[0], concelho=place[1], district=place[2],
+        url=url,
+        raw_json={k: v for k, v in item.items() if k != "field_media_image"},
+    )
+
+
+@register("cgd", "PT")
+def scrape_cgd(db, max_price: float = 100000, **_):
+    """caixaimobiliario.pt — Caixa Geral de Depósitos properties for sale."""
+    session = make_session()
+    key = _cgd_api_key(session)
+    token = session.post(f"{CGD_SITE}/bff/api/v1/auth/token")
+    token.raise_for_status()
+    headers = {"x-api-key": key, "x-authorization": f"Bearer {token.json()['access_token']}",
+               "Accept": "application/json"}
+    total = 0
+    seen = set()
+    for page in range(40):                        # Drupal pages count from 0
+        resp = session.get(CGD_API, headers=headers, params={
+            "field_country_op": "empty", "items_per_page": CGD_PAGE_SIZE, "page": page})
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results") or []
+        for item in results:
+            row = cgd_listing(item, max_price)
+            if row and row["external_id"] not in seen:
+                seen.add(row["external_id"])
+                upsert_listing(db, row)
+                total += 1
+        db.commit()
+        pages = (data.get("pager") or {}).get("total_pages") or 0
+        if not results or page + 1 >= pages:
+            break
+        time.sleep(0.5)
+    return total
+
+
+SANTANDER = "https://imoveis.santander.pt"
+
+
+def parse_santander_page(html: str, max_price: float) -> list[dict]:
+    """Cards of one imoveis.santander.pt results page → listing rows."""
+    rows = []
+    for card in BeautifulSoup(html, "html.parser").select("div.prop"):
+        link = card.select_one("a[href*='/detalhe/']")
+        url = safe_url(link.get("href"), SANTANDER) if link else None
+        m = re.search(r"/detalhe/(\d+)", url or "")
+        if not m:
+            continue
+        price_el = card.select_one(".prop-tag-sub")
+        price = parse_price(price_el.get_text(" ", strip=True)) if price_el else None
+        if price and price > max_price:
+            continue
+        tag = card.select_one(".prop-tag")
+        tipo = tag.get_text(" ", strip=True).split("|")[0].strip() if tag else ""
+        concelho_el = card.select_one(".prop-titleFirst")
+        freguesia_el = card.select_one(".prop-titleSecond")
+        concelho = concelho_el.get_text(" ", strip=True) if concelho_el else None
+        freguesia = freguesia_el.get_text(" ", strip=True) if freguesia_el else None
+        district = (urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).get("distrito") or [None])[0]
+        desc = card.select_one(".prop-description")
+        rows.append(make_listing(
+            "santander", m.group(1), "PT",
+            title=", ".join(p for p in (tipo, freguesia or concelho) if p) or f"Santander #{m.group(1)}",
+            description=desc.get_text(" ", strip=True) if desc else "Imóvel Santander",
+            tipo=tipo.lower() or "imovel",
+            price=price, min_price=price,
+            district=district.replace("-", " ").title() if district else None,
+            concelho=concelho, freguesia=freguesia, url=url,
+        ))
+    return rows
+
+
+@register("santander", "PT")
+def scrape_santander(db, max_price: float = 100000, **_):
+    """imoveis.santander.pt — Santander properties for sale."""
+    session = make_session()
+    total = 0
+    seen = set()
+    for page in range(1, 31):
+        resp = session.get(f"{SANTANDER}/imoveis/{page}/0/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-/-1/-1/")
+        if page > 1 and resp.status_code >= 400:
+            LOG.warning(f"santander: page {page} failed, keeping earlier pages")
+            break
+        resp.raise_for_status()
+        rows = parse_santander_page(resp.text, max_price=float("inf"))
+        if not rows:
+            break                                 # past the last page
+        for row in rows:
+            if row["external_id"] in seen or (row["price"] and row["price"] > max_price):
+                continue
+            seen.add(row["external_id"])
+            upsert_listing(db, row)
+            total += 1
+        db.commit()
+        time.sleep(0.8)
+    return total
+
+
 BPI = CardSite(
-    source="bpi", country="PT", base="https://imoveis.bpi.pt", path="/imoveis",
-    card_selector="div.imovel, article, div[class*='property'], div[class*='imovel']",
-    title_selector="h2,h3,.titulo,.title",
-    location_selector=".localizacao,.location,.concelho",
-    max_pages=19, description="Imóvel BPI", price_is_min_price=True,
+    source="bpi", country="PT", base="https://bpiexpressoimobiliario.net", path="/imoveis-bpi",
+    card_selector="a.announce-details",
+    title_selector=".announce-title",
+    price_selector=".announce-price",
+    location_selector=".announce-location",
+    page_param=None, id_pattern=r"/a(\d+)$",
+    description="Imóvel BPI (BPI Expresso Imobiliário)", price_is_min_price=True,
 )
 
 
-def _imobancos_description(card) -> str:
-    bank_el = card.select_one(".bank,.banco,[class*='bank']")
-    bank = bank_el.get_text(strip=True) if bank_el else "banco"
-    return f"Imóvel banco ({bank}) via Imobancos.pt"
+@register("bpi", "PT")
+def scrape_bpi(db, max_price: float = 100000, **_):
+    """bpiexpressoimobiliario.net — BPI's own properties for sale."""
+    return scrape_cards(db, BPI, max_price)
 
 
-IMOBANCOS = CardSite(
-    source="imobancos", country="PT", base="https://imobancos.pt", path="/imoveis",
-    card_selector="div.property, article.imovel, div[class*='imovel'], div[class*='property']",
-    title_selector="h2,h3,.title,.titulo",
-    location_selector=".location,.localizacao,.concelho",
-    area_selector=".area,[class*='area']",
-    params={"preco_max": "{max_price}"}, max_pages=29, delay=0.8,
-    description=_imobancos_description, price_is_min_price=True,
-)
+IMOBANCOS_API = "https://imobancos.pt/api/properties/fetchProperties"
+
+
+def imobancos_listing(item: dict, max_price: float) -> dict | None:
+    """One Imobancos API hit → listing row (None when over budget, sold or for rent)."""
+    if item.get("available") is False or item.get("prop_purpose") not in (None, "", "Comprar"):
+        return None
+    price = to_number(item.get("prop_price")) or None              # 0 means "no price"
+    if price and price > max_price:
+        return None
+    eid = str(item.get("id") or "")
+    if not eid:
+        return None
+    bank = item.get("site_name") or "banco"
+    text = (item.get("prop_description") or "").strip()
+    photos = item.get("photos") or []
+    return make_listing(
+        "imobancos", eid, "PT",
+        title=(item.get("prop_title") or item.get("prop_name") or f"Imobancos #{eid}")[:200],
+        description=f"Imóvel banco ({bank}) via Imobancos.pt. {text[:600]}".strip(),
+        tipo=(item.get("prop_type") or "imovel").lower(),
+        area_m2=to_number(item.get("prop_area")),
+        price=price, min_price=price,
+        district=item.get("prop_district"), concelho=item.get("prop_county"),
+        freguesia=item.get("prop_parish"),
+        url=f"https://imobancos.pt/imoveis/{eid}",
+        image_url=photos[0].get("photo_url") if photos and isinstance(photos[0], dict) else None,
+        raw_json={k: v for k, v in item.items() if k not in ("photos", "prop_description")},
+    )
+
+
+@register("imobancos", "PT")
+def scrape_imobancos(db, max_price: float = 100000, **_):
+    """imobancos.pt — bank properties (Crédito Agrícola, Montepio, Caixa, Santander, Millennium)."""
+    session = make_session()
+    total = 0
+    for page in range(1, 60):                     # the API counts pages from 1
+        resp = session.post(IMOBANCOS_API, json={"page": page, "hitsPerPage": 100})
+        resp.raise_for_status()
+        data = resp.json()
+        hits = data.get("hits") or []
+        for item in hits:
+            row = imobancos_listing(item, max_price)
+            if row:
+                upsert_listing(db, row)
+                total += 1
+        db.commit()
+        if not hits or page >= (data.get("totalPages") or 0):
+            break
+        time.sleep(0.5)
+    return total
+
+
 CENTROLEILOES = CardSite(
     source="centroleiloes", country="PT", base="https://centrodeleiloes.pt", path="/leiloes",
     card_selector="div.lot, div.lote, article, div[class*='lot']",
@@ -776,146 +914,80 @@ CENTROLEILOES = CardSite(
 )
 
 
-@register("novobanco", "PT")
-def scrape_novobanco(db, max_price: float = 100000, **_):
-    """novobancoimoveis.pt — Novo Banco NPL portfolio."""
-    return scrape_cards(db, NOVOBANCO, max_price)
-
-
-@register("cgd", "PT")
-def scrape_cgd(db, max_price: float = 100000, **_):
-    """caixaimobiliario.pt — Caixa Geral de Depósitos repos + leilões."""
-    total = scrape_cards(db, CGD, max_price)
-    # The leilões page used to be re-fetched once per results page; once is enough.
-    try:
-        resp = make_session().get(f"{CGD.base}/leiloes")
-        resp.raise_for_status()
-        for a in BeautifulSoup(resp.text, "html.parser").select("a[href*='/leilao/'], a[href*='/leiloes/']"):
-            url = safe_url(a.get("href"), CGD.base)
-            if not url:
-                continue
-            eid = listing_id_from_url(url)
-            upsert_listing(db, make_listing(
-                "cgd", eid, "PT", id_prefix="cgd_leilao",
-                title=a.get_text(strip=True)[:200] or f"CGD leilão {eid}",
-                description="Leilão CGD", tipo="imovel", url=url,
-            ))
-            total += 1
-        db.commit()
-    except Exception as e:
-        LOG.warning(f"CGD leilões page failed: {e}")
-    return total
-
-
-@register("santander", "PT")
-def scrape_santander(db, max_price: float = 100000, **_):
-    """imoveis.santander.pt — Santander repos (JSON API if exposed, else HTML)."""
-    session = make_session()
-    base = "https://imoveis.santander.pt"
-    resp = session.get(f"{base}/imoveis")
-    resp.raise_for_status()
-    total = 0
-
-    for api_url in (f"{base}/api/imoveis", f"{base}/api/properties", f"{base}/imoveis/search"):
-        try:
-            r = session.get(api_url, params={"pageSize": 200}, timeout=15)
-            if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
-                continue
-            data = r.json()
-        except Exception:
-            continue
-        items = data if isinstance(data, list) else data.get("items", data.get("results", []))
-        for item in items:
-            price = to_number(item.get("price")) or to_number(item.get("preco")) or 0
-            if price > max_price:
-                continue
-            eid = str(item.get("id") or item.get("referencia") or stable_id(json.dumps(item, sort_keys=True, default=str)))
-            upsert_listing(db, make_listing(
-                "santander", eid, "PT",
-                title=str(item.get("title") or item.get("titulo") or f"Santander #{eid}")[:200],
-                description=item.get("description") or "Imóvel Santander Portugal",
-                tipo=item.get("type") or item.get("tipo") or "imovel",
-                area_m2=item.get("area") or item.get("area_m2"),
-                price=price, min_price=price,
-                district=item.get("distrito") or item.get("district"),
-                concelho=item.get("concelho") or item.get("city"),
-                freguesia=item.get("freguesia"),
-                url=item.get("url") or f"{base}/imovel/{eid}", base_url=base,
-                image_url=item.get("image") or item.get("foto"),
-                raw_json=json.dumps(item, ensure_ascii=False)[:2000],
-            ))
-            total += 1
-        db.commit()
-        break
-
-    if total == 0:
-        soup = BeautifulSoup(resp.text, "html.parser")
-        seen = set()
-        for card in soup.select("div[class*='property'], article, div[class*='imovel']"):
-            link = card.select_one("a[href]")
-            url = safe_url(link.get("href"), base) if link else None
-            if not url:
-                continue
-            eid = listing_id_from_url(url)
-            if eid in seen:
-                continue
-            seen.add(eid)
-            price = find_price(card.get_text(" "))
-            if price and price > max_price:
-                continue
-            upsert_listing(db, make_listing(
-                "santander", eid, "PT",
-                title=card.get_text(" ", strip=True)[:120], description="Imóvel Santander",
-                tipo="imovel", price=price, min_price=price, url=url,
-            ))
-            total += 1
-        db.commit()
-    return total
-
-
-@register("bpi", "PT")
-def scrape_bpi(db, max_price: float = 100000, **_):
-    """imoveis.bpi.pt — BPI bank repos."""
-    return scrape_cards(db, BPI, max_price)
-
-
-@register("imobancos", "PT")
-def scrape_imobancos(db, max_price: float = 100000, **_):
-    """imobancos.pt — aggregator of repos from all Portuguese banks."""
-    return scrape_cards(db, IMOBANCOS, max_price)
-
-
 @register("centroleiloes", "PT")
 def scrape_centroleiloes(db, max_price: float = 100000, **_):
     """centrodeleiloes.pt — bank auction house."""
     return scrape_cards(db, CENTROLEILOES, max_price)
 
 
+BIDLEILOEIRA = "https://www.bidleiloeira.pt"
+
+
+def parse_bidleiloeira_list(html: str) -> list[dict]:
+    """The /leiloes page: one card per sale (a sale can hold several lots)."""
+    sales = []
+    for card in BeautifulSoup(html, "html.parser").select("a.leiloes_item[href]"):
+        m = re.match(r"item-(\d+)$", card.get("id") or "")
+        url = safe_url(card.get("href"), BIDLEILOEIRA + "/")
+        if not m or not url:
+            continue
+        lots_el = card.select_one(".list_txt")
+        lines = [ln.strip(" \xad") for ln in (lots_el.get_text("\n") if lots_el else "").split("\n")]
+        lines = [ln for ln in lines if ln]
+        kind = card.select_one(".subtitulos")
+        card_text = card.get_text(" ", strip=True)
+        n_lots = re.search(r"N[ºo°]\s*LOTES\s*(\d+)", card_text, re.I)
+        sales.append({
+            "id": m.group(1), "url": url,
+            "title": lines[0].rstrip(" ,;:") if lines else "",
+            "description": " ".join(lines),
+            "modalidade": kind.get_text(" ", strip=True) if kind else None,
+            "lots": int(n_lots.group(1)) if n_lots else None,
+        })
+    return sales
+
+
+def bidleiloeira_opening_value(html: str) -> float | None:
+    """The sale page's "Valor abertura" (the first lot's)."""
+    text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True).replace("\xa0", " ")
+    m = re.search(r"Valor\s+(?:de\s+)?abertura\s*([\d .]+,\d{2})\s*€", text, re.I)
+    return parse_price(m.group(1)) if m else None
+
+
 @register("bidleiloeira", "PT")
 def scrape_bidleiloeira(db, max_price: float = 100000, **_):
-    """bidleiloeira.pt — online auction house."""
+    """bidleiloeira.pt — online auction house (insolvency and bank sales)."""
     session = make_session()
-    base = "https://www.bidleiloeira.pt"
-    resp = session.get(f"{base}/leiloes")
-    resp.raise_for_status()
     total = 0
     seen = set()
-    for a in BeautifulSoup(resp.text, "html.parser").select(
-            "a[href*='/leilao/'], a[href*='/lot/'], a[href*='/lote/']"):
-        url = safe_url(a.get("href"), base)
-        if not url or not re.search(r"/\d+", url):
-            continue
-        eid = listing_id_from_url(url)
-        if eid in seen:
-            continue
-        seen.add(eid)
-        price = find_price(a.parent.get_text(" ")) if a.parent else None
-        if price and price > max_price:
-            continue
-        upsert_listing(db, make_listing(
-            "bidleiloeira", eid, "PT",
-            title=a.get_text(" ", strip=True)[:200] or f"BidLeiloeira #{eid}",
-            description="Leilão Bid Leiloeira", tipo="imovel", price=price, url=url,
-        ))
-        total += 1
+    for page in range(1, 11):
+        resp = session.get(f"{BIDLEILOEIRA}/leiloes", params={"p": page} if page > 1 else None)
+        if page > 1 and resp.status_code >= 400:
+            break
+        resp.raise_for_status()
+        sales = [s for s in parse_bidleiloeira_list(resp.text) if s["id"] not in seen]
+        if not sales:
+            break
+        for sale in sales:
+            seen.add(sale["id"])
+            price = None
+            if sale["lots"] == 1:                 # with several lots one value would mislead
+                try:
+                    det = session.get(sale["url"])
+                    det.raise_for_status()
+                    price = bidleiloeira_opening_value(det.text)
+                except Exception as e:
+                    LOG.debug(f"bidleiloeira {sale['id']}: {e}")
+                time.sleep(0.3)
+            if price and price > max_price:
+                continue
+            upsert_listing(db, make_listing(
+                "bidleiloeira", sale["id"], "PT",
+                title=sale["title"][:200] or f"Bid Leiloeira #{sale['id']}",
+                description=f"{sale['modalidade'] or 'Leilão'} · Bid Leiloeira. {sale['description']}"[:800],
+                tipo="imovel", price=price, min_price=price, url=sale["url"],
+                raw_json={"modalidade": sale["modalidade"], "lots": sale["lots"]},
+            ))
+            total += 1
+        db.commit()
     return total

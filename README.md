@@ -194,8 +194,8 @@ sources are also listed in the report and the weekly Telegram summary.
 
 | Country | Sources |
 |---|---|
-| PT | e-leilões, Citius, Portal das Finanças, leilosoc, BCP, Whitestar, Novo Banco, CGD, Santander, BPI, Imobancos, Centro de Leilões, Bid Leiloeira · *idealista (Selenium, on request)* |
-| ES | BOE subastas, AEAT, Sareb, Haya, Servihabitat, SubastasActivas |
+| PT | e-leilões, Citius, leilosoc, BCP, Whitestar, CGD, Santander, BPI, Imobancos, Centro de Leilões, Bid Leiloeira · *idealista (Selenium, on request)* · not scanned: Portal das Finanças (login only), Novo Banco (portal closed) |
+| ES | BOE subastas (includes AEAT tax auctions), Sareb, Haya, Servihabitat, SubastasActivas |
 | FR | licitor, Enchères Publiques |
 | IT | astegiudiziarie, PVP Giustizia, Gobid Real, Astalegale |
 | DE | zvg-portal, justiz-auktion, zwangsversteigerung.de |
