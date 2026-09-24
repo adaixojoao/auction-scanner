@@ -190,6 +190,39 @@ def test_spanish_information_request_by_email(client, add, monkeypatch):
     assert offer["log_id"] == logged["log_id"] and offer["method"] == "online" and offer["bid"] == "70.000,00"
 
 
+def test_sent_letters_are_kept_as_sent(client, add, monkeypatch):
+    import config
+    monkeypatch.setattr("letters._unicode_fonts", lambda: None)
+    add("france", "f1", "FR", title="Maison", price=40000, date_end="2099-01-01T14:00:00")
+    q = {"id": "france:f1", "type": "fr_mandat", "bid": "55.000,00"}
+    text = client.get("/api/offers/letter", query_string=q).get_json()["text"]
+    edited = text.replace("Maître ________________", "Maître Claire Martin")
+
+    pdf = client.post("/api/offers/letter.pdf", json={**q, "text": edited})
+    assert pdf.status_code == 200 and pdf.data.startswith(b"%PDF")
+    sent = client.post("/api/offers/sent", json={**q, "text": edited, "method": "lawyer"}).get_json()
+
+    # later changes to your details or the listing do not rewrite what was sent
+    config.update_config({"proponente": {"nome": "Someone Else"}})
+    offer = client.get("/api/offers").get_json()["sent"][0]["offer"]
+    assert "Maître Claire Martin" in offer["letter_text"] and "Test Person" in offer["letter_text"]
+    assert offer["method"] == "lawyer" and offer["letter_subject"].startswith("Demande de représentation")
+    log_pdf = client.get(f"/api/offers/log/{sent['log_id']}.pdf")
+    assert log_pdf.status_code == 200 and "lettre_f1.pdf" in log_pdf.headers["Content-Disposition"]
+
+
+def test_letters_logged_before_they_were_stored_are_rebuilt(client, db, add, monkeypatch):
+    monkeypatch.setattr("letters._unicode_fonts", lambda: None)
+    add("citius", "p9", title="Moradia", price=30000,
+        raw_json=json.dumps({"processo": "1/20.0T", "modalidade": "carta fechada"}))
+    log_id = client.post("/api/carta-log", json={"listing_id": "citius:p9", "processo": "1/20.0T",
+                                                 "bid_amount": 26000}).get_json()["id"]
+    assert client.get("/api/offers").get_json()["sent"][0]["offer"]["letter_text"] == ""
+    pdf = client.get(f"/api/offers/log/{log_id}.pdf")
+    assert pdf.status_code == 200 and "carta_1-20.0T.pdf" in pdf.headers["Content-Disposition"]
+    assert client.get("/api/offers/log/999.pdf").status_code == 404
+
+
 def test_bid_warnings_follow_the_sale(client, add):
     add("novobanco", "b1", title="Apartamento T2", price=80000)
     add("france", "f1", "FR", title="Maison", price=40000)

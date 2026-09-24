@@ -29,7 +29,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -195,7 +195,15 @@ def _migrate_v4(db: sqlite3.Connection):
     _add_column(db, "carta_log", "sent_to", "TEXT")
 
 
-_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4}
+def _migrate_v5(db: sqlite3.Connection):
+    """The letter exactly as it was sent, so the Sent tab shows and reprints
+    that letter, not one rebuilt today."""
+    _add_column(db, "carta_log", "letter_text", "TEXT")
+    _add_column(db, "carta_log", "letter_subject", "TEXT")
+    _add_column(db, "carta_log", "letter_filename", "TEXT")
+
+
+_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5}
 
 
 def init_db(db: sqlite3.Connection):

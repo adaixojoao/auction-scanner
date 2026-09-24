@@ -50,6 +50,7 @@
     "nif": "000000000",
     "morada": "Street, number\n0000-000 Town",
     "email": "you@example.com",
+    "telefone": "",
     "localidade": "Town"
   },
 

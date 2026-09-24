@@ -21,7 +21,7 @@ import logging
 import os
 import re
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Callable
 
@@ -707,6 +707,22 @@ def get_type(key: str | None, item: dict) -> LetterType | None:
 
 # ─── Building a letter ───────────────────────────────────────────────
 
+SUBJECT_LABELS = {"PT": "Assunto: ", "ES": "Asunto: ", "FR": "Objet : "}
+
+
+def split_letter(text: str) -> dict | None:
+    """A letter's text back into its parts: sender, place and date, recipient,
+    subject line, body. They are separated by the first four blank lines, as
+    Letter.text writes them. None if the text no longer has that shape."""
+    blocks = (text or "").replace("\r\n", "\n").split("\n\n", 4)
+    if len(blocks) < 5 or not all(b.strip() for b in blocks[:4]):
+        return None
+    sender, place_date, recipient, subject_line, body = blocks
+    return {"sender": sender.splitlines(), "place_date": place_date.strip(),
+            "recipient": recipient.splitlines(), "subject_line": " ".join(subject_line.split()),
+            "body": body.strip("\n")}
+
+
 @dataclass
 class Letter:
     country: str
@@ -723,16 +739,37 @@ class Letter:
     is_offer: bool = True
     ref: str = ""
     extra: dict = field(default_factory=dict)
+    edited_text: str = ""      # the user's own version of the whole letter, if they edited it
 
     @property
     def subject_line(self) -> str:
-        label = {"PT": "Assunto: ", "ES": "Asunto: ", "FR": "Objet : "}.get(self.country, "")
-        return label + self.subject
+        return SUBJECT_LABELS.get(self.country, "") + self.subject
+
+    @property
+    def generated_text(self) -> str:
+        return "\n".join([*self.sender, "", self.place_date, "", *self.recipient, "",
+                          self.subject_line, "", self.body])
 
     @property
     def text(self) -> str:
-        return "\n".join([*self.sender, "", self.place_date, "", *self.recipient, "",
-                          self.subject_line, "", self.body])
+        """What the preview, the PDF and the e-mail contain."""
+        return self.edited_text or self.generated_text
+
+    def with_text(self, text: str | None) -> "Letter":
+        """This letter as the user edited it. An edited subject line becomes the
+        e-mail subject. Unchanged or empty text leaves the letter as generated."""
+        text = (text or "").replace("\r\n", "\n").strip()
+        if not text or text == self.generated_text.strip():
+            return self
+        parts = split_letter(text)
+        subject = self.subject
+        if parts:
+            subject = parts["subject_line"]
+            for label in (*SUBJECT_LABELS.values(), "Subject: "):
+                if label and subject.startswith(label):
+                    subject = subject[len(label):]
+                    break
+        return replace(self, edited_text=text, subject=" ".join(subject.split()))
 
     @property
     def filename(self) -> str:
@@ -755,21 +792,27 @@ _MONTH_NAMES = {
 }
 
 
-def _today_for_country(country: str, place: str = "Guarda") -> str:
-    d = date.today()
+def _today_for_country(country: str, place: str = "", when: date | None = None) -> str:
+    """The place-and-date line, as that country writes it: "Guarda, 24 de
+    setembro de 2026", "Nîmes, le 24 septembre 2026". Without a place, just the date."""
+    d = when or date.today()
     if country in ("PT", "ES"):
-        return f"{place}, {d.day} de {_MONTH_NAMES[country][d.month - 1]} de {d.year}"
-    if country == "FR":
-        return f"{place}, le {d.day} {_FR_MONTHS[d.month - 1]} {d.year}"
-    if country == "IT":
-        return f"{place}, {d.day} {_MONTH_NAMES['IT'][d.month - 1]} {d.year}"
-    if country == "DE":
-        return f"{place}, den {d.strftime('%d.%m.%Y')}"
-    if country == "HR":
-        return f"{place}, {d.strftime('%d.%m.%Y.')}"
-    if country == "NL":
-        return f"{place}, {d.strftime('%d-%m-%Y')}"
-    return f"{place}, {d.strftime('%Y-%m-%d')}"
+        text = f"{d.day} de {_MONTH_NAMES[country][d.month - 1]} de {d.year}"
+    elif country == "FR":
+        text = f"le {d.day} {_FR_MONTHS[d.month - 1]} {d.year}"
+    elif country == "IT":
+        text = f"{d.day} {_MONTH_NAMES['IT'][d.month - 1]} {d.year}"
+    elif country == "DE":
+        text = f"den {d.strftime('%d.%m.%Y')}"
+    elif country == "HR":
+        text = d.strftime("%d.%m.%Y.")
+    elif country in ("NL", "BE"):
+        text = d.strftime("%d-%m-%Y")
+    else:
+        text = d.strftime("%Y-%m-%d")
+    if place:
+        return f"{place}, {text}"
+    return text[0].upper() + text[1:]
 
 
 def build_letter(item: dict, bid: str, bid_text: str | None, proponente: dict,
@@ -801,7 +844,8 @@ def build_letter(item: dict, bid: str, bid_text: str | None, proponente: dict,
 
     p = proponente or {}
     id_label = "NIF" if country == "PT" else "NIF/ID"
-    sender = [p.get("nome", ""), f"{id_label}: {p.get('nif', '')}", *(p.get("morada", "")).splitlines()]
+    sender = [p.get("nome", ""), f"{id_label}: {p.get('nif', '')}",
+              *[line.strip() for line in (p.get("morada") or "").splitlines() if line.strip()]]
     if p.get("telefone"):
         sender.append(f"Tel.: {p['telefone']}")
 
@@ -814,7 +858,7 @@ def build_letter(item: dict, bid: str, bid_text: str | None, proponente: dict,
     return Letter(
         country=country,
         sender=sender,
-        place_date=_today_for_country(country, p.get("localidade") or "Guarda"),
+        place_date=_today_for_country(country, (p.get("localidade") or "").strip()),
         recipient=[r for r in recipient if r],
         subject=subject.replace("—", "-") if country == "PT" else subject,
         body=body,
@@ -871,7 +915,14 @@ def _safe_latin1(text: str) -> str:
 
 
 def letter_pdf(letter: Letter, path: str | None = None) -> bytes:
-    """Render a letter as PDF. Writes it to `path` if given; returns the bytes."""
+    """Render a letter as PDF (as edited, if it was). Writes it to `path` if
+    given; returns the bytes."""
+    return text_pdf(letter.text, ref=letter.ref, path=path)
+
+
+def text_pdf(text: str, *, ref: str = "", path: str | None = None) -> bytes:
+    """A letter's text as a PDF: sender, date on the right, recipient, subject in
+    bold, body. Text that no longer has that shape is printed as it is."""
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -885,27 +936,31 @@ def letter_pdf(letter: Letter, path: str | None = None) -> bytes:
     else:
         fn, s = "Helvetica", _safe_latin1
 
-    pdf.set_font(fn, "B", 11)
-    pdf.cell(0, 6, s(letter.sender[0]), new_x="LMARGIN", new_y="NEXT")
+    parts = split_letter(text)
+    if parts:
+        for i, line in enumerate(parts["sender"]):
+            pdf.set_font(fn, "B" if i == 0 else "", 11 if i == 0 else 10)
+            pdf.cell(0, 6 if i == 0 else 5, s(line), new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(8)
+        pdf.set_font(fn, size=10)
+        pdf.cell(0, 5, s(parts["place_date"]), new_x="LMARGIN", new_y="NEXT", align="R")
+        pdf.ln(6)
+        for i, line in enumerate(parts["recipient"]):
+            pdf.set_font(fn, "B" if i == 0 else "", 10)
+            pdf.cell(0, 5, s(line), new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(8)
+        pdf.set_font(fn, "B", 10)
+        pdf.multi_cell(0, 5, s(parts["subject_line"]))
+        pdf.ln(4)
+        body = parts["body"]
+    else:
+        body = text
     pdf.set_font(fn, size=10)
-    for line in letter.sender[1:]:
-        pdf.cell(0, 5, s(line), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(8)
-    pdf.cell(0, 5, s(letter.place_date), new_x="LMARGIN", new_y="NEXT", align="R")
-    pdf.ln(6)
-    for i, line in enumerate(letter.recipient):
-        pdf.set_font(fn, "B" if i == 0 else "", 10)
-        pdf.cell(0, 5, s(line), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(8)
-    pdf.set_font(fn, "B", 10)
-    pdf.multi_cell(0, 5, s(letter.subject_line))
-    pdf.ln(4)
-    pdf.set_font(fn, size=10)
-    pdf.multi_cell(0, 5, s(letter.body), align="L")   # justified text would stretch the indented lists
-    if letter.ref:
+    pdf.multi_cell(0, 5, s(body), align="L")   # justified text would stretch the indented lists
+    if ref:
         pdf.ln(10)
         pdf.set_font(fn, size=7)
-        pdf.cell(0, 4, s(letter.ref), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 4, s(ref), new_x="LMARGIN", new_y="NEXT")
 
     data = bytes(pdf.output())
     if path:

@@ -141,6 +141,7 @@ table.list tr.dim td { opacity: .45; }
 .cell .k { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .5px; }
 .cell .v { font-weight: 600; }
 .letter { font-family: Consolas, 'Courier New', monospace; font-size: 12px; line-height: 1.6; min-height: 380px; resize: vertical; }
+.letter.editing { border-color: var(--yellow); }
 .notice { padding: 9px 12px; border-radius: 7px; font-size: 12px; margin-top: 10px; }
 .notice.bad { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.4); color: #fca5a5; }
 .notice.info { background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.35); color: #bfdbfe; }

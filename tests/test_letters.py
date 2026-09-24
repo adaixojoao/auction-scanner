@@ -117,3 +117,36 @@ def test_amounts_per_country():
     assert letters.format_amount(40000.5, "FR") == "40 000,50 €"
     assert letters.format_amount(40000, "ES") == "40.000,00"
     assert letters.format_amount(None, "ES") == "____"
+
+
+def test_no_personal_details_in_the_code():
+    import config
+    assert not any(config.DEFAULTS["proponente"].values())
+
+
+def test_date_line_with_and_without_a_town():
+    from datetime import date
+    d = date(2026, 9, 24)
+    assert letters._today_for_country("PT", "Guarda", d) == "Guarda, 24 de setembro de 2026"
+    assert letters._today_for_country("FR", "", d) == "Le 24 septembre 2026"
+    assert letters._today_for_country("DE", "Köln", d) == "Köln, den 24.09.2026"
+
+
+def test_an_edited_letter_is_what_gets_printed_and_sent(monkeypatch):
+    monkeypatch.setattr(letters, "_unicode_fonts", lambda: None)
+    it = item("france", "FR", title="Maison", price=40000)
+    letter = letters.build_letter(it, "50.000,00", "", ME, "fr_mandat")
+    assert letter.with_text(letter.text) is letter and letter.with_text("  ") is letter
+
+    edited_text = (letter.text.replace("Maître ________________", "Maître Claire Martin")
+                   .replace("Objet : Demande de représentation", "Objet : Mandat pour la vente"))
+    edited = letter.with_text(edited_text)
+    assert edited.text == edited_text.strip() and "Maître Claire Martin" in edited.text
+    assert edited.subject.startswith("Mandat pour la vente") and edited.filename == letter.filename
+    parts = letters.split_letter(edited.text)
+    assert parts["recipient"][0] == "Maître Claire Martin" and parts["sender"][0] == "Teste Proponente"
+    assert letters.letter_pdf(edited).startswith(b"%PDF")
+
+    # text that lost its layout still prints, as plain text
+    assert letters.split_letter("just one paragraph") is None
+    assert letters.text_pdf("just one paragraph").startswith(b"%PDF")

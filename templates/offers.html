@@ -89,7 +89,7 @@ function draft(c) {
     const t = logged || (c.offer ? null : c.letter_types[0]) || null;
     drafts[c.key] = {type: t ? t.key : "", bid: c.offer ? c.offer.bid : ((t && t.suggested) || c.bid),
                      bidText: "", to: c.offer ? c.offer.sent_to : "", toEdited: false,
-                     online: c.offer ? c.offer.bid : c.bid};
+                     online: c.offer ? c.offer.bid : c.bid, edited: false, text: "", subject: ""};
   }
   return drafts[c.key];
 }
@@ -106,6 +106,12 @@ function renderDetail() {
   const showOnline = onlineBid && (!done || c.offer.method === "online");
   const showLetter = c.letter_types.length && (!done || c.offer.method !== "online");
   const checklist = CHECKLIST[c.country] || CHECKLIST["*"];
+  const lock = done || d.edited;   // an edited letter keeps its amount and type
+  const stored = done && c.offer.letter_text;
+  const note = stored ? `The letter exactly as it was sent on ${AS.esc(c.offer.sent_date || "")}.`
+    : done ? "Rebuilt from today's data: letters logged before this version were not stored, so the date and details may differ from what you sent."
+    : d.edited ? "Edited by you: the PDF and e-mail use your text, and the amount and letter type are locked. Keep the blank lines between sender, date, recipient, subject and body so the PDF is laid out properly."
+    : "Built from your details in Settings and the listing. What you see here is exactly what the PDF and e-mail contain. Edit it to add anything (for example your lawyer's name).";
   $("detail").innerHTML = `
   <div class="card">
     <div class="row" style="align-items:flex-start">
@@ -146,24 +152,25 @@ function renderDetail() {
   ${showLetter ? `
   <div class="card">
     <div class="row"><h2 style="margin:0">Letter</h2><span class="spacer"></span>
-      ${done ? "" : `<select id="ltype" style="max-width:460px">${c.letter_types.map(x =>
+      ${done ? "" : `<select id="ltype" style="max-width:460px" ${d.edited ? "disabled" : ""}>${c.letter_types.map(x =>
         `<option value="${AS.esc(x.key)}" ${x.key === d.type ? "selected" : ""}>${AS.esc(x.label)}</option>`).join("")}</select>`}
     </div>
     ${done ? `<p class="small muted" style="margin-top:4px">${AS.esc(t ? t.label : "")}</p>` : ""}
     ${t && t.is_offer ? `
     <div class="form-grid" style="margin-top:10px">
-      <div class="field"><label>${AS.esc(t.amount_label)}</label><input id="bid" value="${AS.esc(d.bid)}" ${done ? "disabled" : ""}></div>
-      ${c.country === "PT" ? `<div class="field" style="grid-column: span 2"><label>In words (filled in automatically)</label><input id="bidtext" value="${AS.esc(d.bidText)}" placeholder="e.g. quatro mil euros" ${done ? "disabled" : ""}></div>` : ""}
+      <div class="field"><label>${AS.esc(t.amount_label)}</label><input id="bid" value="${AS.esc(d.bid)}" ${lock ? "disabled" : ""}></div>
+      ${c.country === "PT" ? `<div class="field" style="grid-column: span 2"><label>In words (filled in automatically)</label><input id="bidtext" value="${AS.esc(d.bidText)}" placeholder="e.g. quatro mil euros" ${lock ? "disabled" : ""}></div>` : ""}
     </div>
-    ${done ? "" : `<div class="row" style="margin-top:8px;gap:6px">${t.presets.map(v => `<button class="btn btn-sm" data-v="${AS.esc(v)}" onclick="setBid(this.dataset.v)">${AS.esc(v.split(",")[0])} €</button>`).join("")}</div>`}
+    ${lock ? "" : `<div class="row" style="margin-top:8px;gap:6px">${t.presets.map(v => `<button class="btn btn-sm" data-v="${AS.esc(v)}" onclick="setBid(this.dataset.v)">${AS.esc(v.split(",")[0])} €</button>`).join("")}</div>`}
     <div id="bid-warn"></div>` : ""}
-    <textarea class="letter" id="letter" readonly style="margin-top:10px"></textarea>
+    <textarea class="letter ${d.edited ? "editing" : ""}" id="letter" ${d.edited && !done ? "" : "readonly"} style="margin-top:10px"></textarea>
     <div class="row" style="margin-top:8px;gap:6px">
+      ${done ? "" : `<button class="btn btn-sm" id="edit-btn" onclick="toggleEdit()">${d.edited ? "Undo my edits" : "Edit text"}</button>`}
       <button class="btn btn-sm" onclick="copyLetter()">Copy</button>
-      <a class="btn btn-sm" id="pdf-link">Download PDF</a>
+      <button class="btn btn-sm" onclick="downloadPdf()">Download PDF</button>
       <a class="btn btn-sm" id="mail-link">Open in my e-mail app</a>
     </div>
-    <p class="small faint" style="margin-top:6px">Built from your details in Settings and the listing. What you see here is exactly what the PDF and e-mail contain.</p>
+    <p class="small ${d.edited ? "warn" : "faint"}" style="margin-top:6px">${note}</p>
     ${done ? "" : `
     <div class="form-grid" style="margin-top:10px">
       <div class="field" style="grid-column: span 2"><label>Send to (e-mail)</label><input id="to" type="email" value="${AS.esc(d.to)}" placeholder="address of the court, agent, seller or lawyer"></div>
@@ -194,6 +201,7 @@ function renderDetail() {
   on("bid", "input", e => { d.bid = e.target.value; d.bidText = ""; if ($("bidtext")) $("bidtext").value = ""; refreshLetter(); });
   on("bidtext", "input", e => { d.bidText = e.target.value; refreshLetter(); });
   on("to", "input", e => { d.to = e.target.value; d.toEdited = true; refreshLetter(); });
+  on("letter", "input", e => { if (d.edited) { d.text = e.target.value; refreshLetter(); } });
   on("online", "input", e => { d.online = e.target.value; refreshOnline(); });
   refreshLetter();
   refreshOnline();
@@ -216,22 +224,65 @@ function letterQuery(c) {
   const d = draft(c);
   return new URLSearchParams({id: c.id, type: d.type, bid: d.bid || "", bid_text: d.bidText || ""});
 }
+function letterBody(c) {
+  const d = draft(c);
+  return {id: c.id, type: d.type, bid: d.bid || "", bid_text: d.bidText || "", text: d.edited ? d.text : ""};
+}
+function mailLink(to, subject, text) {
+  if ($("mail-link")) $("mail-link").href = `mailto:${encodeURIComponent(to || "")}?subject=${encodeURIComponent(subject || "")}&body=${encodeURIComponent(text || "")}`;
+}
 
 let letterTimer;
 function refreshLetter() {
   clearTimeout(letterTimer);
   letterTimer = setTimeout(async () => {
     const c = current(); if (!c || !$("letter")) return;
-    const d = draft(c), q = letterQuery(c);
-    const r = await (await fetch("/api/offers/letter?" + q)).json();
+    const d = draft(c);
+    if (c.offer && c.offer.letter_text) {            // what was actually sent
+      $("letter").value = c.offer.letter_text;
+      mailLink(c.offer.sent_to, c.offer.letter_subject, c.offer.letter_text);
+      return;
+    }
+    if (d.edited) {                                  // the user's own text; the server keeps the subject in sync
+      if ($("letter").value !== d.text) $("letter").value = d.text;
+      mailLink(d.to, d.subject, d.text);
+      return;
+    }
+    const r = await (await fetch("/api/offers/letter?" + letterQuery(c))).json();
     if (r.error) { AS.toast(r.error, "bad"); return; }
     if (!d.bidText && $("bidtext")) $("bidtext").placeholder = r.bid_text;
     if (!d.toEdited && !c.offer) { d.to = r.to || ""; if ($("to")) $("to").value = d.to; }
+    d.subject = r.subject;
     $("letter").value = r.text;
-    $("pdf-link").href = "/api/offers/letter.pdf?" + q;
-    $("mail-link").href = `mailto:${encodeURIComponent(d.to || r.to || "")}?subject=${encodeURIComponent(r.subject)}&body=${encodeURIComponent(r.text)}`;
+    mailLink(d.to || r.to, r.subject, r.text);
     if ($("bid-warn")) $("bid-warn").innerHTML = r.warning && !c.offer ? `<div class="notice bad">⚠ ${AS.esc(r.warning)}</div>` : "";
   }, 250);
+}
+
+function toggleEdit() {
+  const c = current(), d = draft(c);
+  if (d.edited) {
+    if (d.text !== d.original && !confirm("Discard your edits and go back to the generated letter?")) return;
+    d.edited = false; d.text = "";
+  } else {
+    d.edited = true; d.text = d.original = $("letter").value;
+  }
+  renderDetail();
+  if (d.edited) $("letter").focus();
+}
+
+async function downloadPdf() {
+  const c = current();
+  if (c.offer) { location.href = `/api/offers/log/${c.offer.log_id}.pdf`; return; }
+  const r = await fetch("/api/offers/letter.pdf", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                  body: JSON.stringify(letterBody(c))});
+  if (!r.ok) { AS.toast("Could not make the PDF", "bad"); return; }
+  const name = (r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(await r.blob());
+  a.download = name ? name[1] : "letter.pdf";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
 let onlineTimer;
@@ -258,7 +309,7 @@ function showSent(logId, msg) {
 }
 async function markSent() {
   const c = current(), d = draft(c);
-  const r = await AS.api("/api/offers/sent", {method: "POST", body: {id: c.id, type: d.type, bid: d.bid, bid_text: d.bidText, to: d.to, method: $("method").value}});
+  const r = await AS.api("/api/offers/sent", {method: "POST", body: {...letterBody(c), to: d.to, method: $("method").value}});
   showSent(r.log_id, "Logged as sent — it is now under Sent");
 }
 async function sendEmail() {
@@ -267,7 +318,7 @@ async function sendEmail() {
   if (!confirm(`Send this letter with its PDF to ${d.to}?`)) return;
   btn.disabled = true; btn.textContent = "Sending…";
   try {
-    const r = await AS.api("/api/offers/email", {method: "POST", body: {id: c.id, type: d.type, bid: d.bid, bid_text: d.bidText, to: d.to}});
+    const r = await AS.api("/api/offers/email", {method: "POST", body: {...letterBody(c), to: d.to}});
     showSent(r.log_id, `Sent to ${r.to} — it is now under Sent`);
   } catch (e) { btn.disabled = false; btn.textContent = "Send by e-mail with PDF"; }
 }

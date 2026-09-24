@@ -81,14 +81,15 @@ DEFAULTS = {
     # CourtBid via Apify (python scraper.py --source courtbid)
     "apify_token": "",
 
-    # Proponente details for carta generation
+    # Your details, printed on every letter. Set them on the Settings page (they
+    # are saved in config.json, which git ignores). Never put real ones here.
     "proponente": {
-        "nome": "Joao Castro Adaixo",
-        "nif": "260243132",
-        "morada": "Rua Antonio Sergio, n. 49, 3. Esq.\n6300-665 Guarda",
-        "email": "adaixojoao@gmail.com",
-        "telefone": "",           # optional; printed on letters when set
-        "localidade": "Guarda",   # printed next to the date on each carta
+        "nome": "",
+        "nif": "",
+        "morada": "",
+        "email": "",
+        "telefone": "",           # optional
+        "localidade": "",         # printed next to the date on each letter
     },
 
     # Dashboard

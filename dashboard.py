@@ -441,7 +441,9 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
         "offer": ({"log_id": offer["id"], "bid": _format_amount(offer.get("bid_amount")),
                    "outcome": offer.get("outcome"), "sent_date": offer.get("sent_date"),
                    "letter_type": offer.get("letter_type"), "is_offer": bool(offer.get("is_offer", 1)),
-                   "method": offer.get("method"), "sent_to": offer.get("sent_to") or ""}
+                   "method": offer.get("method"), "sent_to": offer.get("sent_to") or "",
+                   "letter_text": offer.get("letter_text") or "",        # exactly what was sent
+                   "letter_subject": offer.get("letter_subject") or ""}
                   if offer else None),
     }
 
@@ -495,14 +497,16 @@ def _listing(listing_id: str) -> dict | None:
     return found[0] if found else None
 
 
-def _letter_for(listing_id: str, bid: str, bid_text: str, letter_type: str | None = None):
+def _letter_for(listing_id: str, bid: str, bid_text: str, letter_type: str | None = None,
+                text: str | None = None):
     """(listing, letter). The letter is None when the listing does not exist or
-    `letter_type` is not one of its letters."""
+    `letter_type` is not one of its letters. `text` is the user's edited version."""
     from letters import build_letter, get_type
     item = _listing(listing_id)
     if not item or (letter_type and not get_type(letter_type, item)):
         return item, None
-    return item, build_letter(item, bid, bid_text, _config().get("proponente", {}), letter_type or None)
+    letter = build_letter(item, bid, bid_text, _config().get("proponente", {}), letter_type or None)
+    return item, letter.with_text(text)
 
 
 def bid_warning(item: dict, bid: str, letter_type: str | None = None) -> str | None:
@@ -525,13 +529,18 @@ def bid_warning(item: dict, bid: str, letter_type: str | None = None) -> str | N
     return None
 
 
-def _letter_args(src) -> tuple[str, str, str, str]:
-    return (src.get("id", ""), src.get("bid", ""), src.get("bid_text", ""), src.get("type") or "")
+MAX_LETTER = 20_000   # characters; an edited letter is sent back to the server
+
+
+def _letter_args(src) -> tuple[str, str, str, str, str]:
+    """(listing id, amount, amount in words, letter type, edited text) from a query or JSON body."""
+    return (src.get("id", ""), src.get("bid", ""), src.get("bid_text", ""), src.get("type") or "",
+            (src.get("text") or "")[:MAX_LETTER])
 
 
 @app.route("/api/offers/letter")
 def api_offer_letter():
-    listing_id, bid, bid_text, ltype = _letter_args(request.args)
+    listing_id, bid, bid_text, ltype, _text = _letter_args(request.args)
     item, letter = _letter_for(listing_id, bid, bid_text, ltype)
     if not item:
         return jsonify({"error": "no such listing"}), 404
@@ -551,14 +560,41 @@ def api_offer_warning():
     return jsonify({"warning": bid_warning(item, request.args.get("bid", ""), request.args.get("type") or None)})
 
 
-@app.route("/api/offers/letter.pdf")
+def _pdf_response(data: bytes, filename: str) -> Response:
+    return Response(data, mimetype="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.route("/api/offers/letter.pdf", methods=["GET", "POST"])
 def api_offer_letter_pdf():
+    """The letter as PDF. POST (JSON) when it carries the user's edited text."""
     from letters import letter_pdf
-    _item, letter = _letter_for(*_letter_args(request.args))
+    src = (request.get_json(silent=True) or {}) if request.method == "POST" else request.args
+    _item, letter = _letter_for(*_letter_args(src))
     if not letter:
         abort(404)
-    return Response(letter_pdf(letter), mimetype="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{letter.filename}"'})
+    return _pdf_response(letter_pdf(letter), letter.filename)
+
+
+@app.route("/api/offers/log/<int:log_id>.pdf")
+def api_offer_log_pdf(log_id):
+    """The letter as it was sent. Rows logged before letters were stored are rebuilt."""
+    from letters import letter_pdf, text_pdf
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM carta_log WHERE id = ?", (log_id,)).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        abort(404)
+    if row["letter_text"]:
+        return _pdf_response(text_pdf(row["letter_text"], ref=f"Ref: {row['processo'] or row['listing_id']}"),
+                             row["letter_filename"] or f"letter_{log_id}.pdf")
+    ltype = row["letter_type"] if row["letter_type"] != "online" else None
+    _item, letter = _letter_for(row["listing_id"] or "", _format_amount(row["bid_amount"]), "", ltype)
+    if not letter:
+        abort(404)
+    return _pdf_response(letter_pdf(letter), letter.filename)
 
 
 def _log_sent(item: dict, *, letter=None, bid: str = "", method: str, sent_to: str = "",
@@ -570,13 +606,16 @@ def _log_sent(item: dict, *, letter=None, bid: str = "", method: str, sent_to: s
     try:
         cur = db.execute("""
             INSERT INTO carta_log (listing_id, processo, tribunal, country, sent_date, bid_amount,
-                                   method, outcome, notes, created_at, letter_type, is_offer, sent_to)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                                   method, outcome, notes, created_at, letter_type, is_offer, sent_to,
+                                   letter_text, letter_subject, letter_filename)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             item["id"], letter.processo if letter else str(raw.get("processo") or "").split(",")[0].strip(),
             raw.get("tribunal") or raw.get("autoridad"), item.get("country") or "PT",
             datetime.now().strftime("%Y-%m-%d"), parse_bid(bid) if is_offer else None,
             method, "pending", notes, datetime.now(timezone.utc).isoformat(),
-            letter.type_key if letter else "online", int(is_offer), sent_to or None))
+            letter.type_key if letter else "online", int(is_offer), sent_to or None,
+            letter.text if letter else None, letter.subject if letter else None,
+            letter.filename if letter else None))
         db.commit()
         if is_offer and item.get("status") == "shortlisted":
             set_listing_status(db, item["id"], None)   # it is an offer now, not a shortlist entry
@@ -590,13 +629,13 @@ def api_offer_sent():
     """Record a letter you sent yourself (post, your own e-mail, your lawyer),
     or with method "online" a bid you placed on an auction site."""
     data = request.get_json(silent=True) or {}
-    listing_id, bid, bid_text, ltype = _letter_args(data)
+    listing_id, bid, bid_text, ltype, text = _letter_args(data)
     if data.get("method") == "online":
         item, letter = _listing(listing_id), None
         if not item:
             return jsonify({"error": "no such listing"}), 404
     else:
-        item, letter = _letter_for(listing_id, bid, bid_text, ltype)
+        item, letter = _letter_for(listing_id, bid, bid_text, ltype, text)
         if not item:
             return jsonify({"error": "no such listing"}), 404
         if not letter:
