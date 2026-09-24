@@ -15,7 +15,7 @@ import os
 import time
 from datetime import timedelta
 
-from common import LOG, configure_http, parse_dt, utcnow, utcnow_iso
+from common import LOG, configure_http, make_session, parse_dt, utcnow, utcnow_iso
 from locks import lock_holder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -152,6 +152,15 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         queue_requests(db, cfg)          # offered on Telegram; sent only on your tap
                     except Exception:  # noqa: BLE001
                         LOG.exception("Preparing information requests failed")
+                _set_state(db, current="map positions")
+                try:
+                    import geo
+                    from db import load_listings
+                    best = sorted(load_listings(db, filters=cfg.get("filters")),
+                                  key=lambda it: -it.get("rank", it["score"]))
+                    geo.geocode_pending(db, make_session(), best)
+                except Exception:  # noqa: BLE001 — a map position must never fail the scan
+                    LOG.exception("Locating listings failed")
             finally:
                 summary = {
                     "listings": sum(r["count"] for r in results),

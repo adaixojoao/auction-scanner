@@ -164,6 +164,13 @@ function detailsHtml(d) {
       <ol>${d.how_to_find.steps.map(s => `<li>${AS.esc(s.text)}
         ${s.copy ? ` <code>${AS.esc(s.copy)}</code> <button class="btn btn-sm" data-copy="${AS.esc(s.copy)}" onclick="copyText(this.dataset.copy)">Copy</button>` : ""}
         ${s.url ? ` ${AS.link(s.url, "Open Citius ↗")}` : ""}</li>`).join("")}</ol></div>` : "";
+  const sv = d.street_view;
+  const streetView = sv ? `<div class="guide street">
+      <b>Where it is</b> <span class="small muted">(${AS.esc(sv.precision)})</span>
+      ${sv.embed ? `<iframe class="sv-frame" src="${AS.esc(sv.embed)}" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>` : ""}
+      <p class="d-links">${AS.link(sv.url, "Street View ↗")} · ${AS.link(sv.satellite, "Satellite ↗")}
+      ${sv.embed ? "" : `<span class="small faint"> · Add a Google Maps key in Settings to see Street View here.</span>`}</p>
+    </div>` : "";
   const off = d.official;
   const official = off ? `<div class="guide official">
       <b>Official records: ${AS.esc(off.registry)}</b>
@@ -177,6 +184,7 @@ function detailsHtml(d) {
     ${d.image ? `<img class="d-img" src="${AS.esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
     <div class="d-main">
       ${guide}
+      ${streetView}
       ${official}
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${facts ? `<div class="facts">${facts}</div>` : ""}

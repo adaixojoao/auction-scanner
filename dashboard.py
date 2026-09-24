@@ -307,6 +307,7 @@ def api_listing_detail():
         "facts": listing_info.facts(it), "related": related, "same_case": lots,
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
+        "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
     })
 
 @app.route("/api/listings/status", methods=["POST"])
@@ -854,6 +855,7 @@ EDITABLE = {
     "report": ("desktop_copy",),
     "updates": ("auto",),
     "auto_requests": ("enabled", "min_score", "per_day"),
+    "maps": ("google_key",),
 }
 
 
