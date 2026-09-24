@@ -43,6 +43,13 @@ folder: then it tells you why it did not update. It skips the update when
 offline, when git is missing, or when the folder was not installed with
 `git clone`, and the app starts as it is.
 
+**A version that does not start is rolled back.** If a new version crashes
+while starting, or a start of it never completes, the app goes back to the
+last version that started on this PC and restarts. It does not install that
+version again until a newer one is published, and it tells you in the window
+and in Settings → Updates. The database backup from before the update is in
+`backups/` if you ever need it.
+
 ## Use
 
 Double-click **Auction Scanner** on the Desktop. The app opens in its own
