@@ -65,6 +65,8 @@ DEFAULTS = {
         "chat_id": "",
         "min_score": 75,          # new-listing alerts
         "deadline_min_score": 60, # "ending soon, no offer sent" alerts
+        "cut_min_pct": 5,         # "the price just dropped" alerts: how big a cut
+        "cut_min_score": 60,      # …and from what score (your shortlist always counts)
         "source_alerts": True,    # tell me when a site stops working (and when it is back)
     },
 

@@ -288,6 +288,12 @@ Set up in **Settings**:
   listings you have not decided on yet. While the app is open a tap works in
   seconds; when it is closed, the background task handles it on its next round
   (every 30 minutes). Only your own chat (the Chat ID in Settings) can use them.
+- **Price cuts** — when a listing's *valor base* falls by 5% or more between
+  scans, Telegram says so with the old and the new price: <s>€40,000</s> →
+  **€32,000**. Anything on your shortlist counts whatever it scores; everything
+  else from score 60 up. Both numbers are in Settings → Telegram alerts. A bid
+  going up is an auction working, not a discount, so it is not a cut. Each cut
+  is sent once, and a second, deeper cut later is sent again.
 - **Information requests, prepared for you** — after a scan, for strong sales
   (score 75+, at least 5 days before the end) where the recipient's e-mail is
   known (the agente de execução on e-leilões, the court on BOE, the seller's
@@ -300,6 +306,8 @@ Set up in **Settings**:
 - **E-mail** — the same new-listing alerts by SMTP. The same account sends letters from the Offers page.
 
 Each listing is alerted once per channel; a failed send is retried next time.
+A price cut is the one thing that can be sent about the same listing twice,
+because a second cut is news again.
 
 ## Backup
 

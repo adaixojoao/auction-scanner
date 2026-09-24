@@ -380,6 +380,17 @@ def not_yet_alerted(db: sqlite3.Connection, channel: str, ids: list[str]) -> set
     return set(ids) - sent
 
 
+def alerted_at(db: sqlite3.Connection, channel: str) -> dict[str, datetime]:
+    """When each listing was last alerted on this channel. For alerts that can
+    happen again (a second price cut), where "already told" is not enough."""
+    out = {}
+    for lid, sent_at in db.execute("SELECT listing_id, sent_at FROM alert_log WHERE channel = ?", (channel,)):
+        when = parse_dt(sent_at)
+        if when:
+            out[lid] = when
+    return out
+
+
 def mark_alerted(db: sqlite3.Connection, channel: str, ids):
     now = utcnow_iso()
     db.executemany(

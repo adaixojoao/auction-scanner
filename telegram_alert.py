@@ -1,5 +1,5 @@
-"""telegram_alert.py — Telegram notifications: new high-score listings, offer
-deadlines, wins, and a weekly summary.
+"""telegram_alert.py — Telegram notifications: new high-score listings, price
+cuts, offer deadlines, wins, and a weekly summary.
 
 Messages use parse_mode=HTML, so every scraped string is escaped: one "&" in a
 title used to make Telegram reject the whole message, silently.
@@ -12,8 +12,8 @@ import logging
 
 import requests
 
-from common import FLAGS, days_left, effective_end, utcnow
-from db import load_listings, mark_alerted, not_yet_alerted
+from common import FLAGS, days_left, effective_end, parse_dt, utcnow
+from db import alerted_at, load_listings, mark_alerted, not_yet_alerted
 
 LOG = logging.getLogger("telegram")
 
@@ -149,6 +149,84 @@ def alert_new_listings(db, cfg: dict, score_fn=None):
     if sent:
         mark_alerted(db, CHANNEL, sent)
         LOG.info(f"Telegram: alerted {len(sent)} new listings")
+
+
+# ─── Price cuts ──────────────────────────────────────────────────────
+# A cut is what turns a listing anyone would ignore into one worth a letter,
+# and it happens quietly between scans. Only the valor base counts: a bid
+# going up is an auction working, not a discount.
+
+CUT_CHANNEL = "telegram-cut"      # alert_log: when the last cut was told about
+
+
+def _price_history(db) -> dict[str, list[tuple[str, float]]]:
+    out: dict[str, list[tuple[str, float]]] = {}
+    for lid, at, price in db.execute(
+            "SELECT listing_id, observed_at, price FROM price_history "
+            "WHERE price IS NOT NULL ORDER BY listing_id, observed_at"):
+        out.setdefault(lid, []).append((at, price))
+    return out
+
+
+def price_cuts(db, cfg: dict, *, min_pct: float = 5, min_score: float = 60, now=None) -> list[dict]:
+    """Visible listings whose price fell at its last change and that you have
+    not been told about since. Each gains cut_from, cut_pct and cut_at.
+
+    Your shortlist counts whatever it scores: you already said you want it."""
+    history = _price_history(db)
+    told = alerted_at(db, CUT_CHANNEL)
+    out = []
+    for it in load_listings(db, filters=cfg.get("filters"), now=now):
+        rows = history.get(it["id"]) or []
+        if len(rows) < 2:
+            continue
+        before, (at, after) = rows[-2][1], rows[-1]
+        if not before or not after or after >= before:
+            continue
+        pct = (before - after) / before * 100
+        if pct < min_pct or (it.get("status") != "shortlisted" and it["score"] < min_score):
+            continue
+        when = parse_dt(at)
+        if when and told.get(it["id"]) and when <= told[it["id"]]:
+            continue
+        out.append({**it, "cut_from": before, "cut_pct": round(pct, 1), "cut_at": at})
+    return sorted(out, key=lambda it: -it["cut_pct"])
+
+
+def format_cut(item: dict) -> str:
+    flag = FLAGS.get(item.get("country") or "PT", "\U0001f30d")
+    loc = ", ".join(filter(None, [item.get("concelho"), item.get("district")]))
+    ends = (item.get("date_end") or "")[:10]
+    mine = "\u2b50 on your shortlist" if item.get("status") == "shortlisted" else f"Score {item['score']:.0f}/100"
+    return (
+        f"{flag} \U0001f4c9 <b>Price cut \u2014 {item['cut_pct']:.0f}% off</b>\n\n"
+        f"<b>{_esc((item.get('title') or '?')[:80])}</b>\n"
+        f"\U0001f4cd {_esc(loc)}\n"
+        f"\U0001f4b6 <s>{_money(item['cut_from'])}</s> \u2192 <b>{_money(item.get('price'))}</b>"
+        f"{f'  ·  Ends {_esc(ends)}' if ends else ''}"
+        f"{_cost_line(item)}\n"
+        f"\U0001f3f7 {_esc(mine)}\n\n"
+        f"<a href=\"{_esc(item.get('url') or '')}\">View listing \u2192</a>"
+        + _citius_finder(item)
+    )
+
+
+def alert_price_cuts(db, cfg: dict):
+    """Tell me when something got cheaper, once per cut."""
+    tg = _tg(cfg)
+    if not tg:
+        return
+    cuts = price_cuts(db, cfg, min_pct=tg.get("cut_min_pct", 5),
+                      min_score=tg.get("cut_min_score", 60))
+    if not cuts:
+        return
+    from telegram_bot import listing_keyboard
+    sent = [it["id"] for it in cuts[:MAX_INDIVIDUAL]
+            if send_telegram(tg["token"], tg["chat_id"], format_cut(it),
+                             reply_markup=listing_keyboard(db, it["id"]))]
+    if sent:
+        mark_alerted(db, CUT_CHANNEL, sent)
+        LOG.info(f"Telegram: alerted {len(sent)} price cuts")
 
 
 def _sent_processes(db) -> tuple[set, set]:

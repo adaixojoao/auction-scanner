@@ -72,7 +72,10 @@
     <div class="field"><label>Chat ID</label><input id="tg_chat_id"></div>
     <div class="field"><label>Alert new listings scoring at least</label><input type="number" id="tg_min_score" min="0" max="100"></div>
     <div class="field"><label>Deadline reminders scoring at least</label><input type="number" id="tg_deadline_min_score" min="0" max="100"></div>
+    <div class="field"><label>Price-cut alerts from (% off)</label><input type="number" id="tg_cut_min_pct" min="1" max="90"></div>
+    <div class="field"><label>Price cuts on listings scoring at least</label><input type="number" id="tg_cut_min_score" min="0" max="100"></div>
   </div>
+  <p class="help" style="margin-top:6px">A cut on something you shortlisted is always sent, whatever it scores.</p>
   <label class="check" style="margin-top:10px"><input type="checkbox" id="tg_source_alerts"> Tell me when a site stops working, and when it works again</label>
 </div>
 
@@ -153,6 +156,7 @@ async function load() {
   ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
   setv("while_app_open", s.while_app_open); setv("pt_every_hours", s.pt_every_hours); setv("eu_every_hours", s.eu_every_hours);
   ["enabled", "token", "chat_id", "min_score", "deadline_min_score"].forEach(k => setv("tg_" + k, t[k]));
+  setv("tg_cut_min_pct", t.cut_min_pct ?? 5); setv("tg_cut_min_score", t.cut_min_score ?? 60);
   $("tg_source_alerts").checked = t.source_alerts !== false;
   setv("maps_google_key", (c.maps || {}).google_key || "");
   const ar = c.auto_requests || {};
@@ -258,6 +262,7 @@ async function save() {
     schedule: {while_app_open: $("while_app_open").checked, pt_every_hours: num("pt_every_hours"), eu_every_hours: num("eu_every_hours")},
     telegram: {enabled: $("tg_enabled").checked, token: $("tg_token").value.trim(), chat_id: $("tg_chat_id").value.trim(),
                min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score"),
+               cut_min_pct: num("tg_cut_min_pct"), cut_min_score: num("tg_cut_min_score"),
                source_alerts: $("tg_source_alerts").checked},
     auto_requests: {enabled: $("ar_enabled").checked, min_score: num("ar_min_score"), per_day: num("ar_per_day")},
     maps: {google_key: $("maps_google_key").value.trim()},
