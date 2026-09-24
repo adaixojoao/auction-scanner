@@ -29,11 +29,20 @@ def test_letters_follow_how_each_sale_is_bid():
     assert keys(item("spain", "ES")) == ["es_info"]
     assert keys(item("sareb", "ES")) == ["es_oferta"]
     assert keys(item("france", "FR")) == ["fr_mandat", "fr_info"]
-    assert keys(item("astegiudiziarie", "IT")) == ["generic_offer"]
+    assert keys(item("zvg", "DE")) == ["de_info"]
+    assert keys(item("pvp_giustizia", "IT")) == ["it_info"]
+    assert keys(item("veilingnotaris", "NL")) == ["nl_info"]
+    assert keys(item("biddit", "BE")) == keys(item("fina", "HR")) == keys(item("greece", "GR")) == []
+    assert keys(item("poland", "PL")) == ["generic_offer"]       # no country-specific letters yet
 
     assert letters.channel(item("spain", "ES")) == "online"
     assert letters.channel(item("france", "FR")) == "lawyer"
     assert letters.channel(item("citius", "PT")) == "letter"
+    assert letters.channel(item("zvg", "DE")) == "hearing" and letters.channel(item("italy", "IT")) == "formal"
+    assert letters.bid_card(item("zvg", "DE"))["title"] == "Bid at the hearing"
+    assert letters.bid_card(item("pvp_giustizia", "IT"))["button"] == "Log my offer"
+    assert letters.bid_card(item("citius", "PT")) is None and letters.bid_card(item("france", "FR")) is None
+    assert "Amtsgericht" in letters.guidance(item("zvg", "DE")) and "75%" in letters.guidance(item("italy", "IT"))
     assert "subastas.boe.es" in letters.guidance(item("spain", "ES"))
     assert "lawyer" in letters.guidance(item("france", "FR"))
 
@@ -150,3 +159,26 @@ def test_an_edited_letter_is_what_gets_printed_and_sent(monkeypatch):
     # text that lost its layout still prints, as plain text
     assert letters.split_letter("just one paragraph") is None
     assert letters.text_pdf("just one paragraph").startswith(b"%PDF")
+
+
+def test_information_requests_in_german_italian_and_dutch():
+    de = letters.build_letter(item("zvg", "DE", title="Einfamilienhaus — Görlitz", district="Görlitz",
+                                   description="Aktenzeichen: 0010 K 0012/2024. Einfamilienhaus.",
+                                   date_end="2026-11-12T09:30:00"), "", "", ME)
+    assert de.type_key == "de_info" and not de.is_offer
+    assert de.recipient == ["Amtsgericht ________", "– Vollstreckungsgericht –"]
+    assert de.subject_line.startswith("Betreff: Zwangsversteigerungsverfahren Az. 0010 K 0012/2024")
+    assert "(Einfamilienhaus — Görlitz)" in de.body          # the place is not repeated
+    assert "am 12.11.2026 um 09:30 Uhr" in de.body and de.filename.startswith("anfrage_")
+
+    it = letters.build_letter(item("pvp_giustizia", "IT", title="Appartamento", concelho="Perugia",
+                                   raw={"procedura": "123/2024 R.G.E.", "tribunale": "Tribunale di Perugia"}),
+                              "", "", ME)
+    assert it.recipient == ["Al Custode giudiziario / Professionista delegato", "Tribunale di Perugia"]
+    assert it.subject == "Richiesta di informazioni e di visita – procedura n. 123/2024 R.G.E."
+    assert "«Appartamento, Perugia»" in it.body and "visitare l'immobile" in it.body
+
+    nl = letters.build_letter(item("netherlands", "NL", title="Woonhuis", concelho="Zwolle",
+                                   url="https://www.openbareverkoop.nl/9"), "", "", ME)
+    assert nl.recipient == ["Aan de behandelend notaris"] and "veilingvoorwaarden" in nl.body
+    assert nl.subject_line == "Onderwerp: Verzoek om informatie – executieveiling Woonhuis"

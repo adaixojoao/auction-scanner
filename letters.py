@@ -36,8 +36,13 @@ PT_BANK_SOURCES = {"novobanco", "cgd", "santander", "bpi", "imobancos", "bcp", "
 ES_COURT_SOURCES = {"spain", "aeat", "subastasactivas"}
 ES_SERVICER_SOURCES = {"sareb", "haya", "servihabitat"}
 FR_COURT_SOURCES = {"france", "encheres_publiques"}
+DE_COURT_SOURCES = {"zvg", "zvg_de"}
+IT_COURT_SOURCES = {"italy", "pvp_giustizia", "gobidreal", "astalegale"}
+NL_NOTARY_SOURCES = {"netherlands", "veilingnotaris", "veilingbiljet"}
+HR_SOURCES = {"croatia", "fina"}
 ONLINE_SOURCES = {"eleiloes", "financas", "leilosoc", "centroleiloes", "bidleiloeira",
-                  "spain", "aeat", "subastasactivas", "biddit"}
+                  "spain", "aeat", "subastasactivas", "biddit", "justiz_auktion", "greece",
+                  *NL_NOTARY_SOURCES, *HR_SOURCES}
 
 SELLER_NAMES = {
     "novobanco": "Novo Banco", "cgd": "Caixa Geral de Depósitos", "santander": "Banco Santander Totta",
@@ -71,12 +76,37 @@ def sale_kind(modalidade: str | None) -> str:
 
 
 def channel(item: dict) -> str:
+    """How a bid is made: "letter" (the offer is a letter), "online" (on a
+    website), "hearing" (in person at a court hearing), "formal" (a formal
+    offer on the court's form, online or in a sealed envelope) or "lawyer"
+    (only a lawyer can bid)."""
     src = item.get("source") or ""
     if src in FR_COURT_SOURCES:
         return "lawyer"
+    if src in DE_COURT_SOURCES:
+        return "hearing"
+    if src in IT_COURT_SOURCES:
+        return "formal"
     if src in ONLINE_SOURCES:
         return "online"
     return "letter"
+
+
+# Where the bid itself is made outside the app, the Offers page lets you log it.
+_BID_CARDS = {
+    "online": ("Bid online", "Place the bid on the auction site, then log it here to keep track.",
+               "Log my bid"),
+    "hearing": ("Bid at the hearing", "Bid at the court hearing (in person, or through someone with a "
+                "certified power of attorney), then log your bid here.", "Log my bid"),
+    "formal": ("Submit your offer", "Submit the offer the way the sale notice says (online on the "
+               "Portale delle Vendite Pubbliche, or in a sealed envelope at the delegato's office), "
+               "then log it here.", "Log my offer"),
+}
+
+
+def bid_card(item: dict) -> dict | None:
+    card = _BID_CARDS.get(channel(item))
+    return dict(zip(("title", "text", "button"), card)) if card else None
 
 
 def guidance(item: dict) -> str:
@@ -107,8 +137,36 @@ def guidance(item: dict) -> str:
                 "lawyer registered at that court's bar can bid for you. You give them a bank cheque "
                 "(chèque de banque) for 10% of the starting price, at least €3,000. For 10 days after the "
                 "sale anyone may outbid the winner by 10% (surenchère).")
+    if src in DE_COURT_SOURCES:
+        return ("German forced auction (Zwangsversteigerung): you bid at the hearing (Versteigerungstermin) "
+                "at the Amtsgericht, in person or through someone with a publicly certified power of "
+                "attorney. Bring ID. The court can ask for security of 10% of the Verkehrswert, paid in "
+                "advance by bank transfer or by a cheque certified by the Bundesbank; cash is not accepted. "
+                "The valuation report (Gutachten) is usually on zvg-portal.de. At the first hearing, bids "
+                "under half the Verkehrswert are refused, and under 70% the creditor can ask for refusal.")
+    if src == "justiz_auktion":
+        return "Online auction of the German justice authorities: register on justiz-auktion.de and bid there."
+    if src in IT_COURT_SOURCES:
+        return ("Italian court sale, run by a professionista delegato. You submit a formal offer, online "
+                "through the Portale delle Vendite Pubbliche or, if the notice allows it, in a sealed "
+                "envelope at the delegato's office, with a deposit (cauzione), usually at least 10% of the "
+                "price you offer. Offers down to 75% of the base price (offerta minima) are allowed. Read "
+                "the avviso di vendita and the perizia; visits are booked with the custode through the portal.")
+    if src in NL_NOTARY_SOURCES:
+        return ("Dutch execution auction (executieveiling), run by a notary and usually held online on "
+                "veilingnotaris.nl. You register and identify yourself beforehand; the notary may ask for a "
+                "deposit or bank guarantee. Read the veilingvoorwaarden: you buy as it is, often without a "
+                "viewing, and tenants may stay.")
     if src == "biddit":
-        return "Belgian notary auction on biddit.be: bids are placed online. Log your bid here to track it."
+        return ("Belgian notarial auction on biddit.be: you register with your eID or itsme and bid "
+                "online. The notary's conditions of sale and any visit days are on the listing.")
+    if src in HR_SOURCES:
+        return ("Croatian forced sale: most are electronic auctions run by FINA. You register and pay the "
+                "deposit (jamčevina) before the auction; the court's decision on the sale (zaključak o "
+                "prodaji) sets the conditions, and says if the auction is held in person instead.")
+    if src == "greece":
+        return ("Greek electronic auction (eauction.gr), run through a notary: you register and lodge the "
+                "deposit set in the notice before bidding online.")
     return (f"No sale-specific guidance for {country} yet. This is a general offer letter; check with "
             "the authority how offers have to be submitted.")
 
@@ -623,6 +681,102 @@ def _fr_offre(c: Ctx):
     return ["Madame, Monsieur"], f"Offre d'achat — {c.title[:60]}", body
 
 
+# Germany, Italy, the Netherlands: information requests ----------------
+# Bids there are made at a hearing, on a court form or online, so the useful
+# letter is the one that gets you the documents and answers first.
+
+def _signature(c: Ctx, id_label: str) -> str:
+    lines = [c.nome, f"{id_label}: {c.nif}", c.morada, c.email,
+             f"Tel.: {c.telefone}" if c.telefone else ""]
+    return "\n".join(line for line in lines if line)
+
+
+def _when(c: Ctx, fmt: str, time_fmt: str = "") -> str:
+    dt = parse_dt(c.item.get("date_end"))
+    if not dt:
+        return ""
+    return dt.strftime(fmt) + (dt.strftime(time_fmt) if time_fmt and (dt.hour or dt.minute) else "")
+
+
+def _what(c: Ctx) -> str:
+    """The property and where it is, without naming the place twice."""
+    return c.title + (f", {c.loc}" if c.loc and c.loc.lower() not in c.title.lower() else "")
+
+
+def _de_aktenzeichen(c: Ctx) -> str:
+    if c.raw.get("aktenzeichen"):
+        return c.raw["aktenzeichen"]
+    m = re.search(r"Aktenzeichen:\s*([^.]+?)\.(?:\s|$)", c.item.get("description") or "")
+    return m.group(1).strip() if m else "________"
+
+
+def _de_info(c: Ctx):
+    az = _de_aktenzeichen(c)
+    termin = _when(c, "%d.%m.%Y", " um %H:%M Uhr")
+    gericht = c.raw.get("amtsgericht") or "________"
+    body = (
+        "Sehr geehrte Damen und Herren,\n\n"
+        f"im Zwangsversteigerungsverfahren Az. {az} ({_what(c)}) interessiere ich mich als "
+        "möglicher Bieter für das Versteigerungsobjekt und bitte Sie um folgende Auskünfte:\n\n"
+        "   1. eine Kopie des Verkehrswertgutachtens, soweit es nicht im ZVG-Portal veröffentlicht ist;\n"
+        f"   2. ob der Versteigerungstermin{' am ' + termin if termin else ''} wie vorgesehen stattfindet;\n"
+        "   3. ob bekannt ist, ob das Objekt vermietet, vom Eigentümer bewohnt oder leerstehend ist;\n"
+        "   4. die Höhe der Sicherheitsleistung und die Bankverbindung der Gerichtskasse, falls die "
+        "Sicherheit vorab überwiesen werden kann.\n\n"
+        "Für Ihre Mühe bedanke ich mich im Voraus.\n\n"
+        "Mit freundlichen Grüßen\n\n\n\n"
+        f"{_signature(c, 'Steuer-/Ausweisnummer')}"
+    )
+    return ([f"Amtsgericht {gericht}", "– Vollstreckungsgericht –"],
+            f"Zwangsversteigerungsverfahren Az. {az} – Anfrage eines Bietinteressenten", body)
+
+
+def _it_info(c: Ctx):
+    proc = c.raw.get("procedura") or c.raw.get("rge")
+    procedura = f"n. {proc}" if proc else f"relativa all'annuncio {_reference(c)}"
+    data = _when(c, "%d/%m/%Y", " alle ore %H:%M")
+    body = (
+        "Egregio/a Custode, Egregio/a Professionista delegato,\n\n"
+        f"in qualità di potenziale offerente nella procedura {procedura}, riguardante l'immobile "
+        f"«{_what(c)}», chiedo cortesemente:\n\n"
+        "   1. di poter visitare l'immobile, indicandomi le date disponibili;\n"
+        "   2. copia della perizia di stima e dell'avviso di vendita, se non già pubblicati sul Portale "
+        "delle Vendite Pubbliche;\n"
+        "   3. informazioni sullo stato di occupazione dell'immobile e sui tempi previsti per la liberazione;\n"
+        "   4. l'importo di eventuali spese condominiali insolute;\n"
+        f"   5. la conferma della data della vendita{' (' + data + ')' if data else ''} e delle modalità di "
+        "presentazione delle offerte e della cauzione.\n\n"
+        "Ringrazio anticipatamente per la disponibilità.\n\n"
+        "Distinti saluti,\n\n\n\n"
+        f"{_signature(c, 'Codice fiscale / documento')}"
+    )
+    recipient = ["Al Custode giudiziario / Professionista delegato",
+                 *([c.raw["tribunale"]] if c.raw.get("tribunale") else [])]
+    return (recipient, f"Richiesta di informazioni e di visita – {'procedura n. ' + proc if proc else c.title[:60]}",
+            body)
+
+
+def _nl_info(c: Ctx):
+    datum = _when(c, "%d-%m-%Y", " om %H:%M uur")
+    body = (
+        "Geachte notaris,\n\n"
+        f"Met belangstelling heb ik kennisgenomen van de executieveiling van «{c.title}»"
+        f"{' te ' + c.loc if c.loc else ''}{' op ' + datum if datum else ''} ({_reference(c)}). "
+        "Als mogelijke bieder verzoek ik u vriendelijk om:\n\n"
+        "   1. de veilingvoorwaarden en de bijbehorende stukken, zoals het kadastrale bericht en eventuele "
+        "huurovereenkomsten;\n"
+        "   2. informatie over een kijkdag of een andere mogelijkheid tot bezichtiging;\n"
+        "   3. informatie of het registergoed vrij van huur en gebruik wordt opgeleverd;\n"
+        "   4. de voorwaarden voor deelname aan de veiling (registratie, eventuele waarborgsom of "
+        "bankgarantie).\n\n"
+        "Bij voorbaat dank voor uw reactie.\n\n"
+        "Met vriendelijke groet,\n\n\n\n"
+        f"{_signature(c, 'Fiscaal nummer / ID')}"
+    )
+    recipient = [f"Notaris {c.raw['notaris']}" if c.raw.get("notaris") else "Aan de behandelend notaris"]
+    return recipient, f"Verzoek om informatie – executieveiling {c.title[:60]}", body
+
+
 # Everything else: the general templates --------------------------------
 
 def _generic(c: Ctx):
@@ -645,8 +799,12 @@ def _is(country: str, sources: set[str] | None = None, kind: str | None = None):
     return applies
 
 
+# Countries whose sales have their own letters and guidance; the rest get the general offer.
+COVERED_COUNTRIES = ("PT", "ES", "FR", "DE", "IT", "NL", "BE", "HR", "GR")
+
+
 def _other_country(item: dict, raw: dict) -> bool:
-    return (item.get("country") or "PT") not in ("PT", "ES", "FR")
+    return (item.get("country") or "PT") not in COVERED_COUNTRIES
 
 
 LETTER_TYPES: list[LetterType] = [
@@ -677,6 +835,12 @@ LETTER_TYPES: list[LetterType] = [
     LetterType("fr_offre", "FR", "Purchase offer to the seller (offre d'achat)", True,
                lambda i, r: False, _fr_offre,
                suggest=_pct_suggest(75), presets=lambda i: _percent_presets(i.get("price"))),
+    LetterType("de_info", "DE", "Request to the court for the valuation report and details (Anfrage)",
+               False, _is("DE", DE_COURT_SOURCES), _de_info),
+    LetterType("it_info", "IT", "Request to the custode / delegato for a visit and details", False,
+               _is("IT", IT_COURT_SOURCES), _it_info),
+    LetterType("nl_info", "NL", "Request to the notary for the auction conditions and a viewing", False,
+               _is("NL", NL_NOTARY_SOURCES), _nl_info),
     LetterType("generic_offer", "*", "Purchase offer (general template)", True,
                _other_country, _generic, suggest=_pt_suggest, presets=lambda i: PT_PRESETS),
 ]
@@ -693,8 +857,9 @@ def letter_types_for(item: dict) -> list[LetterType]:
         # A source with no letters of its own: the country's plain offer letter.
         country = item.get("country") or "PT"
         fallback = {"PT": f"pt_{sale_kind(raw.get('modalidade'))}", "ES": "es_oferta",
-                    "FR": "fr_offre"}.get(country, "generic_offer")
-        found = [_BY_KEY[fallback]]
+                    "FR": "fr_offre", "DE": "de_info", "IT": "it_info", "NL": "nl_info"}.get(country)
+        if fallback or country not in COVERED_COUNTRIES:
+            found = [_BY_KEY[fallback or "generic_offer"]]
     return found
 
 
@@ -707,7 +872,8 @@ def get_type(key: str | None, item: dict) -> LetterType | None:
 
 # ─── Building a letter ───────────────────────────────────────────────
 
-SUBJECT_LABELS = {"PT": "Assunto: ", "ES": "Asunto: ", "FR": "Objet : "}
+SUBJECT_LABELS = {"PT": "Assunto: ", "ES": "Asunto: ", "FR": "Objet : ", "DE": "Betreff: ",
+                  "IT": "Oggetto: ", "NL": "Onderwerp: "}
 
 
 def split_letter(text: str) -> dict | None:
@@ -776,7 +942,8 @@ class Letter:
         ref = re.sub(r"[^A-Za-z0-9.-]+", "-", self.processo or self.item_id or "sem-processo").strip("-")
         prefix = {"PT": "carta", "ES": "carta", "FR": "lettre"}.get(self.country, "letter")
         if not self.is_offer:
-            prefix = {"PT": "pedido-info", "ES": "solicitud-info", "FR": "demande-info"}.get(
+            prefix = {"PT": "pedido-info", "ES": "solicitud-info", "FR": "demande-info",
+                      "DE": "anfrage", "IT": "richiesta-info", "NL": "informatieverzoek"}.get(
                 self.country, "info-request")
         return f"{prefix}_{ref}.pdf"
 
@@ -972,215 +1139,6 @@ def text_pdf(text: str, *, ref: str = "", path: str | None = None) -> bytes:
 # ─── General templates (other countries) ─────────────────────────────
 
 GENERIC_TEMPLATES = {
-    "DE": {
-        "subject": "Gebot — Zwangsversteigerung {processo}",
-        "salutation": "Sehr geehrte Damen und Herren",
-        "carta_fechada": """Sehr geehrte Damen und Herren,
-
-hiermit möchte ich ein Gebot für die im oben genannten Zwangsversteigerungsverfahren angebotene Immobilie abgeben.
-
-Beschreibung: {title}
-Lage: {location}
-Fläche: {area}
-
-GEBOT:
-
-   Bieter: {nome}
-   Ausweis-Nr.: {nif}
-   Anschrift: {morada}
-   E-Mail: {email}
-   Gebotsbetrag: EUR {bid}
-
-Ich bitte um Auskunft über:
-   1. Die Frist zur Abgabe von Geboten;
-   2. Ob eine Sicherheitsleistung erforderlich ist und in welcher Höhe;
-   3. Den Ort und die Zeit der Gebotsöffnung.
-
-Für Rückfragen stehe ich gerne zur Verfügung.
-
-Mit freundlichen Grüßen,
-
-
-
-{nome}""",
-        "negociacao": """Sehr geehrte Damen und Herren,
-
-ich interessiere mich für den Erwerb der oben genannten Immobilie und möchte folgendes Angebot unterbreiten:
-
-Beschreibung: {title}
-Lage: {location}
-Fläche: {area}
-
-Angebotspreis: EUR {bid}
-
-Meine Kontaktdaten:
-   Name: {nome}
-   Ausweis-Nr.: {nif}
-   Anschrift: {morada}
-   E-Mail: {email}
-
-Mit freundlichen Grüßen,
-
-
-
-{nome}""",
-    },
-    "IT": {
-        "subject": "Offerta di Acquisto — Procedura {processo}",
-        "salutation": "Egregio/a Signor/a Giudice / Delegato alla vendita",
-        "carta_fechada": """Egregio/a Signor/a,
-
-Con la presente intendo presentare un'offerta di acquisto per l'immobile oggetto di vendita giudiziaria nell'ambito della procedura in oggetto.
-
-Descrizione del bene: {title}
-Ubicazione: {location}
-Superficie: {area}
-
-OFFERTA DI ACQUISTO:
-
-   Offerente: {nome}
-   Codice Fiscale/Passaporto: {nif}
-   Indirizzo: {morada}
-   Email: {email}
-   Importo offerto: EUR {bid}
-
-Chiedo inoltre informazioni su:
-   1. Il termine per la presentazione delle offerte;
-   2. Se è richiesta una cauzione e il relativo importo;
-   3. Il luogo e l'orario di presentazione delle buste;
-   4. La data di apertura delle offerte.
-
-Resto a disposizione per qualsiasi chiarimento.
-
-Distinti saluti,
-
-
-
-{nome}""",
-        "negociacao": """Egregio/a Signor/a,
-
-Mi rivolgo a Lei per manifestare il mio interesse nell'acquisto dell'immobile in vendita nell'ambito della procedura sopra indicata.
-
-Descrizione del bene: {title}
-Ubicazione: {location}
-Superficie: {area}
-
-Offerta: EUR {bid}
-
-Dati dell'acquirente:
-   Nome: {nome}
-   Codice Fiscale/Passaporto: {nif}
-   Indirizzo: {morada}
-   Email: {email}
-
-Distinti saluti,
-
-
-
-{nome}""",
-    },
-    "NL": {
-        "subject": "Bod — Executieveiling {processo}",
-        "salutation": "Geachte heer/mevrouw",
-        "carta_fechada": """Geachte heer/mevrouw,
-
-Hierbij doe ik een bod op het onroerend goed dat wordt geveild in het kader van bovengenoemde executieprocedure.
-
-Omschrijving: {title}
-Locatie: {location}
-Oppervlakte: {area}
-
-BOD:
-
-   Bieder: {nome}
-   Paspoort/ID: {nif}
-   Adres: {morada}
-   E-mail: {email}
-   Bedrag: EUR {bid}
-
-Ik verzoek u mij te informeren over:
-   1. De uiterste termijn voor het indienen van biedingen;
-   2. Of een waarborgsom vereist is en het bedrag daarvan;
-   3. De locatie en tijd van de biedopening.
-
-Met vriendelijke groet,
-
-
-
-{nome}""",
-        "negociacao": """Geachte heer/mevrouw,
-
-Ik heb interesse in de aankoop van bovengenoemd onroerend goed en doe hierbij het volgende bod:
-
-Omschrijving: {title}
-Locatie: {location}
-Oppervlakte: {area}
-
-Bod: EUR {bid}
-
-Mijn gegevens:
-   Naam: {nome}
-   Paspoort/ID: {nif}
-   Adres: {morada}
-   E-mail: {email}
-
-Met vriendelijke groet,
-
-
-
-{nome}""",
-    },
-    "HR": {
-        "subject": "Ponuda za kupnju — Predmet {processo}",
-        "salutation": "Poštovani/a",
-        "carta_fechada": """Poštovani/a,
-
-Ovim putem podnosim ponudu za kupnju nekretnine koja se prodaje u okviru gore navedenog postupka.
-
-Opis nekretnine: {title}
-Lokacija: {location}
-Površina: {area}
-
-PONUDA ZA KUPNJU:
-
-   Ponuditelj: {nome}
-   Putovnica/OIB: {nif}
-   Adresa: {morada}
-   E-pošta: {email}
-   Ponuđeni iznos: EUR {bid}
-
-Molim Vas da me obavijestite o:
-   1. Roku za dostavu ponuda;
-   2. Je li potrebno položiti jamčevinu i u kojem iznosu;
-   3. Mjestu i vremenu otvaranja ponuda.
-
-S poštovanjem,
-
-
-
-{nome}""",
-        "negociacao": """Poštovani/a,
-
-Zainteresiran/a sam za kupnju gore navedene nekretnine i podnosim sljedeću ponudu:
-
-Opis: {title}
-Lokacija: {location}
-Površina: {area}
-
-Ponuda: EUR {bid}
-
-Podaci kupca:
-   Ime i prezime: {nome}
-   Putovnica/OIB: {nif}
-   Adresa: {morada}
-   E-pošta: {email}
-
-S poštovanjem,
-
-
-
-{nome}""",
-    },
     "DEFAULT": {
         "subject": "Purchase Offer — Case {processo}",
         "salutation": "Dear Sir/Madam",

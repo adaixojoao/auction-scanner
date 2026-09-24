@@ -100,9 +100,10 @@ function renderDetail() {
   const d = draft(c), t = typeOf(c, d.type), done = !!c.offer;
   const facts = [["Location", c.location], ["Area", c.area_m2 ? Math.round(c.area_m2) + " m²" : "–"],
     [PRICE_LABEL[c.country] || "Price", c.price ? AS.money(c.price) : "–"], ["Current bid", c.current_bid ? AS.money(c.current_bid) : "none"],
-    [c.channel === "lawyer" ? "Hearing" : "Ends", c.date_end ? c.date_end.slice(0, 16).replace("T", " ") : "–"], ["Case", c.processo || "–"]];
+    [c.channel === "lawyer" || c.channel === "hearing" ? "Hearing" : "Ends", c.date_end ? c.date_end.slice(0, 16).replace("T", " ") : "–"], ["Case", c.processo || "–"]];
   const k = c.contact || {};
-  const onlineBid = c.channel === "online" && !(done && c.offer.method !== "online");
+  const bc = c.bid_card;   // the bid is made outside the app (site, hearing, court form): log it here
+  const onlineBid = !!bc && !(done && c.offer.method !== "online");
   const showOnline = onlineBid && (!done || c.offer.method === "online");
   const showLetter = c.letter_types.length && (!done || c.offer.method !== "online");
   const checklist = CHECKLIST[c.country] || CHECKLIST["*"];
@@ -140,13 +141,13 @@ function renderDetail() {
 
   ${showOnline ? `
   <div class="card">
-    <h2>${done ? "Bid logged" : "Bid online"}</h2>
-    <p class="small muted">Place the bid on the auction site${c.url ? ` (${AS.link(c.url, "open listing")})` : ""}, then log it here to keep track.</p>
+    <h2>${done ? "Bid logged" : AS.esc(bc.title)}</h2>
+    <p class="small muted">${AS.esc(bc.text)}${c.url ? ` ${AS.link(c.url, "Open listing ↗")}` : ""}</p>
     <div class="form-grid" style="margin-top:8px">
-      <div class="field"><label>Amount you bid (EUR)</label><input id="online" value="${AS.esc(d.online)}" ${done ? "disabled" : ""}></div>
+      <div class="field"><label>Amount (EUR)</label><input id="online" value="${AS.esc(d.online)}" ${done ? "disabled" : ""}></div>
     </div>
     <div id="online-warn"></div>
-    ${done ? "" : `<div class="row" style="margin-top:10px"><button class="btn btn-success" onclick="logOnline()">Log my bid</button></div>`}
+    ${done ? "" : `<div class="row" style="margin-top:10px"><button class="btn btn-success" onclick="logOnline()">${AS.esc(bc.button)}</button></div>`}
   </div>` : ""}
 
   ${showLetter ? `

@@ -234,6 +234,17 @@ def test_bid_warnings_follow_the_sale(client, add):
     assert client.get("/api/offers/warning?id=eleiloes:e1&bid=1.000,00&type=online").get_json()["warning"]
     assert client.get("/api/offers/warning?id=eleiloes:e1&bid=26.000,00&type=online").get_json()["warning"] is None
 
+    add("pvp_giustizia", "i1", "IT", title="Appartamento", price=40000)
+    add("zvg", "z1", "DE", title="Haus", tipo="imovel", price=100000)
+    warn = lambda lid, bid: client.get(f"/api/offers/warning?id={lid}&bid={bid}&type=online").get_json()["warning"]
+    assert "offerta minima of EUR 30,000" in warn("pvp_giustizia:i1", "29.000,00")
+    assert warn("pvp_giustizia:i1", "30.000,00") is None
+    assert "EUR 50,000 (half)" in warn("zvg:z1", "60.000,00") and warn("zvg:z1", "70.000,00") is None
+    client.post("/api/listings/status", json={"id": "zvg:z1", "status": "shortlisted"})
+    z = next(o for o in client.get("/api/offers").get_json()["review"] if o["id"] == "zvg:z1")
+    assert z["sale"] == "Court hearing (in person)" and z["bid_card"]["title"] == "Bid at the hearing"
+    assert [t["key"] for t in z["letter_types"]] == ["de_info"]
+
 
 def test_scan_api(client, monkeypatch):
     started = []

@@ -61,8 +61,8 @@ def test_one_builder_for_every_country():
     # a Spanish seller with no letters of its own gets the Spanish purchase offer
     es = cartas.build_letter({**base, "country": "ES"}, "5.000,00", "", PROPONENTE)
     assert es.type_key == "es_oferta" and "Estimados señores" in es.text and "5.000,00 €" in es.text
-    it = cartas.build_letter({**base, "country": "IT"}, "5.000,00", "", PROPONENTE)
-    assert it.kind == "negociacao" and "Egregio" in it.text and it.recipient[-1] == "Juzgado 3"
+    pl = cartas.build_letter({**base, "country": "PL"}, "5.000,00", "", PROPONENTE)
+    assert pl.kind == "negociacao" and "Dear Sir/Madam" in pl.text and pl.recipient[-1] == "Juzgado 3"
     pt = cartas.build_letter({**base, "country": "PT"}, "5.000,00", "", PROPONENTE)
     assert pt.text.startswith("Teste Proponente\nNIF: 123456789") and "Assunto:" in pt.text
     assert "cinco mil euros" in pt.text and pt.place_date.startswith("Guarda, ")

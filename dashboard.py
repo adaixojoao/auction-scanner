@@ -377,6 +377,10 @@ def _sale_label(item: dict, raw: dict) -> str:
     src, ch = item.get("source"), channel(item)
     if ch == "lawyer":
         return "Court hearing (lawyer)"
+    if ch == "hearing":
+        return "Court hearing (in person)"
+    if ch == "formal":
+        return "Court sale (formal offer)"
     if ch == "online":
         return "Online auction"
     if src in PT_BANK_SOURCES or src in ES_SERVICER_SOURCES:
@@ -405,7 +409,7 @@ def _format_amount(value) -> str:
 
 
 def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
-    from letters import channel, classify_property, guidance, letter_types_for, place_of
+    from letters import bid_card, channel, classify_property, guidance, letter_types_for, place_of
     raw = _raw(it)
     area = it.get("area_m2") or 0
     types = [t.public(it) for t in letter_types_for(it)]
@@ -429,6 +433,7 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
         "modalidade": _modalidade(it, raw),
         "sale": _sale_label(it, raw),
         "channel": channel(it),
+        "bid_card": bid_card(it),     # where the bid is made outside the app, to log it here
         "guidance": guidance(it),
         "letter_types": types,
         "categoria": classify_property(it.get("title") or "", it.get("description") or "", area) or "IMOVEL",
@@ -511,8 +516,9 @@ def _letter_for(listing_id: str, bid: str, bid_text: str, letter_type: str | Non
 
 def bid_warning(item: dict, bid: str, letter_type: str | None = None) -> str | None:
     """Amounts that cannot work: below 85% of the valor base in Portuguese court
-    sales by sealed bid or e-leilão, or a French maximum below the mise à prix."""
-    from letters import PT_COURT_SOURCES, parse_bid
+    sales by sealed bid or e-leilão, a French maximum below the mise à prix, an
+    Italian offer below the offerta minima, a German bid below the ZVG limits."""
+    from letters import DE_COURT_SOURCES, IT_COURT_SOURCES, PT_COURT_SOURCES, parse_bid
     price, value = item.get("price"), parse_bid(bid) or 0
     if not price:
         return None
@@ -526,6 +532,13 @@ def bid_warning(item: dict, bid: str, letter_type: str | None = None) -> str | N
     if letter_type == "fr_mandat" and value < price:
         return (f"Bidding starts at the mise à prix of EUR {price:,.0f}, so a maximum below it "
                 "cannot win. Final prices are usually well above it.")
+    if letter_type == "online" and item.get("source") in IT_COURT_SOURCES and value < price * 0.75:
+        return (f"Below the offerta minima of EUR {price * 0.75:,.0f} (75% of the base price): "
+                "such an offer is not admissible.")
+    if letter_type == "online" and item.get("source") in DE_COURT_SOURCES and value < price * 0.7:
+        return (f"Below 70% of the Verkehrswert (EUR {price * 0.7:,.0f}): at the first hearing the creditor "
+                f"can ask for the sale to be refused, and bids under EUR {price * 0.5:,.0f} (half) are "
+                "refused outright. At a later hearing these limits no longer apply.")
     return None
 
 
