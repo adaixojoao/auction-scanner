@@ -33,6 +33,510 @@ TERRENO_CONSTRUCAO_KEYWORDS = [
 
 MIN_HERDADE_M2 = 5000
 
+# ── Multi-country carta templates ────────────────────────────────────────────
+
+CARTA_TEMPLATES = {
+    "PT": {
+        "subject": "Proposta de Aquisição — Processo {processo}",
+        "salutation": "Exmo(a). Sr(a). Juiz / Agente de Execução",
+        "carta_fechada": """Exmo(a). Sr(a),
+
+Venho por este meio apresentar proposta de aquisição do imóvel em venda mediante proposta em carta fechada no âmbito do processo acima referido.
+
+Descrição do bem: {title}
+Localização: {location}
+Área: {area}
+
+PROPOSTA DE AQUISIÇÃO:
+
+   Proponente: {nome}
+   NIF: {nif}
+   Morada: {morada}
+   Email: {email}
+   Valor da proposta: EUR {bid} ({bid_text})
+
+Solicito igualmente informação sobre:
+   1. O prazo limite para entrega de propostas;
+   2. Se é necessário juntar cheque visado de caução e montante;
+   3. O local e horário para entrega de propostas;
+   4. A data prevista para abertura das propostas.
+
+Encontro-me disponível para qualquer esclarecimento adicional.
+
+Com os melhores cumprimentos,
+
+
+
+{nome}
+NIF: {nif}""",
+        "negociacao": """Exmo(a). Sr(a),
+
+Venho por este meio manifestar o meu interesse na aquisição do imóvel em venda por negociação particular no âmbito do processo acima referido.
+
+Descrição do bem: {title}
+Localização: {location}
+Área: {area}
+
+Apresento a seguinte proposta de aquisição:
+
+   Valor: EUR {bid} ({bid_text})
+
+Dados do proponente:
+   Nome: {nome}
+   NIF: {nif}
+   Morada: {morada}
+   Email: {email}
+
+Solicito que me informem sobre os procedimentos necessários para formalizar a proposta.
+
+Com os melhores cumprimentos,
+
+
+
+{nome}
+NIF: {nif}""",
+    },
+    "ES": {
+        "subject": "Propuesta de Adquisición — Subasta {processo}",
+        "salutation": "Estimado/a Sr./Sra. Letrado/a de la Administración de Justicia",
+        "carta_fechada": """Estimado/a Sr./Sra.,
+
+Por medio de la presente, me dirijo a usted para presentar oferta de adquisición del bien inmueble objeto de subasta en el procedimiento arriba referenciado.
+
+Descripción del bien: {title}
+Localización: {location}
+Superficie: {area}
+
+OFERTA DE ADQUISICIÓN:
+
+   Licitador: {nome}
+   NIF/NIE: {nif}
+   Domicilio: {morada}
+   Email: {email}
+   Importe ofertado: EUR {bid}
+
+Solicito asimismo información sobre:
+   1. El plazo límite para la presentación de ofertas;
+   2. Si es necesario constituir depósito previo y su importe;
+   3. El lugar y horario de presentación de ofertas;
+   4. La fecha prevista para la apertura de plicas.
+
+Quedo a su disposición para cualquier aclaración.
+
+Atentamente,
+
+
+
+{nome}
+NIF/NIE: {nif}""",
+        "negociacao": """Estimado/a Sr./Sra.,
+
+Me pongo en contacto con ustedes para manifestar mi interés en la adquisición del inmueble en venta directa en el marco del procedimiento arriba referenciado.
+
+Descripción del bien: {title}
+Localización: {location}
+Superficie: {area}
+
+Presento la siguiente oferta:
+
+   Importe: EUR {bid}
+
+Datos del comprador:
+   Nombre: {nome}
+   NIF/NIE: {nif}
+   Domicilio: {morada}
+   Email: {email}
+
+Quedo a su disposición para formalizar la propuesta.
+
+Atentamente,
+
+
+
+{nome}
+NIF/NIE: {nif}""",
+    },
+    "FR": {
+        "subject": "Offre d'Acquisition — Dossier {processo}",
+        "salutation": "Maître / Madame, Monsieur le Juge",
+        "carta_fechada": """Maître / Madame, Monsieur,
+
+J'ai l'honneur de vous soumettre une offre d'acquisition pour le bien immobilier mis en vente aux enchères judiciaires dans le cadre de la procédure susmentionnée.
+
+Description du bien: {title}
+Localisation: {location}
+Surface: {area}
+
+OFFRE D'ACQUISITION:
+
+   Acquéreur: {nome}
+   Passeport/ID: {nif}
+   Adresse: {morada}
+   Email: {email}
+   Montant proposé: EUR {bid}
+
+Je sollicite également les informations suivantes:
+   1. La date limite de dépôt des offres;
+   2. Les modalités de constitution de la consignation;
+   3. Le lieu et les horaires de dépôt des plis;
+   4. La date d'ouverture des plis.
+
+Je reste à votre disposition pour tout renseignement complémentaire.
+
+Veuillez agréer, Maître, l'expression de mes salutations distinguées,
+
+
+
+{nome}""",
+        "negociacao": """Maître / Madame, Monsieur,
+
+Je me permets de vous contacter afin de manifester mon intérêt pour l'acquisition du bien immobilier en vente dans le cadre de la procédure susmentionnée.
+
+Description du bien: {title}
+Localisation: {location}
+Surface: {area}
+
+Je vous soumets l'offre suivante:
+
+   Montant: EUR {bid}
+
+Coordonnées:
+   Nom: {nome}
+   Passeport/ID: {nif}
+   Adresse: {morada}
+   Email: {email}
+
+Dans l'attente de votre retour, veuillez agréer mes salutations distinguées,
+
+
+
+{nome}""",
+    },
+    "DE": {
+        "subject": "Gebot — Zwangsversteigerung {processo}",
+        "salutation": "Sehr geehrte Damen und Herren",
+        "carta_fechada": """Sehr geehrte Damen und Herren,
+
+hiermit möchte ich ein Gebot für die im oben genannten Zwangsversteigerungsverfahren angebotene Immobilie abgeben.
+
+Beschreibung: {title}
+Lage: {location}
+Fläche: {area}
+
+GEBOT:
+
+   Bieter: {nome}
+   Ausweis-Nr.: {nif}
+   Anschrift: {morada}
+   E-Mail: {email}
+   Gebotsbetrag: EUR {bid}
+
+Ich bitte um Auskunft über:
+   1. Die Frist zur Abgabe von Geboten;
+   2. Ob eine Sicherheitsleistung erforderlich ist und in welcher Höhe;
+   3. Den Ort und die Zeit der Gebotsöffnung.
+
+Für Rückfragen stehe ich gerne zur Verfügung.
+
+Mit freundlichen Grüßen,
+
+
+
+{nome}""",
+        "negociacao": """Sehr geehrte Damen und Herren,
+
+ich interessiere mich für den Erwerb der oben genannten Immobilie und möchte folgendes Angebot unterbreiten:
+
+Beschreibung: {title}
+Lage: {location}
+Fläche: {area}
+
+Angebotspreis: EUR {bid}
+
+Meine Kontaktdaten:
+   Name: {nome}
+   Ausweis-Nr.: {nif}
+   Anschrift: {morada}
+   E-Mail: {email}
+
+Mit freundlichen Grüßen,
+
+
+
+{nome}""",
+    },
+    "IT": {
+        "subject": "Offerta di Acquisto — Procedura {processo}",
+        "salutation": "Egregio/a Signor/a Giudice / Delegato alla vendita",
+        "carta_fechada": """Egregio/a Signor/a,
+
+Con la presente intendo presentare un'offerta di acquisto per l'immobile oggetto di vendita giudiziaria nell'ambito della procedura in oggetto.
+
+Descrizione del bene: {title}
+Ubicazione: {location}
+Superficie: {area}
+
+OFFERTA DI ACQUISTO:
+
+   Offerente: {nome}
+   Codice Fiscale/Passaporto: {nif}
+   Indirizzo: {morada}
+   Email: {email}
+   Importo offerto: EUR {bid}
+
+Chiedo inoltre informazioni su:
+   1. Il termine per la presentazione delle offerte;
+   2. Se è richiesta una cauzione e il relativo importo;
+   3. Il luogo e l'orario di presentazione delle buste;
+   4. La data di apertura delle offerte.
+
+Resto a disposizione per qualsiasi chiarimento.
+
+Distinti saluti,
+
+
+
+{nome}""",
+        "negociacao": """Egregio/a Signor/a,
+
+Mi rivolgo a Lei per manifestare il mio interesse nell'acquisto dell'immobile in vendita nell'ambito della procedura sopra indicata.
+
+Descrizione del bene: {title}
+Ubicazione: {location}
+Superficie: {area}
+
+Offerta: EUR {bid}
+
+Dati dell'acquirente:
+   Nome: {nome}
+   Codice Fiscale/Passaporto: {nif}
+   Indirizzo: {morada}
+   Email: {email}
+
+Distinti saluti,
+
+
+
+{nome}""",
+    },
+    "NL": {
+        "subject": "Bod — Executieveiling {processo}",
+        "salutation": "Geachte heer/mevrouw",
+        "carta_fechada": """Geachte heer/mevrouw,
+
+Hierbij doe ik een bod op het onroerend goed dat wordt geveild in het kader van bovengenoemde executieprocedure.
+
+Omschrijving: {title}
+Locatie: {location}
+Oppervlakte: {area}
+
+BOD:
+
+   Bieder: {nome}
+   Paspoort/ID: {nif}
+   Adres: {morada}
+   E-mail: {email}
+   Bedrag: EUR {bid}
+
+Ik verzoek u mij te informeren over:
+   1. De uiterste termijn voor het indienen van biedingen;
+   2. Of een waarborgsom vereist is en het bedrag daarvan;
+   3. De locatie en tijd van de biedopening.
+
+Met vriendelijke groet,
+
+
+
+{nome}""",
+        "negociacao": """Geachte heer/mevrouw,
+
+Ik heb interesse in de aankoop van bovengenoemd onroerend goed en doe hierbij het volgende bod:
+
+Omschrijving: {title}
+Locatie: {location}
+Oppervlakte: {area}
+
+Bod: EUR {bid}
+
+Mijn gegevens:
+   Naam: {nome}
+   Paspoort/ID: {nif}
+   Adres: {morada}
+   E-mail: {email}
+
+Met vriendelijke groet,
+
+
+
+{nome}""",
+    },
+    "HR": {
+        "subject": "Ponuda za kupnju — Predmet {processo}",
+        "salutation": "Poštovani/a",
+        "carta_fechada": """Poštovani/a,
+
+Ovim putem podnosim ponudu za kupnju nekretnine koja se prodaje u okviru gore navedenog postupka.
+
+Opis nekretnine: {title}
+Lokacija: {location}
+Površina: {area}
+
+PONUDA ZA KUPNJU:
+
+   Ponuditelj: {nome}
+   Putovnica/OIB: {nif}
+   Adresa: {morada}
+   E-pošta: {email}
+   Ponuđeni iznos: EUR {bid}
+
+Molim Vas da me obavijestite o:
+   1. Roku za dostavu ponuda;
+   2. Je li potrebno položiti jamčevinu i u kojem iznosu;
+   3. Mjestu i vremenu otvaranja ponuda.
+
+S poštovanjem,
+
+
+
+{nome}""",
+        "negociacao": """Poštovani/a,
+
+Zainteresiran/a sam za kupnju gore navedene nekretnine i podnosim sljedeću ponudu:
+
+Opis: {title}
+Lokacija: {location}
+Površina: {area}
+
+Ponuda: EUR {bid}
+
+Podaci kupca:
+   Ime i prezime: {nome}
+   Putovnica/OIB: {nif}
+   Adresa: {morada}
+   E-pošta: {email}
+
+S poštovanjem,
+
+
+
+{nome}""",
+    },
+}
+
+# English fallback
+CARTA_TEMPLATES["DEFAULT"] = {
+    "subject": "Purchase Offer — Case {processo}",
+    "salutation": "Dear Sir/Madam",
+    "carta_fechada": """Dear Sir/Madam,
+
+I hereby submit a purchase offer for the property being sold in the above-referenced judicial proceedings.
+
+Property description: {title}
+Location: {location}
+Area: {area}
+
+PURCHASE OFFER:
+
+   Bidder: {nome}
+   Passport/ID: {nif}
+   Address: {morada}
+   Email: {email}
+   Offered amount: EUR {bid}
+
+I would also appreciate information on:
+   1. The deadline for submitting offers;
+   2. Whether a deposit is required and the amount;
+   3. The location and time for offer submission;
+   4. The date of offer opening.
+
+I remain available for any further clarification.
+
+Kind regards,
+
+
+
+{nome}""",
+    "negociacao": """Dear Sir/Madam,
+
+I am interested in purchasing the above-mentioned property and submit the following offer:
+
+Description: {title}
+Location: {location}
+Area: {area}
+
+Offer: EUR {bid}
+
+Buyer details:
+   Name: {nome}
+   Passport/ID: {nif}
+   Address: {morada}
+   Email: {email}
+
+Kind regards,
+
+
+
+{nome}""",
+}
+
+_MONTH_NAMES = {
+    "PT": ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"],
+    "ES": ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"],
+    "FR": ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"],
+    "IT": ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"],
+}
+
+
+def _today_for_country(country: str) -> str:
+    from datetime import date
+    d = date.today()
+    if country in _MONTH_NAMES:
+        return f"Guarda, {d.day} de {_MONTH_NAMES[country][d.month-1]} de {d.year}"
+    if country == "DE":
+        return f"Guarda, den {d.strftime('%d.%m.%Y')}"
+    if country == "HR":
+        return f"Guarda, {d.strftime('%d.%m.%Y.')}"
+    if country == "NL":
+        return f"Guarda, {d.strftime('%d-%m-%Y')}"
+    return f"Guarda, {d.strftime('%Y-%m-%d')}"
+
+
+def build_carta_for_country(item: dict, raw: dict, bid: str, bid_text: str,
+                            proponente: dict, country: str) -> str:
+    tmpl = CARTA_TEMPLATES.get(country, CARTA_TEMPLATES["DEFAULT"])
+    modalidade = raw.get("modalidade", "").lower()
+    is_neg = "negoci" in modalidade or "direct" in modalidade or "private" in modalidade
+    body_key = "negociacao" if is_neg else "carta_fechada"
+
+    processo = raw.get("processo", item.get("external_id", ""))
+    loc = ", ".join(filter(None, [item.get("concelho"), item.get("district")]))
+    area = f"{item['area_m2']:,.0f} m²" if item.get("area_m2") else "n/a"
+
+    header = (
+        f"{proponente['nome']}\n"
+        f"NIF/ID: {proponente['nif']}\n"
+        f"{proponente['morada']}\n\n"
+        f"{_today_for_country(country)}\n\n"
+        f"{tmpl['salutation']}\n"
+        f"{raw.get('tribunal', '')}\n\n"
+        f"{tmpl['subject'].format(processo=processo)}\n\n"
+    )
+
+    body = tmpl[body_key].format(
+        title=item.get("title", ""),
+        location=loc,
+        area=area,
+        nome=proponente["nome"],
+        nif=proponente["nif"],
+        morada=proponente["morada"],
+        email=proponente.get("email", ""),
+        bid=bid,
+        bid_text=bid_text,
+        processo=processo,
+    )
+
+    return header + body
+
 
 def _safe_latin1(text: str) -> str:
     if not text:

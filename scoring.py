@@ -54,25 +54,87 @@ DWELLING_WORDS = [
 
 RUIN_WORDS = ["ruína", "ruina", "ruine", "rudere", "ruin", "arruinado"]
 
-# INE 2024 average price/m² by distrito
-PRICE_PER_M2 = {
-    "Lisboa": 4200, "Porto": 3100, "Cascais": 4800, "Sintra": 2800,
-    "Braga": 1800, "Coimbra": 1900, "Faro": 2600, "Setúbal": 2200,
-    "Guarda": 900, "Viseu": 1100, "Castelo Branco": 850, "Beja": 750,
-    "Évora": 1400, "Portalegre": 700, "Viana do Castelo": 1300,
-    "Vila Real": 950, "Bragança": 800, "Santarém": 1100,
-    "Leiria": 1500, "Aveiro": 1700,
-    "Ilha da Madeira": 2000, "Ilha de São Miguel": 1200,
+MARKET_PRICE_PER_M2 = {
+    "PT": {
+        "Lisboa": 4200, "Porto": 3100, "Cascais": 4800, "Sintra": 2800,
+        "Braga": 1800, "Coimbra": 1900, "Faro": 2600, "Setúbal": 2200, "Setubal": 2200,
+        "Guarda": 900, "Viseu": 1100, "Castelo Branco": 850, "Beja": 750,
+        "Évora": 1400, "Evora": 1400, "Portalegre": 700, "Viana do Castelo": 1300,
+        "Vila Real": 950, "Bragança": 800, "Braganca": 800, "Santarém": 1100, "Santarem": 1100,
+        "Leiria": 1500, "Aveiro": 1700, "Almada": 2800, "Amadora": 2600,
+        "Loures": 2200, "Oeiras": 3500, "Matosinhos": 2400,
+        "Vila Nova de Gaia": 2200, "Gondomar": 1800,
+        "Ilha da Madeira": 2000, "Ilha de São Miguel": 1200,
+    },
+    "ES": {
+        "Madrid": 4500, "Barcelona": 4200, "Valencia": 2100, "Sevilla": 1900,
+        "Bilbao": 3200, "Malaga": 2800, "Zaragoza": 1600, "Murcia": 1400,
+        "Palma": 3500, "Las Palmas": 2200, "Alicante": 1800, "Cordoba": 1300,
+        "Valladolid": 1500, "Vigo": 1700, "Granada": 1600, "Toledo": 1200,
+    },
+    "FR": {
+        "Paris": 9500, "Lyon": 4800, "Marseille": 3200, "Toulouse": 3600,
+        "Nice": 4500, "Nantes": 3800, "Strasbourg": 3500, "Montpellier": 3400,
+        "Bordeaux": 4200, "Lille": 3000, "Rennes": 3600, "Reims": 2400,
+        "Saint-Etienne": 1800, "Grenoble": 3200, "Dijon": 2600, "Angers": 2800,
+    },
+    "DE": {
+        "München": 8500, "Munich": 8500, "Frankfurt": 6500, "Hamburg": 6000,
+        "Berlin": 5500, "Stuttgart": 5800, "Düsseldorf": 4500, "Köln": 4800,
+        "Leipzig": 3200, "Dresden": 3000, "Hannover": 3200, "Nürnberg": 4200,
+        "Bremen": 3000, "Dortmund": 2800, "Essen": 2600, "Bonn": 4000,
+    },
+    "IT": {
+        "Milano": 5500, "Roma": 3800, "Napoli": 2200, "Torino": 2400,
+        "Firenze": 3500, "Bologna": 3200, "Venezia": 4500, "Genova": 2000,
+        "Palermo": 1400, "Catania": 1200, "Bari": 1600, "Verona": 2800,
+        "Padova": 2600, "Trieste": 2200, "Perugia": 1800,
+    },
+    "NL": {
+        "Amsterdam": 6500, "Rotterdam": 4200, "Den Haag": 4800, "Utrecht": 5200,
+        "Eindhoven": 4000, "Groningen": 3200, "Tilburg": 3400, "Almere": 3800,
+        "Breda": 3600, "Nijmegen": 3800, "Haarlem": 5500, "Arnhem": 3200,
+    },
+    "HR": {
+        "Zagreb": 2800, "Split": 3200, "Rijeka": 2200, "Osijek": 1200,
+        "Zadar": 2800, "Pula": 2600, "Dubrovnik": 5500, "Varazdin": 1400,
+    },
+    "GR": {
+        "Athina": 2200, "Athens": 2200, "Thessaloniki": 1600, "Patra": 1200,
+        "Heraklion": 1800, "Larissa": 1000, "Rhodes": 2500, "Corfu": 2800,
+    },
+    "BE": {
+        "Bruxelles": 3800, "Brussels": 3800, "Antwerpen": 3200, "Gent": 3000,
+        "Liege": 1800, "Bruges": 3200, "Namur": 2000, "Leuven": 3400,
+    },
+    "RO": {
+        "Bucuresti": 1600, "Bucharest": 1600, "Cluj-Napoca": 1800,
+        "Timisoara": 1400, "Iasi": 1200, "Constanta": 1300, "Brasov": 1600,
+    },
+    "PL": {
+        "Warszawa": 2800, "Warsaw": 2800, "Krakow": 2400, "Wroclaw": 2200,
+        "Poznan": 2000, "Gdansk": 2200, "Lodz": 1400, "Katowice": 1600,
+    },
+    "CY": {
+        "Nicosia": 1800, "Limassol": 3200, "Larnaca": 2000, "Paphos": 2800,
+    },
 }
+
+# Backward compat alias
+PRICE_PER_M2 = MARKET_PRICE_PER_M2["PT"]
 
 
 def market_value_estimate(item: dict) -> float | None:
-    district = (item.get("district") or "").strip()
     area = item.get("area_m2") or 0
-    if not district or not area or area < 5:
+    if not area or area < 5:
         return None
-    for name, ppm2 in PRICE_PER_M2.items():
-        if name.lower() in district.lower() or district.lower() in name.lower():
+    country = item.get("country", "PT")
+    concelho = (item.get("concelho") or item.get("district") or "").strip()
+    if not concelho:
+        return None
+    country_data = MARKET_PRICE_PER_M2.get(country, {})
+    for name, ppm2 in country_data.items():
+        if name.lower() in concelho.lower() or concelho.lower() in name.lower():
             return area * ppm2
     return None
 

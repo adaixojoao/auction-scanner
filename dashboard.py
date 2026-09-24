@@ -488,13 +488,15 @@ def api_cartas_candidates():
     from scoring import score as _score_fn, categorize as _categorize
     from cartas import classify_property, suggest_bid
 
+    country = request.args.get("country", "")
     db = get_db()
     cols = [d[0] for d in db.execute("SELECT * FROM listings LIMIT 0").description]
-    rows = db.execute(
-        "SELECT * FROM listings "
-        "WHERE country='PT' AND source='citius' "
-        "AND (date_end IS NULL OR date_end > datetime('now'))"
-    ).fetchall()
+    q = "SELECT * FROM listings WHERE (date_end IS NULL OR date_end > datetime('now'))"
+    params = []
+    if country:
+        q += " AND country=?"
+        params.append(country)
+    rows = db.execute(q, params).fetchall()
     db.close()
 
     items = [dict(zip(cols, r)) for r in rows]
@@ -533,6 +535,7 @@ def api_cartas_candidates():
 
         candidates.append({
             "id": it.get("id") or str(hash(it.get("url", ""))),
+            "country": it.get("country", "PT"),
             "title": title,
             "description": desc[:300],
             "location": ", ".join(filter(None, [it.get("concelho", ""), it.get("district", "")])),
@@ -573,34 +576,55 @@ def api_analyze_property():
     if not data:
         return jsonify({"error": "No data"}), 400
 
-    prompt = f"""És um especialista em imóveis portugueses e leilões judiciais com 20 anos de experiência.
-O comprador quer adquirir imóveis significativamente abaixo do valor de mercado para fins caritativos.
+    COUNTRY_CONTEXT = {
+        "PT": "Portugal. Venda judicial via Citius. Carta fechada = sealed bid. Risco: dívidas de IMI transferem para comprador.",
+        "ES": "Spain. Subastas judiciales via BOE. Minimum bid 50-75% of appraised value. Risk: occupants with legal protection.",
+        "FR": "France. Enchères judiciaires via licitor.com. Buyer pays ~8% notary fees. Risk: occupants with droit au maintien.",
+        "DE": "Germany. Zwangsversteigerung. No minimum bid by law. Risk: Grundschuld not cleared.",
+        "IT": "Italy. Vendita giudiziaria via pvp.giustizia.it. Starting bid 25% below appraisal. Risk: occupants, condominium debts.",
+        "NL": "Netherlands. Executieveiling. No minimum bid. 2% transfer tax. Risk: hidden defects, no warranty.",
+        "HR": "Croatia. Forced sale via FINA/e-oglasna. Starts 75% market, drops to 50% second round. Risk: unclear title.",
+        "GR": "Greece. Electronic auction via eauction.gr. Starting bid 2/3 of appraisal. Risk: ENFIA tax debts transfer.",
+        "BE": "Belgium. Notary auction via biddit.be. Legally binding bid. Risk: structural defects, no warranty.",
+        "RO": "Romania. ANAF tax seizure. Risk: multiple creditors, unclear priority.",
+        "PL": "Poland. Bailiff auction. First: 3/4 appraised, second: 1/2. Risk: occupants, mortgage not cleared.",
+        "CY": "Cyprus. Forced sale via DLS. Risk: title deeds not issued, occupants.",
+    }
+    country = data.get("country", "PT")
+    ctx = COUNTRY_CONTEXT.get(country, "European judicial auction.")
 
-DADOS DO IMÓVEL:
-- Título: {data.get('title','')}
-- Localização: {data.get('location','')}
-- Área: {data.get('area_m2','')} m²
-- Valor base (VB): €{data.get('price','')}
-- Lance atual: €{data.get('current_bid','Sem lances')}
-- Modalidade: {data.get('modalidade','')}
-- Categoria: {data.get('categoria','')}
-- Prazo: {data.get('date_end','')}
-- Tribunal: {data.get('tribunal','')}
-- Processo: {data.get('processo','')}
-- Descrição completa: {data.get('description','')}
-- Score automático: {data.get('score','')}/100
-- Razões do score: {', '.join(data.get('reasons',[]))}
-- Proposta sugerida: EUR {data.get('bid','')}
+    prompt = f"""You are an expert in European judicial property auctions with 20 years of experience.
+The buyer wants to acquire properties significantly below market value for charitable purposes.
+They are based in Portugal but buy across the EU.
 
-VERIFICA ESPECIFICAMENTE:
-1. A descrição contém "direito de superfície", "aforamento", "bem indiviso", "herança", "compropriedade", "usufruto"? Se sim, é um RED FLAG.
-2. O número do processo parece antigo (ex: /2015, /2016)? Processos antigos podem ter complicações acumuladas.
-3. A área e o preço fazem sentido para a localização? Calcula €/m² e compara com o mercado local.
-4. Para uma moradia/apartamento: estima custo de renovação básico (€100-200/m² para obras ligeiras, €300-500/m² para obras pesadas).
-5. Vale a pena visitar antes de licitar, ou é seguro licitar sem visita?
-6. Se for carta fechada: qual é o bid máximo que faz sentido dado o risco?
+COUNTRY CONTEXT: {ctx}
 
-Responde APENAS com este JSON (sem texto adicional):
+PROPERTY DATA:
+- Title: {data.get('title','')}
+- Country: {country}
+- Location: {data.get('location','')}
+- Area: {data.get('area_m2','')} m²
+- Base value: €{data.get('price','')}
+- Current bid: €{data.get('current_bid','No bids')}
+- Sale type: {data.get('modalidade','')}
+- Category: {data.get('categoria','')}
+- Deadline: {data.get('date_end','')}
+- Court/Agent: {data.get('tribunal','')}
+- Case number: {data.get('processo','')}
+- Description: {data.get('description','')}
+- Auto score: {data.get('score','')}/100
+- Score reasons: {', '.join(data.get('reasons',[]))}
+- Suggested bid: EUR {data.get('bid','')}
+
+CHECK SPECIFICALLY:
+1. Red flags in description (occupants, tax debts, unclear title, usufruct, fractional ownership)?
+2. Is the case number old (pre-2020)? Old cases accumulate complications.
+3. Does price/m² make sense for the location? Compare with local market.
+4. Estimate renovation cost if dwelling (€100-200/m² light, €300-500/m² heavy).
+5. Can this be bid on remotely from Portugal, or is physical presence required?
+6. What is the realistic all-in cost (bid + taxes + fees + renovation)?
+
+Respond ONLY with this JSON (no other text):
 {{
   "veredicto": "COMPRAR" | "INVESTIGAR" | "PASSAR",
   "confianca": 1-10,

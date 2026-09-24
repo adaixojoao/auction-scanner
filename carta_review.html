@@ -79,6 +79,16 @@ const MESES=["janeiro","fevereiro","marco","abril","maio","junho","julho","agost
 const hoje=()=>{const d=new Date();return `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;};
 const PRESETS=["1.000,00","2.500,00","4.000,00","5.000,00","7.500,00","10.000,00"];
 const MSTYLE={"CARTA FECHADA":"background:rgba(59,130,246,.15);color:#60a5fa","NEGOCIACAO PARTICULAR":"background:rgba(168,85,247,.15);color:#c084fc","ADJUDICACAO":"background:rgba(234,179,8,.15);color:#eab308"};
+const FLAGS={PT:"\u{1F1F5}\u{1F1F9}",ES:"\u{1F1EA}\u{1F1F8}",FR:"\u{1F1EB}\u{1F1F7}",DE:"\u{1F1E9}\u{1F1EA}",IT:"\u{1F1EE}\u{1F1F9}",NL:"\u{1F1F3}\u{1F1F1}",HR:"\u{1F1ED}\u{1F1F7}",GR:"\u{1F1EC}\u{1F1F7}",BE:"\u{1F1E7}\u{1F1EA}",RO:"\u{1F1F7}\u{1F1F4}",PL:"\u{1F1F5}\u{1F1F1}",CY:"\u{1F1E8}\u{1F1FE}"};
+const CT={
+  PT:{sal:"Exmo(a). Sr(a). Juiz / Agente de Execucao",close:"Com os melhores cumprimentos,"},
+  ES:{sal:"Estimado/a Sr./Sra. Letrado/a de la Administracion de Justicia",close:"Atentamente,"},
+  FR:{sal:"Maitre / Madame, Monsieur le Juge",close:"Veuillez agreer mes salutations distinguees,"},
+  DE:{sal:"Sehr geehrte Damen und Herren",close:"Mit freundlichen Grussen,"},
+  IT:{sal:"Egregio/a Signor/a Giudice",close:"Distinti saluti,"},
+  NL:{sal:"Geachte heer/mevrouw",close:"Met vriendelijke groet,"},
+  HR:{sal:"Postovani/a",close:"S postovanjem,"},
+};
 
 let items = [];
 fetch('/api/cartas-candidates')
@@ -94,13 +104,15 @@ fetch('/api/cartas-candidates')
 let selId=null,curF="all";
 
 function buildCarta(c){
-  const loc=c.location||"",area=c.area_m2?c.area_m2.toLocaleString()+" m2":"area nao especificada",proc=(c.processo||"").split(",")[0].trim();
-  const isNeg=(c.modalidade||"").includes("NEGOCIACAO"),isAdj=(c.modalidade||"").includes("ADJUDICACAO");
-  const hdr=`${P.nome}\nNIF: ${P.nif}\n${P.morada}\n\nGuarda, ${hoje()}\n\nExmo(a). Sr(a). Juiz / Agente de Execucao\n${c.tribunal||""}\n\nAssunto: Proposta de Aquisicao -- Processo ${proc}\n\n`;
-  const dados=`Dados do proponente:\n   Nome: ${P.nome}\n   NIF: ${P.nif}\n   Morada: ${P.morada}\n   Email: ${P.email}`;
-  if(isNeg)return hdr+`Exmo(a). Sr(a),\n\nVenho por este meio manifestar o meu interesse na aquisicao do imovel em venda por negociacao particular no ambito do processo acima referido.\n\nDescricao do bem: ${c.title}\nLocalizacao: ${loc}\nArea: ${area}\n\nApresento a seguinte proposta de aquisicao:\n\n   Valor: EUR ${c.bid} (${c.bidText})\n\n${dados}\n\nSolicito que me informem sobre:\n   1. Os procedimentos necessarios para formalizar a proposta;\n   2. Se e necessario deposito de caucao e respetivo montante;\n   3. O contacto direto do encarregado da venda.\n\nEncontro-me disponivel para qualquer esclarecimento adicional e para deslocacao ao imovel para visita.\n\nCom os melhores cumprimentos,\n\n\n\n${P.nome}\nNIF: ${P.nif}`;
-  if(isAdj)return hdr+`Exmo(a). Sr(a),\n\nVenho por este meio manifestar o meu interesse na aquisicao do imovel no ambito do processo acima referido, atualmente em fase de adjudicacao.\n\nDescricao do bem: ${c.title}\nLocalizacao: ${loc}\nArea: ${area}\n\nCaso ainda seja possivel apresentar proposta, ofereco:\n\n   Valor: EUR ${c.bid} (${c.bidText})\n\n${dados}\n\nSolicito informacao sobre o estado atual da venda e se ainda e possivel apresentar proposta.\n\nCom os melhores cumprimentos,\n\n\n\n${P.nome}\nNIF: ${P.nif}`;
-  return hdr+`Exmo(a). Sr(a),\n\nVenho por este meio apresentar proposta de aquisicao do imovel em venda mediante proposta em carta fechada no ambito do processo acima referido.\n\nDescricao do bem: ${c.title}\nLocalizacao: ${loc}\nArea: ${area}\n\nPROPOSTA DE AQUISICAO:\n\n   Proponente: ${P.nome}\n   NIF: ${P.nif}\n   Morada: ${P.morada}\n   Email: ${P.email}\n   Valor da proposta: EUR ${c.bid} (${c.bidText})\n\nSolicito igualmente informacao sobre:\n   1. O prazo limite para entrega de propostas;\n   2. Se e necessario juntar cheque visado de caucao e montante;\n   3. O local e horario para entrega de propostas;\n   4. A data prevista para abertura das propostas.\n\nEncontro-me disponivel para qualquer esclarecimento adicional.\n\nCom os melhores cumprimentos,\n\n\n\n${P.nome}\nNIF: ${P.nif}`;
+  const cc=c.country||"PT",tmpl=CT[cc]||CT.PT;
+  const loc=c.location||"",area=c.area_m2?c.area_m2.toLocaleString()+" m2":"n/a",proc=(c.processo||"").split(",")[0].trim();
+  const isNeg=(c.modalidade||"").includes("NEGOCI");
+  const hdr=`${P.nome}\nNIF/ID: ${P.nif}\n${P.morada}\n\nGuarda, ${hoje()}\n\n${tmpl.sal}\n${c.tribunal||""}\n\n`;
+  const subj=cc==="PT"?"Proposta de Aquisicao":cc==="ES"?"Propuesta de Adquisicion":cc==="FR"?"Offre d'Acquisition":cc==="DE"?"Gebot":cc==="IT"?"Offerta di Acquisto":cc==="NL"?"Bod":cc==="HR"?"Ponuda za kupnju":"Purchase Offer";
+  const body=isNeg?
+    `${hdr}${subj} -- ${proc}\n\n${c.title}\n${loc}\n${area}\n\nEUR ${c.bid} (${c.bidText})\n\n   ${P.nome}\n   NIF/ID: ${P.nif}\n   ${P.morada}\n   ${P.email}\n\n${tmpl.close}\n\n\n\n${P.nome}`:
+    `${hdr}${subj} -- ${proc}\n\n${c.title}\n${loc}\n${area}\n\nEUR ${c.bid} (${c.bidText})\n\n   ${P.nome}\n   NIF/ID: ${P.nif}\n   ${P.morada}\n   ${P.email}\n\n${tmpl.close}\n\n\n\n${P.nome}`;
+  return body;
 }
 
 function esc(s){const d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
@@ -117,7 +129,7 @@ function renderList(){
   el.innerHTML=shown.map(c=>`
     <div class="item${selId===c.id?" sel":""}${c.approved?" app":""}${c.rejected?" rej":""}" onclick="pick('${c.id}')">
       <div style="display:flex;justify-content:space-between;gap:5px;margin-bottom:4px">
-        <div style="font-size:11px;font-weight:700;color:#fff;line-height:1.3;flex:1">${esc(c.title)}</div>
+        <div style="font-size:11px;font-weight:700;color:#fff;line-height:1.3;flex:1">${FLAGS[c.country]||""} ${esc(c.title)}</div>
         <span class="sbadge" style="background:${sc_bg(c.score)};color:${sc_col(c.score)}">${c.score}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">
@@ -140,7 +152,9 @@ function renderDetail(){
   const det=document.getElementById("detail");
   if(!c){det.innerHTML='<div id="ph">&#8592; Seleciona uma propriedade</div>';return;}
   const carta=buildCarta(c);
-  const subj=`Proposta de Aquisicao -- Processo ${(c.processo||"").split(",")[0].trim()}`;
+  const cc=c.country||"PT";
+  const SUBJ={PT:"Proposta de Aquisicao",ES:"Propuesta de Adquisicion",FR:"Offre d'Acquisition",DE:"Gebot",IT:"Offerta di Acquisto",NL:"Bod",HR:"Ponuda za kupnju"};
+  const subj=`${SUBJ[cc]||"Purchase Offer"} -- ${(c.processo||"").split(",")[0].trim()}`;
   const mailto=`mailto:${c.agente_email||""}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(carta)}`;
   det.innerHTML=`
   <div class="card">
@@ -247,7 +261,7 @@ function updBidText(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bidTex
 function setPreset(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bid=v;const i=document.getElementById("inp-bid");if(i)i.value=v;document.querySelectorAll(".preset").forEach(b=>b.classList.toggle("on",b.textContent===v.split(",")[0]+"EUR"));refreshCarta();}
 function refreshCarta(){const c=items.find(x=>x.id===selId);if(!c)return;const ta=document.getElementById("carta-ta");if(ta)ta.value=buildCarta(c);}
 function approve(){const c=items.find(x=>x.id===selId);if(!c)return;c.approved=true;c.rejected=false;renderList();showEmail();logSent(c);toast("Aprovado");}
-function logSent(c){fetch('/api/carta-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({listing_id:c.id,processo:c.processo,tribunal:c.tribunal,sent_date:new Date().toISOString().split('T')[0],bid_amount:parseFloat((c.bid||"0").replace(/\./g,'').replace(',','.')),method:'email',outcome:'pending'})}).then(()=>toast("Carta registada no log"));}
+function logSent(c){fetch('/api/carta-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({listing_id:c.id,processo:c.processo,tribunal:c.tribunal,country:c.country||"PT",sent_date:new Date().toISOString().split('T')[0],bid_amount:parseFloat((c.bid||"0").replace(/\./g,'').replace(',','.')),method:'email',outcome:'pending'})}).then(()=>toast("Carta registada no log"));}
 function reject(){const c=items.find(x=>x.id===selId);if(!c)return;c.rejected=true;c.approved=false;renderList();toast("Rejeitado",true);}
 function showEmail(){const p=document.getElementById("epanel");if(p)p.style.display="block";}
 function copyCarta(){const ta=document.getElementById("carta-ta");if(!ta)return;navigator.clipboard.writeText(ta.value).then(()=>toast("Carta copiada!"));}

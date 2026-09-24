@@ -91,6 +91,7 @@ def init_db(db: sqlite3.Connection):
             listing_id TEXT,
             processo TEXT,
             tribunal TEXT,
+            country TEXT DEFAULT 'PT',
             sent_date TEXT,
             bid_amount REAL,
             method TEXT DEFAULT 'email',
