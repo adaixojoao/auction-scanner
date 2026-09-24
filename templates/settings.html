@@ -162,7 +162,10 @@ async function checkUpdates(ask) {
   try {
     const u = await (await fetch("/api/update" + (ask ? "?check=1" : ""))).json();
     const changes = (u.changes || []).map(c => `<li>${commitLine(c)}</li>`).join("");
-    const last = u.last_update ? `<div class="faint" style="margin-top:6px">Last update ${AS.esc(u.last_update.at.replace("T", " "))}: ${(u.last_update.changes || []).length} change(s).</div>` : "";
+    const lu = u.last_update;
+    const last = !lu ? "" : lu.rolled_back
+      ? `<div class="warn" style="margin-top:6px">${AS.esc(lu.at.replace("T", " "))}: version ${commitLine(lu.from)} did not start, so the app went back to ${commitLine(lu.to)}.</div>`
+      : `<div class="faint" style="margin-top:6px">Last update ${AS.esc(lu.at.replace("T", " "))}: ${(lu.changes || []).length} change(s).</div>`;
     $("upd_state").innerHTML = `<div>This version: ${commitLine(u.current)}</div>`
       + (u.reason ? `<div class="notice ${u.ok ? "info" : "bad"}">${AS.esc(u.reason)}</div>`
          : u.behind ? `<div class="notice info"><b>${u.behind} update(s) available</b><ul style="margin:6px 0 0 18px">${changes}</ul></div>`

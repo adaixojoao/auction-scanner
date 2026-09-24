@@ -240,9 +240,27 @@ def main() -> int:
                 return 0
         elif updater.requirements_outdated():
             LOG.info("requirements.txt: " + updater.install_requirements()[1])
-        return run_app(cfg, url, restarting)
+
+        # A new version that already failed to start here: go back to the last good one.
+        if updater.start_attempt() and updater.roll_back():
+            return _restart_after_rollback(restarting)
+        try:
+            return run_app(cfg, url, restarting)
+        except Exception:
+            LOG.exception("The app failed to start")
+            updater.start_failed()
+            if updater.roll_back():
+                return _restart_after_rollback(restarting)
+            raise
     finally:
         release_start()
+
+
+def _restart_after_rollback(restarting: bool) -> int:
+    LOG.warning("This version did not start — restarting the previous version")
+    release_start()
+    restart(reopen_window=not restarting)
+    return 0
 
 
 def run_app(cfg: dict, url: str, restarting: bool) -> int:
@@ -250,6 +268,9 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
         from werkzeug.serving import make_server
         import dashboard
     except ImportError as e:
+        import updater
+        if updater.update_pending():
+            raise                        # a new version that misses a package: main() rolls back
         show_error(f"A required package is missing: {e.name}.\n\n"
                    f"Open a terminal in {HERE} and run:\n    pip install -r requirements.txt")
         return 1
@@ -258,12 +279,16 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
     try:
         server = make_server(d.get("host", "127.0.0.1"), d.get("port", 8050), dashboard.app, threaded=True)
     except OSError as e:
+        import updater
+        updater.start_inconclusive()     # the port is taken: not the new version's fault
         show_error(f"Could not start on {url}: {e}\n\nIs another program using port {d.get('port', 8050)}?")
         return 1
 
     dashboard.app.config["RESTART_APP"] = lambda: restart(reopen_window=False)
     threading.Thread(target=server.serve_forever, name="server", daemon=True).start()
     release_start()                    # a double-click now just opens another window
+    import updater
+    updater.confirm_start()            # this version works here
     LOG.info(f"Auction Scanner running at {url}")
     if not restarting:                 # after a restart the window is already open
         open_window(url)

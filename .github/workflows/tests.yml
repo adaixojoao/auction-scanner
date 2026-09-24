@@ -6,21 +6,23 @@ on:
 
 jobs:
   test:
-    # The app runs on a Windows desktop, so the suite runs on Windows too.
+    # The app runs on a Windows desktop with Python 3.13 and updates itself from
+    # master, so the suite runs there too; 3.11 is the oldest supported version.
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
       - run: pip install -r requirements-dev.txt
       - name: Lint (unused imports, undefined names)
-        if: runner.os == 'Linux'
-        run: python -m pyflakes *.py sources/ tests/
+        if: runner.os == 'Linux' && matrix.python == '3.13'
+        run: python -m pyflakes *.py sources/ tests/ scripts/
       - name: Tests (offline — the suite refuses network access)
         run: python -m pytest -q

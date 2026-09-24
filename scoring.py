@@ -14,6 +14,8 @@ import re
 from datetime import datetime
 
 from common import days_left, find_area, find_terms, has_term, normalize, term_regex, utcnow
+import prices
+from prices import place_key as _place_key
 
 FRAC_PATTERNS = [
     "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
@@ -344,11 +346,6 @@ _MARKET_INDEX = {
 }
 
 
-def _place_key(name: str) -> str:
-    """"Lisboa (Santa Maria Maior)" / "Porto, Porto" → "lisboa" / "porto"."""
-    return re.split(r"[,(/]| - ", normalize(name))[0].strip()
-
-
 def market_value_estimate(item: dict) -> float | None:
     """area × €/m² for the listing's municipality, if we have a figure for it.
 
@@ -358,9 +355,17 @@ def market_value_estimate(item: dict) -> float | None:
     area = item.get("area_m2") or 0
     if not area or area < 5:
         return None
-    town = _known_town(item)
-    table = _MARKET_INDEX.get(item.get("country") or "PT", {})
-    return area * table[_place_key(town)] if town else None
+    found = local_price(item)
+    return area * found[0] if found else None
+
+
+def local_price(item: dict) -> tuple[float, str] | None:
+    """(€/m² of homes where the listing is, source): every Portuguese municipality
+    from INE (prices.py), else the city table. In Portugal only the concelho
+    names the place (`district` is the district, not the town)."""
+    country = item.get("country") or "PT"
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    return prices.local_price(country, place, _MARKET_INDEX)
 
 
 def buyer_priorities(targets: dict | None = None) -> str:
@@ -478,6 +483,7 @@ PRICE_POINTS = [(0, 28), (5000, 25), (15000, 20), (30000, 12), (60000, 4), (8000
 BID_RATIO_POINTS = [(0.1, 38), (0.3, 33), (0.5, 22), (0.7, 12), (1.0, 0), (1.5, -15)]
 # Price cut since first seen, in %.
 PRICE_DROP_POINTS = [(5, 0), (10, 5), (25, 10)]
+EARLIER_ROUND_POINTS = 8        # an earlier round of the same property ended unsold
 # Days left before the sale ends.
 DAYS_LEFT_POINTS = [(0.25, 9), (3, 7), (7, 3), (10, 0)]
 # Home size in m², and how far below local prices (0.4 = 40%).
@@ -574,6 +580,17 @@ def score_detail(item: dict, now: datetime | None = None,
         reasons.append("inheritance right only")
 
     # ── How cheap ─────────────────────────────────────────────────────
+    # On sale again after an earlier round ended (rounds.py): nobody bought it then,
+    # so the seller is likely to take less. First among the reasons: alerts show three.
+    er = item.get("earlier_round")
+    if er:
+        s += EARLIER_ROUND_POINTS
+        was = f" at €{er['price']:,.0f}" if er.get("price") else ""
+        reasons.insert(0, f"on sale before (ended {er['ended']}{was}) — not sold then")
+        if (er.get("cheaper_pct") or 0) >= 5:
+            s += curve(er["cheaper_pct"], PRICE_DROP_POINTS)
+            reasons.insert(1, f"{er['cheaper_pct']:.0f}% cheaper than the last round")
+
     if bid and price and price > 0:
         ratio = bid / price
         s += curve(ratio, BID_RATIO_POINTS)
@@ -708,7 +725,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         market_disc = (mv - pay) / mv
         s += curve(market_disc, MARKET_DISCOUNT_POINTS)
         if market_disc > 0.20:
-            reasons.append(f"{market_disc:.0%} below local prices")
+            reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]})")
     return s
 
 

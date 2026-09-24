@@ -66,6 +66,10 @@ The desktop app updates itself from `origin/master` every time it starts
   new settings need a default in `config.DEFAULTS`.
 - `updater.py` and the start of `app.main()` run before packages may be
   reinstalled: keep them to the standard library.
+- A version that does not start on the PC is rolled back (`updater.roll_back`)
+  and skipped until master moves on. That is a safety net, not a test: CI runs
+  the suite on Windows and Ubuntu with Python 3.11 (the oldest supported) and
+  3.13 (the PC's).
 
 ## Scrapers
 

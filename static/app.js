@@ -31,13 +31,13 @@ const AS = (() => {
   }
 
   let toastTimer;
-  function toast(msg, kind = "ok") {
+  function toast(msg, kind = "ok", ms = 2800) {
     const t = document.getElementById("toast");
     t.textContent = msg;
     t.style.background = kind === "bad" ? "#7f1d1d" : kind === "warn" ? "#78350f" : "#14532d";
     t.style.display = "block";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (t.style.display = "none"), 2800);
+    toastTimer = setTimeout(() => (t.style.display = "none"), ms);
   }
 
   async function api(url, opts = {}) {
@@ -114,7 +114,11 @@ const AS = (() => {
       try { seen = localStorage.getItem("seenUpdate"); } catch (e) {}
       if (seen === last.at) return;
       const n = (last.changes || []).length;
-      toast(`Updated to the latest version (${n} change${n === 1 ? "" : "s"}). See Settings → Updates.`);
+      if (last.rolled_back) {
+        toast("The newest version did not start on this PC, so the app went back to the previous one. See Settings → Updates.", "warn", 12000);
+      } else {
+        toast(`Updated to the latest version (${n} change${n === 1 ? "" : "s"}). See Settings → Updates.`);
+      }
       try { localStorage.setItem("seenUpdate", last.at); } catch (e) {}
     } catch (e) {}
   }
