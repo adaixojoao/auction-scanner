@@ -87,16 +87,19 @@ def _real_municipality(name: str | None, country: str) -> str | None:
     return name.strip() if prices.place_key(name) in table else None
 
 
-def queries(item: dict) -> list[str]:
-    """Address lookups from the most exact to the least, always with the
-    municipality: without it a village name can match the wrong place in the
-    country (there are many "Lage"), and a wrong pin is worse than none."""
+def _address_text(item: dict) -> str:
     raw = _raw(item)
-    country = item.get("country") or "PT"
-    text = " ".join(str(x or "") for x in (raw.get("morada"), raw.get("descricao_completa"),
+    return " ".join(str(x or "") for x in (raw.get("morada"), raw.get("descricao_completa"),
                                            item.get("title"), item.get("description")))
+
+
+def municipality(item: dict) -> str | None:
+    """The municipality this listing is in: the field when it holds a real one,
+    else the court text ("concelho de …", the conservatória, the postcode)."""
+    country = item.get("country") or "PT"
     town = _real_municipality(item.get("concelho"), country)
     if not town and country == "PT":
+        text = _address_text(item)
         for pattern in (_CONCELHO, _CONSERVATORIA_TOWN, _POSTCODE_TOWN):
             for m in pattern.finditer(text):
                 town = _real_municipality(m.group(1), country)
@@ -106,6 +109,15 @@ def queries(item: dict) -> list[str]:
                 break
     if not town and country != "PT":
         town = item.get("district")
+    return re.sub(r"\s+", " ", town).strip(" ,") if town else None
+
+
+def queries(item: dict) -> list[str]:
+    """Address lookups from the most exact to the least, always with the
+    municipality: without it a village name can match the wrong place in the
+    country (there are many "Lage"), and a wrong pin is worse than none."""
+    text = _address_text(item)
+    town = municipality(item)
     if not town:
         return []
     parish = item.get("freguesia")
@@ -193,3 +205,105 @@ def street_view_embed_url(pos: dict, key: str) -> str | None:
         return None
     return ("https://www.google.com/maps/embed/v1/streetview?" + urllib.parse.urlencode(
         {"key": key, "location": f"{pos['lat']:.6f},{pos['lon']:.6f}", "fov": 80}))
+
+
+# ─── How far the property is from its town ───────────────────────────
+# "Good location" guessed from words in the description only works when the
+# description says something. The distance from the property to the middle of
+# its municipality's town is a fact, and it is the same fact in every country.
+
+TOWNS_PER_SCAN = 20         # new municipalities looked up per scan (1 request/s)
+MAX_TOWN_KM = 40            # farther than any Portuguese municipality is wide:
+                            # the lookup found the wrong town, so say nothing
+TOO_VAGUE = {"municipality"}   # that pin *is* the town: the distance would be 0 by construction
+
+
+def town_key(country: str, name: str) -> str:
+    import prices
+    return f"{(country or 'PT').upper()}:{prices.place_key(name)}"
+
+
+def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in kilometres."""
+    import math
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(a)))
+
+
+def town_index(db) -> dict[str, dict]:
+    """{key: {"name", "lat", "lon"}} for the towns already found."""
+    rows = db.execute("SELECT key, name, lat, lon FROM places WHERE lat IS NOT NULL").fetchall()
+    return {r[0]: {"name": r[1], "lat": r[2], "lon": r[3]} for r in rows}
+
+
+def _geocode_town(session, country: str, name: str) -> tuple[float, float] | None:
+    params = {"format": "jsonv2", "limit": 1, "q": name, "featuretype": "settlement"}
+    code = COUNTRY_CODES.get((country or "PT").upper())
+    if code:
+        params["countrycodes"] = code
+    resp = session.get(NOMINATIM, params=params, headers={"User-Agent": USER_AGENT}, timeout=20)
+    time.sleep(1.1)                          # Nominatim: at most one request a second
+    resp.raise_for_status()
+    hits = resp.json()
+    return (float(hits[0]["lat"]), float(hits[0]["lon"])) if hits else None
+
+
+def locate_towns(db, session, items: list[dict], limit: int = TOWNS_PER_SCAN) -> int:
+    """Find the middle of each municipality seen, once each, and keep it.
+    A municipality that cannot be found is stored without coordinates so it is
+    not looked up again every scan."""
+    from common import utcnow_iso
+    known = {r[0] for r in db.execute("SELECT key FROM places")}
+    wanted: dict[str, tuple[str, str]] = {}
+    for item in items:
+        name = municipality(item)
+        if not name:
+            continue
+        country = (item.get("country") or "PT").upper()
+        key = town_key(country, name)
+        if key not in known:
+            wanted.setdefault(key, (country, name))
+    done = 0
+    for key, (country, name) in list(wanted.items())[:limit]:
+        try:
+            found = _geocode_town(session, country, name)
+        except Exception as e:  # noqa: BLE001 — offline or refused: try next scan
+            LOG.info(f"OpenStreetMap town lookup failed ({type(e).__name__}); trying next scan")
+            break
+        db.execute("INSERT OR REPLACE INTO places (key, country, name, lat, lon, checked_at) "
+                   "VALUES (?,?,?,?,?,?)",
+                   (key, country, name, found[0] if found else None,
+                    found[1] if found else None, utcnow_iso()))
+        db.commit()
+        done += 1
+    if done:
+        LOG.info(f"OpenStreetMap: located {done} towns")
+    return done
+
+
+def distance_to_town(item: dict, towns: dict[str, dict]) -> dict | None:
+    """{"km", "town", "approx", "text"} — how far this property is from the middle of
+    its town. None when either position is unknown, when the property is only
+    placed at municipality level (that pin *is* the town), or when the distance
+    is too big to believe."""
+    pos = position(item)
+    if not pos or pos.get("precision") in TOO_VAGUE:
+        return None
+    name = municipality(item)
+    if not name:
+        return None
+    town = towns.get(town_key(item.get("country") or "PT", name))
+    if not town:
+        return None
+    km = distance_km(pos["lat"], pos["lon"], town["lat"], town["lon"])
+    if km > MAX_TOWN_KM:
+        return None
+    approx = pos["precision"] == "parish"
+    return {"km": round(km, 1), "town": town["name"], "approx": approx,
+            "text": f"{'about ' if approx else ''}{km_text(km)} from {town['name']}"}
+
+
+def km_text(km: float) -> str:
+    return f"{km:.1f} km" if km < 10 else f"{km:.0f} km"

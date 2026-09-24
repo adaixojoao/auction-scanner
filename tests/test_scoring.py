@@ -485,3 +485,26 @@ def test_lote_moradia_is_a_plot_and_detached_is_not_isolated():
     _, detached = score(item(title="Moradia isolada T3 em bom estado", price=20000))
     _, remote = score(item(title="Casa em lugar isolado", price=20000))
     assert "isolated location" not in detached and "isolated location" in remote
+
+
+def test_a_house_is_scored_on_how_far_it_really_is_from_town():
+    house = dict(title="Moradia T3", tipo="moradia", area_m2=110, price=40000, concelho="Moura")
+
+    def at(km):
+        return score(item(**house, town_distance={"km": km, "town": "Moura", "approx": False,
+                                                  "text": f"{km} km from Moura"}))
+
+    in_town, edge, far = at(0.5)[0], at(6)[0], at(25)[0]
+    assert in_town > edge > far
+    assert far <= 60 and "25 km from Moura" in at(25)[1]      # far from everything is isolated
+    # The words are only a fallback: with a measured distance they add a little, not 15.
+    words = dict(house, description="Moradia no centro da vila")
+    guessed, _ = score(item(**words))
+    measured, reasons = score(item(**words, town_distance={"km": 0.5, "town": "Moura", "approx": False,
+                                                           "text": "0.5 km from Moura"}))
+    assert measured > guessed and "0.5 km from Moura" in reasons
+    # "Isolated" in the text still decides on its own.
+    _, remote = score(item(title="Casa em lugar isolado", price=20000, concelho="Moura",
+                           town_distance={"km": 0.5, "town": "Moura", "approx": False,
+                                          "text": "0.5 km from Moura"}))
+    assert "isolated location" in remote and "0.5 km from Moura" not in remote

@@ -44,6 +44,18 @@ Every figure is shown as an estimate and says so, because the scanner does not
 know the VPT, the region's rate or the state of the building. Never present one
 as a fact, and never use one to decide a listing's score.
 
+## A position is not a fact about the building
+
+`geo.py` says where a listing is and how exact that is ("sale", "street",
+"village", "parish", "municipality"). Anything built on a position must
+respect the precision: the distance from a "municipality" pin to its own town
+is zero by construction, so it is not a distance, and a town lookup that lands
+more than `MAX_TOWN_KM` away found the wrong town (there are two Lagoas). Say
+nothing rather than score on a number that is not real, and label a parish-level
+answer "about". OpenStreetMap allows one request a second and wants the
+User-Agent that names this app; look each place up once and keep the answer,
+including "looked for, not found".
+
 ## One app, one of each
 
 This is a desktop app (`app.py` → `dashboard.py` in its own window). Keep it

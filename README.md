@@ -202,15 +202,26 @@ than €20,001 instead of jumping at a step.
 
 - **Rejected (hidden, "rejected: …"):** unfinished buildings, properties not in the land register, occupied ones (any language), and land sold only together with another lot.
 - **Skip (score 0):** fractional shares (`1/2`, `29/84`, `4986/100000`, *metade*, quota-parte, avos…), usufruct, and timeshares (*habitação periódica*, *multipropriedade*, *semana 37 de cada año*, *aprovechamiento por turno*, *multipropriété*…).
-- **Homes:** up for good condition (*bom estado*, *renovado*…), a great
-  location (*centro*, near the beach…) or a town we have local prices for,
-  size up to about 150 m², and the discount to local prices per m². Down for
+- **Homes:** up for good condition (*bom estado*, *renovado*…), **how far it
+  is from town** (below), size up to about 150 m², and the discount to local
+  prices per m². Down for
   needing some work, and a lot for an isolated location or heavy work
   (*ruína*, *para recuperar*…). Local prices in Portugal are the median price
   per m² of homes sold in each municipality (INE), from
   `data/pt_home_prices.csv`; refresh it with `python scripts/update_prices.py`
   on a PC that can reach ine.pt. Elsewhere, and for any municipality the file
   lacks, a small table of city prices is used. Each reason says which.
+- **How far a house is from town.** "Good location" used to be guessed from
+  words the listing often does not contain. When the property has a position on
+  the map (its own coordinates, or the address found on OpenStreetMap) and the
+  middle of its municipality's town has been looked up, the score uses the real
+  distance: in the town is worth about as much as the old *centro* guess, 10 km
+  out costs a little, and past 20 km the house is held down like an isolated one
+  — a house nobody can reach services from is not what you are looking for. The
+  panel shows it as *Distance to town*. A position no better than
+  "municipality" is ignored (that pin **is** the town), and so is any distance
+  over 40 km, which means the wrong town was found. Without a distance the old
+  word-matching still applies.
 - **Rural plots:** size as a multiple of the minimum (1 ha by default; about
   5× scores as large), next to water, and €/m² against the maximum (€0.50/m²
   by default). Both limits are in **Settings → What you are looking for**.
@@ -330,6 +341,7 @@ scoring.py      the score             letters.py     the one letter builder (+ P
 costs.py        taxes, fees, work     prices.py      local €/m² (data/pt_home_prices.csv)
 cartas.py       Citius batch letters  report.py      report files
 analysis.py     Claude calls          ics_export.py  calendar files
+geo.py          map positions, towns  listing_info.py  the ⓘ panel
 scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 

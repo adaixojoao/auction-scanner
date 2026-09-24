@@ -102,3 +102,68 @@ def test_no_lookup_without_a_real_municipality(tmp_path, monkeypatch):
     q = geo.queries({"country": "PT", "concelho": "PAÇOS DE FERREIRA", "freguesia": "MEIXOMIL", "raw_json": "{}",
                      "title": "URBANO - CASAS TERREAS CONFRONTAÇÕES: SUL - CAMINHO PUBLICO NASCENTE - X"})
     assert q == ["MEIXOMIL, PAÇOS DE FERREIRA", "PAÇOS DE FERREIRA"]
+
+
+# ─── How far the property is from its town ───────────────────────────
+
+def _towns(handler):
+    return FakeSession(handler)
+
+
+def test_each_towns_position_is_looked_up_once_and_kept(db):
+    items = [{"country": "PT", "concelho": "Moura", "raw_json": "{}"},
+             {"country": "PT", "concelho": "Moura", "raw_json": "{}"},     # the same town
+             {"country": "PT", "concelho": "Beja", "raw_json": "{}"}]      # not found
+    session = _towns(lambda m, url, kw: FakeResponse(
+        json_data=[{"lat": "38.1400", "lon": "-7.4500"}] if kw["params"]["q"] == "Moura" else []))
+    assert geo.locate_towns(db, session, items) == 2
+    assert [c[2]["params"]["q"] for c in session.calls] == ["Moura", "Beja"]
+    assert all(c[2]["params"]["featuretype"] == "settlement" for c in session.calls)
+    assert geo.town_index(db) == {"PT:moura": {"name": "Moura", "lat": 38.14, "lon": -7.45}}
+    # Both are remembered, the one that was not found too: no second round of requests.
+    assert geo.locate_towns(db, session, items) == 0 and len(session.calls) == 2
+
+
+def test_the_distance_is_measured_from_the_property_to_the_town(db):
+    geo.locate_towns(db, _towns(lambda m, url, kw: FakeResponse(json_data=[{"lat": "38.14", "lon": "-7.45"}])),
+                     [{"country": "PT", "concelho": "Moura", "raw_json": "{}"}])
+    towns = geo.town_index(db)
+    item = {"country": "PT", "concelho": "Moura",
+            "raw_json": json.dumps({"geo": {"lat": 38.19, "lon": -7.45, "precision": "village"}})}
+    near = geo.distance_to_town(item, towns)
+    assert near["town"] == "Moura" and near["km"] == 5.6 and near["approx"] is False
+    assert near["text"] == "5.6 km from Moura"
+
+
+def test_a_position_no_better_than_the_town_says_nothing(db):
+    geo.locate_towns(db, _towns(lambda m, url, kw: FakeResponse(json_data=[{"lat": "38.14", "lon": "-7.45"}])),
+                     [{"country": "PT", "concelho": "Moura", "raw_json": "{}"}])
+    towns = geo.town_index(db)
+    vague = {"country": "PT", "concelho": "Moura",
+             "raw_json": json.dumps({"geo": {"lat": 38.14, "lon": -7.45, "precision": "municipality"}})}
+    assert geo.distance_to_town(vague, towns) is None
+    # A parish pin is used, but the panel and the score say "about".
+    parish = {"country": "PT", "concelho": "Moura",
+              "raw_json": json.dumps({"geo": {"lat": 38.19, "lon": -7.45, "precision": "parish"}})}
+    assert geo.distance_to_town(parish, towns)["text"] == "about 5.6 km from Moura"
+    assert geo.distance_to_town({"country": "PT", "concelho": "Moura", "raw_json": "{}"}, towns) is None
+
+
+def test_an_impossible_distance_means_the_wrong_town_was_found(db):
+    geo.locate_towns(db, _towns(lambda m, url, kw: FakeResponse(json_data=[{"lat": "37.13", "lon": "-25.43"}])),
+                     [{"country": "PT", "concelho": "Lagoa", "raw_json": "{}"}])   # the Azores one
+    mainland = {"country": "PT", "concelho": "Lagoa",
+                "raw_json": json.dumps({"geo": {"lat": 37.13, "lon": -8.45, "precision": "village"}})}
+    assert geo.distance_to_town(mainland, geo.town_index(db)) is None
+
+
+def test_the_loader_and_the_panel_carry_the_distance(db, add):
+    from db import load_listings
+    geo.locate_towns(db, _towns(lambda m, url, kw: FakeResponse(json_data=[{"lat": "38.14", "lon": "-7.45"}])),
+                     [{"country": "PT", "concelho": "Moura", "raw_json": "{}"}])
+    add("citius", "d1", title="Moradia T3", tipo="moradia", area_m2=110, price=40000, concelho="Moura",
+        raw_json=json.dumps({"geo": {"lat": 38.16, "lon": -7.45, "precision": "village"}}))
+    item = load_listings(db, include_hidden=True)[0]
+    assert item["town_distance"]["text"] == "2.2 km from Moura"
+    assert "2.2 km from Moura" in item["reasons"]
+    assert {"label": "Distance to town", "value": "2.2 km from Moura"} in listing_info.facts(item)

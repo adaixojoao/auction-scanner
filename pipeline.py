@@ -158,7 +158,9 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     from db import load_listings
                     best = sorted(load_listings(db, filters=cfg.get("filters")),
                                   key=lambda it: -it.get("rank", it["score"]))
-                    geo.geocode_pending(db, make_session(), best)
+                    session = make_session()
+                    geo.locate_towns(db, session, best)
+                    geo.geocode_pending(db, session, best)
                 except Exception:  # noqa: BLE001 — a map position must never fail the scan
                     LOG.exception("Locating listings failed")
             finally:
