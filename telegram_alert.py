@@ -209,6 +209,74 @@ def alert_carta_deadlines(db, cfg: dict, score_fn=None):
         mark_alerted(db, FOLLOW_UP_CHANNEL, [f"carta_log:{r['id']}" for r in waiting])
 
 
+# ─── Broken-source alarm ────────────────────────────────────────────
+# A site that stops working used to show only on the Sources page and in the
+# weekly summary. Now the scan that sees it fail a second time in a row says so
+# (one blip is not a breakage), once per breakage: the alert_log key carries the
+# last good run, so a source that recovers and breaks again is reported again.
+
+SOURCE_CHANNEL = "telegram-source"
+SOURCE_RECOVERED_CHANNEL = "telegram-source-ok"
+SOURCE_FAILS_BEFORE_ALARM = 2
+
+
+def _source_key(h: dict) -> str:
+    return f"src:{h['source']}@{h['last_ok'] or 'never'}"
+
+
+def alert_source_failures(db, cfg: dict, scanned: list[str]) -> int:
+    """Tell Telegram about sources from this scan that broke, and ones that
+    work again after an alarm. Returns how many sources were mentioned."""
+    tg = _tg(cfg)
+    if not tg or not tg.get("source_alerts", True) or not scanned:
+        return 0
+    from db import source_health
+    health = {h["source"]: h for h in source_health(db) if h["source"] in set(scanned)}
+
+    failing = [h for h in health.values()
+               if h["state"] in ("error", "broken") and h["failing_runs"] >= SOURCE_FAILS_BEFORE_ALARM]
+    fresh_keys = not_yet_alerted(db, SOURCE_CHANNEL, [_source_key(h) for h in failing])
+    new_fail = [h for h in failing if _source_key(h) in fresh_keys]
+
+    # Recovered: working now, and alerted about since their previous good run.
+    recovered = []
+    for h in health.values():
+        if h["state"] != "ok":
+            continue
+        alerted = [r[0] for r in db.execute(
+            "SELECT listing_id FROM alert_log WHERE channel = ? AND listing_id LIKE ?",
+            (SOURCE_CHANNEL, f"src:{h['source']}@%"))]
+        pending = not_yet_alerted(db, SOURCE_RECOVERED_CHANNEL, alerted)
+        if pending:
+            recovered.append((h, pending))
+
+    lines = []
+    if new_fail:
+        lines.append(f"⚠️ <b>{len(new_fail)} source(s) stopped working</b>\n")
+        for h in sorted(new_fail, key=lambda h: h["source"]):
+            since = f"last worked {h['last_ok'][:10]}" if h["last_ok"] else "has not worked yet"
+            why = h["last_message"] or ("finds nothing" if h["state"] == "broken" else "error")
+            lines.append(f"• <b>{_esc(h['source'])}</b> — {_esc(why)} "
+                         f"({h['failing_runs']} runs, {since})")
+        lines.append(f"\nSources page: {_dashboard_url(cfg, '/sources')}")
+    if recovered:
+        if lines:
+            lines.append("")
+        lines.append("✅ Working again: " + ", ".join(
+            f"<b>{_esc(h['source'])}</b> ({h['last_count']} listings)" for h, _ in recovered))
+    if not lines:
+        return 0
+    if not send_telegram(tg["token"], tg["chat_id"], "\n".join(lines)):
+        return 0                                   # retried after the next scan
+    if new_fail:
+        mark_alerted(db, SOURCE_CHANNEL, [_source_key(h) for h in new_fail])
+    for _, keys in recovered:
+        mark_alerted(db, SOURCE_RECOVERED_CHANNEL, keys)
+    LOG.info(f"Telegram: source alarm for {[h['source'] for h in new_fail]}, "
+             f"recovered {[h['source'] for h, _ in recovered]}")
+    return len(new_fail) + len(recovered)
+
+
 def alert_carta_won(token: str, chat_id: str, processo: str, bid: float, estado: str):
     send_telegram(token, chat_id,
                   f"\U0001f389 <b>WON!</b>\n\nProcess: {_esc(processo)}\n"

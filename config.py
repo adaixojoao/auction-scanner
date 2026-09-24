@@ -64,6 +64,7 @@ DEFAULTS = {
         "chat_id": "",
         "min_score": 75,          # new-listing alerts
         "deadline_min_score": 60, # "ending soon, no offer sent" alerts
+        "source_alerts": True,    # tell me when a site stops working (and when it is back)
     },
 
     # Scheduling (scheduler.py). while_app_open: scan on this timetable while

@@ -832,7 +832,7 @@ EDITABLE = {
                 "rural_max_eur_m2"),
     "proponente": PROPONENTE_KEYS,
     "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours"),
-    "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score"),
+    "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score", "source_alerts"),
     "notifications": ("enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password",
                       "to_emails", "min_score"),
     "report": ("desktop_copy",),

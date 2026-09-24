@@ -108,3 +108,53 @@ def test_unanswered_letters_are_followed_up_once(db, add, sent):
     assert "/offers" in sent[0]
     telegram_alert.alert_carta_deadlines(db, CFG)
     assert len(sent) == 1          # mentioned once, not every morning
+
+
+# ─── Broken-source alarm ────────────────────────────────────────────
+
+def _runs(db, source, *outcomes):
+    """Record scrape runs oldest first: a number is a good run, "e"/0 a failed one."""
+    from db import record_scrape
+    for n, out in enumerate(outcomes):
+        ts = f"2026-09-{10 + n:02d}T08:00:00"
+        if out == "e":
+            record_scrape(db, source, count=0, status="error", message="HTTP 404 Not Found from x.pt", timestamp=ts)
+        else:
+            record_scrape(db, source, count=out, status="ok" if out else "empty", timestamp=ts)
+
+
+def test_source_alarm_after_two_failures_and_only_once(db, sent):
+    _runs(db, "cgd", 50, "e")
+    assert telegram_alert.alert_source_failures(db, CFG, ["cgd"]) == 0    # one blip is not a breakage
+    _runs(db, "cgd", 50, "e", "e")
+    assert telegram_alert.alert_source_failures(db, CFG, ["cgd"]) == 1
+    assert "stopped working" in sent[0] and "<b>cgd</b> — HTTP 404 Not Found from x.pt" in sent[0]
+    assert "last worked 2026-09-10" in sent[0]
+    assert telegram_alert.alert_source_failures(db, CFG, ["cgd"]) == 0    # not every scan
+    assert len(sent) == 1
+
+
+def test_source_alarm_says_when_it_works_again_and_rearms(db, sent):
+    _runs(db, "santander", 8, 0, 0)                                       # broken: finds nothing
+    telegram_alert.alert_source_failures(db, CFG, ["santander"])
+    assert "finds nothing" in sent[-1]
+    _runs(db, "santander", 8, 0, 0, 12)
+    telegram_alert.alert_source_failures(db, CFG, ["santander"])
+    assert "Working again: <b>santander</b> (12 listings)" in sent[-1]
+    telegram_alert.alert_source_failures(db, CFG, ["santander"])
+    assert len(sent) == 2                                                 # "back" once
+    _runs(db, "santander", 8, 0, 0, 12, 0, 0)                             # breaks again later
+    telegram_alert.alert_source_failures(db, CFG, ["santander"])
+    assert len(sent) == 3 and "stopped working" in sent[-1]
+
+
+def test_source_alarm_only_for_this_scan_and_can_be_off(db, sent, monkeypatch):
+    _runs(db, "haya", "e", "e")
+    assert telegram_alert.alert_source_failures(db, CFG, ["cgd"]) == 0     # not scanned now
+    off = {**CFG, "telegram": {**CFG["telegram"], "source_alerts": False}}
+    assert telegram_alert.alert_source_failures(db, off, ["haya"]) == 0
+    monkeypatch.setattr(telegram_alert, "send_telegram", lambda *a: False)
+    assert telegram_alert.alert_source_failures(db, CFG, ["haya"]) == 0    # send failed…
+    monkeypatch.setattr(telegram_alert, "send_telegram", lambda t, c, m: sent.append(m) or True)
+    assert telegram_alert.alert_source_failures(db, CFG, ["haya"]) == 1    # …so it is retried
+    assert "has not worked yet" in sent[-1]
