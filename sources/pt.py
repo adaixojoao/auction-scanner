@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_price, make_listing, make_session, normalize, parse_date_dmy,
+from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, utcnow_iso)
 from db import upsert_listing
 from sources import SourceUnavailable, register
@@ -129,7 +129,7 @@ def _eleiloes_to_listing(item: dict) -> dict:
 # Fields the detail pass adds to raw_json. The next search-page scrape replaces
 # raw_json with the thin list item, so these are carried over (_keep_details).
 # Bumped when the detail pass reads more: sales read by an older pass are read again.
-DETAIL_VERSION = 2
+DETAIL_VERSION = 3
 ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
                         "valor_abertura", "morada", "lat", "lon", "reg_district", "reg_concelho",
                         "reg_freguesia", "detail_checked")
@@ -165,9 +165,17 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
     """GET /api/Eventos/<referencia> → (listing fields, extra raw_json keys).
     Leaves out the executados: the people whose property is sold."""
     place = _registry_place(item)
+    description = (item.get("descricao") or "").strip() or None
+    area = to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None
+    written = find_area(description)
+    # The area field is sometimes off by a factor of 100 ("1 695 000 m²" for a plot
+    # described as "cerca de 16.950m2"): when the two disagree that much, the
+    # description wins.
+    if area and written and not (1 / 20 < area / written < 20):
+        area = written
     fields = {
-        "description": (item.get("descricao") or "").strip() or None,
-        "area_m2": to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None,
+        "description": description,
+        "area_m2": area or written,
         "freguesia": place["freguesia"] or item.get("moradaFreguesia") or None,
         "concelho": place["concelho"],
         "district": place["district"],
@@ -551,7 +559,6 @@ def parse_citius_item(item_text: str, trib_name: str) -> dict:
 def citius_listing(f: dict, eid: str) -> dict:
     desc = f["desc"]
     district, concelho, freguesia = _citius_extract_location(desc)
-    am = re.search(r"(\d[\d\s.]*)\s*m[²2]", desc, re.I)
     desc_parts = [p for p in (
         desc[:500],
         f"Modalidade: {f['modalidade']}" if f["modalidade"] else None,
@@ -568,12 +575,14 @@ def citius_listing(f: dict, eid: str) -> dict:
         "processo", "tribunal", "modalidade", "estado", "especie", "registo",
         "art_matricial", "entidade_registo", "intervenientes", "agente_nome",
         "agente_contacto", "agente_email")}
+    raw.update({k: f[k] for k in ("html_id", "detail_checked") if f.get(k)})
     return make_listing(
         "citius", eid, "PT",
         title=desc[:120] if desc else f"Citius judicial sale {f['processo']}",
         description=". ".join(desc_parts) if desc_parts else None,
         tipo="imovel",
-        area_m2=parse_price(am.group(1)) if am else None,
+        # "área coberta de 30 m2 e descoberta com 321 m2" → 30; "4,6905 ha" → 46905
+        area_m2=find_area(desc),
         price=f["price"],
         min_price=f["price"],
         district=district, concelho=concelho, freguesia=freguesia,
@@ -582,6 +591,104 @@ def citius_listing(f: dict, eid: str) -> dict:
         date_end=f["date_end"],
         raw_json=raw,
     )
+
+
+CITIUS_DETAILS = "https://www.citius.mj.pt/portal/consultas/ConsultasVenda.aspx/GetHtmlDetails"
+CITIUS_DETAILS_PER_SCAN = 150
+_CITIUS_NEXT = "ctl00$ContentPlaceHolder1$Pager1$btnNextPage"
+
+
+def citius_blocks(html: str) -> list[str]:
+    dl = BeautifulSoup(html, "html.parser").select_one("[id*='dlVenda']")
+    return re.findall(r"Tipo de Bem:(.*?)(?=Tipo de Bem:|$)", str(dl), re.S) if dl else []
+
+
+def _citius_pages(session, first_html: str, form: dict, max_pages: int = 30):
+    """The first results page, then each next page (the pager is an image button)."""
+    html = first_html
+    for _ in range(max_pages):
+        yield html
+        nxt = BeautifulSoup(html, "html.parser").select_one("#ctl00_ContentPlaceHolder1_Pager1_btnNextPage")
+        if nxt is None or nxt.has_attr("disabled"):
+            return
+        state = {i["name"]: i.get("value", "") for i in
+                 BeautifulSoup(html, "html.parser").select("input[type=hidden][name]")}
+        try:
+            resp = session.post(CITIUS_URL, data={**state, "__EVENTTARGET": "", "__EVENTARGUMENT": "", **form,
+                                                  f"{_CITIUS_NEXT}.x": "5", f"{_CITIUS_NEXT}.y": "5"})
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.debug(f"  Citius next page failed: {e}")
+            return
+        html = resp.text
+
+
+def citius_detail_text(html: str) -> str:
+    """A sale's "ver mais" details as text, without the Intervenientes (the
+    people whose property is sold and their addresses)."""
+    text = re.sub(r"\s+", " ", BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True))
+    return text.split("Intervenientes")[0].strip()
+
+
+def citius_full_description(detail: str) -> str | None:
+    m = re.search(r"Descrição do Bem:\s*(.+?)(?:\s+Art\.\s*Matricial:|\s+Registo:|\s+Entidade de Registo:|$)", detail)
+    return m.group(1).strip() if m else None
+
+
+def _keep_citius_details(db, listing_id: str, f: dict) -> dict:
+    """The list shows a cut description ("… com uma ..."); once the full one has
+    been read (fetch_citius_details) it is used on every later scan."""
+    old = db.execute("SELECT raw_json FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if old and old[0] and '"detail_checked"' in old[0]:
+        try:
+            raw = json.loads(old[0])
+        except ValueError:
+            return f
+        f = {**f, "detail_checked": raw.get("detail_checked"), "html_id": f.get("html_id") or raw.get("html_id")}
+        if raw.get("descricao_completa"):
+            f["desc"] = raw["descricao_completa"]
+            f["descricao_completa"] = raw["descricao_completa"]
+    return f
+
+
+def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> int:
+    """Read the full description of sales not read yet (one request each)."""
+    rows = db.execute("""
+        SELECT id, raw_json FROM listings WHERE source = 'citius'
+          AND raw_json LIKE '%"html_id"%' AND raw_json NOT LIKE '%"detail_checked"%'
+        ORDER BY last_seen DESC LIMIT ?""", (limit,)).fetchall()
+    done = 0
+    for listing_id, raw_text in rows:
+        raw = json.loads(raw_text)
+        try:
+            resp = session.post(CITIUS_DETAILS, data="{htmlId:%s}" % int(raw["html_id"]),
+                                headers={"Content-Type": "application/json; charset=utf-8"})
+            resp.raise_for_status()
+            detail = citius_detail_text(resp.json().get("d"))
+        except Exception as e:
+            LOG.debug(f"Citius details {listing_id}: {e}")      # tried again next scan
+            continue
+        full = citius_full_description(detail)
+        raw["detail_checked"] = 1
+        sets = {}
+        if full:
+            raw["descricao_completa"] = full[:3000]
+            district, concelho, freguesia = _citius_extract_location(full)
+            sets = {"title": full[:120], "area_m2": find_area(full),
+                    "district": district, "concelho": concelho, "freguesia": freguesia}
+            old_desc = db.execute("SELECT description FROM listings WHERE id = ?", (listing_id,)).fetchone()[0] or ""
+            rest = old_desc.split(". Modalidade:", 1)
+            sets["description"] = full[:3000] + (". Modalidade:" + rest[1] if len(rest) > 1 else "")
+        sets = {k: v for k, v in sets.items() if v}
+        sets["raw_json"] = json.dumps(raw, ensure_ascii=False)
+        db.execute(f"UPDATE listings SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?",
+                   (*sets.values(), listing_id))
+        done += 1
+        time.sleep(0.2)
+    db.commit()
+    if rows:
+        LOG.info(f"Citius: full details read for {done} of {len(rows)} sales")
+    return done
 
 
 @register("citius", "PT")
@@ -625,29 +732,39 @@ def scrape_citius(db, max_price: float = 50000, **_):
             LOG.debug(f"  Tribunal {trib_id} error: {e}")
             continue
 
-        dl = BeautifulSoup(r2.text, "html.parser").select_one("[id*='dlVenda']")
-        if not dl:
-            continue
-
+        form = {k: v for k, v in (
+            ("ctl00$ContentPlaceHolder1$ddlTribunais", trib_id),
+            ("ctl00$ContentPlaceHolder1$txtCalendarDesde", past),
+            ("ctl00$ContentPlaceHolder1$txtCalendarAte", today),
+            ("ctl00$ContentPlaceHolder1$chkDatas", "on"),
+            ("ctl00$ContentPlaceHolder1$ddlTiposBem", "1"),
+            ("ctl00$ContentPlaceHolder1$ddlModalidades", "0"),
+            ("ctl00$ContentPlaceHolder1$ddlEstados", "927"))}
         trib_count = 0
-        for item_html in re.findall(r"Tipo de Bem:(.*?)(?=Tipo de Bem:|$)", str(dl), re.S):
-            item_text = BeautifulSoup(item_html, "html.parser").get_text(" ", strip=True)
-            f = parse_citius_item(item_text, trib_name)
-            if f["price"] and f["price"] > max_price:
-                continue
+        # Results come 10 to a page; only the first page used to be read, so a
+        # court with 35 sales showed 10.
+        for page_html in _citius_pages(session, r2.text, form):
+            for item_html in citius_blocks(page_html):
+                item_text = BeautifulSoup(item_html, "html.parser").get_text(" ", strip=True)
+                f = parse_citius_item(item_text, trib_name)
+                hid = re.search(r"Viewer\.Abrir\(this,\s*(\d+)", item_html)
+                f["html_id"] = hid.group(1) if hid else None
 
-            if f["processo"]:
-                eid = re.sub(r"[^A-Za-z0-9]", "", f["processo"])[:40]
-            else:
-                eid = stable_id(trib_id, f["desc"])
-            # One processo can sell several bens; before, they overwrote each
-            # other. The first keeps the old ID so existing rows still match.
-            per_process[eid] += 1
-            if per_process[eid] > 1:
-                eid = f"{eid}-{per_process[eid]}"
+                if f["processo"]:
+                    eid = re.sub(r"[^A-Za-z0-9]", "", f["processo"])[:40]
+                else:
+                    eid = stable_id(trib_id, f["desc"])
+                # One processo can sell several bens; before, they overwrote each
+                # other. The first keeps the old ID so existing rows still match.
+                # Counted before the budget filter, so an ID does not depend on the budget.
+                per_process[eid] += 1
+                if per_process[eid] > 1:
+                    eid = f"{eid}-{per_process[eid]}"
+                if f["price"] and f["price"] > max_price:
+                    continue
 
-            upsert_listing(db, citius_listing(f, eid))
-            trib_count += 1
+                upsert_listing(db, citius_listing(_keep_citius_details(db, f"citius:{eid}", f), eid))
+                trib_count += 1
 
         if trib_count:
             total_scraped += trib_count
@@ -655,6 +772,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
         if (i + 1) % 20 == 0:
             LOG.info(f"  Citius: {i+1}/{len(tribunais)} tribunais, {total_scraped} listings so far")
         time.sleep(0.3)
+    fetch_citius_details(db, session)
     return total_scraped
 
 

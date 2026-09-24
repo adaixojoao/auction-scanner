@@ -92,3 +92,15 @@ def test_ruins_marked_in_the_energy_field_score_as_ruins():
     assert "needs heavy work (ruin / full rebuild)" in reasons and sc <= 40
     assert "Ruína" not in imobancos_listing({**hit, "prop_energy_rating": "C"}, 100000)["description"]
     assert listing_info._energy("UNPARSED- isento") == "Isento" and listing_info._energy("detail-item") is None
+
+
+def test_lots_of_the_same_case_are_listed_together(db, add):
+    add("citius", "366104TBVLN", title="Prédio urbano, casa de um pavimento, com área de 142 m2", price=7500,
+        raw_json=json.dumps({"processo": "366/10.4TBVLN, Juízo de Valença"}))
+    add("citius", "366104TBVLN-2", title="Prédio Rústico de cultivo com área de 2760 m2", price=500, area_m2=2760,
+        raw_json=json.dumps({"processo": "366/10.4TBVLN, Juízo de Valença"}))
+    add("citius", "999", title="Outro processo", price=100, raw_json=json.dumps({"processo": "9/99.9XXX"}))
+    house = {"id": "citius:366104TBVLN", "source": "citius",
+             "raw_json": json.dumps({"processo": "366/10.4TBVLN, Juízo de Valença"})}
+    lots = listing_info.same_case_lots(db, house)
+    assert [(lot["id"], lot["price"], lot["area"]) for lot in lots] == [("citius:366104TBVLN-2", 500, 2760)]

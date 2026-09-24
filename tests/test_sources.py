@@ -312,3 +312,67 @@ def test_france_enrichment_sets_the_hearing_date(db, add, fake_http):
     item = load_listings(db, include_hidden=True, now=datetime(2026, 9, 1, tzinfo=timezone.utc))[0]
     assert item["date_end"] == "2026-10-15T14:30:00" and item["price"] == 40000
     assert item["district"] == "Nîmes" and "vacant (devoluto)" in item["reasons"]
+
+
+def _citius_block(html_id, proc, price, desc):
+    return f"""<span><div class="resultadopubvenda"><strong>Tipo de Bem:</strong> Imóvel <br/>
+      <strong>Estado:</strong> Em venda <br/><strong>Valor Base: </strong> {price} € <br/>
+      <strong>Modalidade: </strong> Venda mediante proposta em carta fechada <br/>
+      <strong>Descrição do Bem: </strong> {desc} <br/><strong>Processo: </strong> {proc} <br/>
+      <strong>Espécie: </strong> Execução Ordinária <br/>
+      <a onclick="javascript:Viewer.Abrir(this, {html_id}, 'ConsultasVenda.aspx/GetHtmlDetails', 'btnFechar','viewer')">ver mais</a>
+      </div></span>"""
+
+
+def _citius_page(blocks, last):
+    pager = ('<input type="image" id="ctl00_ContentPlaceHolder1_Pager1_btnNextPage" '
+             'name="ctl00$ContentPlaceHolder1$Pager1$btnNextPage"' + (' disabled="disabled"' if last else '') + '/>')
+    return (f'<input type="hidden" name="__VIEWSTATE" value="p"/>{pager}'
+            f'<span id="ctl00_ContentPlaceHolder1_dlVenda">{"".join(blocks)}</span>')
+
+
+CITIUS_DETAIL = {"d": "<div>Detalhes do bem Tribunal: Viseu Processo: 468/17.6T8MBR Descrição do Bem: "
+                      "Prédio urbano sito na Rua do Eiró, freguesia de Longa, concelho de Tabuaço, composto por "
+                      "casa de habitação de quatro andares, com uma superficie coberta de 85 m2 Art.Matricial: 2º "
+                      "Intervenientes Interveniente: Executado Nome: Pessoa Executada Morada: Rua Privada 1</div>"}
+
+
+def test_citius_reads_every_page_and_the_full_details(db, fake_http):
+    page1 = _citius_page([_citius_block(111850, "468/17.6T8MBR, Juízo de Execução de Viseu", "9 000,00",
+                                        "Prédio urbano sito na Rua do Eiró, freguesia de Longa, concelho de Tabuaço, "
+                                        "composto por casa de habitação de quatro andares, com uma ..."),
+                          _citius_block(222, "10/20.0T8VIS, Juízo de Viseu", "95 000,00", "Moradia cara")], last=False)
+    page2 = _citius_page([_citius_block(333, "10/20.0T8VIS, Juízo de Viseu", "500,00",
+                                        "Prédio rústico de cultivo com 2760 m2")], last=True)
+
+    def handler(method, url, kw):
+        if method == "GET":
+            return FakeResponse(CITIUS_FORM)
+        if url.endswith("GetHtmlDetails"):
+            assert kw["data"] == "{htmlId:111850}" or kw["data"] in ("{htmlId:333}",)
+            return FakeResponse(json_data=CITIUS_DETAIL if "111850" in kw["data"] else {"d": ""})
+        next_page = any(k.endswith("btnNextPage.x") for k in kw["data"])
+        return FakeResponse(page2 if next_page else page1)
+
+    fake_http(handler)
+    assert REGISTRY["citius"].func(db, max_price=30000) == 2        # the €95,000 one is over budget
+    rows = {r["id"]: r for r in db.execute("SELECT * FROM listings")}
+    # page 2 was read, and the €500 plot keeps its place in the case although lot 1 was skipped
+    assert set(rows) == {"citius:468176T8MBRJuzodeExecuodeViseu", "citius:10200T8VISJuzodeViseu-2"}
+    house = rows["citius:468176T8MBRJuzodeExecuodeViseu"]
+    assert "superficie coberta de 85 m2" in house["description"] and house["area_m2"] == 85
+    assert "Pessoa Executada" not in house["description"] + house["raw_json"]   # owners are not stored
+    assert house["concelho"] == "Tabuaço"
+
+    REGISTRY["citius"].func(db, max_price=30000)                     # the next scan keeps the full text
+    house = db.execute("SELECT description FROM listings WHERE id='citius:468176T8MBRJuzodeExecuodeViseu'").fetchone()
+    assert "superficie coberta de 85 m2" in house[0]
+
+
+def test_eleiloes_area_field_off_by_100():
+    from sources.pt import eleiloes_detail_fields
+    fields, _ = eleiloes_detail_fields({"areaTotal": 1695000.0, "descricao":
+                                        "terreno rústico com cerca de 16.950m2, sito na Tapada da Parreira"})
+    assert fields["area_m2"] == 16950
+    fields, _ = eleiloes_detail_fields({"areaTotal": 140.0, "descricao": "Moradia com 120 m2 de área útil"})
+    assert fields["area_m2"] == 140                                  # close enough: the field stays

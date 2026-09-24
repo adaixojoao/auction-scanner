@@ -177,6 +177,22 @@ def related(db, item: dict) -> list[dict]:
     return out
 
 
+def same_case_lots(db, item: dict) -> list[dict]:
+    """Other lots sold in the same court case (a house and the plot next to it,
+    several plots of one owner): worth buying together."""
+    proc = case_number(item)
+    if not proc or not item.get("id"):
+        return []
+    like = f'%"processo": "{proc}%'
+    out = []
+    for row in db.execute("""SELECT id, title, price, area_m2, url, source FROM listings
+                             WHERE source = ? AND id != ? AND raw_json LIKE ?
+                             ORDER BY price""", (item.get("source"), item["id"], like)).fetchall()[:12]:
+        out.append({"id": row["id"], "title": (row["title"] or "")[:140], "price": row["price"],
+                    "area": row["area_m2"], "url": safe_url(row["url"])})
+    return out
+
+
 def how_to_find(item: dict) -> dict | None:
     """Steps to reach the exact sale when its link opens only a search page."""
     if item.get("source") != "citius":

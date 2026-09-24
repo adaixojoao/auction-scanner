@@ -170,6 +170,8 @@ function detailsHtml(d) {
       ${guide}
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
+      ${(d.same_case || []).length ? `<div class="d-lots"><b>Also sold in this case</b> <span class="small muted">(buying together can make sense: a house and the plot next to it)</span><ul>${
+        d.same_case.map(l => `<li>${AS.money(l.price)}${l.area ? ` · ${Math.round(l.area).toLocaleString("de-DE")} m²` : ""} — ${AS.esc(l.title)}</li>`).join("")}</ul></div>` : ""}
       ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
       <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>
     </div></div>`;
