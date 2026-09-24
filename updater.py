@@ -220,8 +220,13 @@ def _auto_enabled(root: str) -> bool:
 
 
 def _scan_running(root: str) -> bool:
+    """A scan holds scan.lock. A lock left behind by a scan that was stopped
+    (app closed or killed, PC shut down) does not count: its process is gone.
+    It used to count for 3 hours, and the app started without updating."""
+    from locks import lock_holder
     lock = os.path.join(root, "scan.lock")
-    return os.path.exists(lock) and time.time() - os.path.getmtime(lock) < 3 * 3600
+    return (os.path.exists(lock) and time.time() - os.path.getmtime(lock) < 3 * 3600
+            and lock_holder(lock) is not None)
 
 
 def update_on_start(root: str = HERE) -> bool:
@@ -230,7 +235,9 @@ def update_on_start(root: str = HERE) -> bool:
     Never raises."""
     changed = False
     try:
-        if _auto_enabled(root) and not _scan_running(root):
+        if _auto_enabled(root) and _scan_running(root):
+            LOG.info("No automatic update: a scan is running (it updates next time)")
+        elif _auto_enabled(root):
             st = apply(root)
             changed = st["updated"]
             if not st["ok"] and st["reason"]:

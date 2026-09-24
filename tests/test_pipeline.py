@@ -59,5 +59,5 @@ def test_scan_state_of_a_killed_process_is_not_running(db):
 
 def test_pid_alive():
     import os
-    from common import pid_alive
+    from locks import pid_alive
     assert pid_alive(os.getpid()) and not pid_alive(999999999) and not pid_alive(0)

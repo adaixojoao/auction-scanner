@@ -115,8 +115,8 @@ def test_update_on_start_respects_the_setting_and_running_scans(repos, monkeypat
     write(pc, "config.json", '{"updates": {"auto": false}}')
     assert updater.update_on_start(pc) is False
     write(pc, "config.json", "{}")
-    write(pc, "scan.lock", "123")
+    write(pc, "scan.lock", f"{os.getpid()} 2026-09-24T14:14:06")    # a scan that is running
     assert updater.update_on_start(pc) is False
-    os.remove(os.path.join(pc, "scan.lock"))
+    write(pc, "scan.lock", "999999999 2026-09-24T14:14:06")          # left by a stopped scan
     assert updater.update_on_start(pc) is True
     assert open(os.path.join(pc, "app.py"), encoding="utf-8").read() == "v2\n"

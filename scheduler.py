@@ -201,7 +201,7 @@ def _acquire_lock() -> bool:
                 f.write(f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n")
             return True
         except FileExistsError:
-            from common import lock_holder
+            from locks import lock_holder
             age = time.time() - os.path.getmtime(LOCK_PATH)
             if age < LOCK_STALE_AFTER.total_seconds() and lock_holder(LOCK_PATH):
                 return False

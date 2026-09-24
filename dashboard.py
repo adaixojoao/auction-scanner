@@ -25,7 +25,8 @@ from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file
 
-from common import COUNTRY_NAMES, FLAGS, lock_holder, safe_url
+from common import COUNTRY_NAMES, FLAGS, safe_url
+from locks import lock_holder
 from db import connect, hidden_category, load_listings, set_listing_status, source_health
 
 HERE = os.path.dirname(os.path.abspath(__file__))
