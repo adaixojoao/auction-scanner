@@ -49,6 +49,7 @@ def is_fractional_share(title: str) -> bool:
 
 
 OCCUPANCY_PATTERNS = [
+    "nije slobodn*", "nisu slobodn*",
     "ocupado", "ocupada", "arrendado", "arrendada", "arrendatário*",
     "inquilino*", "occupied", "tenant*", "locataire*", "affittuari*",
     "ocupantes", "occupato", "occupata", "occupé", "occupée", "loué", "louée",
@@ -121,7 +122,18 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
 # they are hidden unless you shortlist them.
-NOT_THE_GOAL_CAP = {"not a home or plot": 35, "needs heavy work": 40, "isolated location": 40}
+NOT_THE_GOAL_CAP = {"not a home or plot": 35, "needs heavy work": 40, "isolated location": 40,
+                    "rejected:": 30}
+
+# Rejected outright, whatever else looks good (the owner's rules, Sept 2026).
+_REJECTS = [
+    ("unfinished building", re.compile(r"inacabad[oa]|em tosco|por acabar|obra parada|constru[çc][ãa]o suspensa", re.I)),
+    ("not in the land register", re.compile(
+        r"n[ãa]o\s+descri(?:t)?o\s+na\s+(?:C\.?R\.?P|conservat)|omiss[oa]\s+(?:na\s+conservat|no\s+registo)", re.I)),
+    ("occupied", None),                               # from the occupancy rules below
+    ("land only sold together with another lot", re.compile(
+        r"venda\s+conjunta|venda\s+em\s+conjunto|vendid[oa]s?\s+em\s+conjunto", re.I)),
+]
 # Small homes and plots and expensive homes are held down along curves
 # (SMALL_HOME_CAP and the others next to score_detail).
 SMALL_HOME_M2 = 40
@@ -148,6 +160,14 @@ BUILDING_WORDS = ["moradia", "apartamento", "prédio", "fração", "fracção", 
                   "habitação", "andar"]
 # What a portal types as not property at all (e-leilões tipoId 2–6).
 NOT_PROPERTY_TYPES = {"veiculo", "equipamento", "mobiliario", "direitos"}
+
+
+# "Lote de terreno destinado a construção de moradia" is a plot; "Terreno T0"
+# (a portal's typology on land) is land, unless the text also names a house.
+_PLOT_FOR_A_HOUSE = re.compile(
+    r"(?:lote|terreno)[^.;]{0,60}?(?:destinad[oa]\s+a|para)\s+(?:a\s+)?construcao\s+de\s+(?:uma\s+)?(?:moradia|habitacao|casa|vivenda)")
+_STARTS_AS_LAND = re.compile(r"\s*(?:terreno|lote de terreno|lote para construcao|predio rustico)\b")
+_HOUSE_WORDS_NOT_TYPOLOGY = [w for w in DWELLING_WORDS if not re.fullmatch(r"t\d", w)]
 
 
 def _first_at(text: str, terms) -> int | None:
@@ -184,7 +204,8 @@ URBAN_PLOT_TYPES = {normalize(t) for t in ("terreno_urbano", "suelo", "solar", "
 
 RURAL_WORDS = [
     "prédio rústico", "rústico", "rústica", "terreno rústico", "terreno agrícola", "agrícola",
-    "florestal", "floresta", "mata", "pinhal", "mato", "olival", "vinha", "eucaliptal",
+    "florestal", "floresta", "mata", "pinhal", "mato", "olival", "oliveira*", "vinha", "eucaliptal",
+    "terra de cultura", "terra com",
     "montado", "sobreiral", "pastagem", "cultura arvense", "sequeiro", "regadio", "herdade",
     "quinta", "finca rústica", "tierra de labor", "olivar", "viñedo",
     "terrain agricole", "terre agricole", "terres agricoles", "bois", "forêt", "prairie",
@@ -214,6 +235,8 @@ PARKING_WORDS = OTHER_WORDS   # older name
 # Homes: how much work they need, and where they are.
 HEAVY_WORK = [
     "ruin*", "arruinad*", "em ruínas", "para recuperar", "para reconstruir", "reconstrução",
+    "para recuperação", "recuperação total", "necessita de recuperação", "a necessitar de recuperação",
+    "carece de recuperação", "para reabilitação", "para reabilitar",
     "obras profundas", "reabilitação total", "reabilitação integral", "inabitável", "sem telhado",
     "telhado caído", "muito degradad*", "mau estado", "para demolir", "demolição",
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
@@ -403,6 +426,13 @@ def property_kind(item: dict) -> str | None:
     def kind_of(text: str) -> str | None:
         if _is_household_goods(text):
             return "other"
+        norm = normalize(text)
+        if _PLOT_FOR_A_HOUSE.search(norm) or (
+                _STARTS_AS_LAND.match(norm) and not has_term(text, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False)):
+            # The title says land; whether rural often only the description says.
+            if has_term(f"{text} {desc}", RURAL_WORDS, negations=False) or area >= 5000:
+                return "rural_plot"
+            return "urban_plot"
         if has_term(text, DWELLING_WORDS, negations=False):
             return "home"
         if has_term(text, OTHER_WORDS, negations=False):
@@ -571,6 +601,7 @@ def score_detail(item: dict, now: datetime | None = None,
     if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
         s -= 25
         reasons.append("occupied/tenanted")
+        reasons.append("rejected: occupied")
     elif occupation == "vacant" or has_term(full, VACANT_PATTERNS, negations=False):
         s += 6
         reasons.append("vacant (devoluto)")
@@ -674,6 +705,16 @@ def score_detail(item: dict, now: datetime | None = None,
     if price and price < 300:
         s -= 20
         reasons.append("suspiciously cheap — likely tiny/worthless")
+
+    for label, pattern in _REJECTS:
+        if pattern is None or not pattern.search(full):
+            continue
+        if label.startswith("land only") and kind == "home":
+            reasons.append("sold together with another lot (its price is not shown)")
+            continue
+        reasons.append(f"rejected: {label}")
+    if has_term(full, ["inacabad*", "em tosco", "por acabar"], negations=False) and kind == "home":
+        reasons.append("needs heavy work (unfinished)")
 
     for label, cap in NOT_THE_GOAL_CAP.items():
         if any(r.startswith(label) for r in reasons):
