@@ -34,6 +34,10 @@ def isolated_files(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "LOCK_PATH", str(tmp_path / "scan.lock"))
     monkeypatch.setattr(pipeline, "REPORTS_DIR", str(tmp_path / "reports"))
     monkeypatch.setattr(scheduler, "LOCK_PATH", str(tmp_path / "scheduler.lock"))
+    # data/pt_home_prices.csv changes every quarter: tests use the fixed city
+    # table unless they supply their own price file (tests/test_prices.py).
+    import prices
+    monkeypatch.setattr(prices, "PT_FILE", str(tmp_path / "no_pt_home_prices.csv"))
 
 
 @pytest.fixture
