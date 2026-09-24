@@ -120,3 +120,71 @@ def test_update_on_start_respects_the_setting_and_running_scans(repos, monkeypat
     write(pc, "scan.lock", "999999999 2026-09-24T14:14:06")          # left by a stopped scan
     assert updater.update_on_start(pc) is True
     assert open(os.path.join(pc, "app.py"), encoding="utf-8").read() == "v2\n"
+
+
+# ─── Rollback: a version that does not start on this PC ─────────────────
+
+def head(repo):
+    return git(repo, "rev-parse", "HEAD").strip()
+
+
+def test_a_version_that_starts_becomes_the_last_good_one(repos):
+    work, pc = repos
+    publish(work, "app.py", "v2\n", "Update")
+    assert updater.apply(pc)["updated"] and updater.update_pending(pc)
+    assert updater.start_attempt(pc) is None           # first start of the new version: go
+    updater.confirm_start(pc)
+    assert not updater.update_pending(pc)
+    assert open(os.path.join(pc, ".last-good"), encoding="utf-8").read() == head(pc)
+
+
+def test_a_version_that_does_not_start_is_rolled_back_and_skipped(repos):
+    work, pc = repos
+    good = head(pc)
+    publish(work, "app.py", "broken\n", "Broken version")
+    updater.apply(pc)
+    assert updater.start_attempt(pc) is None           # it starts... and dies without confirming
+    chk = updater.start_attempt(pc)                    # the next start sees that
+    assert chk and updater.roll_back(pc, chk)
+    assert head(pc) == good and open(os.path.join(pc, "app.py"), encoding="utf-8").read() == "v1\n"
+    assert updater.last_update(pc)["rolled_back"] is True
+
+    st = updater.status(pc)                            # the broken version is not installed again
+    assert not st["ok"] and "did not start on this PC" in st["reason"]
+    assert not updater.apply(pc)["updated"]
+
+    publish(work, "app.py", "v3\n", "Fixed")           # a newer version is tried
+    assert updater.apply(pc)["updated"] and not os.path.exists(os.path.join(pc, ".bad-update.json"))
+
+
+def test_a_crash_while_starting_rolls_back_at_once(repos):
+    work, pc = repos
+    publish(work, "app.py", "v2\n", "Good")
+    updater.apply(pc)
+    updater.start_attempt(pc)
+    updater.confirm_start(pc)
+    v2 = head(pc)
+    publish(work, "app.py", "v3\n", "Crashes")
+    updater.apply(pc)
+    updater.start_attempt(pc)
+    updater.start_failed(pc)                           # the app raised while starting
+    assert updater.roll_back(pc) and head(pc) == v2   # back to the last good version, not further
+
+
+def test_a_taken_port_does_not_count_against_a_version(repos):
+    work, pc = repos
+    publish(work, "app.py", "v2\n", "Update")
+    updater.apply(pc)
+    updater.start_attempt(pc)
+    updater.start_inconclusive(pc)                     # port 8050 was taken by another program
+    assert updater.start_attempt(pc) is None
+
+
+def test_no_rollback_over_changes_made_on_the_pc(repos):
+    work, pc = repos
+    publish(work, "app.py", "v2\n", "Update")
+    updater.apply(pc)
+    updater.start_attempt(pc)
+    write(pc, "app.py", "edited by hand\n")
+    assert updater.roll_back(pc, updater.start_attempt(pc)) is False
+    assert open(os.path.join(pc, "app.py"), encoding="utf-8").read() == "edited by hand\n"

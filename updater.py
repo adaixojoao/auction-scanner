@@ -9,7 +9,10 @@ from Settings → Updates) it fetches origin/master and moves this folder to it:
 - if requirements.txt changed, the new packages are installed before the app
   loads them;
 - not while a scan is running, and never fatal: offline or no git means the
-  app simply starts as it is.
+  app simply starts as it is;
+- a version that does not start is rolled back: the app returns to the last
+  version that started on this PC and skips the broken one until a newer one
+  is published (see "Rollback" below).
 
 Your data (auctions.db, config.json, reports/, logs) is not in git, so an update
 never touches it.
@@ -89,6 +92,11 @@ def status(root: str = HERE, *, fetch: bool = True) -> dict:
     if out["latest"] is None:
         out["reason"] = f"{upstream} is unknown; press Check now while online."
         return out
+    bad = _read_json(root, _BAD)
+    if bad and bad.get("sha") == _full_sha(root, upstream):
+        out["reason"] = (f"The newest version ({bad['sha'][:7]}) did not start on this PC, so the app went "
+                         "back to the version before it. It will update again when a newer version is published.")
+        return out
     counts = _git(root, "rev-list", "--left-right", "--count", f"HEAD...{upstream}").stdout.split()
     ahead, behind = (int(counts[0]), int(counts[1])) if len(counts) == 2 else (0, 0)
     out["behind"] = behind
@@ -136,6 +144,7 @@ def apply(root: str = HERE, *, fetch: bool = True) -> dict:
     if not st["ok"] or not st["behind"]:
         return st
     before = _requirements_hash(root)
+    before_sha = _full_sha(root, "HEAD")
     st["backup"] = backup_database(root)
     merged = _git(root, "merge", "--ff-only", f"{REMOTE}/{BRANCH}")
     if merged.returncode != 0:
@@ -146,6 +155,9 @@ def apply(root: str = HERE, *, fetch: bool = True) -> dict:
     st["requirements_changed"] = _requirements_hash(root) != before
     st["previous"], st["current"] = st["current"], _commit(root, "HEAD")
     _remember(root, st)
+    # Not yet known to work: confirm_start() clears this once it has started.
+    _write_json(root, _CHECK, {"from": before_sha, "to": _full_sha(root, "HEAD"), "starts": 0})
+    _remove(root, _BAD)
     LOG.info(f"Updated {st['previous']['sha']} → {st['current']['sha']} ({st['behind']} change(s))")
     return st
 
@@ -248,6 +260,130 @@ def update_on_start(root: str = HERE) -> bool:
     except Exception:
         LOG.exception("Update check failed; starting the current version")
     return changed
+
+
+# ─── Rollback ─────────────────────────────────────────────────────────
+# After an update, _CHECK says "from A to B, not confirmed yet". The app
+# calls start_attempt() before it starts and confirm_start() once it serves
+# pages; B then becomes the last good version (_GOOD). A start that raises
+# (start_failed) or a second start without a confirmation means B does not
+# work here: roll_back() returns to the last good version and _BAD keeps the
+# app from installing B again.
+
+_CHECK = ".update-check.json"
+_GOOD = ".last-good"
+_BAD = ".bad-update.json"
+
+
+def _read_json(root: str, name: str) -> dict | None:
+    try:
+        with open(os.path.join(root, name), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _write_json(root: str, name: str, data: dict):
+    try:
+        with open(os.path.join(root, name), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except OSError:
+        LOG.warning(f"Could not write {name}")
+
+
+def _remove(root: str, name: str):
+    try:
+        os.remove(os.path.join(root, name))
+    except OSError:
+        pass
+
+
+def _full_sha(root: str, ref: str) -> str:
+    try:
+        r = _git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def update_pending(root: str = HERE) -> bool:
+    """Was this version installed by an update that has not started yet?"""
+    return _read_json(root, _CHECK) is not None
+
+
+def start_attempt(root: str = HERE) -> dict | None:
+    """Call before starting. Returns the pending update when the new version
+    already failed to start (so the caller rolls back), else None."""
+    chk = _read_json(root, _CHECK)
+    if not chk:
+        return None
+    if chk.get("failed") or chk.get("starts", 0) >= 1:
+        return chk
+    chk["starts"] = chk.get("starts", 0) + 1
+    _write_json(root, _CHECK, chk)
+    return None
+
+
+def start_failed(root: str = HERE):
+    """The new version raised while starting."""
+    chk = _read_json(root, _CHECK)
+    if chk:
+        chk["failed"] = True
+        _write_json(root, _CHECK, chk)
+
+
+def start_inconclusive(root: str = HERE):
+    """The start stopped for a reason that is not the code (the port is taken):
+    do not count it against the new version."""
+    chk = _read_json(root, _CHECK)
+    if chk:
+        chk["starts"] = 0
+        _write_json(root, _CHECK, chk)
+
+
+def confirm_start(root: str = HERE):
+    """The app is up and serving: this version works here."""
+    sha = _full_sha(root, "HEAD")
+    if sha:
+        try:
+            with open(os.path.join(root, _GOOD), "w", encoding="utf-8") as f:
+                f.write(sha)
+        except OSError:
+            pass
+    _remove(root, _CHECK)
+
+
+def roll_back(root: str = HERE, chk: dict | None = None) -> bool:
+    """Return to the last version that started here. Never over files changed
+    on this PC. True when the code changed (the caller restarts)."""
+    chk = chk or _read_json(root, _CHECK)
+    if not chk:
+        return False
+    head = _full_sha(root, "HEAD")
+    try:
+        with open(os.path.join(root, _GOOD), encoding="utf-8") as f:
+            target = f.read().strip() or chk.get("from", "")
+    except OSError:
+        target = chk.get("from", "")
+    if not target or head != chk.get("to") or target == head or not _full_sha(root, target):
+        LOG.warning("Not rolling back: this folder is not where the update left it")
+        _remove(root, _CHECK)
+        return False
+    if _git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        LOG.warning("Not rolling back: files in the app folder were changed on this PC")
+        return False
+    reset = _git(root, "reset", "--hard", target)
+    if reset.returncode != 0:
+        LOG.error("Rollback failed: " + (reset.stderr.strip().splitlines() or ["?"])[-1])
+        return False
+    _write_json(root, _BAD, {"sha": head, "back_to": target, "at": datetime.now().isoformat(timespec="seconds")})
+    _remove(root, _CHECK)
+    info = {"at": datetime.now().isoformat(timespec="seconds"), "rolled_back": True,
+            "from": _commit(root, head), "to": _commit(root, target), "changes": []}
+    _write_json(root, _LAST, info)
+    LOG.warning(f"Version {head[:7]} did not start; went back to {target[:7]}")
+    return True
 
 
 def main(argv=None) -> int:

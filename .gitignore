@@ -26,3 +26,6 @@ app-output.log
 backups/
 .installed-requirements
 .last-update.json
+.update-check.json
+.last-good
+.bad-update.json

@@ -43,6 +43,13 @@ folder: then it tells you why it did not update. It skips the update when
 offline, when git is missing, or when the folder was not installed with
 `git clone`, and the app starts as it is.
 
+**A version that does not start is rolled back.** If a new version crashes
+while starting, or a start of it never completes, the app goes back to the
+last version that started on this PC and restarts. It does not install that
+version again until a newer one is published, and it tells you in the window
+and in Settings → Updates. The database backup from before the update is in
+`backups/` if you ever need it.
+
 ## Use
 
 Double-click **Auction Scanner** on the Desktop. The app opens in its own
@@ -175,7 +182,11 @@ than €20,001 instead of jumping at a step.
   location (*centro*, near the beach…) or a town we have local prices for,
   size up to about 150 m², and the discount to local prices per m². Down for
   needing some work, and a lot for an isolated location or heavy work
-  (*ruína*, *para recuperar*…).
+  (*ruína*, *para recuperar*…). Local prices in Portugal are the median price
+  per m² of homes sold in each municipality (INE), from
+  `data/pt_home_prices.csv`; refresh it with `python scripts/update_prices.py`
+  on a PC that can reach ine.pt. Elsewhere, and for any municipality the file
+  lacks, a small table of city prices is used. Each reason says which.
 - **Rural plots:** size as a multiple of the minimum (1 ha by default; about
   5× scores as large), next to water, and €/m² against the maximum (€0.50/m²
   by default). Both limits are in **Settings → What you are looking for**.
@@ -188,6 +199,13 @@ than €20,001 instead of jumping at a step.
   is one where you name the price and none is published (+18). Up for forced
   and tax sales, a tiny minimum bid, ending soon. Down if occupied, no road
   access, or inheritance rights only.
+- **On sale before:** when a property is back after an earlier round of its
+  sale ended (same court case, same property; across Citius and e-leilões),
+  nobody bought it then, so the seller is likely to take less. That is the
+  first reason shown ("on sale before (ended 2026-08-12 at €40,000) — not
+  sold then"), with "25% cheaper than the last round" when it is, and the
+  listing's ⓘ panel links the earlier round. The scanner only knows rounds
+  that ended since it was installed, so this finds more the longer it runs.
 
 What is not the goal stays under the default minimum score (45), however good
 the sale looks: other (at most 35), homes needing heavy work or in an isolated
@@ -293,7 +311,7 @@ scheduler.py    timetable             telegram_alert.py, notifications.py
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access
-python -m pyflakes *.py sources/ tests/
+python -m pyflakes *.py sources/ tests/ scripts/
 ```
 
 CI runs both on every push. Rules for AI agents working here: [AGENTS.md](AGENTS.md).

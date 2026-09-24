@@ -161,6 +161,12 @@ def related(db, item: dict) -> list[dict]:
             if url and url != CITIUS_SEARCH:
                 out.append({"label": f"Same case on {'e-leilões' if other == 'eleiloes' else 'Citius'}: "
                                      f"{(row['title'] or '')[:60]}", "url": url, "id": row["id"]})
+    er = item.get("earlier_round")               # set by db.load_listings (rounds.py)
+    if er:
+        row = db.execute("SELECT url FROM listings WHERE id = ?", (er["id"],)).fetchone()
+        was = f" at €{er['price']:,.0f}" if er.get("price") else ""
+        out.append({"label": f"Earlier round, ended {er['ended']}{was} without a sale",
+                    "url": safe_url(row["url"]) if row else None, "id": er["id"]})
     cat = catastro_url(item)
     if cat:
         out.append({"label": "Land registry (Catastro)", "url": cat})

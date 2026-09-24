@@ -556,8 +556,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """Every listing a view should consider, scored, with hidden ones removed.
 
     Each item gains: score, reasons, category, hidden_reason (None if visible),
-    price_drop_pct, is_recent, status (shortlisted/dismissed/None) and
-    offer_outcome (latest carta_log outcome, or None). `where`/`params` are extra SQL conditions on the
+    price_drop_pct, earlier_round (rounds.py), is_recent, status
+    (shortlisted/dismissed/None) and offer_outcome (latest carta_log outcome, or None). `where`/`params` are extra SQL conditions on the
     listings table for cheap pre-filtering (country, source, search...).
 
     Hidden, in order of precedence: dismissed by the user, expired, duplicate,
@@ -565,6 +565,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     filters.min_score. A shortlisted listing ignores the last two: the user
     picked it on purpose.
     """
+    import rounds
     from scoring import categorize, property_kind, score_detail  # scoring imports common, not db
 
     now = now or utcnow()
@@ -577,6 +578,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     first_price = _first_prices(db)
     statuses = listing_statuses(db)
     offers = latest_offers(db)
+    cases = rounds.index(db)       # all listings, whatever `where` picks: rounds span sites and dates
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
 
     items = []
@@ -612,6 +614,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             item["price_drop_pct"] = round((fp - item["price"]) / fp * 100, 1)
         else:
             item["price_drop_pct"] = None
+        item["earlier_round"] = rounds.earlier_round(item, cases, now)
 
         rank, reasons = score_detail(item, now=now, targets=filters)
         sc = max(0.0, min(100.0, rank))
