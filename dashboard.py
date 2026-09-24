@@ -573,8 +573,8 @@ def api_analyze_property():
     if not data:
         return jsonify({"error": "No data"}), 400
 
-    prompt = f"""És um especialista em imóveis portugueses e leilões judiciais.
-Analisa este imóvel em venda judicial e dá uma avaliação honesta e prática.
+    prompt = f"""És um especialista em imóveis portugueses e leilões judiciais com 20 anos de experiência.
+O comprador quer adquirir imóveis significativamente abaixo do valor de mercado para fins caritativos.
 
 DADOS DO IMÓVEL:
 - Título: {data.get('title','')}
@@ -587,22 +587,35 @@ DADOS DO IMÓVEL:
 - Prazo: {data.get('date_end','')}
 - Tribunal: {data.get('tribunal','')}
 - Processo: {data.get('processo','')}
-- Descrição: {data.get('description','')}
+- Descrição completa: {data.get('description','')}
 - Score automático: {data.get('score','')}/100
 - Razões do score: {', '.join(data.get('reasons',[]))}
+- Proposta sugerida: EUR {data.get('bid','')}
 
-PROPOSTA SUGERIDA: EUR {data.get('bid','')} ({data.get('bidText','')})
+VERIFICA ESPECIFICAMENTE:
+1. A descrição contém "direito de superfície", "aforamento", "bem indiviso", "herança", "compropriedade", "usufruto"? Se sim, é um RED FLAG.
+2. O número do processo parece antigo (ex: /2015, /2016)? Processos antigos podem ter complicações acumuladas.
+3. A área e o preço fazem sentido para a localização? Calcula €/m² e compara com o mercado local.
+4. Para uma moradia/apartamento: estima custo de renovação básico (€100-200/m² para obras ligeiras, €300-500/m² para obras pesadas).
+5. Vale a pena visitar antes de licitar, ou é seguro licitar sem visita?
+6. Se for carta fechada: qual é o bid máximo que faz sentido dado o risco?
 
-Responde em português com EXATAMENTE este formato JSON (sem mais nada):
+Responde APENAS com este JSON (sem texto adicional):
 {{
   "veredicto": "COMPRAR" | "INVESTIGAR" | "PASSAR",
   "confianca": 1-10,
-  "resumo": "Uma frase direta sobre esta oportunidade",
-  "pontos_positivos": ["ponto 1", "ponto 2"],
-  "riscos": ["risco 1", "risco 2"],
+  "resumo": "Uma frase direta e honesta sobre esta oportunidade",
+  "pontos_positivos": ["máximo 3 pontos"],
+  "riscos": ["máximo 3 riscos, sendo honesto sobre o que não sabes"],
+  "red_flags": ["flags legais ou estruturais críticos — vazio se nenhum"],
+  "preco_mercado_estimado": null,
+  "desconto_estimado_pct": null,
+  "custo_renovacao_estimado": null,
   "bid_recomendado": "valor em formato 1.000,00",
+  "bid_maximo": "valor máximo absoluto em formato 1.000,00",
   "bid_justificacao": "Uma frase explicando o bid recomendado",
-  "proximos_passos": ["passo 1", "passo 2", "passo 3"]
+  "visitar_antes": true,
+  "proximos_passos": ["3 passos concretos e accionáveis"]
 }}"""
 
     try:
@@ -626,6 +639,89 @@ Responde em português com EXATAMENTE este formato JSON (sem mais nada):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/carta-log", methods=["GET"])
+def get_carta_log():
+    db = get_db()
+    try:
+        rows = db.execute("SELECT * FROM carta_log ORDER BY created_at DESC").fetchall()
+        cols = [d[0] for d in db.execute("SELECT * FROM carta_log LIMIT 0").description]
+    except Exception:
+        db.close()
+        return jsonify([])
+    db.close()
+    return jsonify([dict(zip(cols, r)) for r in rows])
+
+
+@app.route("/api/carta-log", methods=["POST"])
+def add_carta_log():
+    data = request.get_json()
+    db = get_db()
+    db.execute("""
+        INSERT INTO carta_log
+        (listing_id, processo, tribunal, sent_date, bid_amount, method, outcome, notes, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (
+        data.get("listing_id"), data.get("processo"), data.get("tribunal"),
+        data.get("sent_date"), data.get("bid_amount"), data.get("method", "email"),
+        data.get("outcome", "pending"), data.get("notes", ""),
+        datetime.now(timezone.utc).isoformat(),
+    ))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/carta-log/<int:log_id>", methods=["PATCH"])
+def update_carta_log(log_id):
+    data = request.get_json()
+    db = get_db()
+    if "outcome" in data:
+        db.execute("UPDATE carta_log SET outcome=?, notes=? WHERE id=?",
+                   (data["outcome"], data.get("notes", ""), log_id))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/map")
+def map_view():
+    return """<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>Auction Scanner Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>body{margin:0}#map{height:100vh}</style>
+</head><body>
+<div id="map"></div>
+<script>
+const map=L.map('map').setView([39.5,-8.0],7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution:'OpenStreetMap'}).addTo(map);
+const C={"Lisboa":[38.717,-9.139],"Porto":[41.157,-8.629],"Guarda":[40.537,-7.267],
+"Viseu":[40.661,-7.909],"Coimbra":[40.211,-8.429],"Aveiro":[40.644,-8.645],
+"Braga":[41.545,-8.426],"Faro":[37.014,-7.935],"Evora":[38.571,-7.909],
+"Beja":[38.015,-7.864],"Castelo Branco":[39.820,-7.491],
+"Portalegre":[39.287,-7.428],"Santarem":[39.236,-8.685],
+"Setubal":[38.524,-8.893],"Leiria":[39.744,-8.807],
+"Viana do Castelo":[41.694,-8.834],"Vila Real":[41.300,-7.745],
+"Braganca":[41.806,-6.757]};
+fetch('/api/listings?country=PT&max_price=100000&per_page=500')
+.then(r=>r.json())
+.then(data=>{
+  data.items.forEach(it=>{
+    const loc=it.concelho||it.district||"";
+    let coords=null;
+    for(const[key,c]of Object.entries(C)){if(loc.toLowerCase().includes(key.toLowerCase())){coords=c;break;}}
+    if(!coords)return;
+    const col=it.score>=85?"#22c55e":it.score>=65?"#eab308":"#94a3b8";
+    L.circleMarker(coords,{radius:8,fillColor:col,color:"#fff",weight:1,fillOpacity:0.85}).addTo(map)
+    .bindPopup("<b>"+it.title+"</b><br>Score: "+it.score+" | "+(it.price?"\\u20ac"+it.price.toLocaleString():"?")+"<br>"+loc+"<br><a href='"+(it.url||"#")+"' target='_blank'>Ver</a>");
+  });
+});
+</script></body></html>"""
+
+
 def main():
     from config import load_config
     cfg = load_config()
@@ -633,7 +729,9 @@ def main():
     host = dash.get("host", "127.0.0.1")
     port = dash.get("port", 8050)
     print(f"\n  EU Auction Scanner Dashboard")
-    print(f"  http://{host}:{port}\n")
+    print(f"  http://{host}:{port}")
+    print(f"  http://{host}:{port}/cartas-review")
+    print(f"  http://{host}:{port}/map\n")
     app.run(host=host, port=port, debug=True)
 
 

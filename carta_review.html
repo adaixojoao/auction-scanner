@@ -204,6 +204,19 @@ function renderDetail(){
   </div>
 
   <div class="card">
+    <div style="font-size:11px;font-weight:700;color:#fff;margin-bottom:11px">Verificacoes Antes de Enviar</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${[["registo","Verificado registo predial (conservatoria)?"],
+         ["matricial","Verificado caderneta matricial (financas)?"],
+         ["dividas","Confirmado sem dividas de IMI / condominio?"],
+         ["ocupacao","Confirmado imovel desocupado?"],
+         ["visita","Visitado o imovel (ou visto fotos recentes)?"],
+         ["hipoteca","Confirmado que hipoteca e cancelada na venda?"]
+      ].map(([k,l])=>'<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:#94a3b8"><input type="checkbox" id="chk-'+k+'" style="width:14px;height:14px;accent-color:#22c55e"> '+l+'</label>').join("")}
+    </div>
+  </div>
+
+  <div class="card">
     <div style="font-size:11px;font-weight:700;color:#fff;margin-bottom:11px">Aprovar & Enviar</div>
     <div style="display:flex;gap:9px;flex-wrap:wrap">
       <button class="abtn btn-g" onclick="approve()">Aprovar & Preparar Email</button>
@@ -233,7 +246,8 @@ function updBid(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bid=v;refr
 function updBidText(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bidText=v;refreshCarta();}
 function setPreset(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bid=v;const i=document.getElementById("inp-bid");if(i)i.value=v;document.querySelectorAll(".preset").forEach(b=>b.classList.toggle("on",b.textContent===v.split(",")[0]+"EUR"));refreshCarta();}
 function refreshCarta(){const c=items.find(x=>x.id===selId);if(!c)return;const ta=document.getElementById("carta-ta");if(ta)ta.value=buildCarta(c);}
-function approve(){const c=items.find(x=>x.id===selId);if(!c)return;c.approved=true;c.rejected=false;renderList();showEmail();toast("Aprovado");}
+function approve(){const c=items.find(x=>x.id===selId);if(!c)return;c.approved=true;c.rejected=false;renderList();showEmail();logSent(c);toast("Aprovado");}
+function logSent(c){fetch('/api/carta-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({listing_id:c.id,processo:c.processo,tribunal:c.tribunal,sent_date:new Date().toISOString().split('T')[0],bid_amount:parseFloat((c.bid||"0").replace(/\./g,'').replace(',','.')),method:'email',outcome:'pending'})}).then(()=>toast("Carta registada no log"));}
 function reject(){const c=items.find(x=>x.id===selId);if(!c)return;c.rejected=true;c.approved=false;renderList();toast("Rejeitado",true);}
 function showEmail(){const p=document.getElementById("epanel");if(p)p.style.display="block";}
 function copyCarta(){const ta=document.getElementById("carta-ta");if(!ta)return;navigator.clipboard.writeText(ta.value).then(()=>toast("Carta copiada!"));}
@@ -270,9 +284,19 @@ function analyzeAI(){
             ${(d.riscos||[]).map(r=>'<div style="font-size:10px;color:#fca5a5;margin-bottom:3px">- '+esc(r)+'</div>').join("")}
           </div>
         </div>
+        ${(d.red_flags&&d.red_flags.length)?'<div style="background:rgba(239,68,68,.1);border:1px solid #7f1d1d;border-radius:6px;padding:10px;margin-bottom:12px"><div style="font-size:9px;color:#ef4444;font-weight:700;margin-bottom:5px">RED FLAGS</div>'+d.red_flags.map(f=>'<div style="font-size:10px;color:#fca5a5;margin-bottom:3px">- '+esc(f)+'</div>').join("")+'</div>':''}
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+          <div style="background:#1e293b;border-radius:6px;padding:8px;text-align:center"><div style="font-size:8px;color:#64748b">Mercado est.</div><div style="font-size:13px;font-weight:700;color:#e2e8f0">${d.preco_mercado_estimado?'EUR '+d.preco_mercado_estimado.toLocaleString():'--'}</div></div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;text-align:center"><div style="font-size:8px;color:#64748b">Desconto</div><div style="font-size:13px;font-weight:700;color:#22c55e">${d.desconto_estimado_pct?d.desconto_estimado_pct+'%':'--'}</div></div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;text-align:center"><div style="font-size:8px;color:#64748b">Renovacao</div><div style="font-size:13px;font-weight:700;color:#eab308">${d.custo_renovacao_estimado?'EUR '+d.custo_renovacao_estimado.toLocaleString():'--'}</div></div>
+        </div>
+        ${d.visitar_antes===false?'<div style="font-size:10px;color:#22c55e;margin-bottom:10px">IA: Seguro licitar sem visita</div>':'<div style="font-size:10px;color:#eab308;margin-bottom:10px">IA: Recomenda visitar antes de licitar</div>'}
         <div style="background:#1e293b;border-radius:6px;padding:10px;margin-bottom:10px">
           <div style="font-size:9px;color:#64748b;margin-bottom:4px">BID RECOMENDADO PELA IA</div>
-          <div style="font-size:16px;font-weight:800;color:#22c55e">EUR ${esc(d.bid_recomendado)}</div>
+          <div style="display:flex;gap:16px;align-items:baseline">
+            <div><div style="font-size:16px;font-weight:800;color:#22c55e">EUR ${esc(d.bid_recomendado)}</div><div style="font-size:8px;color:#64748b">recomendado</div></div>
+            ${d.bid_maximo?'<div><div style="font-size:13px;font-weight:700;color:#eab308">EUR '+esc(d.bid_maximo)+'</div><div style="font-size:8px;color:#64748b">maximo</div></div>':''}
+          </div>
           <div style="font-size:10px;color:#94a3b8;margin-top:3px">${esc(d.bid_justificacao)}</div>
           <button style="margin-top:8px;background:rgba(34,197,94,.2);color:#22c55e;border:1px solid #22c55e;border-radius:5px;padding:5px 12px;font-size:10px;font-weight:700;cursor:pointer"
             onclick="setPreset('${esc(d.bid_recomendado)}')">Usar este bid</button>

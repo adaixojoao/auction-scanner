@@ -85,6 +85,21 @@ def init_db(db: sqlite3.Connection):
             status    TEXT,
             message   TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS carta_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id TEXT,
+            processo TEXT,
+            tribunal TEXT,
+            sent_date TEXT,
+            bid_amount REAL,
+            method TEXT DEFAULT 'email',
+            outcome TEXT DEFAULT 'pending',
+            notes TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_carta_outcome ON carta_log(outcome);
+        CREATE INDEX IF NOT EXISTS idx_carta_processo ON carta_log(processo);
     """)
     db.commit()
 
@@ -3354,6 +3369,38 @@ def print_console_summary(db: sqlite3.Connection, max_price: float = 50000):
     _safe_print(f"\n{'='*60}\n")
 
 
+def _deduplicate(db: sqlite3.Connection):
+    """Remove near-duplicate listings across sources (same concelho+price+area)."""
+    dupes = db.execute("""
+        SELECT a.id, b.id
+        FROM listings a
+        JOIN listings b ON (
+            a.source != b.source
+            AND a.country = b.country
+            AND ABS(COALESCE(a.price,0) - COALESCE(b.price,0)) < 500
+            AND ABS(COALESCE(a.area_m2,0) - COALESCE(b.area_m2,0)) < 5
+            AND LOWER(COALESCE(a.concelho,'')) = LOWER(COALESCE(b.concelho,''))
+            AND a.concelho IS NOT NULL
+            AND a.price IS NOT NULL
+            AND a.area_m2 IS NOT NULL
+        )
+        WHERE a.id < b.id
+    """).fetchall()
+    removed = 0
+    for a_id, b_id in dupes:
+        a = db.execute("SELECT * FROM listings WHERE id=?", (a_id,)).fetchone()
+        b = db.execute("SELECT * FROM listings WHERE id=?", (b_id,)).fetchone()
+        if a and b:
+            a_score = sum(1 for v in a if v is not None)
+            b_score = sum(1 for v in b if v is not None)
+            to_remove = b_id if a_score >= b_score else a_id
+            db.execute("DELETE FROM listings WHERE id=?", (to_remove,))
+            removed += 1
+    if removed:
+        db.commit()
+        LOG.info(f"Deduplication: removed {removed} near-duplicates")
+
+
 def apply_filters(db: sqlite3.Connection, filters: dict):
     """Delete listings that don't match user filters (runs post-scrape)."""
     if not filters:
@@ -3513,6 +3560,9 @@ def main():
         # Apply user filters
         apply_filters(db, cfg.get("filters", {}))
 
+        # Deduplicate cross-source near-duplicates
+        _deduplicate(db)
+
     report_path = generate_report(db, max_price=max_price)
 
     if args.sealed_bid:
@@ -3530,6 +3580,13 @@ def main():
             send_alerts(db, cfg.get("notifications", {}), investment_score, max_price=max_price)
         except ImportError:
             LOG.warning("notifications module not found")
+
+    # Telegram alerts
+    try:
+        from telegram_alert import alert_new_listings
+        alert_new_listings(db, cfg, investment_score)
+    except ImportError:
+        pass
 
     # Send weekly digest
     if args.digest:

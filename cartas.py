@@ -215,6 +215,27 @@ def generate_cartas(
         LOG.error("fpdf2 not installed. Run: pip install fpdf2")
         return []
 
+    import urllib.request
+    font_dir = os.path.join(os.path.dirname(__file__), "fonts")
+    os.makedirs(font_dir, exist_ok=True)
+    font_path = os.path.join(font_dir, "DejaVuSans.ttf")
+    font_bold = os.path.join(font_dir, "DejaVuSans-Bold.ttf")
+    use_dejavu = True
+    if not os.path.exists(font_path):
+        try:
+            LOG.info("Downloading DejaVu font for PDF generation...")
+            urllib.request.urlretrieve(
+                "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
+                font_path,
+            )
+            urllib.request.urlretrieve(
+                "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf",
+                font_bold,
+            )
+        except Exception as e:
+            LOG.warning(f"Could not download DejaVu font: {e}. Falling back to Helvetica.")
+            use_dejavu = False
+
     cols = [d[0] for d in db.execute("SELECT * FROM listings LIMIT 0").description]
     rows = db.execute(
         "SELECT * FROM listings "
@@ -327,35 +348,40 @@ def generate_cartas(
         loc = ", ".join(filter(None, [it.get("concelho", ""), it.get("district", "")]))
         area_str = f"{it['area_m2']:.0f} m2" if it.get("area_m2") else "area nao especificada"
 
-        is_negociacao = "negociação particular" in modalidade.lower() or "negociacao particular" in _safe_latin1(modalidade).lower()
+        is_negociacao = "negociação particular" in modalidade.lower() or "negociacao particular" in modalidade.lower()
         is_adjudicacao = "adjudica" in modalidade.lower()
 
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=25)
 
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 6, _safe_latin1(nome), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", size=10)
+        if use_dejavu:
+            pdf.add_font("DejaVu", "", font_path)
+            pdf.add_font("DejaVu", "B", font_bold)
+            fn, s = "DejaVu", lambda t: t or ""
+        else:
+            fn, s = "Helvetica", _safe_latin1
+
+        pdf.set_font(fn, "B", 11)
+        pdf.cell(0, 6, s(nome), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(fn, size=10)
         pdf.cell(0, 5, f"NIF: {nif}", new_x="LMARGIN", new_y="NEXT")
-        pdf.multi_cell(0, 5, _safe_latin1(morada))
+        pdf.multi_cell(0, 5, s(morada))
         pdf.ln(8)
-        pdf.cell(0, 5, f"Guarda, {_safe_latin1(today)}", new_x="LMARGIN", new_y="NEXT", align="R")
+        pdf.cell(0, 5, f"Guarda, {s(today)}", new_x="LMARGIN", new_y="NEXT", align="R")
         pdf.ln(6)
 
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 5, "Exmo(a). Sr(a). Juiz / Agente de Execucao", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", size=10)
-        pdf.cell(0, 5, _safe_latin1(tribunal), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(fn, "B", 10)
+        pdf.cell(0, 5, "Exmo(a). Sr(a). Juiz / Agente de Execução", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(fn, size=10)
+        pdf.cell(0, 5, s(tribunal), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(8)
 
         proc_key = processo.split(",")[0].strip()
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 5, f"Assunto: Proposta de Aquisicao - Processo {_safe_latin1(proc_key)}", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(fn, "B", 10)
+        pdf.cell(0, 5, f"Assunto: Proposta de Aquisição - Processo {s(proc_key)}", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(6)
-        pdf.set_font("Helvetica", size=10)
-
-        s = _safe_latin1
+        pdf.set_font(fn, size=10)
         dados_bloco = (
             f"Dados do proponente:\n"
             f"   Nome: {s(nome)}\n"
@@ -459,5 +485,9 @@ def generate_cartas(
     )
     print(f"=== {count} cartas geradas em {out_dir} ===")
     print(f"Exposicao total: EUR {total:,.2f}")
+
+    import subprocess, sys
+    if sys.platform == "win32" and generated:
+        subprocess.Popen(f'explorer "{out_dir}"')
 
     return generated
