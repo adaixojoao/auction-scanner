@@ -67,6 +67,15 @@ DEFAULTS = {
         "source_alerts": True,    # tell me when a site stops working (and when it is back)
     },
 
+    # Information requests the app prepares after a scan (outbox.py) for strong
+    # sales whose recipient's e-mail is known. Offered on Telegram with Send /
+    # Show letter / Skip; nothing is sent until you tap Send.
+    "auto_requests": {
+        "enabled": True,
+        "min_score": 75,
+        "per_day": 5,             # at most this many new requests offered per day
+    },
+
     # Scheduling (scheduler.py). while_app_open: scan on this timetable while
     # the app window is open, without the Windows background task.
     "schedule": {

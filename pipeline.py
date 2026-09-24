@@ -146,6 +146,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         alert_source_failures(db, cfg, [r["source"] for r in results])
                     except Exception:  # noqa: BLE001 — an alarm must never fail the scan
                         LOG.exception("Source alarm failed")
+                    try:
+                        from outbox import queue_requests
+                        queue_requests(db, cfg)          # offered on Telegram; sent only on your tap
+                    except Exception:  # noqa: BLE001
+                        LOG.exception("Preparing information requests failed")
             finally:
                 summary = {
                     "listings": sum(r["count"] for r in results),

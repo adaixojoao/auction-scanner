@@ -622,27 +622,10 @@ def api_offer_log_pdf(log_id):
 
 def _log_sent(item: dict, *, letter=None, bid: str = "", method: str, sent_to: str = "",
               notes: str = "") -> int:
-    from letters import parse_bid
-    raw = _raw(item)
-    is_offer = letter.is_offer if letter else True
+    from outbox import log_sent
     db = get_db()
     try:
-        cur = db.execute("""
-            INSERT INTO carta_log (listing_id, processo, tribunal, country, sent_date, bid_amount,
-                                   method, outcome, notes, created_at, letter_type, is_offer, sent_to,
-                                   letter_text, letter_subject, letter_filename)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            item["id"], letter.processo if letter else str(raw.get("processo") or "").split(",")[0].strip(),
-            raw.get("tribunal") or raw.get("autoridad"), item.get("country") or "PT",
-            datetime.now().strftime("%Y-%m-%d"), parse_bid(bid) if is_offer else None,
-            method, "pending", notes, datetime.now(timezone.utc).isoformat(),
-            letter.type_key if letter else "online", int(is_offer), sent_to or None,
-            letter.text if letter else None, letter.subject if letter else None,
-            letter.filename if letter else None))
-        db.commit()
-        if is_offer and item.get("status") == "shortlisted":
-            set_listing_status(db, item["id"], None)   # it is an offer now, not a shortlist entry
-        return cur.lastrowid
+        return log_sent(db, item, letter=letter, bid=bid, method=method, sent_to=sent_to, notes=notes)
     finally:
         db.close()
 
@@ -672,8 +655,7 @@ def api_offer_sent():
 @app.route("/api/offers/email", methods=["POST"])
 def api_offer_email():
     """Send the letter from here by e-mail, with its PDF attached, and log it."""
-    from letters import letter_pdf
-    from notifications import send_letter
+    from outbox import email_letter
     data = request.get_json(silent=True) or {}
     item, letter = _letter_for(*_letter_args(data))
     if not item:
@@ -681,13 +663,13 @@ def api_offer_email():
     if not letter:
         return jsonify({"error": "no such letter for this listing"}), 400
     to = (data.get("to") or letter.to_email or "").strip()
-    cfg = _config()
-    error = send_letter(cfg.get("notifications", {}), to, letter.subject, letter.text,
-                        letter_pdf(letter), letter.filename,
-                        reply_to=cfg.get("proponente", {}).get("email", ""))
+    db = get_db()
+    try:
+        error, log_id = email_letter(db, _config(), item, letter, to=to, bid=data.get("bid", ""))
+    finally:
+        db.close()
     if error:
         return jsonify({"error": error}), 400
-    log_id = _log_sent(item, letter=letter, bid=data.get("bid", ""), method="email", sent_to=to)
     return jsonify({"ok": True, "log_id": log_id, "to": to})
 
 
@@ -837,6 +819,7 @@ EDITABLE = {
                       "to_emails", "min_score"),
     "report": ("desktop_copy",),
     "updates": ("auto",),
+    "auto_requests": ("enabled", "min_score", "per_day"),
 }
 
 

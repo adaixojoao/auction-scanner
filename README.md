@@ -217,6 +217,15 @@ Set up in **Settings**:
   listings you have not decided on yet. While the app is open a tap works in
   seconds; when it is closed, the background task handles it on its next round
   (every 30 minutes). Only your own chat (the Chat ID in Settings) can use them.
+- **Information requests, prepared for you** — after a scan, for strong sales
+  (score 75+, at least 5 days before the end) where the recipient's e-mail is
+  known (the agente de execução on e-leilões, the court on BOE, the seller's
+  lawyer on licitor), the app prepares the information request and sends it to
+  Telegram with **✉ Send**, **📄 Show letter** and **✕ Skip**. Nothing is sent
+  until you tap Send; it then goes from your e-mail account with its PDF and
+  appears under Offers → Sent. At most 5 new ones a day, each sale once.
+  Settings → Information requests. It needs Telegram, the e-mail account, and
+  your name and e-mail.
 - **E-mail** — the same new-listing alerts by SMTP. The same account sends letters from the Offers page.
 
 Each listing is alerted once per channel; a failed send is retried next time.

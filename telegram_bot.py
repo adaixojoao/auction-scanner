@@ -11,6 +11,9 @@ A tap changes the listing exactly as the app's ☆ / ✕ do (db.set_listing_stat
 and the buttons become "↩ Undo". Only the configured chat may act: anyone can
 find a bot and press its buttons, so everything else is ignored.
 
+Information requests prepared by outbox.py come with ✉ Send / 📄 Show letter /
+✕ Skip. Send e-mails that request (outbox.send_queued); nothing is sent otherwise.
+
 Commands: /top (the best listings not yet decided, with buttons), /help.
 """
 from __future__ import annotations
@@ -58,6 +61,20 @@ def listing_keyboard(db, listing_id: str) -> dict:
     ]]}
 
 
+def request_keyboard(db, listing_id: str) -> dict:
+    ref = _ref(db, listing_id)
+    return {"inline_keyboard": [[
+        {"text": "✉ Send", "callback_data": f"rs|{ref}"},
+        {"text": "📄 Show letter", "callback_data": f"rv|{ref}"},
+        {"text": "✕ Skip", "callback_data": f"rk|{ref}"},
+    ]]}
+
+
+def _label_keyboard(text: str) -> dict:
+    """A single, inert button that says what happened."""
+    return {"inline_keyboard": [[{"text": text, "callback_data": "noop|"}]]}
+
+
 def undo_keyboard(db, listing_id: str, done: str) -> dict:
     return {"inline_keyboard": [[
         {"text": f"{done} · ↩ Undo", "callback_data": f"u|{_ref(db, listing_id)}"},
@@ -88,14 +105,19 @@ def _is_owner(chat_id, cfg_chat_id) -> bool:
     return chat_id is not None and str(chat_id) == str(cfg_chat_id).strip()
 
 
-def handle_callback(db, tg: dict, cq: dict) -> str | None:
+def handle_callback(db, cfg: dict, tg: dict, cq: dict) -> str | None:
     """One button tap. Returns what was done (for logs and tests), or None."""
     msg = cq.get("message") or {}
     if not _is_owner((msg.get("chat") or {}).get("id"), tg["chat_id"]):
         LOG.warning("Telegram: ignored a button tap from another chat")
         return None
     action, _, ref = (cq.get("data") or "").partition("|")
+    if action == "noop":
+        _api(tg["token"], "answerCallbackQuery", callback_query_id=cq.get("id"))
+        return None
     listing_id = _listing_id(db, ref) if ref else None
+    if action in REQUEST_ACTIONS and listing_id:
+        return _handle_request(db, cfg, tg, cq, action, listing_id)
     if action not in ACTIONS or not listing_id:
         _api(tg["token"], "answerCallbackQuery", callback_query_id=cq.get("id"), text="Unknown button")
         return None
@@ -114,6 +136,47 @@ def handle_callback(db, tg: dict, cq: dict) -> str | None:
          message_id=msg.get("message_id"), reply_markup=markup)
     LOG.info(f"Telegram: {listing_id} → {status or 'no decision'}")
     return f"{listing_id}:{status or 'cleared'}"
+
+
+REQUEST_ACTIONS = {"rs", "rv", "rk"}
+
+
+def _handle_request(db, cfg: dict, tg: dict, cq: dict, action: str, listing_id: str) -> str | None:
+    import outbox
+    from telegram_alert import _esc, send_telegram
+    msg = cq["message"]
+
+    def answer(text):
+        _api(tg["token"], "answerCallbackQuery", callback_query_id=cq.get("id"), text=text[:190])
+
+    def relabel(markup):
+        _api(tg["token"], "editMessageReplyMarkup", chat_id=msg["chat"]["id"],
+             message_id=msg.get("message_id"), reply_markup=markup)
+
+    if action == "rv":
+        _item, letter = outbox.queued_letter(db, cfg, listing_id)
+        if not letter:
+            answer("That request is no longer available")
+            return None
+        body = letter.text if len(letter.text) <= 3300 else letter.text[:3300] + "\n…(the PDF has it all)"
+        send_telegram(tg["token"], tg["chat_id"],       # cut the text, not the HTML: a cut tag is refused
+                      f"<b>{_esc(letter.subject)}</b>\nTo: {_esc(letter.to_email)}\n\n"
+                      f"<pre>{_esc(body)}</pre>")
+        answer("Letter below")
+        return f"{listing_id}:shown"
+    if action == "rk":
+        if outbox.skip_queued(db, listing_id):
+            relabel(_label_keyboard("✕ Skipped"))
+        answer("Skipped")
+        return f"{listing_id}:skipped"
+    sent, text = outbox.send_queued(db, cfg, listing_id)
+    answer(text)
+    if sent:
+        relabel(_label_keyboard(f"✉ {text}"))
+    else:
+        send_telegram(tg["token"], tg["chat_id"], f"⚠️ Not sent: {_esc(text)}")
+    LOG.info(f"Telegram: request for {listing_id} → {text}")
+    return f"{listing_id}:{'sent' if sent else 'not sent'}"
 
 
 def send_top(db, cfg: dict, tg: dict) -> int:
@@ -163,7 +226,7 @@ def poll_once(db, cfg: dict, *, wait: int = 0) -> int:
         set_kv(db, OFFSET_KEY, str(up["update_id"]))
         try:
             if "callback_query" in up:
-                handled += handle_callback(db, tg, up["callback_query"]) is not None
+                handled += handle_callback(db, cfg, tg, up["callback_query"]) is not None
             elif "message" in up:
                 handled += handle_message(db, cfg, tg, up["message"]) is not None
         except Exception:  # noqa: BLE001

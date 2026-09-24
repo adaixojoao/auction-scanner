@@ -62,18 +62,40 @@ ELEILOES_PAGE = {
 }
 
 
+# GET /api/Eventos/<referencia>, trimmed from a live answer (names invented).
+ELEILOES_DETAIL = {"item": {
+    "id": 101, "referencia": "LO101", "descricao": "Casa T3 devoluta", "areaTotal": 140.0,
+    "moradaFreguesia": "Folques", "valorAbertura": 15000.0, "processoNumero": "123/24.0T8CBR",
+    "processoTribunal": "Juízo de Execução de Coimbra", "gestorTipo": "Agente de Execução",
+    "gestorNome": "Agente Exemplo", "gestorEmail": "agente@exemplo.pt",
+    "executados": "Pessoa Executada"}}
+
+
 def test_eleiloes(db, fake_http):
     def handler(method, url, kw):
         if "/api/Eventos/?" in url:
             return FakeResponse(json_data=ELEILOES_PAGE)
-        return FakeResponse(json_data={"verbas": [{"descricao": "Casa T3 devoluta", "area": 140}]})
-    fake_http(handler)
+        if url.endswith("/LO101"):                     # the reference, not the numeric id
+            return FakeResponse(json_data=ELEILOES_DETAIL)
+        return FakeResponse(json_data={"errorsList": [{"title": "Evento não disponível"}]})
+    session = fake_http(handler)
     assert REGISTRY["eleiloes"].func(db, max_price=100000) == 2
     row = db.execute("SELECT * FROM listings WHERE id='eleiloes:101'").fetchone()
     assert row["url"] == "https://e-leiloes.pt/evento/LO101"
     assert row["current_bid"] == 15000 and row["tipo"] == "moradia"
     assert row["description"] == "Casa T3 devoluta" and row["area_m2"] == 140
+    assert row["freguesia"] == "Folques"
+    raw = json.loads(row["raw_json"])
+    assert raw["agente_email"] == "agente@exemplo.pt" and raw["processo"] == "123/24.0T8CBR"
+    assert "Pessoa Executada" not in row["raw_json"]           # debtors are not stored
     assert db.execute("SELECT current_bid FROM listings WHERE id='eleiloes:102'").fetchone()[0] is None
+
+    # The next scan's thin list item keeps what the detail pass found; no second detail call.
+    detail_calls = sum(1 for _, u, _ in session.calls if u.endswith("/LO101"))
+    REGISTRY["eleiloes"].func(db, max_price=100000)
+    raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='eleiloes:101'").fetchone()[0])
+    assert raw["agente_email"] == "agente@exemplo.pt"
+    assert sum(1 for _, u, _ in session.calls if u.endswith("/LO101")) == detail_calls
 
 
 CITIUS_FORM = """
