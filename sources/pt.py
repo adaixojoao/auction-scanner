@@ -128,8 +128,11 @@ def _eleiloes_to_listing(item: dict) -> dict:
 
 # Fields the detail pass adds to raw_json. The next search-page scrape replaces
 # raw_json with the thin list item, so these are carried over (_keep_details).
+# Bumped when the detail pass reads more: sales read by an older pass are read again.
+DETAIL_VERSION = 2
 ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
-                        "valor_abertura", "morada", "lat", "lon", "detail_checked")
+                        "valor_abertura", "morada", "lat", "lon", "reg_district", "reg_concelho",
+                        "reg_freguesia", "detail_checked")
 _NOT_PROPERTY = ("outro", "direitos", "veiculo", "equipamento", "mobiliario")
 
 
@@ -140,18 +143,34 @@ def _keep_details(db, row: dict) -> dict:
     try:
         kept = {k: v for k, v in json.loads(old[0]).items() if k in ELEILOES_DETAIL_KEYS}
         row["raw_json"] = json.dumps({**json.loads(row["raw_json"] or "{}"), **kept}, ensure_ascii=False)
+        for field in ("district", "concelho", "freguesia"):     # the land registry beats the address field
+            if kept.get(f"reg_{field}"):
+                row[field] = kept[f"reg_{field}"]
     except (TypeError, ValueError):
         pass
     return row
 
 
+def _registry_place(item: dict) -> dict:
+    """District, concelho and freguesia from the land-registry entry
+    ("14 - Santarém" → "Santarém"), which says where the property is."""
+    entries = item.get("descPredial") or []
+    first = entries[0] if entries and isinstance(entries[0], dict) else {}
+    clean = lambda v: re.sub(r"^\s*\d+\s*-\s*", "", str(v or "")).strip() or None  # noqa: E731
+    return {"district": clean(first.get("distritoDesc")), "concelho": clean(first.get("concelhoDesc")),
+            "freguesia": clean(first.get("freguesiaDesc"))}
+
+
 def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
     """GET /api/Eventos/<referencia> → (listing fields, extra raw_json keys).
     Leaves out the executados: the people whose property is sold."""
+    place = _registry_place(item)
     fields = {
         "description": (item.get("descricao") or "").strip() or None,
         "area_m2": to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None,
-        "freguesia": item.get("moradaFreguesia") or None,
+        "freguesia": place["freguesia"] or item.get("moradaFreguesia") or None,
+        "concelho": place["concelho"],
+        "district": place["district"],
     }
     extra = {
         "processo": item.get("processoNumero") or None,
@@ -163,7 +182,9 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
                   or None,
         "lat": to_number(item.get("coordenadasLAT")) or None,
         "lon": to_number(item.get("coordenadasLON")) or None,
-        "detail_checked": True,
+        "reg_district": place["district"], "reg_concelho": place["concelho"],
+        "reg_freguesia": place["freguesia"],
+        "detail_checked": DETAIL_VERSION,
     }
     return fields, {k: v for k, v in extra.items() if v is not None}
 
@@ -179,7 +200,7 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
     rows = db.execute(f"""
         SELECT id, raw_json FROM listings
         WHERE source='eleiloes'
-          AND (raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
+          AND (raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked": ' || ? || '%')
           AND price <= ?
           AND (current_bid <= ? OR current_bid IS NULL OR current_bid = 0)
           AND date_end > ?
@@ -192,7 +213,7 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
             ELSE 1
         END, price DESC
         LIMIT ?
-    """, (max_price, max_price, utcnow_iso()[:10], *_NOT_PROPERTY, limit)).fetchall()
+    """, (DETAIL_VERSION, max_price, max_price, utcnow_iso()[:10], *_NOT_PROPERTY, limit)).fetchall()
 
     count = 0
     for listing_id, raw_text in rows:
@@ -203,7 +224,7 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
             resp.raise_for_status()
             item = resp.json().get("item")
             if not item:
-                raw["detail_checked"] = True           # gone or withdrawn: do not ask again
+                raw["detail_checked"] = DETAIL_VERSION  # gone or withdrawn: do not ask again
                 db.execute("UPDATE listings SET raw_json=? WHERE id=?",
                            (json.dumps(raw, ensure_ascii=False), listing_id))
                 continue

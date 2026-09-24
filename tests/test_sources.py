@@ -70,7 +70,10 @@ ELEILOES_DETAIL = {"item": {
     "moradaFreguesia": "Folques", "valorAbertura": 15000.0, "processoNumero": "123/24.0T8CBR",
     "processoTribunal": "Juízo de Execução de Coimbra", "gestorTipo": "Agente de Execução",
     "gestorNome": "Agente Exemplo", "gestorEmail": "agente@exemplo.pt",
-    "executados": "Pessoa Executada"}}
+    "executados": "Pessoa Executada",
+    # The address fields named Arganil; the land registry says where the house is.
+    "descPredial": [{"distritoDesc": "18 - Viseu", "concelhoDesc": "14 - Resende",
+                     "freguesiaDesc": "05 - Felgueiras"}]}}
 
 
 def test_eleiloes(db, fake_http):
@@ -86,7 +89,7 @@ def test_eleiloes(db, fake_http):
     assert row["url"] == "https://e-leiloes.pt/evento/LO101"
     assert row["current_bid"] == 15000 and row["tipo"] == "moradia"
     assert row["description"] == "Casa T3 devoluta" and row["area_m2"] == 140
-    assert row["freguesia"] == "Folques"
+    assert row["freguesia"] == "Felgueiras" and row["concelho"] == "Resende"
     raw = json.loads(row["raw_json"])
     assert raw["agente_email"] == "agente@exemplo.pt" and raw["processo"] == "123/24.0T8CBR"
     assert "Pessoa Executada" not in row["raw_json"]           # debtors are not stored
@@ -99,6 +102,8 @@ def test_eleiloes(db, fake_http):
     raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='eleiloes:101'").fetchone()[0])
     assert raw["agente_email"] == "agente@exemplo.pt"
     assert sum(1 for _, u, _ in session.calls if u.endswith("/LO101")) == detail_calls
+    place = db.execute("SELECT district, concelho, freguesia FROM listings WHERE id='eleiloes:101'").fetchone()
+    assert tuple(place) == ("Viseu", "Resende", "Felgueiras")     # not Arganil, even after the rescan
 
 
 CITIUS_FORM = """

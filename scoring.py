@@ -13,7 +13,7 @@ import json
 import re
 from datetime import datetime
 
-from common import days_left, find_terms, has_term, normalize, term_regex, utcnow
+from common import days_left, find_area, find_terms, has_term, normalize, term_regex, utcnow
 
 FRAC_PATTERNS = [
     "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
@@ -191,7 +191,7 @@ RURAL_TYPES = {normalize(t) for t in (
 
 OTHER_WORDS = [   # not a home and not a plot
     "parking", "garagem", "garage", "garaje", "box", "emplacement", "estacionamento",
-    "lugar de garagem", "arrecadação", "arrecadacao", "loja", "armazém", "armazem",
+    "lugar de garagem", "arrecadação", "arrecadacao", "arrumos", "arrumo", "loja", "armazém", "armazem",
     "escritório", "escritorio", "pavilhão", "pavilhao", "industrial", "estabelecimento",
     "local comercial", "nave", "oficina", "trastero", "aparcamiento", "plaza de garaje",
     "commerce", "local commercial", "bureau", "entrepôt", "hangar", "cave",
@@ -387,7 +387,7 @@ def property_kind(item: dict) -> str | None:
     decide first; the description only when they say nothing."""
     title, desc = item.get("title") or "", item.get("description") or ""
     tipo = normalize(item.get("tipo"))
-    area = item.get("area_m2") or 0
+    area = item.get("area_m2") or find_area(title) or find_area(desc) or 0
 
     urban_words = URBAN_PLOT_WORDS + (["solar"] if item.get("country") == "ES" else [])
 
@@ -511,7 +511,9 @@ def score_detail(item: dict, now: datetime | None = None,
     full    = f"{title} {desc}"
     price   = item.get("price")   or 0
     bid     = item.get("current_bid") or 0
-    area    = item.get("area_m2") or 0
+    # No size field (licitor, some Citius): the size written in the text, so a
+    # 35 m² "maison" is still a small home.
+    area    = item.get("area_m2") or find_area(title) or find_area(desc) or 0
     source  = item.get("source",  "")
     title_n = normalize(title)
     pay     = _pay(item)
@@ -549,6 +551,11 @@ def score_detail(item: dict, now: datetime | None = None,
     elif kind == "other":
         s -= 25
         reasons.append("not a home or plot")
+    else:
+        # Neither a home nor a plot as far as the text says ("Artigo urbano 4517"):
+        # worth a look, but not above the ones that clearly are.
+        s -= 10
+        reasons.append("unclear what it is — check")
 
     occupation = _occupation(item)   # read from the sale's detail page (ES, FR)
     if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
