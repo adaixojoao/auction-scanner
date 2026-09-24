@@ -166,3 +166,19 @@ table.list tr.dim td { opacity: .45; }
   .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px; }
   .t-why { display: none; }
 }
+
+/* Listing details panel (Listings → ⓘ) */
+tr.details-row td { background: var(--card-2); padding: 14px 16px; }
+.details { display: flex; gap: 16px; align-items: flex-start; }
+.details .d-img { width: 220px; max-height: 165px; object-fit: cover; border-radius: 6px; flex: none; }
+.details .d-main { flex: 1; min-width: 0; }
+.details .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; margin: 8px 0; }
+.details .fact { display: flex; gap: 8px; font-size: 13px; }
+.details .fact .k { color: var(--muted); min-width: 120px; }
+.details .fact .v { overflow-wrap: anywhere; }
+.details .d-desc { font-size: 13px; white-space: pre-line; margin: 8px 0; }
+.details .d-links { margin: 6px 0; font-size: 13px; }
+.details .guide { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; }
+.details .guide ol { margin: 6px 0 0 18px; font-size: 13px; }
+.details .guide code { background: var(--card); padding: 1px 5px; border-radius: 4px; }
+@media (max-width: 800px) { .details { flex-direction: column; } .details .d-img { width: 100%; } }

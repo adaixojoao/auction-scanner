@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_price, make_listing, make_session, parse_date_dmy,
+from common import (LOG, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, utcnow_iso)
 from db import upsert_listing
 from sources import SourceUnavailable, register
@@ -124,7 +124,7 @@ def _eleiloes_to_listing(item: dict) -> dict:
 # Fields the detail pass adds to raw_json. The next search-page scrape replaces
 # raw_json with the thin list item, so these are carried over (_keep_details).
 ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
-                        "valor_abertura", "detail_checked")
+                        "valor_abertura", "morada", "lat", "lon", "detail_checked")
 _NOT_PROPERTY = ("outro", "direitos", "veiculo", "equipamento", "mobiliario")
 
 
@@ -154,6 +154,10 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
         "agente_nome": item.get("gestorNome") or None,
         "agente_email": (item.get("gestorEmail") or "").strip() or None,
         "valor_abertura": to_number(item.get("valorAbertura")),
+        "morada": " ".join(str(item.get(k) or "").strip() for k in ("morada", "moradaNumero", "moradaAndar")).strip()
+                  or None,
+        "lat": to_number(item.get("coordenadasLAT")) or None,
+        "lon": to_number(item.get("coordenadasLON")) or None,
         "detail_checked": True,
     }
     return fields, {k: v for k, v in extra.items() if v is not None}
@@ -769,6 +773,12 @@ def _cgd_api_key(session) -> str:
     return m.group(1)
 
 
+def ruin_note(energy_rating) -> str:
+    """Caixa and Imobancos put "Ruína" in the energy-rating field of ruins; say it in
+    the description, where the score reads it (the owner does not want ruins)."""
+    return " Estado: em ruína (classe energética: Ruína)." if normalize(energy_rating).startswith("ruin") else ""
+
+
 def cgd_listing(item: dict, max_price: float) -> dict | None:
     """One pesquisa-imoveis result → listing row (None when over budget or not for sale)."""
     if item.get("field_objective") not in (None, "", "Comprar"):
@@ -788,7 +798,8 @@ def cgd_listing(item: dict, max_price: float) -> dict | None:
     return make_listing(
         "cgd", eid, "PT",
         title=title[:200],
-        description=" · ".join(n.strip() for n in notes if n and n.strip()) or "Imóvel Caixa Geral de Depósitos",
+        description=(" · ".join(n.strip() for n in notes if n and n.strip()) or "Imóvel Caixa Geral de Depósitos")
+                    + ruin_note(item.get("field_cls")),
         tipo=title.split()[0].lower(),
         area_m2=to_number(item.get("field_area_bruta_int")),
         price=price, min_price=price,
@@ -927,7 +938,8 @@ def imobancos_listing(item: dict, max_price: float) -> dict | None:
     return make_listing(
         "imobancos", eid, "PT",
         title=(item.get("prop_title") or item.get("prop_name") or f"Imobancos #{eid}")[:200],
-        description=f"Imóvel banco ({bank}) via Imobancos.pt. {text[:600]}".strip(),
+        description=f"Imóvel banco ({bank}) via Imobancos.pt. {text[:600]}".strip()
+                    + ruin_note(item.get("prop_energy_rating")),
         tipo=(item.get("prop_type") or "imovel").lower(),
         area_m2=to_number(item.get("prop_area")),
         price=price, min_price=price,
