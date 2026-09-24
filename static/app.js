@@ -105,11 +105,26 @@ const AS = (() => {
     fetch("/api/heartbeat", {method: "POST"}).catch(() => {});
   }
 
+  /* After the app updated itself from GitHub, say so once. */
+  async function announceUpdate() {
+    try {
+      const last = await (await fetch("/api/update/last")).json();
+      if (!last || !last.at) return;
+      let seen = null;
+      try { seen = localStorage.getItem("seenUpdate"); } catch (e) {}
+      if (seen === last.at) return;
+      const n = (last.changes || []).length;
+      toast(`Updated to the latest version (${n} change${n === 1 ? "" : "s"}). See Settings → Updates.`);
+      try { localStorage.setItem("seenUpdate", last.at); } catch (e) {}
+    } catch (e) {}
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     initMenus();
     pollScan();
     heartbeat();
     setInterval(heartbeat, 15000);
+    announceUpdate();
   });
 
   return {esc, money, scoreBadge, flag, link, ago, toast, api, startScan, pollScan};

@@ -12,6 +12,7 @@ in (common.safe_url) and everything is escaped on the way out.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -835,6 +836,7 @@ EDITABLE = {
     "notifications": ("enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password",
                       "to_emails", "min_score"),
     "report": ("desktop_copy",),
+    "updates": ("auto",),
 }
 
 
@@ -901,6 +903,76 @@ def api_background_set():
     else:
         scheduler.remove_task()
     return jsonify({"ok": True, "installed": _task_installed()})
+
+
+# ─── Updates ─────────────────────────────────────────────────────────
+
+@app.route("/api/update", methods=["GET"])
+def api_update_status():
+    """This PC's version against GitHub master. ?check=1 asks GitHub (a few
+    seconds); without it the last known state is shown."""
+    import updater
+    st = updater.status(fetch=request.args.get("check") == "1")
+    st["last_update"] = updater.last_update()
+    st["auto"] = (_config().get("updates") or {}).get("auto", True)
+    return jsonify(st)
+
+
+@app.route("/api/update/last")
+def api_update_last():
+    """What the last automatic update brought (cheap: no git), or null."""
+    import updater
+    return jsonify(updater.last_update())
+
+
+def _scan_running() -> bool:
+    from pipeline import scan_status
+    db = get_db()
+    try:
+        return scan_status(db)["running"]
+    finally:
+        db.close()
+
+
+@app.route("/api/update", methods=["POST"])
+def api_update_apply():
+    """Update now, then restart the app so the new version runs. During a scan
+    the update waits for the scan to finish (202)."""
+    import updater
+    if _scan_running():
+        if not app.config.get("UPDATE_QUEUED"):
+            app.config["UPDATE_QUEUED"] = True
+            threading.Thread(target=_update_after_scan, daemon=True).start()
+        return jsonify({"queued": True}), 202
+    st = updater.apply()
+    if not st["ok"]:
+        return jsonify({"error": st["reason"]}), 400
+    restart = app.config.get("RESTART_APP")
+    st["restart"] = bool(st["updated"] and restart)
+    if st["restart"]:
+        threading.Thread(target=_restart_soon, args=(restart,), daemon=True).start()
+    return jsonify(st)
+
+
+def _update_after_scan():
+    import updater
+    try:
+        while _scan_running():
+            time.sleep(10)
+        st = updater.apply()
+        restart = app.config.get("RESTART_APP")
+        if st["updated"] and restart:
+            _restart_soon(restart)
+    finally:
+        app.config["UPDATE_QUEUED"] = False
+
+
+def _restart_soon(restart):
+    """Start the new version and end this process, once the answer is out."""
+    time.sleep(1.0)
+    restart()
+    logging.shutdown()
+    os._exit(0)
 
 
 # ─── Exports ─────────────────────────────────────────────────────────

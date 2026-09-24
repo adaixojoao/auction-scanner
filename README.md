@@ -11,12 +11,37 @@ potential, and helps you prepare, send and track your offers.
 
 ## Install (once)
 
-1. Install [Python 3.11+](https://www.python.org/downloads/) — tick **"Add python.exe to PATH"**.
-2. In this folder, open a terminal and run:
+1. Install [Python 3.11+](https://www.python.org/downloads/) — tick **"Add python.exe to PATH"** —
+   and [Git for Windows](https://git-scm.com/download/win).
+2. Open a terminal where you want the app and run:
    ```
+   git clone https://github.com/adaixojoao/auction-scanner.git
+   cd auction-scanner
    pip install -r requirements.txt
    ```
+   (Installing with `git clone` is what lets the app update itself.)
 3. Double-click **`create_shortcut.bat`**. An **Auction Scanner** icon appears on your Desktop.
+
+## Updates
+
+New versions are published on GitHub, in the `master` branch. Each time the app
+starts, it checks GitHub and, if there is a newer version:
+
+1. copies your database to `backups/` (the last 5 copies are kept);
+2. updates the code — a clean fast-forward only;
+3. installs any new packages from `requirements.txt`;
+4. restarts itself with the new version, and says so once.
+
+**Settings → Updates** shows the version you have, lists the changes waiting,
+and has **Update now**. During a scan, the update waits for the scan to finish.
+Untick *Update automatically when the app starts* to update only by hand.
+From a terminal: `python updater.py` (check) or `python updater.py apply`.
+
+It never overwrites your data (`auctions.db`, `config.json`, `reports/` and
+logs are not in git) and never overwrites files you changed in the app
+folder: then it tells you why it did not update. It skips the update when
+offline, when git is missing, or when the folder was not installed with
+`git clone`, and the app starts as it is.
 
 ## Use
 
@@ -224,6 +249,7 @@ python dashboard.py                      # the web interface without the desktop
 
 ```
 app.py          desktop launcher      dashboard.py   Flask routes (templates/, static/)
+updater.py      updates from GitHub
 pipeline.py     the one scan routine  sources/       one module per country + registry
 db.py           schema, load_listings common.py      HTTP, parsing, matching
 scoring.py      the score             letters.py     the one letter builder (+ PDF)
