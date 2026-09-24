@@ -301,11 +301,25 @@ Set up in **Settings**:
 
 Each listing is alerted once per channel; a failed send is retried next time.
 
+## Backup
+
+Everything you have decided — the shortlist, the offers, the letters, the whole
+history — is in `auctions.db`, on this PC only. **Settings → Backup** takes a
+folder that is *not* on this PC (a OneDrive or Dropbox folder, another drive, a
+memory stick) and copies the database there **once a day**, keeping the last 14
+copies. **Back up now** does it immediately.
+
+The copy is made with SQLite's own backup, so it is a whole, working database
+even if the app is busy. To go back to one: close the app, then rename the copy
+to `auctions.db` in the app's folder. The app also keeps a few copies in
+`backups/` before each update — those are on the same disk, so they do not help
+if the PC does.
+
 ## Files
 
 | | |
 |---|---|
-| `auctions.db` | Everything found, your decisions and your offers. Back it up. |
+| `auctions.db` | Everything found, your decisions and your offers. Settings → Backup copies it off this PC. |
 | `config.json` | Your settings (written by the Settings page). |
 | `reports/` | The latest report (`.md`, `.docx`, `.pdf`). |
 | `app.log`, `scheduler.log` | What the app and the background task did. |

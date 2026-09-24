@@ -106,6 +106,17 @@
   </div>
 </div>
 
+<div class="card" id="backup">
+  <h2>Backup</h2>
+  <p class="small muted" style="margin-bottom:10px">Everything you have decided — the shortlist, the offers, the letters, the whole history — is in <code>auctions.db</code> on this PC. Give the app a folder that is <b>not</b> on this PC (a OneDrive or Dropbox folder, another drive, a memory stick) and it copies the database there once a day, keeping the last few. To go back to a copy: close the app, and rename the copy to <code>auctions.db</code> in the app's folder.</p>
+  <div class="form-grid">
+    <div class="field"><label>Folder (empty: no copies are made)</label><input id="bk_folder" placeholder="C:\Users\you\OneDrive\Auction Scanner"></div>
+    <div class="field"><label>Copies to keep there</label><input type="number" id="bk_keep" min="1" max="100"></div>
+  </div>
+  <div id="bk_state" class="small" style="margin-top:12px"></div>
+  <div class="row" style="margin-top:10px"><button class="btn" id="bk_now" onclick="backupNow()">Back up now</button></div>
+</div>
+
 <div class="card" id="updates">
   <h2>Updates</h2>
   <p class="small muted" style="margin-bottom:10px">New versions are published on GitHub (the <code>master</code> branch). The app fetches them when it starts, backs up your database to <code>backups/</code>, installs any new packages and restarts itself. Your listings, offers and settings are never touched.</p>
@@ -152,7 +163,10 @@ async function load() {
   setv("em_to_emails", (e.to_emails || []).join(", "));
   setv("desktop_copy", (c.report || {}).desktop_copy);
   setv("upd_auto", (c.updates || {}).auto !== false);
+  setv("bk_folder", (c.backup || {}).folder || "");
+  setv("bk_keep", (c.backup || {}).keep ?? 14);
   checkUpdates(false);
+  showBackup();
 
   const bg = await (await fetch("/api/background")).json();
   $("bg_enabled").checked = bg.installed; $("bg_enabled").disabled = !bg.supported;
@@ -160,6 +174,33 @@ async function load() {
     ? (bg.installed ? "Installed. It runs quietly and uses the same timetable." : "Not installed.")
     : "Only available on Windows.";
 }
+
+async function showBackup() {
+  const b = await (await fetch("/api/backup")).json();
+  if (!b.folder) {
+    $("bk_state").innerHTML = '<span class="faint">No folder set: the database is only on this PC.</span>';
+    return;
+  }
+  const rows = (b.copies || []).map(c => `<li><code>${AS.esc(c.name)}</code> · ${c.mb} MB</li>`).join("");
+  $("bk_state").innerHTML = (b.error ? `<div class="warn">${AS.esc(b.error)}</div>` : "")
+    + (rows ? `<div class="faint">Latest copies there:</div><ul>${rows}</ul>`
+            : '<span class="faint">Nothing copied there yet.</span>');
+}
+
+async function backupNow() {
+  const btn = $("bk_now");
+  btn.disabled = true; btn.textContent = "Copying…";
+  try {
+    // Save the folder first, so the button works right after it is typed.
+    await AS.api("/api/settings", {method: "POST", body: {backup: backupSettings()}});
+    const r = await AS.api("/api/backup", {method: "POST"});
+    AS.toast(`Database copied (${r.mb} MB)`);
+  } catch { /* the toast said what went wrong */ }
+  btn.disabled = false; btn.textContent = "Back up now";
+  showBackup();
+}
+
+const backupSettings = () => ({folder: $("bk_folder").value.trim(), keep: num("bk_keep") || 14});
 
 const commitLine = c => c ? `<code>${AS.esc(c.sha)}</code> ${AS.esc(c.date)} · ${AS.esc(c.subject)}` : "–";
 
@@ -225,6 +266,7 @@ async function save() {
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},
     report: {desktop_copy: $("desktop_copy").checked},
     updates: {auto: $("upd_auto").checked},
+    backup: backupSettings(),
   };
   await AS.api("/api/settings", {method: "POST", body});
   const bg = await (await fetch("/api/background")).json();

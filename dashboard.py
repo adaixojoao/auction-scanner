@@ -870,6 +870,7 @@ EDITABLE = {
     "updates": ("auto",),
     "auto_requests": ("enabled", "min_score", "per_day"),
     "maps": ("google_key",),
+    "backup": ("folder", "keep"),
 }
 
 
@@ -956,6 +957,44 @@ def api_update_last():
     """What the last automatic update brought (cheap: no git), or null."""
     import updater
     return jsonify(updater.last_update())
+
+
+@app.route("/api/backup", methods=["GET"])
+def api_backup_status():
+    """The backup folder, and the copies already in it (newest first)."""
+    import glob
+    cfg = _config().get("backup") or {}
+    folder = (cfg.get("folder") or "").strip()
+    out = {"folder": folder, "keep": cfg.get("keep") or 14, "copies": [], "error": None}
+    if not folder:
+        return jsonify(out)
+    try:
+        found = sorted(glob.glob(os.path.join(os.path.expanduser(folder), "auctions-*.db")), reverse=True)
+        out["copies"] = [{"name": os.path.basename(f), "mb": round(os.path.getsize(f) / 1e6, 1),
+                          "at": datetime.fromtimestamp(os.path.getmtime(f), timezone.utc).isoformat()}
+                         for f in found[:5]]
+        if not os.path.isdir(os.path.expanduser(folder)):
+            out["error"] = "That folder does not exist (is the drive plugged in?)"
+    except OSError as e:
+        out["error"] = str(e)
+    return jsonify(out)
+
+
+@app.route("/api/backup", methods=["POST"])
+def api_backup_now():
+    """Copy the database to the backup folder now."""
+    import updater
+    cfg = _config().get("backup") or {}
+    folder = (cfg.get("folder") or "").strip()
+    if not folder:
+        return jsonify({"error": "Set a backup folder first."}), 400
+    try:
+        made = updater.backup_database(folder=folder, keep=int(cfg.get("keep") or 14))
+    except OSError as e:
+        return jsonify({"error": f"Could not write to {folder}: {e}"}), 400
+    if not made:
+        return jsonify({"error": "There is no database to copy yet."}), 400
+    return jsonify({"ok": True, "path": made, "mb": round(os.path.getsize(made) / 1e6, 1)})
 
 
 def _scan_running() -> bool:
