@@ -23,6 +23,12 @@ INE_ANSWER = [{
             {"geocod": "1690907", "geodsg": "Guarda", "dim_3": "1", "dim_3_t": "Novos", "valor": "1100"},
             {"geocod": "1690914", "geodsg": "Sabugal", "dim_3": "T", "dim_3_t": "Total", "valor": "310"},
             {"geocod": "1690915", "geodsg": "Seia", "dim_3": "T", "dim_3_t": "Total", "valor": "x"},
+            # NUTS 2024 codes can hold letters; "-" is INE's "no figure"
+            {"geocod": "11D1818", "geodsg": "Sernancelhe", "dim_3": "H1", "dim_3_t": "Total", "valor": "275"},
+            {"geocod": "1C20204", "geodsg": "Barrancos", "dim_3": "H1", "dim_3_t": "Total",
+             "sinal_conv": "-", "ind_string": "-"},
+            {"geocod": "11D1818", "geodsg": "Sernancelhe", "dim_3": "H3", "dim_3_t": "Existentes", "valor": "260"},
+            {"geocod": "11D18", "geodsg": "Viseu Dão Lafões", "dim_3": "H1", "dim_3_t": "Total", "valor": "600"},
         ],
     },
 }]
@@ -31,7 +37,8 @@ INE_ANSWER = [{
 def test_ine_answer_is_read_for_municipalities_only():
     rows, period, title = update_prices.parse_ine(INE_ANSWER)
     assert period == "2.º Trimestre de 2026" and "mediano" in title
-    assert [(r["municipality"], r["eur_m2"]) for r in rows] == [("Guarda", 742), ("Sabugal", 310)]
+    assert [(r["municipality"], r["eur_m2"]) for r in rows] == [("Guarda", 742), ("Sabugal", 310),
+                                                                ("Sernancelhe", 275)]
     with pytest.raises(ValueError):
         update_prices.parse_ine([{"Dados": {}}])
 

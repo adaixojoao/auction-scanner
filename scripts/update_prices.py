@@ -10,11 +10,15 @@ Run it on a PC that can reach www.ine.pt, check the summary it prints, and
 commit data/pt_home_prices.csv through a pull request. INE publishes the
 figures every quarter; refreshing once or twice a year is plenty.
 
-The indicator wanted is INE's "Valor mediano das vendas por m² de alojamentos
-familiares (€) por Localização geográfica (Município)", quarterly, from the
-housing price statistics at local level. If the default code below is not
-that indicator, find the right code on ine.pt (Estatísticas → Indicadores,
-search "valor mediano das vendas por m2") and pass it with --indicator.
+The indicator wanted is INE's median sale value per m² of family dwellings by
+municipality, quarterly, from the housing price statistics at local level. The
+default, 0012234, is "Valor mediano das vendas de alojamentos familiares nos
+últimos 12 meses (Metodologia 2022 - €/m²) por Localização geográfica (NUTS -
+2024) e Categoria": published every quarter, each value the median of the last
+12 months. It is the series that covers all 308 municipalities; INE's plain
+quarterly median exists only for regions and cities over 100,000 people. If
+INE renumbers it, find the code on ine.pt (Estatísticas → Indicadores, search
+"valor mediano das vendas") and pass it with --indicator.
 """
 from __future__ import annotations
 
@@ -29,13 +33,17 @@ sys.path.insert(0, HERE)
 from prices import COLUMNS, PT_FILE  # noqa: E402
 
 API = "https://www.ine.pt/ine/json_indicador/pindica.jsp"
-DEFAULT_INDICATOR = "0012009"
+DEFAULT_INDICATOR = "0012234"
 
 
 def parse_ine(payload) -> tuple[list[dict], str, str]:
     """(rows, period, indicator title) from INE's JSON API answer: the latest
-    period's values for municipalities (7-digit geographic codes), for all
-    kinds of dwelling ("Total") when the indicator splits them."""
+    period's values for municipalities, for all kinds of dwelling ("Total")
+    when the indicator splits them.
+
+    Municipalities have 7-character codes. Since the 2024 regions (NUTS 2024)
+    many contain letters ("11D1818" Sernancelhe, "1C20204" Barrancos); only
+    reading all-digit codes kept 144 of the 308."""
     entry = payload[0] if isinstance(payload, list) else payload
     title = entry.get("IndicadorDsg", "")
     data = entry.get("Dados") or {}
@@ -45,7 +53,7 @@ def parse_ine(payload) -> tuple[list[dict], str, str]:
     rows = []
     for rec in data[period]:
         code = str(rec.get("geocod", ""))
-        if not (code.isdigit() and len(code) == 7):          # municipalities only
+        if not (len(code) == 7 and code.isalnum()):          # municipalities only
             continue
         extra = [v for k, v in rec.items() if k.startswith("dim_") and k.endswith("_t")]
         if extra and not all(str(v).strip().lower() in ("total", "t") for v in extra):
