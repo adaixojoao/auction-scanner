@@ -57,6 +57,8 @@ ELEILOES_PAGE = {
          "dataFim": "2099-10-01T10:00:00"},
         {"id": 102, "titulo": "Terreno", "subtipoId": 27, "valorBase": 5000,
          "lanceAtual": None, "referencia": "NP102", "dataFim": "2099-10-02T10:00:00"},
+        {"id": 103, "titulo": "Ford Focus 1.8 TDCi", "tipoId": 2, "subtipoId": 9, "valorBase": 900,
+         "referencia": "LO103", "dataFim": "2099-10-02T10:00:00"},     # not property: not kept
     ],
     "pagination": {"total": 2},
 }
@@ -89,6 +91,7 @@ def test_eleiloes(db, fake_http):
     assert raw["agente_email"] == "agente@exemplo.pt" and raw["processo"] == "123/24.0T8CBR"
     assert "Pessoa Executada" not in row["raw_json"]           # debtors are not stored
     assert db.execute("SELECT current_bid FROM listings WHERE id='eleiloes:102'").fetchone()[0] is None
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE id='eleiloes:103'").fetchone()[0] == 0
 
     # The next scan's thin list item keeps what the detail pass found; no second detail call.
     detail_calls = sum(1 for _, u, _ in session.calls if u.endswith("/LO101"))
