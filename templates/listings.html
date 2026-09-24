@@ -78,6 +78,7 @@ async function load() {
     sort, dir, page, per_page: PER_PAGE,
   });
   const data = await (await fetch("/api/listings?" + params)).json();
+  lastFound = data.found ?? data.total; lastCap = data.cap ?? 100;
   renderStats(data.stats);
   renderRows(data.items, status === "hidden");
   renderPages(data.total);
@@ -86,7 +87,7 @@ async function load() {
 function renderStats(s) {
   const hidden = Object.entries(s.hidden || {}).map(([k, v]) => `${v} ${k}`).join(", ");
   $("stats").innerHTML = `
-    <div class="stat"><div class="label">Matching</div><div class="value">${s.total}</div></div>
+    <div class="stat"><div class="label">${lastFound > lastCap ? "Showing the best" : "Matching"}</div><div class="value" title="${AS.esc(countText())}">${s.total}${lastFound > lastCap ? `<span class="small muted"> of ${lastFound}</span>` : ""}</div></div>
     <div class="stat"><div class="label">New (24 h)</div><div class="value ok">${s.new_today}</div></div>
     <div class="stat"><div class="label">Score 70+</div><div class="value warn">${s.high_score}</div></div>
     <div class="stat"><div class="label">Homes · urban · rural plots</div><div class="value">${s.homes} · ${s.urban_plots} · ${s.rural_plots}</div></div>
@@ -185,7 +186,12 @@ function renderPages(total) {
   const first = Math.max(1, Math.min(page - 4, pages - 9)), last = Math.min(pages, first + 9);
   let html = `<button class="btn btn-sm" ${page === 1 ? "disabled" : ""} onclick="go(${page - 1})">‹</button>`;
   for (let i = first; i <= last; i++) html += `<button class="btn btn-sm ${i === page ? "active" : ""}" onclick="go(${i})">${i}</button>`;
-  el.innerHTML = html + `<button class="btn btn-sm" ${page === pages ? "disabled" : ""} onclick="go(${page + 1})">›</button><span class="small muted" style="align-self:center">${total} listings</span>`;
+  el.innerHTML = html + `<button class="btn btn-sm" ${page === pages ? "disabled" : ""} onclick="go(${page + 1})">›</button><span class="small muted" style="align-self:center">${countText()}</span>`;
+}
+let lastFound = 0, lastCap = 100;
+function countText() {
+  return lastFound > lastCap ? `best ${lastCap} of ${lastFound.toLocaleString("de-DE")} listings`
+                             : `${lastFound} listings`;
 }
 function go(p) { page = p; load(); window.scrollTo(0, 0); }
 
