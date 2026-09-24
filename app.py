@@ -6,10 +6,11 @@ Double-click the "Auction Scanner" icon (made by create_shortcut.bat), or run:
     pythonw app.py      (no console window)
     python app.py       (with a console, for troubleshooting)
 
-It starts the local server, opens the app in its own window (Edge or Chrome
-"app mode", no browser tabs or address bar), scans on the Settings timetable
-while it is open, and quits a few minutes after the window is closed.
-Opening the icon again while it runs just brings up another window.
+It first updates itself from GitHub if a newer version was merged into master
+(updater.py), then starts the local server, opens the app in its own window
+(Edge or Chrome "app mode", no browser tabs or address bar), scans on the
+Settings timetable while it is open, and quits a few minutes after the window
+is closed. Opening the icon again while it runs just brings up another window.
 """
 from __future__ import annotations
 
@@ -70,12 +71,56 @@ def app_url(cfg: dict) -> str:
 
 
 def already_running(url: str) -> bool:
-    import requests
+    # urllib, not requests: this runs before an update may reinstall packages.
+    import json
+    import urllib.request
     try:
-        r = requests.get(url + "api/ping", timeout=2)
-        return r.ok and r.json().get("app") == "auction-scanner"
+        with urllib.request.urlopen(url + "api/ping", timeout=2) as r:
+            return json.load(r).get("app") == "auction-scanner"
     except Exception:
         return False
+
+
+# Set when the app restarts itself after an update from Settings: the window is
+# already open, and the old process may still be letting go of the port.
+RESTART_ENV = "AUCTION_SCANNER_RESTART"
+NO_UPDATE_ENV = "AUCTION_SCANNER_NO_UPDATE"
+
+
+STARTING_LOCK = os.path.join(HERE, "starting.lock")
+
+
+def claim_start() -> bool:
+    """Only one copy updates and starts at a time. False if another copy is
+    already starting (a double-click while it updates)."""
+    for _ in range(2):
+        try:
+            os.close(os.open(STARTING_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(STARTING_LOCK) < 300:
+                    return False
+                os.remove(STARTING_LOCK)          # left behind by a crash
+            except OSError:
+                return False
+    return False
+
+
+def release_start():
+    try:
+        os.remove(STARTING_LOCK)
+    except OSError:
+        pass
+
+
+def restart(*, reopen_window: bool):
+    """Start a fresh copy of the app (the new code) with the update already done."""
+    env = {**os.environ, NO_UPDATE_ENV: "1"}
+    if not reopen_window:
+        env[RESTART_ENV] = "1"
+    subprocess.Popen([sys.executable, os.path.abspath(__file__)], cwd=HERE, env=env,
+                     creationflags=0x08000000 if sys.platform == "win32" else 0)
 
 
 def find_app_browser() -> str | None:
@@ -137,21 +182,54 @@ def scan_running() -> bool:
 
 def main() -> int:
     setup_logging()
+    from config import load_config    # standard library only, like updater
+    import updater
+
+    cfg = load_config()
+    url = app_url(cfg)
+    restarting = os.environ.pop(RESTART_ENV, "") == "1"
+    if restarting:
+        for _ in range(40):            # the old process is shutting down
+            if not already_running(url):
+                break
+            time.sleep(0.5)
+    elif already_running(url):
+        LOG.info("Already running — opening another window")
+        open_window(url)
+        return 0
+
+    if not claim_start():
+        LOG.info("Another copy is starting (updating?) — waiting for it")
+        for _ in range(180):
+            if already_running(url):
+                open_window(url)
+                return 0
+            time.sleep(1)
+        show_error("The app did not start. Look at app.log in the app folder.")
+        return 1
     try:
-        from config import load_config
+        # Update from GitHub before anything else is imported, then run the new code.
+        if os.environ.pop(NO_UPDATE_ENV, "") != "1":
+            if updater.update_on_start():
+                LOG.info("Updated from GitHub — restarting with the new version")
+                release_start()
+                restart(reopen_window=True)
+                return 0
+        elif updater.requirements_outdated():
+            LOG.info("requirements.txt: " + updater.install_requirements()[1])
+        return run_app(cfg, url, restarting)
+    finally:
+        release_start()
+
+
+def run_app(cfg: dict, url: str, restarting: bool) -> int:
+    try:
         from werkzeug.serving import make_server
         import dashboard
     except ImportError as e:
         show_error(f"A required package is missing: {e.name}.\n\n"
                    f"Open a terminal in {HERE} and run:\n    pip install -r requirements.txt")
         return 1
-
-    cfg = load_config()
-    url = app_url(cfg)
-    if already_running(url):
-        LOG.info("Already running — opening another window")
-        open_window(url)
-        return 0
 
     d = cfg.get("dashboard", {})
     try:
@@ -160,9 +238,12 @@ def main() -> int:
         show_error(f"Could not start on {url}: {e}\n\nIs another program using port {d.get('port', 8050)}?")
         return 1
 
+    dashboard.app.config["RESTART_APP"] = lambda: restart(reopen_window=False)
     threading.Thread(target=server.serve_forever, name="server", daemon=True).start()
+    release_start()                    # a double-click now just opens another window
     LOG.info(f"Auction Scanner running at {url}")
-    open_window(url)
+    if not restarting:                 # after a restart the window is already open
+        open_window(url)
 
     stop = threading.Event()
     threading.Thread(target=auto_scan_loop, args=(stop,), name="timetable", daemon=True).start()

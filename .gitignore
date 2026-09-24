@@ -19,6 +19,10 @@ cartas/
 .pytest_cache/
 config.json.tmp
 scan.lock
+starting.lock
 reports/
 app.log*
 app-output.log
+backups/
+.installed-requirements
+.last-update.json

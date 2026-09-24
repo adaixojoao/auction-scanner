@@ -88,6 +88,17 @@
   </div>
 </div>
 
+<div class="card" id="updates">
+  <h2>Updates</h2>
+  <p class="small muted" style="margin-bottom:10px">New versions are published on GitHub (the <code>master</code> branch). The app fetches them when it starts, backs up your database to <code>backups/</code>, installs any new packages and restarts itself. Your listings, offers and settings are never touched.</p>
+  <label class="check"><input type="checkbox" id="upd_auto"> Update automatically when the app starts</label>
+  <div id="upd_state" class="small" style="margin-top:12px">Checking…</div>
+  <div class="row" style="margin-top:10px">
+    <button class="btn" id="upd_check" onclick="checkUpdates(true)">Check now</button>
+    <button class="btn btn-primary" id="upd_apply" onclick="applyUpdate()" style="display:none">Update now</button>
+  </div>
+</div>
+
 <div class="card">
   <h2>Reports</h2>
   <label class="check"><input type="checkbox" id="desktop_copy"> Also put Auction-Report.docx / .pdf on the Desktop after each scan</label>
@@ -116,12 +127,53 @@ async function load() {
   ["enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password", "min_score"].forEach(k => setv("em_" + k, e[k]));
   setv("em_to_emails", (e.to_emails || []).join(", "));
   setv("desktop_copy", (c.report || {}).desktop_copy);
+  setv("upd_auto", (c.updates || {}).auto !== false);
+  checkUpdates(false);
 
   const bg = await (await fetch("/api/background")).json();
   $("bg_enabled").checked = bg.installed; $("bg_enabled").disabled = !bg.supported;
   $("bg_help").textContent = bg.supported
     ? (bg.installed ? "Installed. It runs quietly and uses the same timetable." : "Not installed.")
     : "Only available on Windows.";
+}
+
+const commitLine = c => c ? `<code>${AS.esc(c.sha)}</code> ${AS.esc(c.date)} · ${AS.esc(c.subject)}` : "–";
+
+async function checkUpdates(ask) {
+  const btn = $("upd_check");
+  btn.disabled = true; btn.textContent = ask ? "Asking GitHub…" : "Check now";
+  try {
+    const u = await (await fetch("/api/update" + (ask ? "?check=1" : ""))).json();
+    const changes = (u.changes || []).map(c => `<li>${commitLine(c)}</li>`).join("");
+    const last = u.last_update ? `<div class="faint" style="margin-top:6px">Last update ${AS.esc(u.last_update.at.replace("T", " "))}: ${(u.last_update.changes || []).length} change(s).</div>` : "";
+    $("upd_state").innerHTML = `<div>This version: ${commitLine(u.current)}</div>`
+      + (u.reason ? `<div class="notice ${u.ok ? "info" : "bad"}">${AS.esc(u.reason)}</div>`
+         : u.behind ? `<div class="notice info"><b>${u.behind} update(s) available</b><ul style="margin:6px 0 0 18px">${changes}</ul></div>`
+         : ask ? `<div class="ok" style="margin-top:6px">Up to date.</div>` : "")
+      + last;
+    $("upd_apply").style.display = u.ok && u.behind ? "" : "none";
+  } finally { btn.disabled = false; btn.textContent = "Check now"; }
+}
+
+async function applyUpdate() {
+  const btn = $("upd_apply");
+  btn.disabled = true; btn.textContent = "Updating…";
+  try {
+    const r = await AS.api("/api/update", {method: "POST", body: {}});
+    if (r.queued) {
+      $("upd_state").innerHTML = '<div class="notice info">A scan is running. The app will update and restart as soon as it finishes.</div>';
+      $("upd_apply").style.display = "none";
+      return;
+    }
+    if (!r.restart) { AS.toast(r.updated ? "Updated. Restart the app to use the new version." : "Already up to date."); checkUpdates(false); return; }
+    $("upd_state").innerHTML = '<div class="notice info">Updated. Restarting the app with the new version…</div>';
+    await new Promise(res => setTimeout(res, 2500));
+    for (let i = 0; i < 60; i++) {         // wait for the new version to answer, then reload
+      try { if ((await fetch("/api/ping", {cache: "no-store"})).ok) { location.reload(); return; } } catch (e) {}
+      await new Promise(res => setTimeout(res, 1000));
+    }
+    AS.toast("The app did not come back; open it again from the Desktop icon.", "bad");
+  } catch (e) { btn.disabled = false; btn.textContent = "Update now"; }
 }
 
 async function save() {
@@ -141,6 +193,7 @@ async function save() {
                     smtp_user: $("em_smtp_user").value.trim(), smtp_password: $("em_smtp_password").value,
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},
     report: {desktop_copy: $("desktop_copy").checked},
+    updates: {auto: $("upd_auto").checked},
   };
   await AS.api("/api/settings", {method: "POST", body});
   const bg = await (await fetch("/api/background")).json();

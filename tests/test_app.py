@@ -31,3 +31,26 @@ def test_app_mode_window(monkeypatch):
     monkeypatch.setattr(app.subprocess, "Popen", lambda args, **kw: launched.append(args))
     app.open_window("http://127.0.0.1:8050/")
     assert launched[0][:2] == ["/usr/bin/chromium", "--app=http://127.0.0.1:8050/"]
+
+
+def test_restart_runs_the_new_version_without_updating_again(monkeypatch):
+    started = []
+    monkeypatch.setattr(app.subprocess, "Popen", lambda args, **kw: started.append((args, kw["env"])))
+    app.restart(reopen_window=False)
+    args, env = started[0]
+    assert args[-1].endswith("app.py") and env[app.NO_UPDATE_ENV] == "1" and env[app.RESTART_ENV] == "1"
+    app.restart(reopen_window=True)
+    assert app.RESTART_ENV not in started[1][1]
+
+
+def test_one_copy_starts_at_a_time(tmp_path, monkeypatch):
+    import os
+    import time
+    monkeypatch.setattr(app, "STARTING_LOCK", str(tmp_path / "starting.lock"))
+    assert app.claim_start() is True
+    assert app.claim_start() is False          # a double-click while the first copy updates
+    old = time.time() - 3600
+    os.utime(app.STARTING_LOCK, (old, old))
+    assert app.claim_start() is True           # a lock left behind by a crash is taken over
+    app.release_start()
+    assert not os.path.exists(app.STARTING_LOCK)

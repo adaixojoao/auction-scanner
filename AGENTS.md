@@ -54,6 +54,19 @@ congruent — one way to do each thing:
 - **One place for user choices:** shortlist/dismiss in `listing_status`,
   offers in `carta_log`, settings in `config.json` via the Settings page.
 
+## `master` is what runs on the owner's PC
+
+The desktop app updates itself from `origin/master` every time it starts
+(`updater.py`): a fast-forward, a database backup, `pip install` when
+`requirements.txt` changed, then a restart. So:
+
+- Merge into `master` only through a PR whose CI is green on Windows and Ubuntu.
+- Never rewrite `master`'s history (the PC can only fast-forward).
+- Schema changes must migrate an existing `auctions.db` in place (see below);
+  new settings need a default in `config.DEFAULTS`.
+- `updater.py` and the start of `app.main()` run before packages may be
+  reinstalled: keep them to the standard library.
+
 ## Scrapers
 
 - Live in `sources/<country>.py`, registered with `@register(name, country)`.

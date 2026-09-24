@@ -344,6 +344,37 @@ def test_background_task_toggle_on_windows(client, monkeypatch):
     assert calls == ["install", "remove"]
 
 
+def test_updates_from_settings(client, db, monkeypatch):
+    import updater
+    monkeypatch.setattr(updater, "status", lambda fetch=True: {
+        "ok": True, "reason": "", "behind": 2 if fetch else 0, "changes": [], "current": {"sha": "abc"}})
+    monkeypatch.setattr(updater, "last_update", lambda: None)
+    assert client.get("/api/update?check=1").get_json()["behind"] == 2
+    assert client.get("/api/update").get_json()["auto"] is True
+    assert client.get("/api/update/last").get_json() is None
+
+    restarted = []
+    monkeypatch.setattr(dashboard, "_restart_soon", restarted.append)    # never end the test run
+    monkeypatch.setattr(updater, "apply", lambda: {"ok": True, "updated": True, "reason": ""})
+    # started with `python dashboard.py`: no restart, the user restarts
+    assert client.post("/api/update", json={}).get_json()["restart"] is False
+    monkeypatch.setitem(dashboard.app.config, "RESTART_APP", lambda: None)
+    assert client.post("/api/update", json={}).get_json()["restart"] is True and len(restarted) == 1
+
+    monkeypatch.setattr(updater, "apply", lambda: {"ok": False, "updated": False, "reason": "Git is not installed"})
+    refused = client.post("/api/update", json={})
+    assert refused.status_code == 400 and "Git" in refused.get_json()["error"]
+
+    queued = []
+    monkeypatch.setattr(dashboard, "_scan_running", lambda: True)
+    monkeypatch.setattr(dashboard, "_update_after_scan", lambda: queued.append(1))
+    monkeypatch.setitem(dashboard.app.config, "UPDATE_QUEUED", False)
+    first = client.post("/api/update", json={})
+    assert first.status_code == 202 and first.get_json()["queued"] is True
+    client.post("/api/update", json={})
+    assert len(queued) == 1          # waits once, however often you click
+
+
 def test_export_report(client, add):
     add(external_id="a", title="Moradia", price=20000)
     r = client.get("/export/report.md")

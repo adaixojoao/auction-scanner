@@ -95,6 +95,11 @@ DEFAULTS = {
         "localidade": "",         # printed next to the date on each letter
     },
 
+    # The app updates itself from GitHub (master) when it starts (updater.py)
+    "updates": {
+        "auto": True,
+    },
+
     # Dashboard
     "dashboard": {
         "host": "127.0.0.1",
