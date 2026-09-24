@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Carta Review Dashboard</title>
+<style>
+:root{--bg:#0a1120;--card:#1e293b;--acc:#3b82f6;--g:#22c55e;--y:#eab308;--r:#ef4444;--t:#e2e8f0;--m:#64748b;--b:#334155}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--t);font-family:'Segoe UI',system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+input,textarea{background:#070d1a;color:var(--t);border:1px solid var(--b);border-radius:6px;padding:7px 10px;font-family:inherit;width:100%}
+textarea{resize:vertical;font-family:monospace;font-size:11px;line-height:1.7}
+button{cursor:pointer;font-family:inherit}
+#header{background:var(--card);border-bottom:1px solid var(--b);padding:11px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;flex-shrink:0}
+#header h1{font-size:16px;font-weight:700;color:#fff}
+#header p{font-size:10px;color:var(--m)}
+.badges{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.badge{padding:3px 11px;border-radius:5px;font-size:11px;font-weight:600}
+.badge-g{background:rgba(34,197,94,.15);color:var(--g)}
+.badge-y{background:rgba(234,179,8,.15);color:var(--y)}
+.filt-btn{background:#0a1120;color:var(--m);border:1px solid var(--b);border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600}
+.filt-btn.active{background:var(--acc);color:#fff;border-color:var(--acc)}
+#main{display:flex;flex:1;overflow:hidden}
+#list{width:290px;min-width:210px;border-right:1px solid #0f172a;overflow-y:auto;background:#070d1a}
+.item{padding:11px 13px;border-bottom:1px solid #0f172a;cursor:pointer;border-left:3px solid transparent;transition:background .12s}
+.item:hover{background:#1e293b}
+.item.sel{background:var(--card);border-left-color:var(--acc)}
+.item.app{background:rgba(34,197,94,.03);border-left-color:var(--g)}
+.item.rej{background:rgba(239,68,68,.03);border-left-color:var(--r)}
+.sbadge{font-weight:700;font-size:11px;padding:2px 8px;border-radius:4px;min-width:30px;text-align:center;display:inline-block}
+.mbadge{font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;letter-spacing:.4px}
+.card{background:var(--card);border-radius:10px;padding:16px;border:1px solid var(--b)}
+.grid6{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:11px}
+.cell{background:#0a1120;border-radius:6px;padding:7px 9px}
+.cell-label{font-size:8px;color:#334155;margin-bottom:2px}
+.cell-val{font-size:11px;color:var(--t);font-weight:600}
+.dbox{background:#0a1120;border-radius:6px;padding:8px 11px;margin-bottom:9px}
+.dlabel{font-size:8px;color:#334155;margin-bottom:2px}
+.dtext{font-size:10px;color:var(--m);line-height:1.6}
+.rtag{background:rgba(34,197,94,.1);color:#86efac;font-size:9px;padding:2px 6px;border-radius:3px}
+.preset{background:#0a1120;color:var(--m);border:1px solid var(--b);border-radius:5px;padding:4px 9px;font-size:10px}
+.preset.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.abtn{border-radius:7px;padding:8px 16px;font-size:11px;font-weight:700;border:1px solid}
+.btn-g{background:rgba(34,197,94,.2);color:var(--g);border-color:var(--g)}
+.btn-r{background:rgba(239,68,68,.1);color:var(--r);border-color:var(--r)}
+.btn-b{background:rgba(59,130,246,.15);color:#60a5fa;border-color:var(--acc)}
+.epanel{background:#0a1120;border-radius:8px;padding:13px;border:1px solid var(--b);margin-top:13px}
+.egrid{display:grid;grid-template-columns:65px 1fr;gap:4px 9px;font-size:10px;margin-bottom:11px}
+.elabel{color:#334155}
+.send-btn{background:var(--acc);color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:11px;font-weight:700;text-decoration:none;display:inline-block}
+.cbtn{background:#0a1120;color:var(--m);border:1px solid var(--b);border-radius:6px;padding:8px 13px;font-size:11px}
+#detail{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+#ph{flex:1;display:flex;align-items:center;justify-content:center;color:#1e293b;font-size:13px}
+#toast{position:fixed;bottom:18px;right:18px;padding:8px 16px;border-radius:7px;font-size:11px;font-weight:600;color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.5);display:none;z-index:9999}
+.loading{flex:1;display:flex;align-items:center;justify-content:center;color:#334155;font-size:12px}
+</style>
+</head>
+<body>
+<div id="header">
+  <div><h1>Carta Review Dashboard</h1><p>Reve - ajusta - aprova - envia propostas de aquisicao</p></div>
+  <div class="badges">
+    <span class="badge badge-g" id="napp">0 aprovadas</span>
+    <span class="badge badge-y" id="npen">0 pendentes</span>
+    <button class="filt-btn active" onclick="setF('all',this)">Todas</button>
+    <button class="filt-btn" onclick="setF('pending',this)">Pendentes</button>
+    <button class="filt-btn" onclick="setF('approved',this)">Aprovadas</button>
+    <button class="filt-btn" onclick="setF('rejected',this)">Rejeitadas</button>
+  </div>
+</div>
+<div id="main">
+  <div id="list"><div class="loading">A carregar...</div></div>
+  <div id="detail"><div id="ph">&#8592; Seleciona uma propriedade</div></div>
+</div>
+<div id="toast"></div>
+<script>
+const P={nome:"Joao Castro Adaixo",nif:"260243132",morada:"Rua Antonio Sergio, n. 49, 3. Esq.\n6300-665 Guarda",email:"adaixojoao@gmail.com"};
+const MESES=["janeiro","fevereiro","marco","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+const hoje=()=>{const d=new Date();return `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;};
+const PRESETS=["1.000,00","2.500,00","4.000,00","5.000,00","7.500,00","10.000,00"];
+const MSTYLE={"CARTA FECHADA":"background:rgba(59,130,246,.15);color:#60a5fa","NEGOCIACAO PARTICULAR":"background:rgba(168,85,247,.15);color:#c084fc","ADJUDICACAO":"background:rgba(234,179,8,.15);color:#eab308"};
+
+let items = [];
+fetch('/api/cartas-candidates')
+  .then(r => r.json())
+  .then(data => {
+    items = data.map(c => ({...c, approved:false, rejected:false}));
+    renderList();
+  })
+  .catch(e => {
+    document.getElementById("list").innerHTML = '<div class="loading" style="color:#ef4444">Erro ao carregar dados. Dashboard activo?</div>';
+  });
+
+let selId=null,curF="all";
+
+function buildCarta(c){
+  const loc=c.location||"",area=c.area_m2?c.area_m2.toLocaleString()+" m2":"area nao especificada",proc=(c.processo||"").split(",")[0].trim();
+  const isNeg=(c.modalidade||"").includes("NEGOCIACAO"),isAdj=(c.modalidade||"").includes("ADJUDICACAO");
+  const hdr=`${P.nome}\nNIF: ${P.nif}\n${P.morada}\n\nGuarda, ${hoje()}\n\nExmo(a). Sr(a). Juiz / Agente de Execucao\n${c.tribunal||""}\n\nAssunto: Proposta de Aquisicao -- Processo ${proc}\n\n`;
+  const dados=`Dados do proponente:\n   Nome: ${P.nome}\n   NIF: ${P.nif}\n   Morada: ${P.morada}\n   Email: ${P.email}`;
+  if(isNeg)return hdr+`Exmo(a). Sr(a),\n\nVenho por este meio manifestar o meu interesse na aquisicao do imovel em venda por negociacao particular no ambito do processo acima referido.\n\nDescricao do bem: ${c.title}\nLocalizacao: ${loc}\nArea: ${area}\n\nApresento a seguinte proposta de aquisicao:\n\n   Valor: EUR ${c.bid} (${c.bidText})\n\n${dados}\n\nSolicito que me informem sobre:\n   1. Os procedimentos necessarios para formalizar a proposta;\n   2. Se e necessario deposito de caucao e respetivo montante;\n   3. O contacto direto do encarregado da venda.\n\nEncontro-me disponivel para qualquer esclarecimento adicional e para deslocacao ao imovel para visita.\n\nCom os melhores cumprimentos,\n\n\n\n${P.nome}\nNIF: ${P.nif}`;
+  if(isAdj)return hdr+`Exmo(a). Sr(a),\n\nVenho por este meio manifestar o meu interesse na aquisicao do imovel no ambito do processo acima referido, atualmente em fase de adjudicacao.\n\nDescricao do bem: ${c.title}\nLocalizacao: ${loc}\nArea: ${area}\n\nCaso ainda seja possivel apresentar proposta, ofereco:\n\n   Valor: EUR ${c.bid} (${c.bidText})\n\n${dados}\n\nSolicito informacao sobre o estado atual da venda e se ainda e possivel apresentar proposta.\n\nCom os melhores cumprimentos,\n\n\n\n${P.nome}\nNIF: ${P.nif}`;
+  return hdr+`Exmo(a). Sr(a),\n\nVenho por este meio apresentar proposta de aquisicao do imovel em venda mediante proposta em carta fechada no ambito do processo acima referido.\n\nDescricao do bem: ${c.title}\nLocalizacao: ${loc}\nArea: ${area}\n\nPROPOSTA DE AQUISICAO:\n\n   Proponente: ${P.nome}\n   NIF: ${P.nif}\n   Morada: ${P.morada}\n   Email: ${P.email}\n   Valor da proposta: EUR ${c.bid} (${c.bidText})\n\nSolicito igualmente informacao sobre:\n   1. O prazo limite para entrega de propostas;\n   2. Se e necessario juntar cheque visado de caucao e montante;\n   3. O local e horario para entrega de propostas;\n   4. A data prevista para abertura das propostas.\n\nEncontro-me disponivel para qualquer esclarecimento adicional.\n\nCom os melhores cumprimentos,\n\n\n\n${P.nome}\nNIF: ${P.nif}`;
+}
+
+function esc(s){const d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+function sc_col(s){return s>=85?"#22c55e":s>=65?"#eab308":"#94a3b8";}
+function sc_bg(s){return s>=85?"rgba(34,197,94,.15)":s>=65?"rgba(234,179,8,.15)":"rgba(148,163,184,.1)";}
+function toast(msg,warn=false){const t=document.getElementById("toast");t.textContent=msg;t.style.background=warn?"#7c2d12":"#14532d";t.style.display="block";setTimeout(()=>t.style.display="none",2400);}
+
+function renderList(){
+  const shown=items.filter(c=>curF==="approved"?c.approved:curF==="pending"?(!c.approved&&!c.rejected):curF==="rejected"?c.rejected:true);
+  document.getElementById("napp").textContent=items.filter(c=>c.approved).length+" aprovadas";
+  document.getElementById("npen").textContent=items.filter(c=>!c.approved&&!c.rejected).length+" pendentes";
+  const el=document.getElementById("list");
+  if(!shown.length){el.innerHTML='<div style="padding:24px;color:#334155;text-align:center;font-size:11px">Nenhuma carta nesta categoria.</div>';return;}
+  el.innerHTML=shown.map(c=>`
+    <div class="item${selId===c.id?" sel":""}${c.approved?" app":""}${c.rejected?" rej":""}" onclick="pick('${c.id}')">
+      <div style="display:flex;justify-content:space-between;gap:5px;margin-bottom:4px">
+        <div style="font-size:11px;font-weight:700;color:#fff;line-height:1.3;flex:1">${esc(c.title)}</div>
+        <span class="sbadge" style="background:${sc_bg(c.score)};color:${sc_col(c.score)}">${c.score}</span>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">
+        <span class="mbadge" style="${MSTYLE[c.modalidade]||"background:rgba(148,163,184,.1);color:#94a3b8"}">${esc(c.modalidade)}</span>
+        <span style="font-size:9px;color:#475569;background:#1e293b;padding:1px 5px;border-radius:3px">${esc(c.categoria)}</span>
+      </div>
+      <div style="font-size:9px;color:#334155;margin-bottom:3px">${esc(c.location)}</div>
+      <div style="display:flex;justify-content:space-between;font-size:9px">
+        <span style="color:#475569">${c.price?"VB: EUR "+c.price.toLocaleString():"Sem VB"}${c.current_bid?" - Bid: EUR "+c.current_bid.toLocaleString():""}</span>
+        <span style="color:#334155">${c.date_end?"ate "+esc(c.date_end):""}</span>
+      </div>
+      <div style="margin-top:3px;font-size:10px;color:#22c55e;font-weight:700">Proposta: EUR ${esc(c.bid)}</div>
+      ${c.approved?'<div style="margin-top:2px;font-size:9px;color:#22c55e;font-weight:700">APROVADA</div>':""}
+      ${c.rejected?'<div style="margin-top:2px;font-size:9px;color:#ef4444;font-weight:700">REJEITADA</div>':""}
+    </div>`).join("");
+}
+
+function renderDetail(){
+  const c=items.find(x=>x.id===selId);
+  const det=document.getElementById("detail");
+  if(!c){det.innerHTML='<div id="ph">&#8592; Seleciona uma propriedade</div>';return;}
+  const carta=buildCarta(c);
+  const subj=`Proposta de Aquisicao -- Processo ${(c.processo||"").split(",")[0].trim()}`;
+  const mailto=`mailto:${c.agente_email||""}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(carta)}`;
+  det.innerHTML=`
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:11px">
+      <div>
+        <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">${esc(c.title)}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="mbadge" style="${MSTYLE[c.modalidade]||""}">${esc(c.modalidade)}</span>
+          <span style="font-size:9px;color:#64748b;background:#0a1120;padding:2px 5px;border-radius:3px">${esc(c.categoria)}</span>
+          <span class="sbadge" style="background:${sc_bg(c.score)};color:${sc_col(c.score)}">${c.score}</span>
+        </div>
+      </div>
+      <a href="${esc(c.url)}" target="_blank" style="font-size:10px">Ver no Citius</a>
+    </div>
+    <div class="grid6">
+      ${[["Local",c.location],["Area",c.area_m2?c.area_m2.toLocaleString()+" m2":"--"],["VB",c.price?"EUR "+c.price.toLocaleString():"--"],["Bid",c.current_bid?"EUR "+c.current_bid.toLocaleString():"Sem lances"],["Prazo",c.date_end||"--"],["Processo",c.processo||"--"]].map(([l,v])=>`<div class="cell"><div class="cell-label">${l}</div><div class="cell-val">${esc(v)}</div></div>`).join("")}
+    </div>
+    <div class="dbox"><div class="dlabel">DESCRICAO</div><div class="dtext">${esc(c.description)}</div></div>
+    <div class="dbox">
+      <div class="dlabel" style="margin-bottom:4px">AGENTE DE EXECUCAO</div>
+      <div style="font-size:11px;color:#e2e8f0;font-weight:600">${esc(c.agente_nome)}</div>
+      <div style="font-size:10px;color:#475569;margin-top:2px">
+        Tel: <a href="tel:${esc(c.agente_contacto)}">${esc(c.agente_contacto)}</a>
+        &nbsp;-&nbsp; Email: <a href="mailto:${esc(c.agente_email)}">${esc(c.agente_email)}</a>
+      </div>
+    </div>
+    <div class="dlabel" style="margin-bottom:4px">RAZOES DO SCORE</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap">${(c.reasons||[]).map(r=>`<span class="rtag">${esc(r)}</span>`).join("")}</div>
+  </div>
+
+  <div class="card">
+    <div style="font-size:11px;font-weight:700;color:#fff;margin-bottom:11px">Ajustar Proposta</div>
+    <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:9px">
+      <div style="flex:1;min-width:130px">
+        <label style="font-size:9px;color:#475569;display:block;margin-bottom:2px">Valor (ex: 4.000,00)</label>
+        <input id="inp-bid" value="${esc(c.bid)}" style="font-size:14px;font-weight:700" oninput="updBid(this.value)">
+      </div>
+      <div style="flex:2;min-width:170px">
+        <label style="font-size:9px;color:#475569;display:block;margin-bottom:2px">Por extenso</label>
+        <input id="inp-btext" value="${esc(c.bidText)}" style="font-size:11px" oninput="updBidText(this.value)">
+      </div>
+    </div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap">
+      ${PRESETS.map(v=>`<button class="preset${c.bid===v?" on":""}" onclick="setPreset('${v}')">${v.split(",")[0]}EUR</button>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px">
+      <div style="font-size:11px;font-weight:700;color:#fff">Carta Gerada</div>
+      <div style="display:flex;gap:6px">
+        <button class="cbtn" onclick="copyCarta()">Copiar</button>
+        <button class="cbtn" onclick="dlCarta()">Download .txt</button>
+      </div>
+    </div>
+    <textarea id="carta-ta" rows="18">${esc(carta)}</textarea>
+  </div>
+
+  <div class="card">
+    <div style="font-size:11px;font-weight:700;color:#fff;margin-bottom:11px">Aprovar & Enviar</div>
+    <div style="display:flex;gap:9px;flex-wrap:wrap">
+      <button class="abtn btn-g" onclick="approve()">Aprovar & Preparar Email</button>
+      <button class="abtn btn-r" onclick="reject()">Rejeitar</button>
+      <button class="abtn btn-b" onclick="showEmail()">Preparar Email</button>
+    </div>
+    <div id="epanel" class="epanel" style="display:none">
+      <div style="font-size:10px;font-weight:700;color:#60a5fa;margin-bottom:9px">Email pronto para enviar</div>
+      <div class="egrid">
+        <span class="elabel">Para:</span><span>${esc(c.agente_email)}</span>
+        <span class="elabel">Agente:</span><span>${esc(c.agente_nome)}</span>
+        <span class="elabel">Tel:</span><a href="tel:${esc(c.agente_contacto)}">${esc(c.agente_contacto)}</a>
+        <span class="elabel">Assunto:</span><span style="font-size:9px;color:#94a3b8">${esc(subj)}</span>
+      </div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap">
+        <a href="${mailto}" class="send-btn">Abrir no Email</a>
+        <button class="cbtn" onclick="copyBody()">Copiar corpo</button>
+        <button class="cbtn" onclick="copyAddr('${esc(c.agente_email)}')">Copiar endereco</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function pick(id){selId=id;renderList();renderDetail();}
+function setF(f,btn){curF=f;document.querySelectorAll(".filt-btn").forEach(b=>b.classList.remove("active"));btn.classList.add("active");renderList();}
+function updBid(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bid=v;refreshCarta();}
+function updBidText(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bidText=v;refreshCarta();}
+function setPreset(v){const c=items.find(x=>x.id===selId);if(!c)return;c.bid=v;const i=document.getElementById("inp-bid");if(i)i.value=v;document.querySelectorAll(".preset").forEach(b=>b.classList.toggle("on",b.textContent===v.split(",")[0]+"EUR"));refreshCarta();}
+function refreshCarta(){const c=items.find(x=>x.id===selId);if(!c)return;const ta=document.getElementById("carta-ta");if(ta)ta.value=buildCarta(c);}
+function approve(){const c=items.find(x=>x.id===selId);if(!c)return;c.approved=true;c.rejected=false;renderList();showEmail();toast("Aprovado");}
+function reject(){const c=items.find(x=>x.id===selId);if(!c)return;c.rejected=true;c.approved=false;renderList();toast("Rejeitado",true);}
+function showEmail(){const p=document.getElementById("epanel");if(p)p.style.display="block";}
+function copyCarta(){const ta=document.getElementById("carta-ta");if(!ta)return;navigator.clipboard.writeText(ta.value).then(()=>toast("Carta copiada!"));}
+function dlCarta(){const c=items.find(x=>x.id===selId);const ta=document.getElementById("carta-ta");if(!ta||!c)return;const b=new Blob([ta.value],{type:"text/plain;charset=utf-8"}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=`carta_${(c.processo||"unknown").replace(/\//g,"-")}.txt`;a.click();URL.revokeObjectURL(u);}
+function copyBody(){const ta=document.getElementById("carta-ta");if(!ta)return;navigator.clipboard.writeText(ta.value).then(()=>toast("Corpo copiado!"));}
+function copyAddr(addr){navigator.clipboard.writeText(addr).then(()=>toast("Email copiado!"));}
+
+renderList();
+</script>
+</body>
+</html>

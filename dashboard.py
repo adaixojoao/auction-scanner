@@ -476,6 +476,88 @@ def api_listings():
     })
 
 
+@app.route("/cartas-review")
+def cartas_review():
+    path = os.path.join(os.path.dirname(__file__), "carta_review.html")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.route("/api/cartas-candidates")
+def api_cartas_candidates():
+    from scoring import score as _score_fn, categorize as _categorize
+    from cartas import classify_property, suggest_bid
+
+    db = get_db()
+    cols = [d[0] for d in db.execute("SELECT * FROM listings LIMIT 0").description]
+    rows = db.execute(
+        "SELECT * FROM listings "
+        "WHERE country='PT' AND source='citius' "
+        "AND (date_end IS NULL OR date_end > datetime('now'))"
+    ).fetchall()
+    db.close()
+
+    items = [dict(zip(cols, r)) for r in rows]
+    candidates = []
+
+    for it in items:
+        if _categorize(it) != "imoveis":
+            continue
+        sc, reasons = _score_fn(it)
+        if sc < 45:
+            continue
+
+        title = it.get("title") or ""
+        desc = it.get("description") or ""
+        area = it.get("area_m2") or 0
+        cat = classify_property(title, desc, area)
+        if cat is None:
+            continue
+
+        bid_val, bid_text = suggest_bid(cat, it.get("price"), area)
+
+        raw = {}
+        if it.get("raw_json"):
+            try:
+                raw = json.loads(it["raw_json"])
+            except Exception:
+                pass
+
+        modalidade = raw.get("modalidade", "CARTA FECHADA").upper()
+        if "NEGOCI" in modalidade:
+            modalidade = "NEGOCIACAO PARTICULAR"
+        elif "ADJUDIC" in modalidade:
+            modalidade = "ADJUDICACAO"
+        else:
+            modalidade = "CARTA FECHADA"
+
+        candidates.append({
+            "id": it.get("id") or str(hash(it.get("url", ""))),
+            "title": title,
+            "description": desc[:300],
+            "location": ", ".join(filter(None, [it.get("concelho", ""), it.get("district", "")])),
+            "price": it.get("price"),
+            "current_bid": it.get("current_bid"),
+            "area_m2": area,
+            "date_end": it.get("date_end"),
+            "url": it.get("url", ""),
+            "processo": raw.get("processo", ""),
+            "tribunal": raw.get("tribunal", ""),
+            "modalidade": modalidade,
+            "categoria": cat,
+            "score": sc,
+            "reasons": reasons,
+            "bid": bid_val,
+            "bidText": bid_text,
+            "agente_nome": raw.get("agente_nome", ""),
+            "agente_email": raw.get("agente_email", ""),
+            "agente_contacto": raw.get("agente_contacto", ""),
+        })
+
+    candidates.sort(key=lambda x: -x["score"])
+    return jsonify(candidates[:100])
+
+
 def main():
     from config import load_config
     cfg = load_config()
