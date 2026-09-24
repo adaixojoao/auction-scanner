@@ -149,39 +149,57 @@ Show → Hidden* shows what is hidden and why.
 ## Scoring (0–100)
 
 The score says how well a listing fits the goal: **homes and plots at
-ridiculous prices**. Urban plots are welcome; rural plots only when they are
-**big and cheap**; homes in a **good location** that **do not need heavy work**.
+ridiculous prices**, in this order of preference:
+
+1. a house in good condition, in a great location, well under market price;
+2. a large farm plot next to water (river, stream, lake, reservoir), very cheap;
+3. a house needing some repairs, dirt cheap, in a great location;
+4. a medium farm plot next to water, dirt cheap;
+5. a house in good condition, dirt cheap, in an ordinary location.
+
+Not wanted: small or partial homes or plots, homes needing heavy work (unless
+they come with a big farm plot, which is then what is scored), expensive
+homes, bad locations. These examples are a test (`tests/test_scoring.py`), so
+the order holds whenever the weights change.
+
 Every listing is sorted into a kind (Listings → *What*): home, urban plot,
-rural plot, or other.
+rural plot, or other. Starts at 50.
 
-Starts at 50.
+**Amounts score smoothly.** Price, size, discount to local prices, €/m² of
+land, bid-to-value ratio, price cuts and days left each move the score along
+a curve (`scoring.py`, the `*_POINTS` lists), so €20,000 scores a little more
+than €20,001 instead of jumping at a step.
 
-- **Skip (score 0):** fractional shares (`1/2`, `1 / 2 (Um Meio)`, `½`, quota-parte, avos…) and usufruct.
-- **Homes:** up for a home, good condition (*bom estado*, *renovado*, *pronto a
-  habitar*…), a good location (*centro*, near the beach…, or a town we have
-  local prices for) and being well below local prices per m². Down for needing
-  some work, for an isolated location, and a lot for heavy work (*ruína*,
-  *para recuperar*, *reconstrução*…).
-- **Rural plots:** big (≥ 1 ha by default) and cheap (≤ €0.50/m² by default;
-  half of that scores best). Smaller or dearer rural land is pushed down.
-  Both limits are in **Settings → What you are looking for**.
+- **Skip (score 0):** fractional shares (`1/2`, `29/84`, `4986/100000`, *metade*, quota-parte, avos…) and usufruct.
+- **Homes:** up for good condition (*bom estado*, *renovado*…), a great
+  location (*centro*, near the beach…) or a town we have local prices for,
+  size up to about 150 m², and the discount to local prices per m². Down for
+  needing some work, and a lot for an isolated location or heavy work
+  (*ruína*, *para recuperar*…).
+- **Rural plots:** size as a multiple of the minimum (1 ha by default; about
+  5× scores as large), next to water, and €/m² against the maximum (€0.50/m²
+  by default). Both limits are in **Settings → What you are looking for**.
+  The absolute price counts half for land: its €/m² already says how cheap it is.
 - **Urban plots:** up. **Shops, garages, storage:** down.
 - **Price:** up the lower the amount you would actually pay (current bid, else
-  minimum, else price), for a deep bid-to-value discount, no bids yet and a
-  price cut since first seen. Down for overheated bidding and suspiciously
-  cheap junk.
-- **Sale:** up for sealed-bid, forced and tax sales, no or tiny minimum bid,
-  ending within 3–7 days. Down if occupied, no road access, or inheritance
-  rights only.
+  minimum, else price); down above about €60,000. Up for a deep bid-to-value
+  discount, no bids yet and a price cut since first seen.
+- **Sale:** a sealed-bid (*carta fechada*) sale is a great chance (+20), and so
+  is one where you name the price and none is published (+18). Up for forced
+  and tax sales, a tiny minimum bid, ending soon. Down if occupied, no road
+  access, or inheritance rights only.
 
 What is not the goal stays under the default minimum score (45), however good
-the sale looks: other (at most 35), rural plots that are too small (35), homes
-needing heavy work (40). They are hidden unless you shortlist them.
+the sale looks: other (at most 35), homes needing heavy work or in an isolated
+location (40). Small homes and plots and expensive homes are held down along a
+curve: a 25 m² home at most 35, 40 m² at most 45, no limit from about 100 m²;
+a home at €60,000 at most 100, €75,000 at most 55, €90,000 at most 40. They
+are hidden unless you shortlist them.
 
 Words match whole words, accents ignored, and negations are understood:
 *desocupado* is vacant, not occupied; *não necessita de obras* does not count
-as needing work; *Casal do Mato* is not a *casa*. The **AI check** is told the
-same goal.
+as needing work; *Casal do Mato* is not a *casa*; *Rio Maior* is a town, not a
+river. The **AI check** is told the same goal.
 
 ## Sources and their health
 

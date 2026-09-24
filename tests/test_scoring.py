@@ -193,14 +193,14 @@ def test_rural_plots_must_be_big_and_cheap():
     big_dear, r_dear = score(item(title="Prédio rústico", area_m2=30000, price=45000))   # €1.50/m²
     unknown, r_unknown = score(item(title="Prédio rústico", price=4500))
     assert "rural plot too small (3 000 m² < 1.0 ha)" in r_small
-    assert "big rural plot (3.0 ha)" in r_big and "very cheap land (€0.15/m²)" in r_big
+    assert "medium rural plot (3.0 ha)" in r_big and "very cheap land (€0.15/m²)" in r_big
     assert "dear for rural land (€1.50/m²)" in r_dear
     assert "rural plot, size unknown" in r_unknown
     assert big_cheap > unknown > small and big_cheap > big_dear
     # the limits come from Settings (config filters)
     _, relaxed = score(item(title="Prédio rústico", area_m2=3000, price=1500),
                        targets={"rural_min_m2": 2000, "rural_max_eur_m2": 1})
-    assert "big rural plot (3 000 m²)" in relaxed and "very cheap land (€0.50/m²)" in relaxed
+    assert "medium rural plot (3 000 m²)" in relaxed and "very cheap land (€0.50/m²)" in relaxed
 
 
 def test_homes_in_good_places_without_heavy_work():
@@ -271,3 +271,97 @@ def test_listings_that_all_reach_100_are_still_ordered():
     good = item(title="Moradia", concelho="Guarda", price=25000, area_m2=90, **court)
     assert score(better)[0] == score(good)[0] == 100
     assert score_detail(better)[0] > score_detail(good)[0] > 100
+
+
+# ─── The owner's own examples (Sept 2026): this order, and the rest below it ───
+
+def _ex(**kw):
+    return item(**kw)
+
+
+OWNER_WANTS = [   # best first
+    _ex(title="Moradia T3 em bom estado", description="Remodelada, no centro da vila.",
+        concelho="Guarda", area_m2=120, price=45000),                  # pristine, great place, well under market
+    _ex(title="Prédio rústico com 8 ha", description="Terreno agrícola que confronta com o rio.",
+        area_m2=80000, price=20000),                                  # large farm plot by water, very cheap
+    _ex(title="Moradia T2", description="Necessita de obras. No centro da vila.",
+        concelho="Guarda", area_m2=100, price=8000),                   # some repairs, dirt cheap, great place
+    _ex(title="Terreno rústico", description="Terreno de cultura junto à ribeira.",
+        area_m2=20000, price=3000),                                   # medium farm plot by water, dirt cheap
+    _ex(title="Moradia em bom estado", description="Casa de habitação.",
+        area_m2=100, price=9000),                                     # pristine, dirt cheap, ordinary place
+]
+OWNER_DOES_NOT_WANT = {
+    "small home": _ex(title="Apartamento T0 com 25 m2", description="No centro da vila.",
+                      concelho="Guarda", area_m2=25, price=8000),
+    "partial home": _ex(title="1/2 de moradia", description="No centro.", area_m2=100, price=8000),
+    "heavy repairs": _ex(title="Moradia em ruínas", description="Para reconstruir.", area_m2=100, price=5000),
+    "expensive home": _ex(title="Moradia em bom estado", description="No centro da vila.",
+                          concelho="Guarda", area_m2=120, price=95000),
+    "bad location": _ex(title="Moradia em bom estado", description="Lugar isolado, caminho de terra.",
+                        area_m2=100, price=9000),
+    "small plot": _ex(title="Terreno rústico", description="Junto à ribeira.", area_m2=2000, price=500),
+    "small building plot": _ex(title="Lote de terreno para construção", area_m2=90, price=3000),
+}
+
+
+def test_the_owners_order():
+    from scoring import score_detail
+    raws = [score_detail(x)[0] for x in OWNER_WANTS]
+    assert raws == sorted(raws, reverse=True), raws
+    assert len(set(raws)) == len(raws), raws
+
+
+def test_what_the_owner_does_not_want_stays_under_the_minimum_score():
+    from scoring import score_detail
+    worst_wanted = min(score_detail(x)[0] for x in OWNER_WANTS)
+    for label, x in OWNER_DOES_NOT_WANT.items():
+        sc, reasons = score(x)
+        assert sc <= 45 and sc < worst_wanted, (label, sc, reasons)
+
+
+def test_a_ruin_on_a_big_farm_is_valued_as_land():
+    sc, reasons = score(item(title="Quinta com casa em ruínas",
+                             description="Prédio misto com 6 ha de terreno agrícola.",
+                             area_m2=60000, price=25000))
+    assert "ruin on a farm — valued as land" in reasons and "large rural plot (6.0 ha)" in reasons
+    assert sc >= 80
+
+
+def test_water_is_next_to_the_plot_not_a_place_name():
+    from scoring import water_nearby
+    assert water_nearby("Terreno que confronta com o rio Mondego")
+    assert water_nearby("Olival junto à ribeira, com poço")
+    assert water_nearby("atravessado por uma linha de água")
+    assert water_nearby("Finca rústica junto al río")
+    assert not water_nearby("Prédio rústico em Rio Maior")
+    assert not water_nearby("Terreno no concelho de Albufeira")
+    assert not water_nearby("Moradia na Lagoa, Algarve")
+
+
+def test_amounts_score_smoothly_not_in_steps():
+    from scoring import score_detail
+
+    def raw(**kw):
+        return score_detail(item(title="Moradia", concelho="Guarda", **kw))[0]
+    # €20,000 scores a little more than €20,001: no ties, no jumps
+    assert 0 < raw(price=20000, area_m2=100) - raw(price=20001, area_m2=100) < 0.01
+    # one more euro, m², hectare or percent never moves the score by more than a hair
+    for lo in range(1000, 99000, 997):
+        assert abs(raw(price=lo, area_m2=100) - raw(price=lo + 1, area_m2=100)) < 0.05, lo
+    for m2 in range(20, 300, 7):
+        assert abs(raw(price=20000, area_m2=m2) - raw(price=20000, area_m2=m2 + 1)) < 3, m2
+
+    def rural(area, price):
+        return score_detail(item(title="Prédio rústico", area_m2=area, price=price))[0]
+    for ha in range(2000, 120000, 1990):
+        assert abs(rural(ha, 10000) - rural(ha + 10, 10000)) < 0.1, ha
+    # and cheaper, bigger, further below market is always at least as good
+    prices = [raw(price=p, area_m2=100) for p in range(1000, 100000, 500)]
+    assert all(a >= b for a, b in zip(prices, prices[1:]))
+
+
+def test_curve_passes_through_its_points():
+    from scoring import curve
+    pts = [(0, 10), (10, 0)]
+    assert curve(-5, pts) == 10 and curve(5, pts) == 5 and curve(99, pts) == 0

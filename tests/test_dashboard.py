@@ -65,7 +65,7 @@ def test_listings_by_kind_follow_the_settings(client, add):
 
     client.post("/api/settings", json={"filters": {"rural_min_m2": 5000, "rural_max_eur_m2": 0.5}})
     rural = client.get("/api/listings?kind=rural_plot").get_json()["items"][0]
-    assert "big rural plot (8 000 m²)" in rural["reasons"] and "very cheap land (€0.25/m²)" in rural["reasons"]
+    assert "medium rural plot (8 000 m²)" in rural["reasons"] and "very cheap land (€0.25/m²)" in rural["reasons"]
     assert client.get("/api/settings").get_json()["filters"]["rural_min_m2"] == 5000
 
 
