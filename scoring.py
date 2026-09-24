@@ -97,8 +97,12 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
 # they are hidden unless you shortlist them.
-NOT_THE_GOAL_CAP = {"not a home or plot": 35, "rural plot too small": 35,
-                    "needs heavy work": 40}
+NOT_THE_GOAL_CAP = {"not a home or plot": 35, "needs heavy work": 40, "isolated location": 40}
+# Small homes and plots and expensive homes are held down along curves
+# (SMALL_HOME_CAP and the others next to score_detail).
+SMALL_HOME_M2 = 40
+SMALL_URBAN_PLOT_M2 = 150
+EXPENSIVE_HOME_EUR = 60000
 
 DWELLING_WORDS = [
     "moradia", "moradias", "apartamento", "vivenda", "habitação", "casa", "casas",
@@ -216,6 +220,28 @@ GOOD_LOCATION = [
     "centro storico", "zona centrale", "vicino al centro",
     "innenstadt", "stadtmitte", "zentrale lage", "zentrumsnah", "centrum",
 ]
+# Water next to a plot. Place names ("Rio Maior", "Albufeira", "Lagoa", "Ribeira
+# de Pena") are not water: a water word counts only after words saying the plot
+# touches it ("confronta com o rio", "junto à ribeira"), or as a set phrase.
+_WATER = (r"(?:o |a |um |uma |pelo |pela |do |da |el |la |le |l')?"
+          r"(?:rio|ribeira|ribeiro|regato|lago|lagoa|albufeira|barragem|charca|represa|a[cç]ude|mar|"
+          r"r[ií]o|arroyo|embalse|pantano|rivi[eè]re|[eé]tang|lac|fleuve)")
+WATER_RE = re.compile(
+    r"\b(?:junto (?:a|ao|à|de|do|da)|perto (?:de|do|da)|pr[oó]ximo (?:de|do|da|ao|à)|"
+    r"margens? (?:de|do|da)|frente (?:a|ao|à|para|de|do|da)|confronta\w* (?:com|a|ao|à)|"
+    r"atravessad\w* (?:por|pelo|pela)|banhad\w* (?:por|pelo|pela)|limitad\w* (?:por|pelo|pela)|"
+    r"(?:com )?acesso (?:a|ao|à)|junto al|orilla (?:de|del)|au bord (?:de|du|de la)|en bordure (?:de|du))\s+"
+    + _WATER + r"\b"
+    r"|\b(?:curso de [aá]gua|linha de [aá]gua|plano de [aá]gua|espelho de [aá]gua|frente de rio|frente rio)\b",
+    re.I)
+
+
+def water_nearby(text: str) -> str | None:
+    """The words that put a plot next to water, or None."""
+    m = WATER_RE.search(text or "")
+    return m.group(0).strip() if m else None
+
+
 ISOLATED = [
     "isolad*", "lugar isolado", "acesso difícil", "caminho de terra", "sem acessos",
     "aislad*", "isolé", "isolée", "isolato", "isolata", "abgelegen", "alleinlage", "afgelegen",
@@ -319,12 +345,16 @@ def buyer_priorities(targets: dict | None = None) -> str:
     """The goal in words, for the AI check: the same rules as score()."""
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
     return (
-        "Homes (houses or flats) and plots at very low prices. Homes must be in a good location "
-        "(a town or village centre with services, not isolated) and must not need heavy work: no "
-        "ruins or full rebuilds, light work is acceptable. Urban building plots are welcome. Rural "
-        f"plots only if big (at least {t['rural_min_m2']:,.0f} m²) and cheap (at most "
-        f"€{t['rural_max_eur_m2']:.2f}/m², about €{t['rural_max_eur_m2'] * 10000:,.0f} per hectare). "
-        "Shops, garages, storage and offices are not wanted."
+        "Homes (houses or flats) and plots at very low prices. In order of preference: a house in "
+        "good condition in a great location well under market price; a large farm plot next to "
+        "water (river, stream, lake, reservoir) that is very cheap; a house needing some repairs, "
+        "dirt cheap, in a great location; a medium farm plot next to water, dirt cheap; a house "
+        "in good condition, dirt cheap, in an ordinary location. Rural plots only if at least "
+        f"{t['rural_min_m2']:,.0f} m² and cheap (at most €{t['rural_max_eur_m2']:.2f}/m², about "
+        f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare). Not wanted: small or partial homes "
+        "or plots; homes needing heavy work (ruins, full rebuilds) unless they come with a big "
+        "farm plot that carries the value; expensive homes; isolated or bad locations; shops, "
+        "garages, storage and offices."
     )
 
 
@@ -404,12 +434,53 @@ def score(item: dict, now: datetime | None = None,
     return max(0.0, min(100.0, raw)), reasons
 
 
+def curve(x: float, points: list[tuple[float, float]]) -> float:
+    """Straight lines between (x, points) pairs, flat beyond the ends.
+
+    Every amount (price, size, discount, €/m², …) is scored along one of these,
+    so €20,000 scores a little more than €20,001 instead of jumping at a step.
+    The points are where the old steps were."""
+    if x <= points[0][0]:
+        return points[0][1]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return points[-1][1]
+
+
+# How cheap, in euros (what you would pay). Rural land counts this at half:
+# its €/m² already says how cheap it is.
+PRICE_POINTS = [(0, 28), (5000, 25), (15000, 20), (30000, 12), (60000, 4), (80000, -15), (150000, -20)]
+# Bid as a share of the base value.
+BID_RATIO_POINTS = [(0.1, 38), (0.3, 33), (0.5, 22), (0.7, 12), (1.0, 0), (1.5, -15)]
+# Price cut since first seen, in %.
+PRICE_DROP_POINTS = [(5, 0), (10, 5), (25, 10)]
+# Days left before the sale ends.
+DAYS_LEFT_POINTS = [(0.25, 9), (3, 7), (7, 3), (10, 0)]
+# Home size in m², and how far below local prices (0.4 = 40%).
+HOME_AREA_POINTS = [(30, -25), (40, -15), (60, 0), (80, 4), (150, 6)]
+MARKET_DISCOUNT_POINTS = [(0.1, 0), (0.2, 4), (0.4, 14), (0.6, 20), (0.9, 24)]
+# Rural plot size as a multiple of the minimum (Settings), and €/m² as a share of the maximum.
+RURAL_SIZE_POINTS = [(0.5, -30), (1.0, 8), (2.0, 13), (5.0, 25), (10.0, 28)]
+RURAL_EUR_M2_POINTS = [(0.2, 18), (0.5, 15), (1.0, 8), (1.5, -10), (3.0, -25)]
+# A very low minimum bid (€) on a sale with a real base value.
+LOW_MIN_BID_POINTS = [(100, 10), (500, 10), (1500, 0)]
+
+# What the owner does not want, as the highest score it can reach. They slide
+# too: a 38 m² home is held down a little less than a 30 m² one.
+SMALL_HOME_CAP = [(25, 35), (40, 45), (75, 130), (100, 200)]   # by m²
+EXPENSIVE_HOME_CAP = [(50000, 200), (60000, 100), (75000, 55), (90000, 40)]   # by €
+SMALL_URBAN_PLOT_CAP = [(60, 35), (150, 45), (250, 200)]   # by m²
+SMALL_RURAL_PLOT_CAP = [(0.3, 30), (1.0, 45), (1.3, 200)]  # by multiple of the minimum
+
+
 def score_detail(item: dict, now: datetime | None = None,
                  targets: dict | None = None) -> tuple[float, list[str]]:
     """The score before it is clamped to 0–100: several listings can reach 100,
     and this still says which of them is best (used for sorting)."""
     s = 50.0
     reasons: list[str] = []
+    caps: list[float] = []
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
 
     title   = item.get("title") or ""
@@ -430,15 +501,25 @@ def score_detail(item: dict, now: datetime | None = None,
         return 0.0, ["usufruct — skip"]
 
     # ── What it is ────────────────────────────────────────────────────
+    # A ruin on a big farm: the value is the land, so it is scored as land.
+    if (kind == "home" and area >= t["rural_min_m2"] and has_term(full, HEAVY_WORK)
+            and has_term(full, RURAL_WORDS, negations=False)):
+        kind = "rural_plot"
+        reasons.append("ruin on a farm — valued as land")
+
     if kind == "home":
         s += 10
         reasons.append("home")
-        s += _home_points(item, full, area, pay, reasons)
+        s += _home_points(item, full, area, pay, reasons, caps)
     elif kind == "urban_plot":
         s += 8
         reasons.append("urban plot" + (f" ({_ha(area)})" if area else ""))
+        if area:
+            caps.append(curve(area, SMALL_URBAN_PLOT_CAP))
+            if area < SMALL_URBAN_PLOT_M2:
+                reasons.append(f"small plot ({area:.0f} m²)")
     elif kind == "rural_plot":
-        s += _rural_points(area, pay, t, reasons)
+        s += _rural_points(area, pay, t, reasons, full, caps)
     elif kind == "other":
         s -= 25
         reasons.append("not a home or plot")
@@ -462,17 +543,14 @@ def score_detail(item: dict, now: datetime | None = None,
     # ── How cheap ─────────────────────────────────────────────────────
     if bid and price and price > 0:
         ratio = bid / price
+        s += curve(ratio, BID_RATIO_POINTS)
         if ratio < 0.30:
-            s += 35
             reasons.append(f"bid only {ratio:.0%} of VB — extreme discount")
         elif ratio < 0.50:
-            s += 25
             reasons.append(f"bid {ratio:.0%} of VB — deep discount")
         elif ratio < 0.70:
-            s += 15
             reasons.append(f"bid {ratio:.0%} of VB — good discount")
         elif ratio > 1.50:
-            s -= 15
             reasons.append(f"overbid {ratio:.0%} — overheated")
     elif not bid and price:
         s += 8
@@ -480,29 +558,26 @@ def score_detail(item: dict, now: datetime | None = None,
 
     # Price already cut since we first saw it (e.g. a second, cheaper round)
     drop = item.get("price_drop_pct")
-    if drop and drop >= 25:
-        s += 10
-        reasons.append(f"price cut {drop:.0f}% since first seen")
-    elif drop and drop >= 10:
-        s += 5
-        reasons.append(f"price cut {drop:.0f}% since first seen")
+    if drop and drop > 5:
+        s += curve(drop, PRICE_DROP_POINTS)
+        if drop >= 10:
+            reasons.append(f"price cut {drop:.0f}% since first seen")
 
     # Ridiculous in absolute terms. This is the goal, so a dear sale stays out of
     # the top even with every court bonus: a €97,500 flat used to reach 100.
+    # For rural land the price per m² already says how cheap it is (_rural_points),
+    # so a bonus for the absolute price counts half: a small cheap plot must not
+    # beat a big one.
     if pay >= 300:
+        points = curve(pay, PRICE_POINTS)
+        s += points * (0.5 if kind == "rural_plot" and points > 0 else 1.0)
         if pay <= 5000:
-            s += 25
             reasons.append(f"very cheap: €{pay:,.0f}")
         elif pay <= 15000:
-            s += 20
             reasons.append(f"cheap: €{pay:,.0f}")
         elif pay <= 30000:
-            s += 12
             reasons.append(f"€{pay:,.0f}")
-        elif pay <= 60000:
-            s += 4
-        else:
-            s -= 15
+        elif pay > 60000:
             reasons.append(f"€{pay:,.0f} — not a low price")
 
     # ── How the sale works ────────────────────────────────────────────
@@ -525,8 +600,8 @@ def score_detail(item: dict, now: datetime | None = None,
                     or has_term(full, OFFER_SALE_PATTERNS, negations=False)):
         s += 18
         reasons.append("no price — you set your offer")
-    elif min_p and min_p <= 500 and price and price > 1000:
-        s += 10
+    elif min_p and price and price > 1000 and min_p < price and curve(min_p, LOW_MIN_BID_POINTS) > 0:
+        s += curve(min_p, LOW_MIN_BID_POINTS)
         reasons.append(f"min bid only €{min_p:.0f}")
     elif not min_p and pay and source in FORCED_SOURCES:
         s += 4
@@ -535,12 +610,12 @@ def score_detail(item: dict, now: datetime | None = None,
     # Urgency. days_left() understands naive dates; the old tz-aware subtraction
     # raised on them, so most sources never got this bonus.
     left = days_left(item.get("date_end"), now or utcnow())
-    if left is not None and 0 < left <= 3:
-        s += 8
-        reasons.append(f"{left * 24:.0f}h left — urgent" if left < 1 else f"{left:.0f}d left — urgent")
-    elif left is not None and 0 < left <= 7:
-        s += 4
-        reasons.append(f"{left:.0f}d left")
+    if left is not None and left > 0:
+        s += curve(left, DAYS_LEFT_POINTS)
+        if left <= 3:
+            reasons.append(f"{left * 24:.0f}h left — urgent" if left < 1 else f"{left:.0f}d left — urgent")
+        elif left <= 7:
+            reasons.append(f"{left:.0f}d left")
 
     if price and price < 300:
         s -= 20
@@ -548,80 +623,93 @@ def score_detail(item: dict, now: datetime | None = None,
 
     for label, cap in NOT_THE_GOAL_CAP.items():
         if any(r.startswith(label) for r in reasons):
-            s = min(s, cap)
+            caps.append(cap)
+    if caps:
+        s = min(s, *caps)
     return s, reasons
 
 
-def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[str]) -> float:
-    """A home should be in a good place and not need heavy work."""
+def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[str],
+                 caps: list[float]) -> float:
+    """A home should be in a good place, in good condition, big enough, well
+    under local prices and not expensive."""
     s = 0.0
     if has_term(full, HEAVY_WORK):
         s -= 25
         reasons.append("needs heavy work (ruin / full rebuild)")
     elif has_term(full, SOME_WORK):
-        s -= 10
+        s -= 12
         reasons.append("needs some work")
     elif has_term(full, GOOD_CONDITION):
-        s += 10
+        s += 15
         reasons.append("good condition")
 
     if has_term(full, ISOLATED):
-        s -= 20
+        s -= 35
         reasons.append("isolated location")
     else:
         spot = find_terms(full, GOOD_LOCATION, negations=False)
         town = _known_town(item)
         if spot:
-            s += 8
+            s += 15
             reasons.append(f"good location ({spot[0]})")
         elif town:
             s += 8
             reasons.append(f"in {town} (town with services)")
 
-    if area and area < 30:
-        s -= 5
-        reasons.append(f"very small ({area:.0f} m²)")
-    elif area >= 60:
-        s += 4
-        reasons.append(f"{area:.0f} m²")
+    if area:
+        s += curve(area, HOME_AREA_POINTS)
+        caps.append(curve(area, SMALL_HOME_CAP))
+        if area < SMALL_HOME_M2:
+            reasons.append(f"small home ({area:.0f} m²)")
+        elif area >= 60:
+            reasons.append(f"{area:.0f} m²")
+    if pay:
+        caps.append(curve(pay, EXPENSIVE_HOME_CAP))
+        if pay > EXPENSIVE_HOME_EUR:
+            reasons.append(f"expensive home (€{pay:,.0f})")
 
     # Below the local price per m² (homes only: land is not priced like buildings)
     mv = market_value_estimate(item)
     if mv and pay and area <= 1000:
         market_disc = (mv - pay) / mv
-        if market_disc > 0.60:
-            s += 15
-            reasons.append(f"{market_disc:.0%} below local prices")
-        elif market_disc > 0.40:
-            s += 10
-            reasons.append(f"{market_disc:.0%} below local prices")
-        elif market_disc > 0.20:
-            s += 5
+        s += curve(market_disc, MARKET_DISCOUNT_POINTS)
+        if market_disc > 0.20:
             reasons.append(f"{market_disc:.0%} below local prices")
     return s
 
 
-def _rural_points(area: float, pay: float, t: dict, reasons: list[str]) -> float:
-    """A rural plot is only interesting when it is big and cheap per m²."""
+def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: str = "",
+                  caps: list[float] | None = None) -> float:
+    """A rural plot is only interesting when it is big and cheap per m²; next
+    to water it is worth more."""
     min_m2, max_eur = t["rural_min_m2"], t["rural_max_eur_m2"]
     if not area:
         reasons.append("rural plot, size unknown")
         return -12
+    size = area / min_m2
+    s = curve(size, RURAL_SIZE_POINTS)
+    if caps is not None:
+        caps.append(curve(size, SMALL_RURAL_PLOT_CAP))
     if area < min_m2:
         reasons.append(f"rural plot too small ({_ha(area)} < {_ha(min_m2)})")
-        return -30
-    s = 15.0 if area >= 5 * min_m2 else 10.0
-    reasons.append(f"big rural plot ({_ha(area)})")
+        return s
+    if size >= 5:
+        reasons.append(f"large rural plot ({_ha(area)})")
+    else:
+        reasons.append(f"medium rural plot ({_ha(area)})")
+    water = water_nearby(full)
+    if water:
+        s += 18
+        reasons.append(f"next to water ({water})")
     if pay:
         per_m2 = pay / area
+        s += curve(per_m2 / max_eur, RURAL_EUR_M2_POINTS)
         if per_m2 <= max_eur / 2:
-            s += 15
             reasons.append(f"very cheap land (€{per_m2:.2f}/m²)")
         elif per_m2 <= max_eur:
-            s += 8
             reasons.append(f"cheap land (€{per_m2:.2f}/m²)")
         else:
-            s -= 20
             reasons.append(f"dear for rural land (€{per_m2:.2f}/m²)")
     return s
 
