@@ -9,3 +9,11 @@ analysis.md
 analysis_prompt.txt
 config.json
 scheduler.log
+auctions.db-wal
+auctions.db-shm
+scheduler.log.*
+scheduler-output.log
+scheduler.lock
+fonts/
+cartas/
+.pytest_cache/

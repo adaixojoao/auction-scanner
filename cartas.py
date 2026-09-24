@@ -487,18 +487,18 @@ _MONTH_NAMES = {
 }
 
 
-def _today_for_country(country: str) -> str:
+def _today_for_country(country: str, place: str = "Guarda") -> str:
     from datetime import date
     d = date.today()
     if country in _MONTH_NAMES:
-        return f"Guarda, {d.day} de {_MONTH_NAMES[country][d.month-1]} de {d.year}"
+        return f"{place}, {d.day} de {_MONTH_NAMES[country][d.month-1]} de {d.year}"
     if country == "DE":
-        return f"Guarda, den {d.strftime('%d.%m.%Y')}"
+        return f"{place}, den {d.strftime('%d.%m.%Y')}"
     if country == "HR":
-        return f"Guarda, {d.strftime('%d.%m.%Y.')}"
+        return f"{place}, {d.strftime('%d.%m.%Y.')}"
     if country == "NL":
-        return f"Guarda, {d.strftime('%d-%m-%Y')}"
-    return f"Guarda, {d.strftime('%Y-%m-%d')}"
+        return f"{place}, {d.strftime('%d-%m-%Y')}"
+    return f"{place}, {d.strftime('%Y-%m-%d')}"
 
 
 def build_carta_for_country(item: dict, raw: dict, bid: str, bid_text: str,
@@ -516,7 +516,7 @@ def build_carta_for_country(item: dict, raw: dict, bid: str, bid_text: str,
         f"{proponente['nome']}\n"
         f"NIF/ID: {proponente['nif']}\n"
         f"{proponente['morada']}\n\n"
-        f"{_today_for_country(country)}\n\n"
+        f"{_today_for_country(country, proponente.get('localidade') or 'Guarda')}\n\n"
         f"{tmpl['salutation']}\n"
         f"{raw.get('tribunal', '')}\n\n"
         f"{tmpl['subject'].format(processo=processo)}\n\n"
@@ -588,6 +588,76 @@ def suggest_bid(category: str, price: float | None, area_m2: float | None) -> tu
             return "1.500,00", "mil e quinhentos euros"
         return "1.000,00", "mil euros"
     return "1.000,00", "mil euros"
+
+
+
+def _pt_letter_body(kind: str, *, nome, nif, morada, email, title, loc, area,
+                    valor, valor_texto) -> str:
+    """Body of the Portuguese carta, with accents. The PDF code runs it through
+    _safe_latin1() when only Helvetica is available."""
+    dados = (
+        f"Dados do proponente:\n"
+        f"   Nome: {nome}\n"
+        f"   NIF: {nif}\n"
+        f"   Morada: {morada}\n"
+        f"   Email: {email}"
+    )
+    bem = (
+        f"Descrição do bem: {title}\n"
+        f"Localização: {loc}\n"
+        f"Área: {area}\n\n"
+    )
+    fecho = f"Com os melhores cumprimentos,\n\n\n\n{nome}\nNIF: {nif}"
+    if kind == "negociacao":
+        return (
+            "Exmo(a). Sr(a),\n\n"
+            "Venho por este meio manifestar o meu interesse na aquisição do imóvel "
+            "em venda por negociação particular no âmbito do processo acima referido.\n\n"
+            f"{bem}"
+            "Apresento a seguinte proposta de aquisição:\n\n"
+            f"   Valor: EUR {valor} ({valor_texto})\n\n"
+            f"{dados}\n\n"
+            "Solicito que me informem sobre:\n"
+            "   1. Os procedimentos necessários para formalizar a proposta;\n"
+            "   2. Se é necessário depósito de caução e respetivo montante;\n"
+            "   3. O contacto direto do encarregado da venda.\n\n"
+            "Encontro-me disponível para qualquer esclarecimento adicional "
+            "e para deslocação ao imóvel para visita.\n\n"
+            f"{fecho}"
+        )
+    if kind == "adjudicacao":
+        return (
+            "Exmo(a). Sr(a),\n\n"
+            "Venho por este meio manifestar o meu interesse na aquisição do imóvel "
+            "no âmbito do processo acima referido, atualmente em fase de adjudicação.\n\n"
+            f"{bem}"
+            "Caso ainda seja possível apresentar proposta, ofereço:\n\n"
+            f"   Valor: EUR {valor} ({valor_texto})\n\n"
+            f"{dados}\n\n"
+            "Solicito informação sobre o estado atual da venda e se ainda é "
+            "possível apresentar proposta.\n\n"
+            f"{fecho}"
+        )
+    return (
+        "Exmo(a). Sr(a),\n\n"
+        "Venho por este meio apresentar proposta de aquisição do imóvel "
+        "em venda mediante proposta em carta fechada no âmbito do processo "
+        "acima referido.\n\n"
+        f"{bem}"
+        "PROPOSTA DE AQUISIÇÃO:\n\n"
+        f"   Proponente: {nome}\n"
+        f"   NIF: {nif}\n"
+        f"   Morada: {morada}\n"
+        f"   Email: {email}\n"
+        f"   Valor da proposta: EUR {valor} ({valor_texto})\n\n"
+        "Solicito igualmente informação sobre:\n"
+        "   1. O prazo limite para entrega de propostas;\n"
+        "   2. Se é necessário juntar cheque visado de caução e montante;\n"
+        "   3. O local e horário para entrega de propostas;\n"
+        "   4. A data prevista para abertura das propostas.\n\n"
+        "Encontro-me disponível para qualquer esclarecimento adicional.\n\n"
+        f"{fecho}"
+    )
 
 
 def check_citius_active(processes: dict[str, str]) -> dict[str, str]:
@@ -704,15 +774,23 @@ def generate_cartas(
     out_dir: str,
     max_price: float = 50000,
     top_n: int = 15,
+    filters: dict | None = None,
 ) -> list[dict]:
     """Find top properties, check if active, generate PDF letters.
 
     Args:
-        proponente: {"nome": ..., "nif": ..., "morada": ..., "email": ...}
+        score_fn, categorize_fn: ignored; kept so old callers still work.
+            Scores come from db.load_listings(), the same as every other view.
+        proponente: {"nome": ..., "nif": ..., "morada": ..., "email": ...,
+                     "localidade": town printed next to the date (default Guarda)}
 
     Returns:
         List of generated carta info dicts.
     """
+    missing = [k for k in ("nome", "nif", "morada") if not (proponente or {}).get(k)]
+    if missing:
+        LOG.error(f"config.json proponente is missing {', '.join(missing)}; no cartas generated.")
+        return []
     try:
         from fpdf import FPDF
     except ImportError:
@@ -725,7 +803,7 @@ def generate_cartas(
     font_path = os.path.join(font_dir, "DejaVuSans.ttf")
     font_bold = os.path.join(font_dir, "DejaVuSans-Bold.ttf")
     use_dejavu = True
-    if not os.path.exists(font_path):
+    if not (os.path.exists(font_path) and os.path.exists(font_bold)):
         try:
             LOG.info("Downloading DejaVu font for PDF generation...")
             urllib.request.urlretrieve(
@@ -740,20 +818,17 @@ def generate_cartas(
             LOG.warning(f"Could not download DejaVu font: {e}. Falling back to Helvetica.")
             use_dejavu = False
 
-    cols = [d[0] for d in db.execute("SELECT * FROM listings LIMIT 0").description]
-    rows = db.execute(
-        "SELECT * FROM listings "
-        "WHERE country='PT' AND source='citius' "
-        "AND (date_end IS NULL OR date_end > datetime('now'))"
-    ).fetchall()
-    items = [dict(zip(cols, r)) for r in rows]
+    from db import load_listings
+    # Same visibility rules as the report and dashboard: no expired, duplicate,
+    # stale or filtered listings.
+    items = load_listings(db, filters=filters, where="country='PT' AND source='citius'")
 
     # Score and classify
     candidates = []
     for it in items:
-        if categorize_fn(it) != "imoveis":
+        if it["category"] != "imoveis":
             continue
-        sc, reasons = score_fn(it)
+        sc, reasons = it["score"], it["reasons"]
         if sc == 0:
             continue
 
@@ -826,14 +901,10 @@ def generate_cartas(
     morada = proponente["morada"]
     email = proponente.get("email", "")
 
-    from datetime import datetime
-    today = datetime.now().strftime("%d de %B de %Y").replace(
-        "January", "janeiro").replace("February", "fevereiro").replace(
-        "March", "marco").replace("April", "abril").replace(
-        "May", "maio").replace("June", "junho").replace(
-        "July", "julho").replace("August", "agosto").replace(
-        "September", "setembro").replace("October", "outubro").replace(
-        "November", "novembro").replace("December", "dezembro")
+    from datetime import date
+    d = date.today()
+    today = f"{d.day} de {_MONTH_NAMES['PT'][d.month - 1]} de {d.year}"
+    localidade = proponente.get("localidade") or "Guarda"
 
     generated = []
     count = 0
@@ -848,9 +919,9 @@ def generate_cartas(
         processo = raw.get("processo", "")
         tribunal = raw.get("tribunal", "")
         modalidade = raw.get("modalidade", "")
-        title_short = (it.get("title") or "Imovel")[:80]
+        title_short = (it.get("title") or "Imóvel")[:80]
         loc = ", ".join(filter(None, [it.get("concelho", ""), it.get("district", "")]))
-        area_str = f"{it['area_m2']:.0f} m2" if it.get("area_m2") else "area nao especificada"
+        area_str = f"{it['area_m2']:.0f} m²" if it.get("area_m2") else "área não especificada"
 
         is_negociacao = "negociação particular" in modalidade.lower() or "negociacao particular" in modalidade.lower()
         is_adjudicacao = "adjudica" in modalidade.lower()
@@ -872,96 +943,30 @@ def generate_cartas(
         pdf.cell(0, 5, f"NIF: {nif}", new_x="LMARGIN", new_y="NEXT")
         pdf.multi_cell(0, 5, s(morada))
         pdf.ln(8)
-        pdf.cell(0, 5, f"Guarda, {s(today)}", new_x="LMARGIN", new_y="NEXT", align="R")
+        pdf.cell(0, 5, s(f"{localidade}, {today}"), new_x="LMARGIN", new_y="NEXT", align="R")
         pdf.ln(6)
 
         pdf.set_font(fn, "B", 10)
-        pdf.cell(0, 5, "Exmo(a). Sr(a). Juiz / Agente de Execução", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 5, s("Exmo(a). Sr(a). Juiz / Agente de Execução"), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font(fn, size=10)
         pdf.cell(0, 5, s(tribunal), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(8)
 
         proc_key = processo.split(",")[0].strip()
         pdf.set_font(fn, "B", 10)
-        pdf.cell(0, 5, f"Assunto: Proposta de Aquisição - Processo {s(proc_key)}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 5, s(f"Assunto: Proposta de Aquisição - Processo {proc_key}"), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(6)
         pdf.set_font(fn, size=10)
-        dados_bloco = (
-            f"Dados do proponente:\n"
-            f"   Nome: {s(nome)}\n"
-            f"   NIF: {nif}\n"
-            f"   Morada: {s(morada)}\n"
-            f"   Email: {email}"
-        )
-
-        if is_negociacao:
-            body = (
-                f"Exmo(a). Sr(a),\n\n"
-                f"Venho por este meio manifestar o meu interesse na aquisicao do imovel "
-                f"em venda por negociacao particular no ambito do processo acima referido.\n\n"
-                f"Descricao do bem: {s(title_short)}\n"
-                f"Localizacao: {s(loc)}\n"
-                f"Area: {s(area_str)}\n\n"
-                f"Apresento a seguinte proposta de aquisicao:\n\n"
-                f"   Valor: EUR {valor} ({valor_texto})\n\n"
-                f"{dados_bloco}\n\n"
-                f"Solicito que me informem sobre:\n"
-                f"   1. Os procedimentos necessarios para formalizar a proposta;\n"
-                f"   2. Se e necessario deposito de caucao e respetivo montante;\n"
-                f"   3. O contacto direto do encarregado da venda.\n\n"
-                f"Encontro-me disponivel para qualquer esclarecimento adicional "
-                f"e para deslocacao ao imovel para visita.\n\n"
-                f"Com os melhores cumprimentos,\n\n\n\n"
-                f"{s(nome)}\n"
-                f"NIF: {nif}"
-            )
-        elif is_adjudicacao:
-            body = (
-                f"Exmo(a). Sr(a),\n\n"
-                f"Venho por este meio manifestar o meu interesse na aquisicao do imovel "
-                f"no ambito do processo acima referido, atualmente em fase de adjudicacao.\n\n"
-                f"Descricao do bem: {s(title_short)}\n"
-                f"Localizacao: {s(loc)}\n"
-                f"Area: {s(area_str)}\n\n"
-                f"Caso ainda seja possivel apresentar proposta, ofereco:\n\n"
-                f"   Valor: EUR {valor} ({valor_texto})\n\n"
-                f"{dados_bloco}\n\n"
-                f"Solicito informacao sobre o estado atual da venda e se ainda e "
-                f"possivel apresentar proposta.\n\n"
-                f"Com os melhores cumprimentos,\n\n\n\n"
-                f"{s(nome)}\n"
-                f"NIF: {nif}"
-            )
-        else:
-            body = (
-                f"Exmo(a). Sr(a),\n\n"
-                f"Venho por este meio apresentar proposta de aquisicao do imovel "
-                f"em venda mediante proposta em carta fechada no ambito do processo "
-                f"acima referido.\n\n"
-                f"Descricao do bem: {s(title_short)}\n"
-                f"Localizacao: {s(loc)}\n"
-                f"Area: {s(area_str)}\n\n"
-                f"PROPOSTA DE AQUISICAO:\n\n"
-                f"   Proponente: {s(nome)}\n"
-                f"   NIF: {nif}\n"
-                f"   Morada: {s(morada)}\n"
-                f"   Email: {email}\n"
-                f"   Valor da proposta: EUR {valor} ({valor_texto})\n\n"
-                f"Solicito igualmente informacao sobre:\n"
-                f"   1. O prazo limite para entrega de propostas;\n"
-                f"   2. Se e necessario juntar cheque visado de caucao e montante;\n"
-                f"   3. O local e horario para entrega de propostas;\n"
-                f"   4. A data prevista para abertura das propostas.\n\n"
-                f"Encontro-me disponivel para qualquer esclarecimento adicional.\n\n"
-                f"Com os melhores cumprimentos,\n\n\n\n"
-                f"{s(nome)}\n"
-                f"NIF: {nif}"
-            )
+        body = s(_pt_letter_body(
+            "negociacao" if is_negociacao else "adjudicacao" if is_adjudicacao else "carta_fechada",
+            nome=nome, nif=nif, morada=morada, email=email, title=title_short, loc=loc,
+            area=area_str, valor=valor, valor_texto=valor_texto,
+        ))
 
         pdf.multi_cell(0, 5, body)
         pdf.ln(10)
         pdf.set_font("Helvetica", "I", 8)
-        pdf.cell(0, 4, f"Ref: {s(processo)} | {cat}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 4, _safe_latin1(f"Ref: {processo} | {cat}"), new_x="LMARGIN", new_y="NEXT")
 
         filename = f"carta_{count:02d}_{proc_key.replace('/', '-')}_{valor.replace('.', '').replace(',', '_')}EUR.pdf"
         filepath = os.path.join(out_dir, filename)

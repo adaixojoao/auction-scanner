@@ -1,8 +1,13 @@
 """
 Auction Scanner configuration.
 Loads from config.json in the project directory, with sensible defaults.
+
+Filters decide what is *shown* (report, dashboard, alerts, cartas); nothing is
+deleted from the database, so changing a filter takes effect immediately and
+can be undone.
 """
 
+import copy
 import json
 import os
 
@@ -49,12 +54,30 @@ DEFAULTS = {
         "send_on": "new",         # "new" = only new listings, "all" = every run
     },
 
-    # Scheduling
-    "schedule": {
+    # Telegram alerts (telegram_alert.py)
+    "telegram": {
         "enabled": False,
-        "interval_hours": 6,
-        "sources": "PT",
+        "token": "",
+        "chat_id": "",
+        "min_score": 75,          # new-listing alerts
+        "deadline_min_score": 60, # "ending soon, no offer sent" alerts
     },
+
+    # Scheduling (scheduler.py)
+    "schedule": {
+        "pt_every_hours": 2,
+        "eu_every_hours": 6,
+        "check_times": ["08:00", "20:00"],
+        "weekly_report": "mon 08:00",
+    },
+
+    # Report output
+    "report": {
+        "desktop_copy": True,     # also write Auction-Report.docx/.pdf to the Desktop
+    },
+
+    # CourtBid via Apify (python scraper.py --source courtbid)
+    "apify_token": "",
 
     # Proponente details for carta generation
     "proponente": {
@@ -62,12 +85,14 @@ DEFAULTS = {
         "nif": "260243132",
         "morada": "Rua Antonio Sergio, n. 49, 3. Esq.\n6300-665 Guarda",
         "email": "adaixojoao@gmail.com",
+        "localidade": "Guarda",   # printed next to the date on each carta
     },
 
     # Dashboard
     "dashboard": {
         "host": "127.0.0.1",
         "port": 8050,
+        "debug": False,           # Flask debugger runs code from the browser: keep off
     },
 }
 
@@ -77,7 +102,7 @@ def load_config() -> dict:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             user = json.load(f)
         return _deep_merge(DEFAULTS, user)
-    return DEFAULTS.copy()
+    return copy.deepcopy(DEFAULTS)
 
 
 def save_config(cfg: dict):
@@ -86,7 +111,7 @@ def save_config(cfg: dict):
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    result = base.copy()
+    result = copy.deepcopy(base)
     for k, v in override.items():
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):
             result[k] = _deep_merge(result[k], v)

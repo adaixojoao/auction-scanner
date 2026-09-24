@@ -1,6 +1,6 @@
 @echo off
 title Auction Scanner
-cd /d "C:\Users\adaix\Desktop\auction-scanner\"
+cd /d "%~dp0"
 echo.
 echo  ============================================
 echo   AUCTION SCANNER - Starting up...
