@@ -1,22 +1,39 @@
 """
 scoring.py — Deep-discount / charity acquisition scorer.
 Goal: find properties significantly below market price for charitable use.
+
+Every keyword is matched as a whole word (see common.term_regex), accent- and
+case-insensitively. Substring matching is what made "desocupado" count as
+occupied, "Casal do ..." count as a house and "11/2023" count as a 1/2 share.
+Occupancy/usufruct terms also ignore negated mentions ("não arrendado").
 """
 from __future__ import annotations
-import re
-from datetime import datetime, timezone
 
+import re
+from datetime import datetime
+
+from common import days_left, has_term, normalize, utcnow
 
 FRAC_PATTERNS = [
     "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
     "1/10", "1/11", "1/12", "1/14", "1/16", "1/20", "1/24",
-    "avos", "quota", "quinhão", "quinhao", "quota-parte",
+    "2/3", "3/4",
+    "um meio", "metade indivisa", "mitad indivisa",
+    "avos", "quota", "quota-parte", "quinhão", "quinhao",
     "fração ideal", "fracao ideal", "parte indivisa", "compropriedade",
+    "meação", "quote-part", "cuota indivisa",
 ]
 
 OCCUPANCY_PATTERNS = [
-    "ocupado", "arrendado", "arrendatário", "inquilino",
-    "occupied", "tenant", "locataire", "affittuario",
+    "ocupado", "ocupada", "arrendado", "arrendada", "arrendatário*",
+    "inquilino*", "occupied", "tenant*", "locataire*", "affittuari*",
+    "ocupantes", "occupato", "occupata",
+]
+
+VACANT_PATTERNS = [
+    "devoluto", "devoluta", "desocupado", "desocupada",
+    "livre de pessoas", "livre de ocupantes", "libre de ocupantes",
+    "vacant", "libre d'occupation", "leegstaand",
 ]
 
 ACCESS_PATTERNS = [
@@ -25,8 +42,8 @@ ACCESS_PATTERNS = [
 ]
 
 USUFRUCT_PATTERNS = [
-    "usufruto", "usufruct", "nue-propri", "direito de uso",
-    "direito de habitação",
+    "usufruto", "usufructo", "usufruct", "nue-propri*", "nuda proprietà",
+    "nuda propiedad", "direito de uso", "direito de habitação",
 ]
 
 SEALED_BID_PATTERNS = [
@@ -45,14 +62,18 @@ RURAL_TYPES = {
     "terreno_rustico", "terreno", "rustico", "agricola",
     "florestal", "quinta", "herdade",
 }
+RURAL_WORDS = ["rústico", "rustico", "floresta", "mata", "quinta"]
 
 DWELLING_WORDS = [
     "moradia", "apartamento", "vivienda", "appartement",
-    "maison", "woonhuis", "appartamento", "casa", "logement",
+    "maison", "woonhuis", "appartamento", "casa", "casas", "logement",
     "tussenwoning", "vivenda", "habitação",
 ]
 
-RUIN_WORDS = ["ruína", "ruina", "ruine", "rudere", "ruin", "arruinado"]
+RUIN_WORDS = ["ruin*", "arruinad*", "rudere"]
+
+PARKING_WORDS = ["parking", "garagem", "garage", "garaje", "box", "emplacement",
+                 "magazzino", "estacionamento"]
 
 MARKET_PRICE_PER_M2 = {
     "PT": {
@@ -123,50 +144,66 @@ MARKET_PRICE_PER_M2 = {
 # Backward compat alias
 PRICE_PER_M2 = MARKET_PRICE_PER_M2["PT"]
 
+_MARKET_INDEX = {
+    country: {normalize(name): ppm2 for name, ppm2 in table.items()}
+    for country, table in MARKET_PRICE_PER_M2.items()
+}
+
+
+def _place_key(name: str) -> str:
+    """"Lisboa (Santa Maria Maior)" / "Porto, Porto" → "lisboa" / "porto"."""
+    return re.split(r"[,(/]| - ", normalize(name))[0].strip()
+
 
 def market_value_estimate(item: dict) -> float | None:
+    """area × €/m² for the listing's municipality, if we have a figure for it.
+
+    Matches the place name exactly (accent-insensitive). The old substring match
+    priced Porto de Mós as Porto and anything containing "a" as something.
+    """
     area = item.get("area_m2") or 0
     if not area or area < 5:
         return None
-    country = item.get("country", "PT")
-    concelho = (item.get("concelho") or item.get("district") or "").strip()
-    if not concelho:
+    place = (item.get("concelho") or item.get("district") or "").strip()
+    if not place:
         return None
-    country_data = MARKET_PRICE_PER_M2.get(country, {})
-    for name, ppm2 in country_data.items():
-        if name.lower() in concelho.lower() or concelho.lower() in name.lower():
-            return area * ppm2
-    return None
+    table = _MARKET_INDEX.get(item.get("country") or "PT", {})
+    ppm2 = table.get(_place_key(place))
+    return area * ppm2 if ppm2 else None
 
 
-def score(item: dict) -> tuple[float, list[str]]:
+def score(item: dict, now: datetime | None = None) -> tuple[float, list[str]]:
     s = 50.0
     reasons: list[str] = []
 
-    title   = (item.get("title")       or "").lower()
-    desc    = (item.get("description") or "").lower()
+    title   = item.get("title") or ""
+    desc    = item.get("description") or ""
     full    = f"{title} {desc}"
     price   = item.get("price")   or 0
     bid     = item.get("current_bid") or 0
     area    = item.get("area_m2") or 0
     source  = item.get("source",  "")
-    tipo    = (item.get("tipo")   or "").lower()
+    tipo    = normalize(item.get("tipo"))
+    title_n = normalize(title)
 
-    if any(p in title for p in FRAC_PATTERNS):
+    if has_term(title, FRAC_PATTERNS, negations=False):
         return 0, ["fractional share — skip"]
 
-    if any(p in full for p in USUFRUCT_PATTERNS):
+    if has_term(full, USUFRUCT_PATTERNS):
         return 0, ["usufruct — skip"]
 
-    if any(p in full for p in OCCUPANCY_PATTERNS):
+    if has_term(full, OCCUPANCY_PATTERNS):
         s -= 25
         reasons.append("occupied/tenanted")
+    elif has_term(full, VACANT_PATTERNS, negations=False):
+        s += 6
+        reasons.append("vacant (devoluto)")
 
-    if any(p in full for p in ACCESS_PATTERNS):
+    if has_term(full, ACCESS_PATTERNS, negations=False):
         s -= 20
         reasons.append("no road access")
 
-    if "direito" in title and ("herança" in title or "heranca" in title):
+    if "direito" in title_n and "heranca" in title_n:
         s -= 20
         reasons.append("inheritance right only")
 
@@ -189,10 +226,19 @@ def score(item: dict) -> tuple[float, list[str]]:
         s += 8
         reasons.append("no bids yet")
 
+    # Price already cut since we first saw it (e.g. a second, cheaper round)
+    drop = item.get("price_drop_pct")
+    if drop and drop >= 25:
+        s += 10
+        reasons.append(f"price cut {drop:.0f}% since first seen")
+    elif drop and drop >= 10:
+        s += 5
+        reasons.append(f"price cut {drop:.0f}% since first seen")
+
     # Sealed-bid bonus
-    if any(p in full for p in SEALED_BID_PATTERNS):
+    if has_term(full, SEALED_BID_PATTERNS, negations=False):
         s += 20
-        reasons.append("sealed-bid — set your own price")
+        reasons.append("sealed-bid (carta fechada)")
 
     # Source quality
     if source in FORCED_SOURCES:
@@ -201,13 +247,13 @@ def score(item: dict) -> tuple[float, list[str]]:
     if source in TAX_SOURCES:
         s += 8
         reasons.append("tax seizure — no reserve")
-    if source == "citius" and (not price or price == 0):
+
+    # Minimum bid signal (one bonus per listing: these all describe the same fact)
+    min_p = item.get("min_price") or 0
+    if source == "citius" and not price:
         s += 18
         reasons.append("Citius no-minimum court sale")
-
-    # Minimum bid signal
-    min_p = item.get("min_price") or 0
-    if min_p and min_p <= 500 and price and price > 1000:
+    elif min_p and min_p <= 500 and price and price > 1000:
         s += 18
         reasons.append(f"min bid only €{min_p:.0f}")
     elif not min_p and source in FORCED_SOURCES:
@@ -215,14 +261,14 @@ def score(item: dict) -> tuple[float, list[str]]:
         reasons.append("no minimum bid")
 
     # Property type
-    if any(w in title for w in DWELLING_WORDS):
+    if has_term(title, DWELLING_WORDS, negations=False):
         s += 12
         reasons.append("full dwelling")
 
-    if any(w in title for w in RUIN_WORDS):
+    if has_term(title, RUIN_WORDS, negations=False):
         s += 5
         reasons.append("ruins — cheap entry")
-    if tipo in RURAL_TYPES or any(w in title for w in ["rústico", "rustico", "floresta", "mata", "quinta"]):
+    if tipo in RURAL_TYPES or has_term(title, RURAL_WORDS, negations=False):
         s += 8
         reasons.append("rural/land — conservation potential")
 
@@ -237,7 +283,7 @@ def score(item: dict) -> tuple[float, list[str]]:
     if price and 1000 <= price <= 30000:
         s += 8
         reasons.append("price sweet spot ≤30k")
-    elif price and 30001 <= price <= 60000:
+    elif price and 30000 < price <= 60000:
         s += 3
 
     # Market value discount
@@ -254,19 +300,15 @@ def score(item: dict) -> tuple[float, list[str]]:
             s += 5
             reasons.append(f"{market_disc:.0%} below market")
 
-    # Urgency
-    if item.get("date_end"):
-        try:
-            end = datetime.fromisoformat(item["date_end"].replace("Z", "+00:00"))
-            days_left = (end - datetime.now(timezone.utc)).days
-            if 0 < days_left <= 3:
-                s += 8
-                reasons.append(f"{days_left}d left — urgent")
-            elif 0 < days_left <= 7:
-                s += 4
-                reasons.append(f"{days_left}d left")
-        except (ValueError, TypeError):
-            pass
+    # Urgency. days_left() understands naive dates; the old tz-aware subtraction
+    # raised on them, so most sources never got this bonus.
+    left = days_left(item.get("date_end"), now or utcnow())
+    if left is not None and 0 < left <= 3:
+        s += 8
+        reasons.append(f"{left * 24:.0f}h left — urgent" if left < 1 else f"{left:.0f}d left — urgent")
+    elif left is not None and 0 < left <= 7:
+        s += 4
+        reasons.append(f"{left:.0f}d left")
 
     # Suspiciously cheap
     if price and price < 300:
@@ -274,40 +316,43 @@ def score(item: dict) -> tuple[float, list[str]]:
         reasons.append("suspiciously cheap — likely tiny/worthless")
 
     # Parking/storage only
-    if any(w in title for w in ["parking", "garagem", "garage", "box", "emplacement", "magazzino"]):
+    if has_term(title, PARKING_WORDS, negations=False):
         s -= 12
         reasons.append("parking/storage only")
 
     return max(0.0, min(100.0, s)), reasons
 
 
+GOLD_KW = ["ouro", "joalharia", "bijutaria", "relojoaria", "cautela"]
+VEHICLE_KW = [
+    "veículo", "veiculo", "automóvel", "automovel", "peugeot", "renault",
+    "volkswagen", "toyota", "ford", "opel", "smart", "hyundai", "volvo",
+    "bmw", "mercedes", "audi", "citroen", "fiat", "seat", "motociclo",
+    "moto", "ligeiro", "pesado de mercadorias", "matricula", "matrícula",
+]
+IMOVEL_TYPES = {normalize(t) for t in (
+    "apartamento/moradia", "apartamento", "moradia", "loja/escritorio",
+    "terreno_urbano", "terreno_rustico", "armazem", "outro_imovel",
+    "hotel", "industrial", "garagem", "terreno", "inmueble", "nekretnina",
+    "immobilier", "immobile", "vastgoed", "nieruchomosc", "akinito",
+    "imovel", "imóvel", "loja", "escritório", "prédio", "residencial",
+    "residential", "house", "apartment", "land",
+)}
+IMOVEL_TITLE_WORDS = [
+    "prédio", "terreno", "moradia", "apartamento", "fração", "quinta",
+    "herdade", "floresta", "casa", "vivienda", "inmueble", "maison",
+    "appartement", "immobile", "appartamento", "woning", "woonhuis",
+]
+
+
 def categorize(item: dict) -> str:
-    title = (item.get("title") or "").lower()
-    tipo  = (item.get("tipo")  or "").lower()
+    title = item.get("title") or ""
+    tipo = normalize(item.get("tipo"))
 
-    GOLD_KW    = {"ouro", "joalharia", "bijutaria", "relojoaria", "cautela"}
-    VEHICLE_KW = {
-        "veículo", "veiculo", "automóvel", "automovel", "peugeot", "renault",
-        "volkswagen", "toyota", "ford", "opel", "smart", "hyundai", "volvo",
-        "bmw", "mercedes", "audi", "citroen", "fiat", "seat", "motociclo",
-        "moto ", "ligeiro", "pesado de mercadorias", "matricula",
-    }
-    IMOVEL_TYPES = {
-        "apartamento/moradia", "apartamento", "moradia", "loja/escritorio",
-        "terreno_urbano", "terreno_rustico", "armazem", "outro_imovel",
-        "hotel", "industrial", "garagem", "terreno", "inmueble", "nekretnina",
-        "immobilier", "immobile", "vastgoed", "nieruchomosc", "akinito",
-        "imovel", "imóvel",
-    }
-
-    if any(kw in title for kw in GOLD_KW):
+    if has_term(title, GOLD_KW, negations=False):
         return "ouro_joias"
-    if any(kw in title for kw in VEHICLE_KW):
+    if has_term(title, VEHICLE_KW, negations=False):
         return "outros"
-    if (tipo in IMOVEL_TYPES
-            or "prédio" in title or "terreno" in title
-            or "moradia" in title or "apartamento" in title
-            or "fração" in title or "quinta" in title
-            or "herdade" in title or "floresta" in title):
+    if tipo in IMOVEL_TYPES or has_term(title, IMOVEL_TITLE_WORDS, negations=False):
         return "imoveis"
     return "outros"
