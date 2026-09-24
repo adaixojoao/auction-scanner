@@ -894,6 +894,71 @@ def imobancos_listing(item: dict, max_price: float) -> dict | None:
     )
 
 
+# Imobancos only gathers listings: each of its pages has a "Ver anúncio original"
+# link to the bank's own page. That is the link a listing should open, so it is
+# read once per listing and kept (the API does not include it).
+IMOBANCOS_ORIGINALS_PER_SCAN = 200
+_ORIGINAL_LINK_RE = re.compile(r"an[uú]ncio\s+original", re.I)
+
+
+def imobancos_original_url(html: str) -> str | None:
+    """The bank's own page, from an Imobancos listing page."""
+    for a in BeautifulSoup(html, "html.parser").select("a[href]"):
+        if _ORIGINAL_LINK_RE.search(a.get_text(" ", strip=True)):
+            url = safe_url(a.get("href"), "https://imobancos.pt")
+            if url and "imobancos.pt" not in urllib.parse.urlsplit(url).netloc:
+                return url
+    return None
+
+
+def _keep_original(db, row: dict) -> dict:
+    """A rescan must not put the Imobancos page back in place of the bank's page."""
+    old = db.execute("SELECT raw_json FROM listings WHERE id = ?", (row["id"],)).fetchone()
+    if not old or not old[0] or '"original_checked"' not in old[0]:
+        return row
+    try:
+        kept = {k: v for k, v in json.loads(old[0]).items() if k in ("original_url", "original_checked")}
+    except (TypeError, ValueError):
+        return row
+    raw = {**json.loads(row["raw_json"] or "{}"), **kept}
+    row["raw_json"] = json.dumps(raw, ensure_ascii=False)
+    if kept.get("original_url"):
+        row["url"] = kept["original_url"]
+    return row
+
+
+def resolve_imobancos_originals(db, session, limit: int = IMOBANCOS_ORIGINALS_PER_SCAN) -> int:
+    rows = db.execute("""
+        SELECT id, raw_json FROM listings WHERE source='imobancos'
+          AND (raw_json IS NULL OR raw_json NOT LIKE '%"original_checked"%')
+        ORDER BY last_seen DESC LIMIT ?""", (limit,)).fetchall()
+    found = 0
+    for listing_id, raw_text in rows:
+        eid = listing_id.split(":", 1)[1]
+        try:
+            resp = session.get(f"https://imobancos.pt/imoveis/{eid}", timeout=15)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.debug(f"Imobancos page {eid}: {e}")    # tried again next scan
+            continue
+        original = imobancos_original_url(resp.text)
+        raw = json.loads(raw_text or "{}")
+        raw["original_checked"] = True
+        if original:
+            raw["original_url"] = original
+            db.execute("UPDATE listings SET url = ?, raw_json = ? WHERE id = ?",
+                       (original, json.dumps(raw, ensure_ascii=False), listing_id))
+            found += 1
+        else:                                          # keep the Imobancos page
+            db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
+                       (json.dumps(raw, ensure_ascii=False), listing_id))
+        time.sleep(0.3)
+    db.commit()
+    if rows:
+        LOG.info(f"Imobancos: original bank page found for {found} of {len(rows)} listings")
+    return found
+
+
 @register("imobancos", "PT")
 def scrape_imobancos(db, max_price: float = 100000, **_):
     """imobancos.pt — bank properties (Crédito Agrícola, Montepio, Caixa, Santander, Millennium)."""
@@ -907,12 +972,13 @@ def scrape_imobancos(db, max_price: float = 100000, **_):
         for item in hits:
             row = imobancos_listing(item, max_price)
             if row:
-                upsert_listing(db, row)
+                upsert_listing(db, _keep_original(db, row))
                 total += 1
         db.commit()
         if not hits or page >= (data.get("totalPages") or 0):
             break
         time.sleep(0.5)
+    resolve_imobancos_originals(db, session)
     return total
 
 

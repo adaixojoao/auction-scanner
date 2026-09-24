@@ -34,16 +34,37 @@ def test_imobancos_reads_the_api_and_pages(db, fake_http):
         2: {"hits": [imobancos_hit(5, 45000, available=False), imobancos_hit(6, 60000)],
             "page": 2, "totalPages": 2},
     }
-    session = fake_http(lambda m, url, kw: FakeResponse(json_data=pages[kw["json"]["page"]]))
+    detail = {   # the listing pages: 1 links to the bank, 3 has no link, 6 is down
+        "1": '<a href="https://www.banco-exemplo.pt/imovel/99?uid=abc">Ver anúncio original</a>'
+             '<a href="/imoveis">Voltar</a>',
+        "3": '<a href="/contactos">Contactar</a>',
+    }
+
+    def handler(method, url, kw):
+        if method == "POST":
+            return FakeResponse(json_data=pages[kw["json"]["page"]])
+        eid = url.rsplit("/", 1)[1]
+        return FakeResponse(detail[eid]) if eid in detail else FakeResponse("down", status=503)
+
+    session = fake_http(handler)
     assert REGISTRY["imobancos"].func(db, max_price=100000) == 3
     got = rows(db, "imobancos")
     assert set(got) == {"1", "3", "6"}                       # over budget, rent and sold left out
     one = got["1"]
     assert one["price"] == 30000 and one["area_m2"] == 120 and one["tipo"] == "moradia"
     assert (one["district"], one["concelho"], one["freguesia"]) == ("Viseu", "Armamar", "Queimadela")
-    assert one["url"] == "https://imobancos.pt/imoveis/1" and "Montepio" in one["description"]
+    assert "Montepio" in one["description"]
+    assert one["url"] == "https://www.banco-exemplo.pt/imovel/99?uid=abc"   # the bank's own page
+    assert got["3"]["url"] == "https://imobancos.pt/imoveis/3"            # no original: Imobancos
     assert got["3"]["price"] is None                         # 0 is "no price", not a €0 bargain
-    assert [c[2]["json"]["page"] for c in session.calls] == [1, 2]
+    assert [c[2]["json"]["page"] for c in session.calls if c[0] == "POST"] == [1, 2]
+
+    # Next scan: the bank's page stays; 1 and 3 are not fetched again, 6 (down) is retried.
+    before = len(session.calls)
+    REGISTRY["imobancos"].func(db, max_price=100000)
+    assert rows(db, "imobancos")["1"]["url"] == "https://www.banco-exemplo.pt/imovel/99?uid=abc"
+    pages_asked = [c[1] for c in session.calls[before:] if c[0] == "GET"]
+    assert pages_asked == ["https://imobancos.pt/imoveis/6"]
 
 
 # ─── Caixa Imobiliário (CGD API behind a key and token) ─────────────
