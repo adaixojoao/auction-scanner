@@ -64,9 +64,9 @@ def select(items, max_price: float, max_bid: float):
         if price <= max_price and bid <= max_bid:
             categories[item["category"]].append(item)
     for cat in categories:
-        categories[cat].sort(key=lambda it: (-it["score"], (it["current_bid"] or 0) / it["price"]
+        categories[cat].sort(key=lambda it: (-it.get("rank", it["score"]), (it["current_bid"] or 0) / it["price"]
                                              if it["price"] else 999))
-    unknown_imoveis.sort(key=lambda it: -it["score"])
+    unknown_imoveis.sort(key=lambda it: -it.get("rank", it["score"]))
     return categories, unknown_imoveis
 
 
@@ -388,7 +388,7 @@ def print_console_summary(db, max_price: float = 50000, *, filters: dict | None 
     for it in props:
         by_country[it.get("country") or "PT"].append(it)
     for cc in _countries(props):
-        top5 = sorted(by_country[cc], key=lambda it: -it["score"])[:5]
+        top5 = sorted(by_country[cc], key=lambda it: -it.get("rank", it["score"]))[:5]
         _safe_print(f"\n  {COUNTRY_NAMES.get(cc, cc)} ({total_by_country[cc]} total)")
         _safe_print(f"  {'-' * 56}")
         for i, it in enumerate(top5, 1):
@@ -414,7 +414,7 @@ def print_sealed_bid_summary(db, *, filters: dict | None = None):
     sealed = [it for it in items
               if has_term(f"{it.get('title') or ''} {it.get('description') or ''}",
                           SEALED_BID_PATTERNS, negations=False)]
-    sealed.sort(key=lambda it: -it["score"])
+    sealed.sort(key=lambda it: -it.get("rank", it["score"]))
     print(f"\n{'=' * 60}")
     print(f"  SEALED-BID LISTINGS (carta fechada) — {len(sealed)} found")
     print(f"{'=' * 60}")

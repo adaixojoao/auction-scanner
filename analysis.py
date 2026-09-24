@@ -14,17 +14,18 @@ import re
 
 from common import LOG, has_term, utcnow
 from db import load_listings
-from scoring import FRAC_PATTERNS
+from scoring import FRAC_PATTERNS, buyer_priorities
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = "claude-haiku-4-5"
 
 ANALYSIS_PROMPT = """You are a Portuguese real estate investment analyst. Budget: €{budget:,.0f}.
-Analyze these auction/sale listings and rank them by investment potential.
+What the buyer wants: {priorities}
+Analyze these auction/sale listings and rank them by how well they fit that goal.
 
 For each listing, assess:
 1. Is this a FULL property or a fractional share (quota-parte, 1/2, 1/12, avos)?
-2. Location quality (urban vs rural, proximity to cities)
+2. Location quality (urban vs rural, proximity to cities) and how much work it needs
 3. Red flags (very old listing, unrealistic price, legal complications like "direito de usufruto")
 4. Realistic resale/rental potential
 
@@ -77,7 +78,7 @@ def analyze_with_llm(db, max_price: float = 50000, category: str = "imoveis",
     if not items:
         LOG.info("No listings to analyze")
         return None
-    items.sort(key=lambda it: -it["score"])
+    items.sort(key=lambda it: -it.get("rank", it["score"]))
 
     compact = []
     for it in items[:limit]:
@@ -97,7 +98,8 @@ def analyze_with_llm(db, max_price: float = 50000, category: str = "imoveis",
             entry["desc"] = it["description"][:200]
         compact.append(entry)
 
-    prompt = ANALYSIS_PROMPT.format(budget=max_price, listings_json=json.dumps(compact, ensure_ascii=False))
+    prompt = ANALYSIS_PROMPT.format(budget=max_price, priorities=buyer_priorities(filters),
+                                    listings_json=json.dumps(compact, ensure_ascii=False))
     out_dir = out_dir or HERE
     analysis_path = os.path.join(out_dir, "analysis.md")
 
@@ -184,8 +186,9 @@ PROPERTY_SCHEMA = {
 def _property_prompt(data: dict) -> str:
     country = data.get("country") or "PT"
     return f"""You are an expert in European judicial property auctions with 20 years of experience.
-The buyer wants to acquire properties well below market value for charitable purposes.
-They are based in Portugal but buy across the EU.
+The buyer is based in Portugal, buys across the EU for charitable use, and wants:
+{buyer_priorities(data.get('targets'))}
+Judge the property against that goal first.
 
 COUNTRY CONTEXT: {COUNTRY_CONTEXT.get(country, "European judicial auction.")}
 
@@ -196,6 +199,7 @@ PROPERTY DATA:
 - Area: {data.get('area_m2', '')} m²
 - Base value: €{data.get('price', '')}
 - Current bid: €{data.get('current_bid') or 'no bids'}
+- What it is: {data.get('kind') or 'unclear'}
 - Sale type: {data.get('sale') or data.get('modalidade', '')}
 - How it is bid: {data.get('guidance', '')}
 - Category: {data.get('categoria', '')}

@@ -31,7 +31,7 @@ another window.
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
-| **Settings** | Budget, what to hide, your details for letters, alerts, automatic scanning. |
+| **Settings** | What you are looking for (rural plot size and price), budget, what to hide, your details for letters, alerts, automatic scanning. |
 
 **Scan now** (top right) scans Portugal or every country; progress shows
 next to it. While the app is open it also scans on the timetable in
@@ -123,15 +123,40 @@ Show → Hidden* shows what is hidden and why.
 
 ## Scoring (0–100)
 
+The score says how well a listing fits the goal: **homes and plots at
+ridiculous prices**. Urban plots are welcome; rural plots only when they are
+**big and cheap**; homes in a **good location** that **do not need heavy work**.
+Every listing is sorted into a kind (Listings → *What*): home, urban plot,
+rural plot, or other.
+
 Starts at 50.
 
 - **Skip (score 0):** fractional shares (`1/2`, `1 / 2 (Um Meio)`, `½`, quota-parte, avos…) and usufruct.
-- **Down:** occupied/tenanted, no road access, inheritance rights only, overheated bidding, parking/storage only, suspiciously cheap.
-- **Up:** deep bid-to-value discount, no bids yet, price cut since first seen, sealed-bid sale, forced/tax sale, no or tiny minimum bid, full dwelling, vacant (*devoluto*), rural land, size, €1k–30k sweet spot, below the local €/m² estimate, ending within 3–7 days.
+- **Homes:** up for a home, good condition (*bom estado*, *renovado*, *pronto a
+  habitar*…), a good location (*centro*, near the beach…, or a town we have
+  local prices for) and being well below local prices per m². Down for needing
+  some work, for an isolated location, and a lot for heavy work (*ruína*,
+  *para recuperar*, *reconstrução*…).
+- **Rural plots:** big (≥ 1 ha by default) and cheap (≤ €0.50/m² by default;
+  half of that scores best). Smaller or dearer rural land is pushed down.
+  Both limits are in **Settings → What you are looking for**.
+- **Urban plots:** up. **Shops, garages, storage:** down.
+- **Price:** up the lower the amount you would actually pay (current bid, else
+  minimum, else price), for a deep bid-to-value discount, no bids yet and a
+  price cut since first seen. Down for overheated bidding and suspiciously
+  cheap junk.
+- **Sale:** up for sealed-bid, forced and tax sales, no or tiny minimum bid,
+  ending within 3–7 days. Down if occupied, no road access, or inheritance
+  rights only.
+
+What is not the goal stays under the default minimum score (45), however good
+the sale looks: other (at most 35), rural plots that are too small (35), homes
+needing heavy work (40). They are hidden unless you shortlist them.
 
 Words match whole words, accents ignored, and negations are understood:
-*desocupado* is vacant, not occupied; *não arrendado* is not tenanted; *Casal
-do Mato* is not a *casa*.
+*desocupado* is vacant, not occupied; *não necessita de obras* does not count
+as needing work; *Casal do Mato* is not a *casa*. The **AI check** is told the
+same goal.
 
 ## Sources and their health
 

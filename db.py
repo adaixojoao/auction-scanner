@@ -527,7 +527,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     filters.min_score. A shortlisted listing ignores the last two: the user
     picked it on purpose.
     """
-    from scoring import categorize, score  # scoring imports common, not db
+    from scoring import categorize, property_kind, score_detail  # scoring imports common, not db
 
     now = now or utcnow()
     sql = "SELECT * FROM listings"
@@ -575,10 +575,13 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         else:
             item["price_drop_pct"] = None
 
-        sc, reasons = score(item, now=now)
+        rank, reasons = score_detail(item, now=now, targets=filters)
+        sc = max(0.0, min(100.0, rank))
         item["score"] = sc
+        item["rank"] = rank          # unclamped: orders listings that all reach 100
         item["reasons"] = reasons
         item["category"] = categorize(item)
+        item["kind"] = property_kind(item) if item["category"] == "imoveis" else None
 
         if reason is None and min_score and sc < min_score and item["status"] != "shortlisted":
             reason = f"score {sc:.0f} < filters.min_score {min_score}"

@@ -100,7 +100,7 @@ def send_alerts(db, notify_cfg: dict, score_fn=None, max_price: float = 50000,
     if notify_cfg.get("send_on", "new") == "new":
         fresh = not_yet_alerted(db, CHANNEL, [it["id"] for it in alerts])
         alerts = [it for it in alerts if it["id"] in fresh]
-    alerts.sort(key=lambda it: -it["score"])
+    alerts.sort(key=lambda it: -it.get("rank", it["score"]))
 
     if not alerts:
         LOG.info(f"No listings scoring >= {min_score} to e-mail about")
@@ -169,7 +169,7 @@ def send_weekly_digest(db, notify_cfg: dict, score_fn=None, max_price: float = 5
 
     now = utcnow()
     scored = [it for it in load_listings(db, filters=filters, now=now) if _in_budget(it, max_price)]
-    scored.sort(key=lambda it: -it["score"])
+    scored.sort(key=lambda it: -it.get("rank", it["score"]))
     top = scored[:top_n]
     if not top:
         LOG.info("Weekly digest: no listings to report")

@@ -106,7 +106,7 @@ def alert_new_listings(db, cfg: dict, score_fn=None):
     candidates = [it for it in load_listings(db, filters=cfg.get("filters"))
                   if it["score"] >= min_sc and (it.get("price") or 0) <= max_price]
     fresh_ids = not_yet_alerted(db, CHANNEL, [it["id"] for it in candidates])
-    fresh = sorted((it for it in candidates if it["id"] in fresh_ids), key=lambda it: -it["score"])
+    fresh = sorted((it for it in candidates if it["id"] in fresh_ids), key=lambda it: -it.get("rank", it["score"]))
     if not fresh:
         return
 

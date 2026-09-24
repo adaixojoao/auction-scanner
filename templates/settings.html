@@ -9,6 +9,17 @@
 </div>
 
 <div class="card">
+  <h2>What you are looking for</h2>
+  <p class="small muted" style="margin-bottom:10px">Homes and plots at very low prices. Homes score higher in a good location (a town with services, "centro", near the beach) and in good condition; they score lower when they need heavy work (ruins, "para recuperar") or are isolated. Urban plots are welcome. Rural plots only count when they are big and cheap:</p>
+  <div class="form-grid">
+    <div class="field"><label>Rural plots: at least (m²)</label><input type="number" id="rural_min_m2" min="0" step="1000">
+      <p class="help">10 000 m² = 1 hectare. Smaller rural plots are pushed down.</p></div>
+    <div class="field"><label>Rural plots: at most (EUR per m²)</label><input type="number" id="rural_max_eur_m2" min="0" step="0.05">
+      <p class="help">0.50 €/m² = €5 000 per hectare. Dearer land is pushed down; half of it scores best.</p></div>
+  </div>
+</div>
+
+<div class="card">
   <h2>Budget &amp; what to show</h2>
   <div class="form-grid">
     <div class="field"><label>Maximum price (EUR)</label><input type="number" id="max_price" step="5000"></div>
@@ -96,6 +107,7 @@ async function load() {
   const c = await (await fetch("/api/settings")).json();
   const f = c.filters || {}, p = c.proponente || {}, s = c.schedule || {}, t = c.telegram || {}, e = c.notifications || {};
   setv("max_price", c.max_price); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
+  setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
   document.querySelectorAll("input[name=country]").forEach(cb => cb.checked = (f.countries || []).includes(cb.value));
   setv("exclude_keywords", (f.exclude_keywords || []).join("\n"));
   ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
@@ -117,6 +129,7 @@ async function save() {
     max_price: num("max_price"),
     filters: {
       min_score: num("min_score") || 0, min_area_m2: num("min_area_m2") || 0,
+      rural_min_m2: num("rural_min_m2"), rural_max_eur_m2: num("rural_max_eur_m2"),
       countries: [...document.querySelectorAll("input[name=country]:checked")].map(cb => cb.value),
       exclude_keywords: $("exclude_keywords").value.split("\n").map(s => s.trim()).filter(Boolean),
     },

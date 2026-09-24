@@ -22,6 +22,14 @@
     <select id="f-country"><option value="">All</option>
       {% for code, name in countries %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
     </select></div>
+  <div class="field"><label>What</label>
+    <select id="f-kind">
+      <option value="">Everything</option>
+      <option value="home">Homes</option>
+      <option value="urban_plot">Urban plots</option>
+      <option value="rural_plot">Rural plots</option>
+      <option value="other">Other (shops, garages…)</option>
+    </select></div>
   <div class="field"><label>Source</label><select id="f-source"><option value="">All</option></select></div>
   <div class="field"><label>Show</label>
     <select id="f-status">
@@ -56,13 +64,14 @@
 {% block scripts %}
 <script>
 let sort = "score", dir = "desc", page = 1;
+const KIND_LABEL = {home: "home", urban_plot: "urban plot", rural_plot: "rural plot", other: "other"};
 const PER_PAGE = 50;
 const $ = id => document.getElementById(id);
 
 async function load() {
   const status = $("f-status").value;
   const params = new URLSearchParams({
-    country: $("f-country").value, source: $("f-source").value,
+    country: $("f-country").value, source: $("f-source").value, kind: $("f-kind").value,
     max_price: $("f-maxprice").value, min_score: $("f-minscore").value,
     search: $("f-search").value, properties: $("f-properties").checked ? 1 : 0,
     show_hidden: status === "hidden" ? 1 : 0, status: status === "shortlisted" ? "shortlisted" : "",
@@ -80,6 +89,7 @@ function renderStats(s) {
     <div class="stat"><div class="label">Matching</div><div class="value">${s.total}</div></div>
     <div class="stat"><div class="label">New (24 h)</div><div class="value ok">${s.new_today}</div></div>
     <div class="stat"><div class="label">Score 70+</div><div class="value warn">${s.high_score}</div></div>
+    <div class="stat"><div class="label">Homes · urban · rural plots</div><div class="value">${s.homes} · ${s.urban_plots} · ${s.rural_plots}</div></div>
     <div class="stat"><div class="label">Shortlisted</div><div class="value">${s.shortlisted}</div></div>
     <div class="stat"><div class="label">Sources failing</div><div class="value ${s.sources_failing ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_failing}</a></div></div>
     ${hidden ? `<div class="stat"><div class="label">Hidden</div><div class="small muted" style="margin-top:6px">${AS.esc(hidden)}</div></div>` : ""}`;
@@ -96,7 +106,8 @@ function renderRows(items, hiddenView) {
   }
   $("rows").innerHTML = items.map(it => {
     const loc = [it.concelho, it.district].filter(Boolean).join(", ");
-    const badges = (it.is_recent ? '<span class="badge b-new">NEW</span>' : "")
+    const badges = (it.kind ? `<span class="badge b-muted">${AS.esc(KIND_LABEL[it.kind])}</span>` : "")
+      + (it.is_recent ? '<span class="badge b-new">NEW</span>' : "")
       + (it.price_drop_pct ? `<span class="badge b-drop">↓${Math.round(it.price_drop_pct)}%</span>` : "")
       + (it.offer_outcome ? `<span class="badge b-offer">offer ${AS.esc(it.offer_outcome)}</span>` : "")
       + (it.hidden_reason ? `<span class="badge b-hidden" title="${AS.esc(it.hidden_reason)}">${AS.esc(it.hidden_category)}</span>` : "");
@@ -144,7 +155,7 @@ document.querySelectorAll("th.sortable").forEach(th => th.addEventListener("clic
   load();
 }));
 $("f-search").addEventListener("keydown", e => { if (e.key === "Enter") { page = 1; load(); } });
-["f-country", "f-source", "f-status", "f-properties"].forEach(id => $(id).addEventListener("change", () => { page = 1; load(); }));
+["f-country", "f-kind", "f-source", "f-status", "f-properties"].forEach(id => $(id).addEventListener("change", () => { page = 1; load(); }));
 document.addEventListener("scan-finished", load);
 
 fetch("/api/meta").then(r => r.json()).then(d => d.sources.forEach(s => {

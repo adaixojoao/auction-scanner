@@ -25,7 +25,8 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Callable
 
-from common import has_term, parse_dt, parse_price
+from common import parse_dt, parse_price
+from scoring import DWELLING_WORDS, RURAL_WORDS, URBAN_PLOT_WORDS, property_kind
 
 LOG = logging.getLogger("letters")
 
@@ -254,39 +255,25 @@ def _round_down(value: float, step: int = 500) -> float:
 
 # ─── Property classes (PT sealed-bid suggestions) ────────────────────
 
-# Whole-word terms (common.term_regex); "*" = prefix. "casa" no longer matches "Casal".
-RUSTICO_KEYWORDS = [
-    "mato", "pinhal", "pastagem", "cultura arvense", "sequeiro",
-    "oliveir*", "vinha", "eucalipt*", "sobreir*", "pasto", "finca rústica",
-]
-CASA_KEYWORDS = [
-    "casa", "casas", "habitação", "moradia", "apartamento", "andar",
-    "assoalhada*", "r/c", "rés-do-chão", "prédio urbano", "fração autónoma",
-    "vivienda", "piso", "chalet", "maison", "appartement", "logement",
-]
-TERRENO_CONSTRUCAO_KEYWORDS = [
-    "construção urbana", "lote", "urbaniz*", "solar", "terrain à bâtir",
-]
-
+# What a listing is comes from scoring.property_kind(), the one classifier.
 MIN_HERDADE_M2 = 5000
+RUSTICO_KEYWORDS = RURAL_WORDS           # older names, kept for imports
+CASA_KEYWORDS = DWELLING_WORDS
+TERRENO_CONSTRUCAO_KEYWORDS = URBAN_PLOT_WORDS
 
 
 def classify_property(title: str, description: str, area_m2: float) -> str | None:
-    combined = f"{title} {description}"
-    area = area_m2 or 0
-
-    is_casa = has_term(combined, CASA_KEYWORDS, negations=False)
-    is_terreno = has_term(combined, TERRENO_CONSTRUCAO_KEYWORDS, negations=False)
-    is_rustico_small = has_term(combined, RUSTICO_KEYWORDS, negations=False) and area < MIN_HERDADE_M2
-    is_herdade = area >= MIN_HERDADE_M2
-
-    if is_casa:
+    """CASA / TERRENO_CONSTRUCAO / HERDADE / IMOVEL for the amount suggestions,
+    or None when it is not worth a letter: a small rural plot, or not a home or
+    a plot at all (shop, garage, storage)."""
+    kind = property_kind({"title": title, "description": description, "area_m2": area_m2})
+    if kind == "home":
         return "CASA"
-    if is_terreno:
+    if kind == "urban_plot":
         return "TERRENO_CONSTRUCAO"
-    if is_herdade:
-        return "HERDADE"
-    if is_rustico_small:
+    if kind == "rural_plot":
+        return "HERDADE" if (area_m2 or 0) >= MIN_HERDADE_M2 else None
+    if kind == "other":
         return None
     return "IMOVEL"
 

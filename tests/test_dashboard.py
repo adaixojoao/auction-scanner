@@ -51,6 +51,24 @@ def test_hidden_view_shows_only_hidden_with_reasons(client, add):
     assert [it["hidden_category"] for it in hidden["items"]] == ["expired"]
 
 
+def test_listings_by_kind_follow_the_settings(client, add):
+    add("eleiloes", "r1", title="Prédio rústico com olival", tipo="terreno_rustico", area_m2=8000, price=2000)
+    add("eleiloes", "h1", title="Moradia T2", tipo="moradia", price=20000)
+    add("eleiloes", "s1", title="Loja", tipo="loja/escritorio", price=20000)
+    # under 1 ha by default: pushed below the minimum score, so hidden
+    assert client.get("/api/listings?kind=rural_plot").get_json()["items"] == []
+    hidden = client.get("/api/listings?kind=rural_plot&show_hidden=1").get_json()["items"]
+    assert hidden[0]["kind"] == "rural_plot" and hidden[0]["hidden_category"] == "low score"
+    assert any("too small" in r for r in hidden[0]["reasons"])
+    stats = client.get("/api/listings").get_json()["stats"]
+    assert (stats["homes"], stats["rural_plots"]) == (1, 0)
+
+    client.post("/api/settings", json={"filters": {"rural_min_m2": 5000, "rural_max_eur_m2": 0.5}})
+    rural = client.get("/api/listings?kind=rural_plot").get_json()["items"][0]
+    assert "big rural plot (8 000 m²)" in rural["reasons"] and "very cheap land (€0.25/m²)" in rural["reasons"]
+    assert client.get("/api/settings").get_json()["filters"]["rural_min_m2"] == 5000
+
+
 def test_shortlist_and_dismiss(client, add):
     add(external_id="a", title="Moradia", price=20000)
     add(external_id="b", title="Moradia", price=20000)

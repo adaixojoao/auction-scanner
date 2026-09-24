@@ -41,7 +41,7 @@ NAV = [
 ]
 
 SORT_KEYS = {
-    "score": lambda x: x.get("score", 0),
+    "score": lambda x: x.get("rank", x.get("score", 0)),
     "price": lambda x: x.get("price") if x.get("price") is not None else 1e12,
     "date_end": lambda x: x.get("date_end") or "9999",
     "current_bid": lambda x: x.get("current_bid") or 0,
@@ -206,6 +206,7 @@ def api_listings():
     search = args.get("search", "").strip()
     tipo = args.get("type", "")
     status = args.get("status", "")
+    kind = args.get("kind", "")          # home / urban_plot / rural_plot / other
     properties_only = args.get("properties", "0") == "1"
     show_hidden = args.get("show_hidden", "0") == "1"
     sort = args.get("sort", "score")
@@ -235,7 +236,7 @@ def api_listings():
                                where=" AND ".join(conditions), params=params)
         loaded = [it for it in loaded
                   if it["score"] >= min_score and (not properties_only or it["category"] == "imoveis")
-                  and (not status or it["status"] == status)]
+                  and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
         hidden_counts = Counter(hidden_category(it["hidden_reason"]) for it in loaded
                                 if it["hidden_reason"])
         if show_hidden:
@@ -263,6 +264,9 @@ def api_listings():
             "countries": len({it.get("country") for it in visible}),
             "new_today": sum(1 for it in visible if it["is_recent"]),
             "high_score": sum(1 for it in visible if it["score"] >= 70),
+            "homes": sum(1 for it in visible if it["kind"] == "home"),
+            "urban_plots": sum(1 for it in visible if it["kind"] == "urban_plot"),
+            "rural_plots": sum(1 for it in visible if it["kind"] == "rural_plot"),
             "shortlisted": sum(1 for it in visible if it["status"] == "shortlisted"),
             "hidden": dict(hidden_counts),
             "sources_failing": sum(1 for h in health if h["state"] in ("error", "broken")),
@@ -439,7 +443,9 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
         "guidance": guidance(it),
         "letter_types": types,
         "categoria": classify_property(it.get("title") or "", it.get("description") or "", area) or "IMOVEL",
+        "kind": it.get("kind"),
         "score": it["score"],
+        "rank": it.get("rank", it["score"]),
         "reasons": it["reasons"],
         "status": it.get("status"),
         "bid": (first_offer or {}).get("suggested", ""),   # online-only sales: nothing to suggest
@@ -480,7 +486,7 @@ def api_offers():
             it.get("title") or "", it.get("description") or "", it.get("area_m2") or 0) is not None)
         if it["status"] == "shortlisted" or candidate:
             review.append(_offer_view(it, it["id"]))
-    review.sort(key=lambda c: (c["status"] != "shortlisted", -c["score"]))
+    review.sort(key=lambda c: (c["status"] != "shortlisted", -c["rank"]))
 
     sent, closed = [], []
     for log in logs:
@@ -498,7 +504,8 @@ def api_offers():
 def _listing(listing_id: str) -> dict | None:
     db = get_db()
     try:
-        found = load_listings(db, include_hidden=True, where="id = ?", params=(listing_id,))
+        found = load_listings(db, filters=_config().get("filters"), include_hidden=True,
+                              where="id = ?", params=(listing_id,))
     finally:
         db.close()
     return found[0] if found else None
@@ -706,14 +713,16 @@ def api_offers_calendar():
     from common import effective_end, utcnow
     from ics_export import calendar
     listing_id = request.args.get("id")
+    filters = _config().get("filters")
     db = get_db()
     try:
         if listing_id:
-            items = load_listings(db, include_hidden=True, where="id = ?", params=(listing_id,))
+            items = load_listings(db, filters=filters, include_hidden=True, where="id = ?",
+                                  params=(listing_id,))
         else:
             pending = {r[0] for r in db.execute(
                 "SELECT listing_id FROM carta_log WHERE outcome = 'pending' AND listing_id IS NOT NULL")}
-            items = [it for it in load_listings(db, include_hidden=True)
+            items = [it for it in load_listings(db, filters=filters, include_hidden=True)
                      if it["status"] == "shortlisted" or it["id"] in pending]
     finally:
         db.close()
@@ -733,8 +742,10 @@ def api_offers_calendar():
 def api_analyze_property():
     from analysis import analyze_property
     data = request.get_json(silent=True)
-    if not data:
+    if not isinstance(data, dict) or not data:
         return jsonify({"error": "No data"}), 400
+    filters = _config().get("filters") or {}
+    data = {**data, "targets": {k: filters.get(k) for k in ("rural_min_m2", "rural_max_eur_m2")}}
     result = analyze_property(data)
     return jsonify(result), (502 if "verdict" not in result else 200)
 
@@ -816,7 +827,8 @@ def api_proponente():
 # What the Settings page may change: section → allowed keys (None = a scalar).
 EDITABLE = {
     "max_price": None,
-    "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2"),
+    "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
+                "rural_max_eur_m2"),
     "proponente": PROPONENTE_KEYS,
     "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours"),
     "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score"),

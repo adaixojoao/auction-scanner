@@ -30,6 +30,9 @@ DEFAULTS = {
             "sem acesso", "encravado",
         ],
         "min_area_m2": 0,
+        # Rural plots are only worth it big and cheap (scoring.py, "What we are looking for")
+        "rural_min_m2": 10000,    # 1 ha
+        "rural_max_eur_m2": 0.5,  # €5,000 per hectare
         "min_score": 45,
         "districts": [],
     },

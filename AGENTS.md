@@ -22,7 +22,11 @@ form for rows that already exist (see Citius's `-2` suffix, `id_prefix`).
 ## One score, one loader
 
 `scoring.score()` is the only scorer; the dashboard used to have its own copy
-that disagreed with the report. Keywords go through `common.find_terms()`:
+that disagreed with the report. It encodes the owner's goal — homes and plots
+at very low prices; rural plots only big and cheap; homes in a good location
+without heavy work — and `scoring.property_kind()` is the one classifier
+(Offers and letters use it too). Keep changes to the score pointed at that goal,
+with a test, and keep `buyer_priorities()` (the AI check's copy) in step. Keywords go through `common.find_terms()`:
 whole words, accent-insensitive, negation-aware. Never go back to `x in text`:
 that is how "desocupado" counted as occupied and "11/2023" as a 1/2 share.
 
