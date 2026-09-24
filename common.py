@@ -249,6 +249,27 @@ def parse_price(text) -> float | None:
     return _number_from_match(m.group(1)) if m else None
 
 
+_AREA_RE = re.compile(
+    r"(\d{1,3}(?:[ .\u00a0]\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?)\s*"
+    r"(m²|m2|m\s?2|mq|sq\.?\s?m|ha|hectares?)(?![a-z])", re.I)
+
+
+def find_area(text) -> float | None:
+    """The first size in a text, in m²: "d'environ 35,50 m²" → 35.5,
+    "com 1.250 m2" → 1250, "8 ha" → 80000. None if there is none."""
+    for m in _AREA_RE.finditer(str(text or "")):
+        number = m.group(1).replace("\u00a0", " ")
+        if re.fullmatch(r"\d{1,3}(?:[ .]\d{3})+(?:,\d+)?", number):
+            value = float(number.replace(" ", "").replace(".", "").replace(",", "."))
+        else:
+            value = float(number.replace(",", "."))
+        if m.group(2).lower().startswith("h"):
+            value *= 10000
+        if value > 0:
+            return value
+    return None
+
+
 def find_price(text) -> float | None:
     """First amount next to €/EUR/euro in a block of text, else None."""
     if not text:

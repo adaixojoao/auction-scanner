@@ -385,3 +385,27 @@ def test_timeshares_are_skipped():
     assert not is_timeshare("Moradia T3, visitas durante a semana, das 10h às 12h")
     assert not is_timeshare("Obras de 3 semanas concluídas em 2024")
     assert not is_timeshare("Vivienda en venta, 3 dormitorios, visitas cada semana")
+
+
+def test_size_written_in_the_text():
+    from common import find_area
+    assert find_area("Une maison à usage d'habitation d'environ 35,50 m², comprenant") == 35.5
+    assert find_area("Prédio com 1.250 m2 de terreno") == 1250
+    assert find_area("Herdade com 8 ha") == 80000
+    assert find_area("T2 em Lisboa, 3º andar") is None
+    # the Le Mans house from the real list: 35 m² is a small home, however cheap
+    sc, reasons = score(item(source="france", country="FR", price=6000,
+                             title="72Le MansUne maison à usage d'habitationd'environ 35,50 m², comprenant : entrée"))
+    assert any(r.startswith("small home") for r in reasons) and sc <= 45
+
+
+def test_storage_rooms_and_unclear_listings():
+    from scoring import property_kind
+    storage = item(source="citius", price=9733,
+                   title="Fracção Autómoma designada pelas letras ZB, respeitante a arrumos ao nível do sotão")
+    assert property_kind(storage) == "other" and score(storage)[0] <= 35
+    assert property_kind(item(title="Casa com arrumos e quintal")) == "home"
+    sc, reasons = score(item(source="citius", price=1372, title="Artigo urbano 4517, sito no Montoiro"))
+    assert "unclear what it is — check" in reasons
+    clear, _ = score(item(source="citius", price=1372, title="Moradia sita no Montoiro"))
+    assert clear > sc
