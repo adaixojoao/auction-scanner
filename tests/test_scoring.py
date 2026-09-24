@@ -471,3 +471,17 @@ def test_plots_are_not_taken_for_houses():
     assert kind(item(title="Terreno T0, Tabuaço", area_m2=924)) == "urban_plot"
     assert kind(item(title="Terreno em Paialvo", description="Terra com oliveira com 3000m2", area_m2=3000)) == "rural_plot"
     assert kind(item(title="Terreno com moradia T3")) == "home"          # a house on land is still a house
+
+
+def test_lote_moradia_is_a_plot_and_detached_is_not_isolated():
+    from scoring import property_kind as kind
+    # Montepio via Imobancos (Sept 2026): 28 "Lote Moradia" plots scored 100 as houses.
+    lote = item(source="imobancos", title="Lote Moradia, ref: 18159LT 43", tipo="terreno p/ moradia", price=34000,
+                area_m2=400, description="lote de terreno com 689 m2, para construção de moradia isolada de 2 Pisos")
+    assert kind(lote) == "urban_plot"
+    sc, reasons = score(lote)
+    assert sc < 90 and not any("below local prices" in r for r in reasons)
+    assert kind(item(title="Casa T2", tipo="terreno")) == "home"          # the title names a house
+    _, detached = score(item(title="Moradia isolada T3 em bom estado", price=20000))
+    _, remote = score(item(title="Casa em lugar isolado", price=20000))
+    assert "isolated location" not in detached and "isolated location" in remote

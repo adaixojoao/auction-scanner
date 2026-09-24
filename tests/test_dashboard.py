@@ -423,3 +423,17 @@ def test_listings_show_at_most_the_best_100(client, add):
     assert by_price[0]["id"] == "eleiloes:m99"                           # sorting stays within them
     client.post("/api/settings", json={"max_listings": 20})
     assert client.get("/api/listings?per_page=1000").get_json()["total"] == 20
+
+
+def test_offers_to_review_follow_the_owners_filters(client, add):
+    import json as _json
+    client.post("/api/settings", json={"max_price": 30000, "max_listings": 2, "filters": {"min_score": 70}})
+    for n, price in enumerate((5000, 8000, 12000, 40000)):
+        add("citius", f"c{n}", title="Moradia com 100 m2", price=price, area_m2=100,
+            description="Venda mediante proposta em carta fechada",
+            raw_json=_json.dumps({"processo": f"{n}/20.0T8XXX", "modalidade": "Venda mediante proposta em carta fechada"}))
+    client.post("/api/listings/status", json={"id": "citius:c3", "status": "shortlisted"})
+    review = client.get("/api/offers").get_json()["review"]
+    ids = [c["id"] for c in review]
+    assert ids[0] == "citius:c3"                         # your pick stays, even over budget
+    assert ids[1:] == ["citius:c0", "citius:c1"]         # then the best 2 within budget

@@ -511,17 +511,29 @@ def api_offers():
     # Out of "To review": anything waiting for an answer, and anything already offered on.
     busy = {log["listing_id"] for log in logs
             if log["outcome"] == "pending" or (log.get("is_offer", 1) and log["outcome"] != "cancelled")}
-    review = []
+    cfg = _config()
+    min_score = (cfg.get("filters") or {}).get("min_score") or 45
+    budget = cfg.get("max_price") or 0
+    size = max(1, _num(cfg.get("max_listings"), 100, int))
+    shortlisted, candidates = [], []
     for it in items:
-        if it["id"] in busy or it["category"] != "imoveis" or it["hidden_reason"]:
+        if it["id"] in busy or it["category"] != "imoveis":
             continue
-        # Strong candidates are sales where the offer is a letter; online auctions and
-        # French court sales only appear here if you shortlist them.
-        candidate = (it["score"] >= 45 and channel(it) == "letter" and classify_property(
-            it.get("title") or "", it.get("description") or "", it.get("area_m2") or 0) is not None)
-        if it["status"] == "shortlisted" or candidate:
-            review.append(_offer_view(it, it["id"]))
-    review.sort(key=lambda c: (c["status"] != "shortlisted", -c["rank"]))
+        if it["status"] == "shortlisted":           # your picks are always here
+            shortlisted.append(it)
+            continue
+        if it["hidden_reason"]:
+            continue
+        # Strong candidates: your minimum score and budget, sales where the offer is a
+        # letter; online auctions and French court sales only if you shortlist them.
+        pay = it.get("current_bid") or it.get("min_price") or it.get("price") or 0
+        if (it["score"] >= min_score and (not budget or pay <= budget) and channel(it) == "letter"
+                and classify_property(it.get("title") or "", it.get("description") or "",
+                                      it.get("area_m2") or 0) is not None):
+            candidates.append(it)
+    candidates.sort(key=lambda it: -it.get("rank", it["score"]))
+    review = [_offer_view(it, it["id"]) for it in
+              sorted(shortlisted, key=lambda it: -it.get("rank", it["score"])) + candidates[:size]]
 
     sent, closed = [], []
     for log in logs:

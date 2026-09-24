@@ -165,7 +165,10 @@ NOT_PROPERTY_TYPES = {"veiculo", "equipamento", "mobiliario", "direitos"}
 # "Lote de terreno destinado a construção de moradia" is a plot; "Terreno T0"
 # (a portal's typology on land) is land, unless the text also names a house.
 _PLOT_FOR_A_HOUSE = re.compile(
-    r"(?:lote|terreno)[^.;]{0,60}?(?:destinad[oa]\s+a|para)\s+(?:a\s+)?construcao\s+de\s+(?:uma\s+)?(?:moradia|habitacao|casa|vivenda)")
+    r"(?:lote|terreno)[^.;]{0,60}?(?:destinad[oa]\s+a|para)\s+(?:a\s+)?construcao\s+de\s+(?:uma\s+)?(?:moradia|habitacao|casa|vivenda)"
+    r"|\blote\s+(?:p/\s*|para\s+)?(?:moradia|habitacao|vivenda)\b|\bterreno\s+(?:p/\s*|para\s+)(?:moradia|habitacao|construcao)\b")
+# A portal's own type that says land ("Terreno P/ Moradia", "Lote", "Terreno rústico").
+_LAND_TYPE = re.compile(r"^\s*(?:terreno|lote|land|suelo|solar|terrain)\b")
 _STARTS_AS_LAND = re.compile(r"\s*(?:terreno|lote de terreno|lote para construcao|predio rustico)\b")
 _HOUSE_WORDS_NOT_TYPOLOGY = [w for w in DWELLING_WORDS if not re.fullmatch(r"t\d", w)]
 
@@ -293,9 +296,13 @@ def water_nearby(text: str) -> str | None:
     return m.group(0).strip() if m else None
 
 
+# Not bare "isolada": "moradia isolada" is a detached house (and "vivienda aislada"
+# in Spain), which is good, not a remote place.
 ISOLATED = [
-    "isolad*", "lugar isolado", "acesso difícil", "caminho de terra", "sem acessos",
-    "aislad*", "isolé", "isolée", "isolato", "isolata", "abgelegen", "alleinlage", "afgelegen",
+    "lugar isolado", "local isolado", "zona isolada", "sítio isolado", "sitio isolado", "muito isolad*",
+    "isolado de tudo", "longe de tudo", "acesso difícil", "caminho de terra", "sem acessos",
+    "zona aislada", "lugar aislado", "muy aislad*", "isolé", "isolée", "isolato", "isolata",
+    "abgelegen", "alleinlage", "afgelegen",
 ]
 
 MARKET_PRICE_PER_M2 = {
@@ -450,6 +457,12 @@ def property_kind(item: dict) -> str | None:
 
     if tipo in NOT_PROPERTY_TYPES:
         return "other"
+    if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
+                                                negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
+        # The portal says land (or "Lote Moradia"): a plot, whatever house word follows.
+        if has_term(f"{title} {desc}", RURAL_WORDS, negations=False) or area >= 5000:
+            return "rural_plot"
+        return "urban_plot"
     found = kind_of(title)
     if found:
         return found
