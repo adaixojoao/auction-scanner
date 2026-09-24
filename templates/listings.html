@@ -124,7 +124,7 @@ function renderRows(items, hiddenView) {
       ? `<a href="#" data-id="${id}" onclick="toggleDetails(this); return false">${AS.esc(it.title || "?")}</a>`
       : AS.link(it.url, it.title || "?");
     return `<tr class="${it.hidden_reason ? "dim" : ""}">
-      <td>${AS.scoreBadge(it.score)}</td>
+      <td>${AS.scoreBadge(it.score, it.rank)}</td>
       <td>${AS.flag(it.country)}</td>
       <td class="t-title">${titleLink}${badges}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
       <td class="nowrap"><b>${AS.money(it.price)}</b></td>

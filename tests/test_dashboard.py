@@ -437,3 +437,19 @@ def test_offers_to_review_follow_the_owners_filters(client, add):
     ids = [c["id"] for c in review]
     assert ids[0] == "citius:c3"                         # your pick stays, even over budget
     assert ids[1:] == ["citius:c0", "citius:c1"]         # then the best 2 within budget
+
+
+def test_listings_above_100_show_their_real_points(client, add):
+    """Several listings reach 100: the page shows the unclamped points so the
+    better one can be told apart (a €9,000 house beats the same at €12,000)."""
+    desc = "Moradia T3 em excelente estado, remodelada, 120 m2, carta fechada"
+    add(external_id="cheap", title="Moradia T3 renovada", description=desc, price=9000, area_m2=120,
+        concelho="Lisboa", tipo="Moradia")
+    add(external_id="dear", title="Moradia T3 renovada", description=desc, price=12000, area_m2=120,
+        concelho="Lisboa", tipo="Moradia")
+    items = client.get("/api/listings").get_json()["items"]
+    assert [it["id"] for it in items] == ["eleiloes:cheap", "eleiloes:dear"]
+    assert all(it["score"] == 100 for it in items)
+    assert items[0]["rank"] > items[1]["rank"] > 100
+    detail = client.get("/api/listing?id=eleiloes:cheap").get_json()
+    assert detail["rank"] == items[0]["rank"]

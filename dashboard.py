@@ -303,7 +303,7 @@ def api_listing_detail():
         "id": it["id"], "title": it.get("title"), "source": it.get("source"),
         "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
         "description": (it.get("description") or "")[:4000],
-        "score": it["score"], "reasons": it.get("reasons") or [],
+        "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [],
         "facts": listing_info.facts(it), "related": related, "same_case": lots,
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
