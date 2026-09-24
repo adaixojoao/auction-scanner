@@ -116,3 +116,9 @@ def test_the_listing_panel_carries_the_estimate(client, add):
 def test_a_listing_without_a_price_has_no_estimate(client, add):
     add("citius", "c2", title="Moradia", tipo="moradia", price=0)
     assert client.get("/api/listing?id=citius:c2").get_json()["costs"] is None
+
+
+def test_a_car_pays_no_imt(client, add):
+    assert costs.estimate({"title": "Veículo ligeiro Opel Corsa", "price": 2000, "country": "PT"}) is None
+    add("eleiloes", "c3", title="Automóvel Opel Corsa", tipo="veiculo", price=2000)
+    assert client.get("/api/listing?id=eleiloes:c3").get_json()["costs"] is None

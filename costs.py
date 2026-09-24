@@ -19,7 +19,7 @@ Everything here is an estimate, and it says so:
 from __future__ import annotations
 
 from common import has_term, price_to_pay
-from scoring import GOOD_CONDITION, HEAVY_WORK, SOME_WORK, property_kind
+from scoring import GOOD_CONDITION, HEAVY_WORK, SOME_WORK, categorize, property_kind
 
 IMT_YEAR = 2025
 
@@ -166,10 +166,11 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
 
     {"base", "basis", "lines": [{"label", "amount", "note"}], "fees", "total",
      "renovation": {…} | None, "all_in": {"low", "high"} | None, "note"}
-    None when the listing has no price to work from.
+    None when the listing has no price to work from, or is not a property: a
+    car or a lot of jewellery pays no IMT.
     """
     value = float(bid or price_to_pay(item) or 0)
-    if value <= 0:
+    if value <= 0 or (item.get("category") or categorize(item)) != "imoveis":
         return None
     country = (item.get("country") or "PT").upper()
     kind = item.get("kind") or property_kind(item)

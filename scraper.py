@@ -172,8 +172,9 @@ def main(argv=None) -> int:
             from notifications import send_alerts
             send_alerts(db, {**notify_cfg, "enabled": True}, max_price=max_price, filters=filters)
 
-        from telegram_alert import alert_new_listings
+        from telegram_alert import alert_new_listings, alert_price_cuts
         alert_new_listings(db, cfg)
+        alert_price_cuts(db, cfg)
 
         if args.digest:
             from notifications import send_weekly_digest
