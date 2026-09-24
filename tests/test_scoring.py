@@ -365,3 +365,23 @@ def test_curve_passes_through_its_points():
     from scoring import curve
     pts = [(0, 10), (10, 0)]
     assert curve(-5, pts) == 10 and curve(5, pts) == 5 and curve(99, pts) == 0
+
+
+def test_timeshares_are_skipped():
+    # Court sales in Benalmádena (Sept 2026): cheap "homes" that were one week a year.
+    for title, desc in [
+        ("Finca nº 13.623 del Registro de la Propiedad Nº 2 de Benalmádena",
+         "que se concreta en el uso y disfrute de forma exclusiva y excluyente de esa finca "
+         "(apartamento 501) durante la semana 37 de cada año"),
+        ("Finca registral nº 13.649/37 inscrita en el Registro de la Propiedad",
+         "Benalmádena, SEMANA SEIS DE CADA AÑO"),
+        ("Direito real de habitação periódica - apartamento T1 em Albufeira", ""),
+        ("Apartamento em regime de multipropriedade", ""),
+        ("Appartement en multipropriété, semaine 12 chaque année", ""),
+    ]:
+        sc, reasons = score(item(title=title, description=desc, price=4400, source="spain", country="ES"))
+        assert sc == 0 and reasons == ["timeshare (some weeks a year) — skip"], title
+    from scoring import is_timeshare
+    assert not is_timeshare("Moradia T3, visitas durante a semana, das 10h às 12h")
+    assert not is_timeshare("Obras de 3 semanas concluídas em 2024")
+    assert not is_timeshare("Vivienda en venta, 3 dormitorios, visitas cada semana")

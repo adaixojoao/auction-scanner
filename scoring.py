@@ -70,6 +70,28 @@ USUFRUCT_PATTERNS = [
     "nuda propiedad", "direito de uso", "direito de habitação",
 ]
 
+# Timeshares: the use of a flat for some weeks a year, not the flat. Court sales
+# describe them in the description only ("el uso y disfrute … durante la semana
+# 37 de cada año"), so the whole text is checked.
+TIMESHARE_PATTERNS = [
+    "habitação periódica", "habitacao periodica", "multipropriedade", "tempo partilhado",
+    "timeshare", "time-share", "time share", "timesharing", "time-sharing", "part-time", "parttime",
+    "aprovechamiento por turno", "aprovechamiento por turnos", "multipropiedad", "tiempo compartido",
+    "multipropriété", "multipropriete", "temps partagé", "jouissance à temps partagé",
+    "multiproprietà", "multiproprieta",
+]
+_TIMESHARE_RE = re.compile(
+    r"\b(?:semanas?|semaines?|settiman[ae])\b[^.;]{0,60}?\b(?:de cada|cada|por|chaque|ogni|every|each)\s+"
+    r"(?:ano|año|annee|année|anno|year)\b"
+    r"|\bdurante (?:a|la|as|las) semanas?\s+(?:n\.?\s*[ºo°]\s*)?\d+"
+    r"|\(\s*semanas?\s+\d+\s*\)",
+    re.I)
+
+
+def is_timeshare(text: str) -> bool:
+    return bool(has_term(text, TIMESHARE_PATTERNS, negations=False) or _TIMESHARE_RE.search(text or ""))
+
+
 # Sales where you name the price: a sealed-bid letter or a private negotiation.
 # Often no price is published at all, and that is the chance, not a gap.
 OFFER_SALE_PATTERNS = ["negociação particular", "negociacao particular", "venda por negociação"]
@@ -353,7 +375,8 @@ def buyer_priorities(targets: dict | None = None) -> str:
         f"{t['rural_min_m2']:,.0f} m² and cheap (at most €{t['rural_max_eur_m2']:.2f}/m², about "
         f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare). Not wanted: small or partial homes "
         "or plots; homes needing heavy work (ruins, full rebuilds) unless they come with a big "
-        "farm plot that carries the value; expensive homes; isolated or bad locations; shops, "
+        "farm plot that carries the value; expensive homes; isolated or bad locations; timeshares "
+        "(a few weeks a year); shops, "
         "garages, storage and offices."
     )
 
@@ -499,6 +522,9 @@ def score_detail(item: dict, now: datetime | None = None,
 
     if has_term(full, USUFRUCT_PATTERNS):
         return 0.0, ["usufruct — skip"]
+
+    if is_timeshare(full):
+        return 0.0, ["timeshare (some weeks a year) — skip"]
 
     # ── What it is ────────────────────────────────────────────────────
     # A ruin on a big farm: the value is the land, so it is scored as land.
