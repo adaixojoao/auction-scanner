@@ -1610,6 +1610,45 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
             mod_m = re.search(r"Modalidade:\s*(.+?)(?:Descrição|$)", item_text)
             modalidade = mod_m.group(1).strip() if mod_m else ""
 
+            estado_m = re.search(r"Estado:\s*(.+?)(?:Valor|Modalidade|$)", item_text)
+            estado = estado_m.group(1).strip() if estado_m else ""
+
+            especie_m = re.search(r"Espécie:\s*(.+?)(?:Tipo|$)", item_text)
+            especie = especie_m.group(1).strip() if especie_m else ""
+
+            registo_m = re.search(r"Registo:\s*(\S+)", item_text)
+            registo = registo_m.group(1).strip() if registo_m else ""
+
+            art_m = re.search(r"Art\.?\s*Matricial:\s*(\S+)", item_text)
+            art_matricial = art_m.group(1).strip() if art_m else ""
+
+            entidade_registo_m = re.search(r"Entidade de Registo:\s*(.+?)(?:Art|Registo:|$)", item_text)
+            entidade_registo = entidade_registo_m.group(1).strip() if entidade_registo_m else ""
+
+            intervenientes = []
+            for iv_m in re.finditer(
+                r"Interveniente:\s*(\w+)\s+Nome:\s*(.+?)(?:Morada:|Interveniente:|$)",
+                item_text,
+            ):
+                role = iv_m.group(1).strip()
+                name = iv_m.group(2).strip()
+                intervenientes.append({"role": role, "name": name})
+            morada_m = re.search(r"Morada:\s*(.+?)(?:Interveniente:|$)", item_text)
+            if morada_m and intervenientes:
+                intervenientes[-1]["morada"] = morada_m.group(1).strip()
+
+            agente_m = re.search(
+                r"(?:Agente de Execução|Solicitador|Encarregado)\s*(?:Nome:)?\s*(.+?)(?:Morada:|Contacto:|Email:|Telefone:|$)",
+                item_text, re.I,
+            )
+            agente_nome = agente_m.group(1).strip() if agente_m else ""
+            agente_contacto_m = re.search(
+                r"(?:Contacto|Telefone|Tel)\s*:?\s*([\d\s+()-]+)", item_text, re.I,
+            )
+            agente_contacto = agente_contacto_m.group(1).strip() if agente_contacto_m else ""
+            agente_email_m = re.search(r"Email:\s*(\S+@\S+)", item_text, re.I)
+            agente_email = agente_email_m.group(1).strip() if agente_email_m else ""
+
             eid = re.sub(r"[^A-Za-z0-9]", "", processo)[:40] if processo else str(hash(desc))
 
             title = desc[:120] if desc else f"Citius judicial sale {processo}"
@@ -1634,16 +1673,33 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
 
             desc_parts = [p for p in (
                 desc[:500],
-                modalidade,
+                f"Modalidade: {modalidade}" if modalidade else None,
+                f"Estado: {estado}" if estado else None,
                 f"Processo: {processo}" if processo else None,
                 f"Tribunal: {trib_name}",
+                f"Registo: {registo} ({entidade_registo})" if registo else None,
+                f"Art. Matricial: {art_matricial}" if art_matricial else None,
+                f"Agente: {agente_nome}" if agente_nome else None,
+                f"Tel: {agente_contacto}" if agente_contacto else None,
+                f"Email: {agente_email}" if agente_email else None,
             ) if p]
 
-            search_url = (
-                f"https://www.google.com/search?q={urllib.parse.quote(f'citius venda {processo} {trib_name}')}"
-                if processo else
-                "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx"
-            )
+            citius_url = "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx"
+
+            raw_data = {
+                "processo": processo,
+                "tribunal": trib_name,
+                "modalidade": modalidade,
+                "estado": estado,
+                "especie": especie,
+                "registo": registo,
+                "art_matricial": art_matricial,
+                "entidade_registo": entidade_registo,
+                "intervenientes": intervenientes,
+                "agente_nome": agente_nome,
+                "agente_contacto": agente_contacto,
+                "agente_email": agente_email,
+            }
 
             listing = {
                 "id": f"citius:{eid}",
@@ -1660,10 +1716,10 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
                 "district": district,
                 "concelho": concelho,
                 "freguesia": freguesia,
-                "url": search_url,
+                "url": citius_url,
                 "image_url": None,
                 "date_end": date_end,
-                "raw_json": json.dumps({"processo": processo, "tribunal": trib_name, "modalidade": modalidade}, ensure_ascii=False),
+                "raw_json": json.dumps(raw_data, ensure_ascii=False),
             }
             upsert_listing(db, listing)
             trib_count += 1
@@ -1682,6 +1738,148 @@ def scrape_citius(db: sqlite3.Connection, max_price: float = 50000):
     )
     db.commit()
     LOG.info(f"Citius: {total_scraped} Portuguese judicial sale listings scraped")
+    return total_scraped
+
+
+# ─── PT: WhitestarProperties (NPL bank repos) ──────────────────────
+
+def scrape_whitestar(db: sqlite3.Connection, max_price: float = 50000):
+    """Scrape WhitestarProperties.pt — non-performing loan property portfolios.
+    Whitestar services NPL portfolios for Portuguese banks (Novo Banco etc).
+    These are bank-owned, often vacant, priced to move."""
+    LOG.info("Scraping WhitestarProperties.pt...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    base = "https://www.whitestarproperties.pt"
+    total_scraped = 0
+    seen_ids = set()
+
+    DISTRICTS = [("", "")] + [(str(i), "") for i in range(1, 21)]
+
+    for dist_id, _ in DISTRICTS:
+        try:
+            resp = session.post(f"{base}/Assets",
+                data={"District": dist_id, "County": "", "PropertyType": ""},
+                timeout=15, allow_redirects=True)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.debug(f"Whitestar district {dist_id}: {e}")
+            continue
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        detail_links = soup.select('a[href*="/Assets/Details/"]')
+
+        for a in detail_links:
+            href = a.get("href", "")
+            m = re.search(r"/Assets/Details/(\d+)", href)
+            if not m:
+                continue
+            eid = m.group(1)
+            if eid in seen_ids:
+                continue
+            seen_ids.add(eid)
+
+            card_text = a.get_text(" ", strip=True)
+
+            price = None
+            pm = re.search(r"([\d\xa0\s.,]+)\s*€", card_text)
+            if pm:
+                try:
+                    price = float(pm.group(1).replace("\xa0", "").replace(" ", "").replace(".", "").replace(",", "."))
+                except ValueError:
+                    pass
+
+            if price and price > max_price:
+                continue
+
+            tipo = ""
+            for t in ["Apartamento", "Moradia", "Terreno", "Loja", "Armazém", "Garagem", "Escritório", "Prédio"]:
+                if t.lower() in card_text.lower():
+                    tipo = t
+                    break
+
+            title = card_text[:80].strip() if card_text else f"Whitestar #{eid}"
+
+            try:
+                det = session.get(f"{base}/Assets/Details/{eid}", timeout=15)
+                det.raise_for_status()
+                dsoup = BeautifulSoup(det.text, "html.parser")
+
+                labels = {}
+                for lbl in dsoup.select(".wsi-assetview-label"):
+                    val_el = lbl.find_next_sibling(class_="wsi-assetview-value")
+                    if val_el:
+                        labels[lbl.get_text(strip=True)] = val_el.get_text(strip=True)
+
+                distrito = labels.get("Distrito", "")
+                concelho = labels.get("Concelho", "")
+                freguesia = labels.get("Freguesia", "")
+                area_str = labels.get("Área ( m 2 )", "") or labels.get("Área (m2)", "")
+                area = None
+                if area_str:
+                    am = re.search(r"[\d.,]+", area_str)
+                    if am:
+                        try:
+                            area = float(am.group().replace(",", "."))
+                        except ValueError:
+                            pass
+
+                desc_el = dsoup.select_one(".wsi-assetview-description")
+                description = desc_el.get_text(" ", strip=True)[:500] if desc_el else None
+
+                h1 = dsoup.find("h1")
+                if h1:
+                    title = re.sub(r"\s*\d[\d\s\xa0.,]*€.*", "", h1.get_text(" ", strip=True))[:80]
+
+                if not price:
+                    pm2 = re.search(r"([\d\xa0\s.,]+)\s*€", dsoup.get_text())
+                    if pm2:
+                        try:
+                            price = float(pm2.group(1).replace("\xa0","").replace(" ","").replace(".","").replace(",","."))
+                        except ValueError:
+                            pass
+                    if price and price > max_price:
+                        continue
+
+            except Exception as e:
+                LOG.debug(f"Whitestar detail {eid}: {e}")
+                distrito = concelho = freguesia = ""
+                description = None
+                area = None
+
+            listing = {
+                "id": f"whitestar:{eid}",
+                "source": "whitestar",
+                "country": "PT",
+                "external_id": eid,
+                "title": title,
+                "description": description,
+                "tipo": tipo.lower() if tipo else "imóvel",
+                "area_m2": area,
+                "price": price,
+                "current_bid": None,
+                "min_price": price,
+                "district": distrito,
+                "concelho": concelho,
+                "freguesia": freguesia,
+                "url": f"{base}/Assets/Details/{eid}",
+                "image_url": None,
+                "date_end": None,
+                "raw_json": None,
+            }
+            upsert_listing(db, listing)
+            total_scraped += 1
+
+        time.sleep(0.3)
+
+    db.commit()
+    db.execute(
+        "INSERT INTO scrape_log (source, timestamp, count, status) VALUES (?,?,?,?)",
+        ("whitestar", datetime.now(timezone.utc).isoformat(), total_scraped, "ok"),
+    )
+    db.commit()
+    LOG.info(f"WhitestarProperties: {total_scraped} Portuguese NPL listings scraped")
     return total_scraped
 
 
@@ -3338,9 +3536,11 @@ def main():
     parser = argparse.ArgumentParser(description="EU Auction Scanner")
     parser.add_argument("--source", choices=[
         "eleiloes", "idealista", "croatia", "fina", "spain", "france", "italy",
-        "netherlands", "veilingnotaris", "leilosoc", "bcp", "citius", "all"
+        "netherlands", "veilingnotaris", "leilosoc", "bcp", "citius", "whitestar",
+        "financas", "zvg", "justiz_auktion", "greece", "biddit", "anaf", "poland",
+        "aeat", "pvp_giustizia", "cyprus", "all"
     ], default="all")
-    parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "all"], default=None,
+    parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "DE", "GR", "BE", "RO", "PL", "CY", "all"], default=None,
                         help="Scrape all sources for a country")
     parser.add_argument("--max-price", type=float, default=None)
     parser.add_argument("--report-only", action="store_true")
@@ -3348,6 +3548,9 @@ def main():
     parser.add_argument("--analyze-category", default="imoveis", choices=["imoveis", "ouro_joias", "outros"])
     parser.add_argument("--notify", action="store_true", help="Send email alerts for high-scoring listings")
     parser.add_argument("--digest", action="store_true", help="Send weekly top-15 digest email")
+    parser.add_argument("--check-active", action="store_true", help="Check which Citius listings are still active")
+    parser.add_argument("--cartas", action="store_true", help="Generate proposal PDFs for active Citius listings")
+    parser.add_argument("--cartas-top", type=int, default=15, help="Number of top listings to generate cartas for")
     parser.add_argument("--dashboard", action="store_true", help="Launch web dashboard after scraping")
     args = parser.parse_args()
 
@@ -3372,7 +3575,7 @@ def main():
         db.commit()
 
     COUNTRY_SOURCES = {
-        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius), ("financas", scrape_financas)],
+        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius), ("financas", scrape_financas), ("whitestar", scrape_whitestar)],
         "HR": [("croatia", scrape_croatia), ("fina", scrape_fina_csv)],
         "ES": [("spain", scrape_spain), ("aeat", scrape_aeat)],
         "FR": [("france", scrape_france)],
@@ -3420,6 +3623,7 @@ def main():
                 "aeat": ("aeat", scrape_aeat),
                 "pvp_giustizia": ("pvp_giustizia", scrape_italy_pvp),
                 "cyprus": ("cyprus", scrape_cyprus),
+                "whitestar": ("whitestar", scrape_whitestar),
             }
             if args.source in source_map:
                 sources_to_run.append(source_map[args.source])
@@ -3458,6 +3662,48 @@ def main():
             send_weekly_digest(db, cfg.get("notifications", {}), investment_score, max_price=max_price)
         except ImportError:
             LOG.warning("notifications module not found")
+
+    # Check active Citius listings
+    if args.check_active:
+        try:
+            from cartas import check_citius_active
+            import json as _json
+            cols = [d[0] for d in db.execute("SELECT * FROM listings LIMIT 0").description]
+            rows = db.execute("SELECT * FROM listings WHERE source='citius'").fetchall()
+            proc_trib = {}
+            for r in rows:
+                it = dict(zip(cols, r))
+                raw = _json.loads(it.get("raw_json") or "{}") if it.get("raw_json") else {}
+                proc = raw.get("processo", "")
+                trib = raw.get("tribunal", "")
+                if proc and trib:
+                    proc_trib[proc.split(",")[0].strip()] = trib
+            print(f"\nChecking {len(proc_trib)} Citius processes...")
+            estados = check_citius_active(proc_trib)
+            active = sum(1 for e in estados.values() if "em venda" in e.lower())
+            print(f"\n{active} of {len(estados)} are active ('Em venda')")
+        except ImportError:
+            LOG.error("cartas module not found")
+
+    # Generate proposal letters
+    if args.cartas:
+        try:
+            from cartas import generate_cartas
+            from config import load_config as _lc
+            _cfg = _lc()
+            proponente = _cfg.get("proponente", {
+                "nome": "Joao Castro Adaixo",
+                "nif": "260243132",
+                "morada": "Rua Antonio Sergio, n. 49, 3. Esq.\n6300-665 Guarda",
+                "email": "adaixojoao@gmail.com",
+            })
+            out_dir = os.path.join(os.path.dirname(DB_PATH), "cartas")
+            generate_cartas(
+                db, investment_score, _categorize, proponente, out_dir,
+                max_price=max_price, top_n=args.cartas_top,
+            )
+        except ImportError as e:
+            LOG.error(f"cartas module error: {e}")
 
     # Console summary
     print_console_summary(db, max_price=max_price)

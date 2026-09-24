@@ -55,6 +55,14 @@ DEFAULTS = {
         "sources": "all",
     },
 
+    # Proponente details for carta generation
+    "proponente": {
+        "nome": "Joao Castro Adaixo",
+        "nif": "260243132",
+        "morada": "Rua Antonio Sergio, n. 49, 3. Esq.\n6300-665 Guarda",
+        "email": "adaixojoao@gmail.com",
+    },
+
     # Dashboard
     "dashboard": {
         "host": "127.0.0.1",
