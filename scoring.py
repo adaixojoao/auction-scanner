@@ -125,6 +125,10 @@ NOT_THE_GOAL_CAP = {"not a home or plot": 35, "needs heavy work": 40, "isolated 
 # Small homes and plots and expensive homes are held down along curves
 # (SMALL_HOME_CAP and the others next to score_detail).
 SMALL_HOME_M2 = 40
+# Land sold in the same case counts for a home when it costs at most this, or
+# this share of the home's price.
+CASE_LAND_MAX_EUR = 3000
+CASE_LAND_SHARE = 0.4
 SMALL_URBAN_PLOT_M2 = 150
 EXPENSIVE_HOME_EUR = 60000
 
@@ -693,6 +697,20 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     elif has_term(full, GOOD_CONDITION):
         s += 15
         reasons.append("good condition")
+
+    # Sold together with cheap land in the same case: worth buying both.
+    land = [lot for lot in (item.get("case_land") or [])
+            if lot.get("price") and lot["price"] <= max(CASE_LAND_MAX_EUR, CASE_LAND_SHARE * (pay or 0))]
+    if land:
+        lot = land[0]
+        s += 6
+        size = f", {_ha(lot['area_m2'])}" if lot.get("area_m2") else ""
+        reasons.append(f"land in the same case (€{lot['price']:,.0f}{size})")
+
+    water = water_nearby(full)
+    if water:
+        s += 6
+        reasons.append(f"next to water ({water})")
 
     if has_term(full, ISOLATED):
         s -= 35

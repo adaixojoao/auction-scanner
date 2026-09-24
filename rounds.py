@@ -74,6 +74,25 @@ def pay(item: dict) -> float:
     return item.get("current_bid") or item.get("min_price") or item.get("price") or 0
 
 
+def land_in_case(item: dict, idx: dict[str, list[dict]], now: datetime, kind_of) -> list[dict]:
+    """Land sold in the same case and round as this listing, still on sale: a
+    house and the plot next to it (Lage: a €7,500 house, its field for €500).
+    `kind_of` is scoring.property_kind (not imported here: scoring imports prices)."""
+    key = case_key(_raw(item.get("raw_json")))
+    if not key:
+        return []
+    out = []
+    for other in idx.get(key, []):
+        if other["id"] == item["id"] or other["source"] != item.get("source"):
+            continue
+        ended = effective_end(other.get("date_end"))
+        if ended is not None and ended <= now:
+            continue
+        if kind_of({**other, "country": item.get("country")}) in ("rural_plot", "urban_plot"):
+            out.append({"id": other["id"], "price": pay(other) or None, "area_m2": other.get("area_m2")})
+    return sorted(out, key=lambda lot: lot["price"] or 0)
+
+
 def earlier_round(item: dict, idx: dict[str, list[dict]], now: datetime) -> dict | None:
     """The latest earlier round of this listing's property that has ended, or None:
     {"id", "source", "ended", "price", "cheaper_pct"}."""
