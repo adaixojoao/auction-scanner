@@ -186,3 +186,4 @@ tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 .details .d-lots ul { margin: 4px 0 0 18px; }
 .details .copy-list { margin: 6px 0 0 18px; font-size: 13px; }
 .details .official { margin-top: 6px; }
+.details .sv-frame { width: 100%; max-width: 640px; height: 320px; border: 0; border-radius: 6px; margin: 6px 0; }

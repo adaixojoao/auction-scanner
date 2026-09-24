@@ -13,9 +13,12 @@ const AS = (() => {
   function money(v) {
     return v ? "€" + Number(v).toLocaleString("de-DE", {maximumFractionDigits: 0}) : "?";
   }
-  function scoreBadge(sc) {
-    const s = Math.round(sc || 0);
-    return `<span class="score ${s >= 70 ? "s-high" : s >= 50 ? "s-mid" : "s-low"}">${s}</span>`;
+  // The unclamped score (rank) when given: several listings reach 100, and the
+  // points above it say which of them is better.
+  function scoreBadge(sc, rank) {
+    const s = Math.round(rank != null && rank > (sc || 0) ? rank : (sc || 0));
+    const tip = s > 100 ? ` title="Above 100: beats the goal by more"` : "";
+    return `<span class="score ${s >= 70 ? "s-high" : s >= 50 ? "s-mid" : "s-low"}"${tip}>${s}</span>`;
   }
   function flag(code) { return FLAGS[code] ? `<span title="${esc(code)}">${FLAGS[code]}</span>` : esc(code || ""); }
   function link(url, text) {

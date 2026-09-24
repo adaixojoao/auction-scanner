@@ -1,3 +1,5 @@
+import pytest
+
 from datetime import datetime, timedelta, timezone
 
 from scoring import categorize, market_value_estimate, score
@@ -435,3 +437,51 @@ def test_a_home_next_to_water():
                                           price=20000))
     inland, _ = score_detail(item(title="Moradia T2", description="Casa em bom estado", price=20000))
     assert "next to water (junto ao rio)" in reasons and by_river > inland
+
+
+# ─── Rejected outright (the owner's list of 24 Sept, from real listings) ───────
+
+@pytest.mark.parametrize("title, description, why", [
+    ("Prédio urbano (totalmente inacabado) em Paredes", "O imóvel encontra-se totalmente inacabado",
+     "rejected: unfinished building"),
+    ("Predio rustico, artigo matricial 560, destinado a cultura, pastagem e pinhal",
+     "com a área de 1,960000 ha. Não descrio na CRP.", "rejected: not in the land register"),
+    ("Nekretnina u vlasništvu ovršenika, kuća i dvorište", "Nekretnina nije slobodna od osoba i stvari.",
+     "rejected: occupied"),
+    ("Terreno T0, Tabuaço", "Terreno rústico, sito em Tabuaço. Imóvel em venda conjunta com o 331312.",
+     "rejected: land only sold together with another lot"),
+])
+def test_rejected_outright(title, description, why):
+    sc, reasons = score(item(title=title, description=description, price=3500, area_m2=900))
+    assert why in reasons and sc <= 30, reasons
+
+
+def test_recovery_is_heavy_work_but_a_house_sold_with_land_is_kept():
+    sc, reasons = score(item(title="Moradia em Banda T3", description="Imóvel para recuperação total.", price=23000,
+                             area_m2=94))
+    assert "needs heavy work (ruin / full rebuild)" in reasons and sc <= 40
+    sc, reasons = score(item(title="Moradia Geminada T2", description="Moradia Venda em conjunto com terreno 40725",
+                             price=15000, area_m2=144))
+    assert "sold together with another lot (its price is not shown)" in reasons and sc > 45
+
+
+def test_plots_are_not_taken_for_houses():
+    from scoring import property_kind as kind
+    assert kind(item(title="Lote de terreno destinado a construção de moradia unifamiliar", area_m2=200)) == "urban_plot"
+    assert kind(item(title="Terreno T0, Tabuaço", area_m2=924)) == "urban_plot"
+    assert kind(item(title="Terreno em Paialvo", description="Terra com oliveira com 3000m2", area_m2=3000)) == "rural_plot"
+    assert kind(item(title="Terreno com moradia T3")) == "home"          # a house on land is still a house
+
+
+def test_lote_moradia_is_a_plot_and_detached_is_not_isolated():
+    from scoring import property_kind as kind
+    # Montepio via Imobancos (Sept 2026): 28 "Lote Moradia" plots scored 100 as houses.
+    lote = item(source="imobancos", title="Lote Moradia, ref: 18159LT 43", tipo="terreno p/ moradia", price=34000,
+                area_m2=400, description="lote de terreno com 689 m2, para construção de moradia isolada de 2 Pisos")
+    assert kind(lote) == "urban_plot"
+    sc, reasons = score(lote)
+    assert sc < 90 and not any("below local prices" in r for r in reasons)
+    assert kind(item(title="Casa T2", tipo="terreno")) == "home"          # the title names a house
+    _, detached = score(item(title="Moradia isolada T3 em bom estado", price=20000))
+    _, remote = score(item(title="Casa em lugar isolado", price=20000))
+    assert "isolated location" not in detached and "isolated location" in remote

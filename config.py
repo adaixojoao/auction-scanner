@@ -77,6 +77,12 @@ DEFAULTS = {
         "per_day": 5,             # at most this many new requests offered per day
     },
 
+    # Street View inside the listing panel: a Google Maps Embed API key (free,
+    # from Google Cloud). Without one, the panel links to Street View instead.
+    "maps": {
+        "google_key": "",
+    },
+
     # Scheduling (scheduler.py). while_app_open: scan on this timetable while
     # the app window is open, without the Windows background task.
     "schedule": {

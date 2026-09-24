@@ -303,10 +303,11 @@ def api_listing_detail():
         "id": it["id"], "title": it.get("title"), "source": it.get("source"),
         "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
         "description": (it.get("description") or "")[:4000],
-        "score": it["score"], "reasons": it.get("reasons") or [],
+        "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [],
         "facts": listing_info.facts(it), "related": related, "same_case": lots,
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
+        "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
     })
 
 @app.route("/api/listings/status", methods=["POST"])
@@ -510,17 +511,29 @@ def api_offers():
     # Out of "To review": anything waiting for an answer, and anything already offered on.
     busy = {log["listing_id"] for log in logs
             if log["outcome"] == "pending" or (log.get("is_offer", 1) and log["outcome"] != "cancelled")}
-    review = []
+    cfg = _config()
+    min_score = (cfg.get("filters") or {}).get("min_score") or 45
+    budget = cfg.get("max_price") or 0
+    size = max(1, _num(cfg.get("max_listings"), 100, int))
+    shortlisted, candidates = [], []
     for it in items:
-        if it["id"] in busy or it["category"] != "imoveis" or it["hidden_reason"]:
+        if it["id"] in busy or it["category"] != "imoveis":
             continue
-        # Strong candidates are sales where the offer is a letter; online auctions and
-        # French court sales only appear here if you shortlist them.
-        candidate = (it["score"] >= 45 and channel(it) == "letter" and classify_property(
-            it.get("title") or "", it.get("description") or "", it.get("area_m2") or 0) is not None)
-        if it["status"] == "shortlisted" or candidate:
-            review.append(_offer_view(it, it["id"]))
-    review.sort(key=lambda c: (c["status"] != "shortlisted", -c["rank"]))
+        if it["status"] == "shortlisted":           # your picks are always here
+            shortlisted.append(it)
+            continue
+        if it["hidden_reason"]:
+            continue
+        # Strong candidates: your minimum score and budget, sales where the offer is a
+        # letter; online auctions and French court sales only if you shortlist them.
+        pay = it.get("current_bid") or it.get("min_price") or it.get("price") or 0
+        if (it["score"] >= min_score and (not budget or pay <= budget) and channel(it) == "letter"
+                and classify_property(it.get("title") or "", it.get("description") or "",
+                                      it.get("area_m2") or 0) is not None):
+            candidates.append(it)
+    candidates.sort(key=lambda it: -it.get("rank", it["score"]))
+    review = [_offer_view(it, it["id"]) for it in
+              sorted(shortlisted, key=lambda it: -it.get("rank", it["score"])) + candidates[:size]]
 
     sent, closed = [], []
     for log in logs:
@@ -854,6 +867,7 @@ EDITABLE = {
     "report": ("desktop_copy",),
     "updates": ("auto",),
     "auto_requests": ("enabled", "min_score", "per_day"),
+    "maps": ("google_key",),
 }
 
 

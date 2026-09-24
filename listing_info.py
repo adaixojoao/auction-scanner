@@ -124,9 +124,28 @@ def _coords(item: dict, raw: dict):
     return (lat, lon) if lat and lon and -90 <= lat <= 90 and -180 <= lon <= 180 else None
 
 
+def street_view(item: dict, google_key: str = "") -> dict | None:
+    """Street View and the satellite view where the listing is (geo.py)."""
+    import geo
+    pos = geo.position(item)
+    if not pos:
+        return None
+    note = {"sale": "position from the sale", "street": "the street, from OpenStreetMap",
+            "village": "approximate: the village (Street View shows a nearby street)",
+            "parish": "approximate: the parish centre", "municipality": "approximate: the town centre"}
+    return {"url": geo.street_view_url(pos), "satellite": geo.satellite_url(pos),
+            "embed": geo.street_view_embed_url(pos, google_key) if pos.get("precision") in ("sale", "street") else None,
+            "precision": note.get(pos.get("precision"), pos.get("precision")),
+            "lat": pos["lat"], "lon": pos["lon"]}
+
+
 def map_url(item: dict) -> str | None:
     raw = raw_of(item)
     where = _coords(item, raw)
+    if not where:
+        import geo
+        pos = geo.position(item)
+        where = (pos["lat"], pos["lon"]) if pos else None
     if where:
         query = f"{where[0]:.6f},{where[1]:.6f}"
     else:
@@ -200,6 +219,7 @@ def same_case_lots(db, item: dict) -> list[dict]:
 
 
 PREDIAL_ONLINE = "https://www.predialonline.pt/PredialOnline/"
+_TAX_VALUE = re.compile(r"valor\s+(?:patrimonial(?:\s+tribut[áa]vel)?|tribut[áa]vel)\s*(?:de|:)?\s*€?\s*([\d][\d .]*,\d{2}|[\d][\d .]*)", re.I)
 
 _CONSERVATORIA = re.compile(
     r"Conservat[óo]ria\s+(?:do\s+)?(?:Registo\s+Predial\s+)?(?:de|do|da)\s+(.+?)\s+sob\s+o\s+n[.ºo°]*\s*([\d/]+)", re.I)
@@ -285,12 +305,23 @@ def official_records(item: dict) -> dict | None:
         copy.append({"label": "Tax article (artigo matricial)", "value": str(raw["art_matricial"])})
     if raw.get("registo") and not any(c["label"].startswith("Description") for c in copy):
         copy.append({"label": "Description no. (número da descrição)", "value": str(raw["registo"])})
-    if not copy:
+    facts = []
+    vpt = _TAX_VALUE.search(" ".join(str(x or "") for x in (raw.get("descricao_completa"), item.get("description"))))
+    if vpt:
+        facts.append({"label": "Tax value (valor patrimonial tributário)", "value": f"€{vpt.group(1).strip()}"})
+    try:
+        from scoring import local_price
+        local = local_price(item)
+    except Exception:  # noqa: BLE001
+        local = None
+    if local:
+        facts.append({"label": "Local median price", "value": f"€{local[0]:,.0f}/m² ({local[1]})"})
+    if not copy and not facts:
         return None
     parish = item.get("freguesia") or next((e.get("freguesia") for e in entries if e.get("freguesia")), None)
     return {
         "country": "PT", "registry": "Registo Predial (land register) — certidão permanente",
-        "copy": copy, "facts": [], "check": None,
+        "copy": copy, "facts": facts, "check": None,
         "links": [{"label": "Predial Online", "url": PREDIAL_ONLINE}],
         "steps": [
             {"text": "Open Predial Online and sign in with your Cartão de Cidadão or Chave Móvel Digital."},

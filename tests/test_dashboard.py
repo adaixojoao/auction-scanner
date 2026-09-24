@@ -423,3 +423,33 @@ def test_listings_show_at_most_the_best_100(client, add):
     assert by_price[0]["id"] == "eleiloes:m99"                           # sorting stays within them
     client.post("/api/settings", json={"max_listings": 20})
     assert client.get("/api/listings?per_page=1000").get_json()["total"] == 20
+
+
+def test_offers_to_review_follow_the_owners_filters(client, add):
+    import json as _json
+    client.post("/api/settings", json={"max_price": 30000, "max_listings": 2, "filters": {"min_score": 70}})
+    for n, price in enumerate((5000, 8000, 12000, 40000)):
+        add("citius", f"c{n}", title="Moradia com 100 m2", price=price, area_m2=100,
+            description="Venda mediante proposta em carta fechada",
+            raw_json=_json.dumps({"processo": f"{n}/20.0T8XXX", "modalidade": "Venda mediante proposta em carta fechada"}))
+    client.post("/api/listings/status", json={"id": "citius:c3", "status": "shortlisted"})
+    review = client.get("/api/offers").get_json()["review"]
+    ids = [c["id"] for c in review]
+    assert ids[0] == "citius:c3"                         # your pick stays, even over budget
+    assert ids[1:] == ["citius:c0", "citius:c1"]         # then the best 2 within budget
+
+
+def test_listings_above_100_show_their_real_points(client, add):
+    """Several listings reach 100: the page shows the unclamped points so the
+    better one can be told apart (a €9,000 house beats the same at €12,000)."""
+    desc = "Moradia T3 em excelente estado, remodelada, 120 m2, carta fechada"
+    add(external_id="cheap", title="Moradia T3 renovada", description=desc, price=9000, area_m2=120,
+        concelho="Lisboa", tipo="Moradia")
+    add(external_id="dear", title="Moradia T3 renovada", description=desc, price=12000, area_m2=120,
+        concelho="Lisboa", tipo="Moradia")
+    items = client.get("/api/listings").get_json()["items"]
+    assert [it["id"] for it in items] == ["eleiloes:cheap", "eleiloes:dear"]
+    assert all(it["score"] == 100 for it in items)
+    assert items[0]["rank"] > items[1]["rank"] > 100
+    detail = client.get("/api/listing?id=eleiloes:cheap").get_json()
+    assert detail["rank"] == items[0]["rank"]
