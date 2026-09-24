@@ -410,3 +410,16 @@ def test_carta_log_legacy_api(client):
                                              "country": "PT", "bid_amount": "2500"})
     assert r.get_json()["ok"]
     assert client.get("/api/carta-log").get_json()[0]["bid_amount"] == 2500
+
+
+def test_listings_show_at_most_the_best_100(client, add):
+    for n in range(130):
+        add(external_id=f"m{n}", title="Moradia", price=5000 + n * 300)   # cheaper scores higher
+    d = client.get("/api/listings?per_page=1000").get_json()
+    assert d["total"] == 100 and d["found"] == 130 and d["cap"] == 100
+    ids = {it["id"] for it in d["items"]}
+    assert "eleiloes:m0" in ids and "eleiloes:m129" not in ids          # the best 100, not any 100
+    by_price = client.get("/api/listings?per_page=1000&sort=price&dir=desc").get_json()["items"]
+    assert by_price[0]["id"] == "eleiloes:m99"                           # sorting stays within them
+    client.post("/api/settings", json={"max_listings": 20})
+    assert client.get("/api/listings?per_page=1000").get_json()["total"] == 20

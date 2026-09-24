@@ -245,6 +245,10 @@ def api_listings():
         else:
             items = [it for it in loaded if not it["hidden_reason"]]
 
+        # Only the best N (Settings → Show at most), then sorted as asked.
+        found = len(items)
+        cap = max(1, _num(_config().get("max_listings"), 100, int))
+        items = sorted(items, key=SORT_KEYS["score"], reverse=True)[:cap]
         items.sort(key=SORT_KEYS.get(sort, SORT_KEYS["score"]), reverse=(direction == "desc"))
         total = len(items)
         page_items = [_public(it) for it in items[(page - 1) * per_page:page * per_page]]
@@ -257,6 +261,8 @@ def api_listings():
     return jsonify({
         "items": page_items,
         "total": total,
+        "found": found,
+        "cap": cap,
         "page": page,
         "per_page": per_page,
         "stats": {
@@ -834,6 +840,7 @@ def api_proponente():
 # What the Settings page may change: section → allowed keys (None = a scalar).
 EDITABLE = {
     "max_price": None,
+    "max_listings": None,
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
                 "rural_max_eur_m2"),
     "proponente": PROPONENTE_KEYS,

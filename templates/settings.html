@@ -23,6 +23,7 @@
   <h2>Budget &amp; what to show</h2>
   <div class="form-grid">
     <div class="field"><label>Maximum price (EUR)</label><input type="number" id="max_price" step="5000"></div>
+    <div class="field"><label>Show at most (listings, best first)</label><input type="number" id="max_listings" min="10" max="1000" step="10"></div>
     <div class="field"><label>Hide listings scoring below</label><input type="number" id="min_score" min="0" max="100" step="5"></div>
     <div class="field"><label>Hide listings smaller than (m²)</label><input type="number" id="min_area_m2" min="0" step="10"></div>
   </div>
@@ -128,7 +129,7 @@ const num = id => $(id).value === "" ? null : Number($(id).value);
 async function load() {
   const c = await (await fetch("/api/settings")).json();
   const f = c.filters || {}, p = c.proponente || {}, s = c.schedule || {}, t = c.telegram || {}, e = c.notifications || {};
-  setv("max_price", c.max_price); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
+  setv("max_price", c.max_price); setv("max_listings", c.max_listings ?? 100); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
   setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
   document.querySelectorAll("input[name=country]").forEach(cb => cb.checked = (f.countries || []).includes(cb.value));
   setv("exclude_keywords", (f.exclude_keywords || []).join("\n"));
@@ -195,6 +196,7 @@ async function applyUpdate() {
 async function save() {
   const body = {
     max_price: num("max_price"),
+    max_listings: num("max_listings"),
     filters: {
       min_score: num("min_score") || 0, min_area_m2: num("min_area_m2") || 0,
       rural_min_m2: num("rural_min_m2"), rural_max_eur_m2: num("rural_max_eur_m2"),

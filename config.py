@@ -16,6 +16,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 DEFAULTS = {
     "max_price": 100000,
     "max_bid": 100000,
+    "max_listings": 100,          # Listings shows at most this many: the best first
 
     "filters": {
         "countries": ["PT"],      # Portugal focus; [] for all EU
