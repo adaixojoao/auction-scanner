@@ -1,0 +1,20 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Lint (unused imports, undefined names)
+        run: python -m pyflakes *.py sources/ tests/
+      - name: Tests (offline — the suite refuses network access)
+        run: python -m pytest -q
