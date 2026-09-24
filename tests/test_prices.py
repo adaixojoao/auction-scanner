@@ -75,3 +75,19 @@ def test_without_the_file_the_city_table_is_used(tmp_path, monkeypatch):
     _, reasons = score({"source": "eleiloes", "country": "PT", "title": "Moradia", "description": "",
                         "concelho": "Guarda", "area_m2": 90, "price": 25000})
     assert any("below local prices (city estimate)" in r for r in reasons)
+
+
+def test_same_named_municipalities_get_their_own_region(tmp_path, monkeypatch):
+    path = tmp_path / "pt.csv"
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=prices.COLUMNS)
+        w.writeheader()
+        for name, eur in (("Calheta (R.A.A.)", 697), ("Calheta (R.A.M.)", 1722), ("Lagoa", 3220),
+                          ("Lagoa (R.A.A.)", 1761), ("São João da Madeira", 1836)):
+            w.writerow({"municipality": name, "eur_m2": eur, "period": "1.º Trimestre de 2026", "source": "INE"})
+    monkeypatch.setattr(prices, "PT_FILE", str(path))
+    price = lambda place, district: prices.local_price("PT", place, {}, district=district)[0]  # noqa: E731
+    assert price("Calheta", "Ilha da Madeira") == 1722 and price("Calheta", "Ilha de São Jorge") == 697
+    assert price("Lagoa", "Faro") == 3220 and price("Lagoa", "Ilha de São Miguel") == 1761
+    assert price("São João da Madeira", "Aveiro") == 1836          # mainland, despite the name
+    assert price("Calheta", None) == 697                             # no district: the first one
