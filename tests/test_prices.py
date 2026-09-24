@@ -23,6 +23,12 @@ INE_ANSWER = [{
             {"geocod": "1690907", "geodsg": "Guarda", "dim_3": "1", "dim_3_t": "Novos", "valor": "1100"},
             {"geocod": "1690914", "geodsg": "Sabugal", "dim_3": "T", "dim_3_t": "Total", "valor": "310"},
             {"geocod": "1690915", "geodsg": "Seia", "dim_3": "T", "dim_3_t": "Total", "valor": "x"},
+            # NUTS 2024 codes can hold letters; "-" is INE's "no figure"
+            {"geocod": "11D1818", "geodsg": "Sernancelhe", "dim_3": "H1", "dim_3_t": "Total", "valor": "275"},
+            {"geocod": "1C20204", "geodsg": "Barrancos", "dim_3": "H1", "dim_3_t": "Total",
+             "sinal_conv": "-", "ind_string": "-"},
+            {"geocod": "11D1818", "geodsg": "Sernancelhe", "dim_3": "H3", "dim_3_t": "Existentes", "valor": "260"},
+            {"geocod": "11D18", "geodsg": "Viseu Dão Lafões", "dim_3": "H1", "dim_3_t": "Total", "valor": "600"},
         ],
     },
 }]
@@ -31,7 +37,8 @@ INE_ANSWER = [{
 def test_ine_answer_is_read_for_municipalities_only():
     rows, period, title = update_prices.parse_ine(INE_ANSWER)
     assert period == "2.º Trimestre de 2026" and "mediano" in title
-    assert [(r["municipality"], r["eur_m2"]) for r in rows] == [("Guarda", 742), ("Sabugal", 310)]
+    assert [(r["municipality"], r["eur_m2"]) for r in rows] == [("Guarda", 742), ("Sabugal", 310),
+                                                                ("Sernancelhe", 275)]
     with pytest.raises(ValueError):
         update_prices.parse_ine([{"Dados": {}}])
 
@@ -68,3 +75,19 @@ def test_without_the_file_the_city_table_is_used(tmp_path, monkeypatch):
     _, reasons = score({"source": "eleiloes", "country": "PT", "title": "Moradia", "description": "",
                         "concelho": "Guarda", "area_m2": 90, "price": 25000})
     assert any("below local prices (city estimate)" in r for r in reasons)
+
+
+def test_same_named_municipalities_get_their_own_region(tmp_path, monkeypatch):
+    path = tmp_path / "pt.csv"
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=prices.COLUMNS)
+        w.writeheader()
+        for name, eur in (("Calheta (R.A.A.)", 697), ("Calheta (R.A.M.)", 1722), ("Lagoa", 3220),
+                          ("Lagoa (R.A.A.)", 1761), ("São João da Madeira", 1836)):
+            w.writerow({"municipality": name, "eur_m2": eur, "period": "1.º Trimestre de 2026", "source": "INE"})
+    monkeypatch.setattr(prices, "PT_FILE", str(path))
+    price = lambda place, district: prices.local_price("PT", place, {}, district=district)[0]  # noqa: E731
+    assert price("Calheta", "Ilha da Madeira") == 1722 and price("Calheta", "Ilha de São Jorge") == 697
+    assert price("Lagoa", "Faro") == 3220 and price("Lagoa", "Ilha de São Miguel") == 1761
+    assert price("São João da Madeira", "Aveiro") == 1836          # mainland, despite the name
+    assert price("Calheta", None) == 697                             # no district: the first one

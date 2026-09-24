@@ -365,7 +365,7 @@ def local_price(item: dict) -> tuple[float, str] | None:
     names the place (`district` is the district, not the town)."""
     country = item.get("country") or "PT"
     place = item.get("concelho") or (item.get("district") if country != "PT" else None)
-    return prices.local_price(country, place, _MARKET_INDEX)
+    return prices.local_price(country, place, _MARKET_INDEX, district=item.get("district"))
 
 
 def buyer_priorities(targets: dict | None = None) -> str:
