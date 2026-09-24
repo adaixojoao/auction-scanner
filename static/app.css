@@ -180,6 +180,7 @@ tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 .details .d-links { margin: 6px 0; font-size: 13px; }
 .details .guide { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; }
 .details .guide ol { margin: 6px 0 0 18px; font-size: 13px; }
+.details .cost-total { font-weight: 600; margin-top: 4px; }
 .details .guide code { background: var(--card); padding: 1px 5px; border-radius: 4px; }
 @media (max-width: 800px) { .details { flex-direction: column; } .details .d-img { width: 100%; } }
 .details .d-lots { font-size: 13px; margin: 8px 0; }

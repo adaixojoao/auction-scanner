@@ -59,7 +59,7 @@ another window.
 
 | Page | What it is for |
 |---|---|
-| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale. Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
+| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
@@ -152,6 +152,29 @@ listing when it is:
 
 A shortlisted listing ignores 5 and 6: you picked it on purpose. *Listings →
 Show → Hidden* shows what is hidden and why.
+
+## What it really costs
+
+A €20 000 house is not a €20 000 house. Under **ⓘ → What it really costs**
+(and in the Telegram alert, and in the AI check) the scanner adds up what you
+pay on top of the price:
+
+- **Portugal**: IMT at the published brackets — 1% for a dwelling up to
+  €104 261, 5% for a prédio rústico, 6.5% for anything else — plus imposto do
+  selo (0.8%) and the land registry (€250). A bank or private sale also pays for
+  the escritura; a court sale has none.
+- **Other countries**: one typical transfer tax and notary/registry figure per
+  country. Spain, Germany and Belgium set their rates by region, so those are a
+  ballpark.
+- **The work**, for a home whose floor area is known: €0–150/m² when the listing
+  says it is in good condition, €300–600/m² when it says it needs work,
+  €700–1 200/m² for a ruin, €200–500/m² when it says nothing. It is shown as a
+  range because it is a guess.
+
+All of it is an estimate. The Portuguese IMT is charged on the higher of the
+price and the taxable value (VPT), which the listings do not publish, and the
+brackets change with each Orçamento do Estado — they live in `costs.py`
+(`IMT_YEAR`), one table to update.
 
 ## Scoring (0–100)
 
@@ -304,6 +327,7 @@ updater.py      updates from GitHub
 pipeline.py     the one scan routine  sources/       one module per country + registry
 db.py           schema, load_listings common.py      HTTP, parsing, matching
 scoring.py      the score             letters.py     the one letter builder (+ PDF)
+costs.py        taxes, fees, work     prices.py      local €/m² (data/pt_home_prices.csv)
 cartas.py       Citius batch letters  report.py      report files
 analysis.py     Claude calls          ics_export.py  calendar files
 scheduler.py    timetable             telegram_alert.py, notifications.py

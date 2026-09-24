@@ -286,6 +286,7 @@ def api_listings():
 @app.route("/api/listing")
 def api_listing_detail():
     """Everything known about one listing, for the detail panel on Listings."""
+    import costs
     import listing_info
     listing_id = request.args.get("id", "")
     db = get_db()
@@ -305,6 +306,7 @@ def api_listing_detail():
         "description": (it.get("description") or "")[:4000],
         "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [],
         "facts": listing_info.facts(it), "related": related, "same_case": lots,
+        "costs": costs.estimate(it),
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),

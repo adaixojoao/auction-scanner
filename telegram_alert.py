@@ -67,6 +67,18 @@ def _tg(cfg: dict) -> dict | None:
     return tg
 
 
+def _cost_line(item: dict) -> str:
+    """What it really costs: taxes, fees and, for a home, the work it needs."""
+    import costs
+    est = costs.estimate(item)
+    if not est:
+        return ""
+    if est["all_in"]:
+        low, high = est["all_in"]["low"], est["all_in"]["high"]
+        return f"\n\U0001f9fe {_money(low)}\u2013{high:,.0f} all-in (taxes, fees and the work)"
+    return f"\n\U0001f9fe {_money(est['total'])} to own it (taxes and fees in)"
+
+
 def format_listing(item: dict) -> str:
     flag = FLAGS.get(item.get("country") or "PT", "\U0001f30d")
     loc = ", ".join(filter(None, [item.get("concelho"), item.get("district")]))
@@ -75,7 +87,8 @@ def format_listing(item: dict) -> str:
         f"{flag} <b>New opportunity — Score {item['score']:.0f}/100</b>\n\n"
         f"<b>{_esc((item.get('title') or '?')[:80])}</b>\n"
         f"\U0001f4cd {_esc(loc)}\n"
-        f"\U0001f4b6 {_money(item.get('price'))}{f'  ·  Ends {_esc(ends)}' if ends else ''}\n"
+        f"\U0001f4b6 {_money(item.get('price'))}{f'  ·  Ends {_esc(ends)}' if ends else ''}"
+        f"{_cost_line(item)}\n"
         f"\U0001f4cb {_esc((item.get('source') or '').upper())}\n"
         f"\U0001f3f7 {_esc(', '.join(item['reasons'][:3]))}\n\n"
         f"<a href=\"{_esc(item.get('url') or '')}\">View listing →</a>"

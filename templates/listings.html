@@ -155,6 +155,22 @@ function factValue(f) {
   return v;
 }
 
+function costsHtml(c) {
+  if (!c) return "";
+  const eur = v => v ? AS.money(v) : "\u20ac0";
+  const row = (k, v, note) => `<div class="fact"><span class="k">${AS.esc(k)}</span><span class="v">${v}
+      <span class="small muted">${AS.esc(note)}</span></span></div>`;
+  const lines = c.lines.map(l => row(l.label, eur(l.amount), l.note)).join("");
+  const work = c.renovation ? row("Work", eur(c.renovation.low) + "\u2013" + eur(c.renovation.high), c.renovation.note) : "";
+  const total = `${eur(c.total)} to own it`
+    + (c.all_in ? ` \u00b7 ${eur(c.all_in.low)}\u2013${eur(c.all_in.high)} all-in with the work` : "");
+  return `<div class="guide">
+    <b>What it really costs</b> <span class="small muted">on ${AS.esc(c.basis)}, ${eur(c.base)}</span>
+    <div class="facts">${lines}${work}</div>
+    <div class="cost-total">${total}</div>
+    <p class="small muted">${AS.esc(c.note)}</p></div>`;
+}
+
 function detailsHtml(d) {
   const facts = d.facts.map(f => `<div class="fact"><span class="k">${AS.esc(f.label)}</span><span class="v">${factValue(f)}</span></div>`).join("");
   const links = [d.url && d.source !== "citius" ? AS.link(d.url, "Open the listing ↗") : "",
@@ -187,6 +203,7 @@ function detailsHtml(d) {
       ${streetView}
       ${official}
       ${links ? `<p class="d-links">${links}</p>` : ""}
+      ${costsHtml(d.costs)}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${(d.same_case || []).length ? `<div class="d-lots"><b>Also sold in this case</b> <span class="small muted">(buying together can make sense: a house and the plot next to it)</span><ul>${
         d.same_case.map(l => `<li>${AS.money(l.price)}${l.area ? ` · ${Math.round(l.area).toLocaleString("de-DE")} m²` : ""} — ${AS.esc(l.title)}</li>`).join("")}</ul></div>` : ""}

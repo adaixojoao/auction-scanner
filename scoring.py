@@ -13,7 +13,8 @@ import json
 import re
 from datetime import datetime
 
-from common import days_left, find_area, find_terms, has_term, normalize, term_regex, utcnow
+from common import (days_left, find_area, find_terms, has_term, normalize,
+                    price_to_pay as _pay, term_regex, utcnow)
 import prices
 from prices import place_key as _place_key
 
@@ -489,11 +490,6 @@ def _occupation(item: dict) -> str | None:
         return json.loads(raw).get("occupation")
     except (TypeError, ValueError, AttributeError):
         return None
-
-
-def _pay(item: dict) -> float:
-    """What you would realistically pay: the current bid, else the minimum, else the price."""
-    return item.get("current_bid") or item.get("min_price") or item.get("price") or 0
 
 
 def _ha(m2: float) -> str:

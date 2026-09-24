@@ -30,6 +30,20 @@ with a test, and keep `buyer_priorities()` (the AI check's copy) in step. Keywor
 whole words, accent-insensitive, negation-aware. Never go back to `x in text`:
 that is how "desocupado" counted as occupied and "11/2023" as a 1/2 share.
 
+## Money figures are estimates, in one place
+
+`costs.py` holds every tax and fee rate: the Portuguese IMT brackets
+(`IMT_YEAR` says which year's), imposto do selo, the registry, the per-country
+transfer taxes and the renovation €/m² bands. Do not repeat a rate anywhere
+else — the AI check's prompt asks `costs.bands_text()` rather than naming its
+own numbers, so the two cannot drift. What you pay for a listing (current bid,
+else minimum, else base value) is `common.price_to_pay()`; the scorer, the
+round matcher and the estimate all call it.
+
+Every figure is shown as an estimate and says so, because the scanner does not
+know the VPT, the region's rate or the state of the building. Never present one
+as a fact, and never use one to decide a listing's score.
+
 ## One app, one of each
 
 This is a desktop app (`app.py` → `dashboard.py` in its own window). Keep it
