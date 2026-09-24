@@ -1899,6 +1899,382 @@ def scrape_whitestar(db: sqlite3.Connection, max_price: float = 50000):
     return total_scraped
 
 
+# ─── PT: Novo Banco Imóveis ──────────────────────────────────────────
+
+def scrape_novobanco(db: sqlite3.Connection, max_price: float = 100000):
+    """Novo Banco NPL portfolio — largest in PT, 30-60% below market."""
+    LOG.info("Scraping Novo Banco Imóveis...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.novobancoimoveis.pt"
+    total = 0
+    for page in range(1, 30):
+        try:
+            resp = session.get(f"{base}/imoveis", params={"page": page, "preco_max": int(max_price)}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Novo Banco p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.property-card, div.imovel-card, article.property, div[class*='property'], div[class*='imovel']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?$", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title,.property-title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"Novo Banco #{eid}"
+            price_el = card.select_one(".price,.preco,[class*='price']")
+            price = _parse_euro(price_el.get_text()) if price_el else None
+            if price and price > max_price: continue
+            loc_el = card.select_one(".location,.localizacao,[class*='location']")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            area_el = card.select_one(".area,[class*='area']")
+            area = None
+            if area_el:
+                am = re.search(r"(\d+)", area_el.get_text())
+                if am: area = float(am.group(1))
+            upsert_listing(db, {"id": f"novobanco:{eid}", "source": "novobanco", "country": "PT",
+                "external_id": eid, "title": title, "description": "NPL Novo Banco",
+                "tipo": "imovel", "area_m2": area, "price": price, "current_bid": None,
+                "min_price": price, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": None, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 10: break
+        time.sleep(1)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("novobanco", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Novo Banco: {total} listings")
+    return total
+
+
+# ─── PT: Caixa Imobiliário (CGD) ────────────────────────────────────
+
+def scrape_cgd(db: sqlite3.Connection, max_price: float = 100000):
+    """Caixa Geral de Depósitos — state bank repos + leilões."""
+    LOG.info("Scraping Caixa Imobiliário...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.caixaimobiliario.pt"
+    total = 0
+    for page in range(1, 20):
+        try:
+            resp = session.get(f"{base}/imoveis", params={"pagina": page}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"CGD p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.imovel, article.property, div[class*='imovel'], li.property-item")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.titulo,.title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"CGD #{eid}"
+            price_el = card.select_one(".preco,.price,[class*='preco'],[class*='price']")
+            price = _parse_euro(price_el.get_text()) if price_el else None
+            if price and price > max_price: continue
+            loc_el = card.select_one(".localizacao,.location,.concelho")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            upsert_listing(db, {"id": f"cgd:{eid}", "source": "cgd", "country": "PT",
+                "external_id": eid, "title": title, "description": "Imóvel Caixa Geral de Depósitos",
+                "tipo": "imovel", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": price, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": None, "raw_json": None})
+            total += 1
+        db.commit()
+        try:
+            resp2 = session.get(f"{base}/leiloes", timeout=20)
+            soup2 = BeautifulSoup(resp2.text, "html.parser")
+            for a in soup2.select("a[href*='/leilao/'], a[href*='/leiloes/']"):
+                href = a.get("href", "")
+                if not href.startswith("http"): href = f"{base}{href}"
+                eid = re.sub(r"[^A-Za-z0-9]", "", href[-20:])
+                title = a.get_text(strip=True)[:200] or f"CGD leilão {eid}"
+                upsert_listing(db, {"id": f"cgd_leilao:{eid}", "source": "cgd", "country": "PT",
+                    "external_id": eid, "title": title, "description": "Leilão CGD",
+                    "tipo": "imovel", "area_m2": None, "price": None, "current_bid": None,
+                    "min_price": None, "district": None, "concelho": None, "freguesia": None,
+                    "url": href, "image_url": None, "date_end": None, "raw_json": None})
+                total += 1
+        except Exception: pass
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(1)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("cgd", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"CGD: {total} listings")
+    return total
+
+
+# ─── PT: Santander Imóveis ──────────────────────────────────────────
+
+def scrape_santander(db: sqlite3.Connection, max_price: float = 100000):
+    """Santander Portugal bank repos — imoveis.santander.pt"""
+    LOG.info("Scraping Santander Imóveis...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://imoveis.santander.pt"
+    total = 0
+    try:
+        resp = session.get(f"{base}/imoveis", timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"Santander: {e}"); return 0
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for api_url in [f"{base}/api/imoveis", f"{base}/api/properties", f"{base}/imoveis/search"]:
+        try:
+            r = session.get(api_url, params={"pageSize": 200}, timeout=15)
+            if r.status_code == 200 and "json" in r.headers.get("content-type", ""):
+                data = r.json()
+                items = data if isinstance(data, list) else data.get("items", data.get("results", []))
+                for item in items:
+                    price = item.get("price") or item.get("preco") or 0
+                    if price > max_price: continue
+                    eid = str(item.get("id") or item.get("referencia") or hash(str(item)))
+                    upsert_listing(db, {
+                        "id": f"santander:{eid}", "source": "santander", "country": "PT",
+                        "external_id": eid,
+                        "title": (item.get("title") or item.get("titulo") or f"Santander #{eid}")[:200],
+                        "description": item.get("description") or "Imóvel Santander Portugal",
+                        "tipo": item.get("type") or item.get("tipo") or "imovel",
+                        "area_m2": item.get("area") or item.get("area_m2"),
+                        "price": price, "current_bid": None, "min_price": price,
+                        "district": item.get("distrito") or item.get("district"),
+                        "concelho": item.get("concelho") or item.get("city"),
+                        "freguesia": item.get("freguesia"),
+                        "url": item.get("url") or f"{base}/imovel/{eid}",
+                        "image_url": item.get("image") or item.get("foto"),
+                        "date_end": None, "raw_json": json.dumps(item, ensure_ascii=False)[:2000]})
+                    total += 1
+                db.commit()
+                break
+        except Exception: pass
+    if total == 0:
+        for card in soup.select("div[class*='property'], article, div[class*='imovel']"):
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid = re.sub(r"[^A-Za-z0-9]", "", href[-20:])
+            title = card.get_text(" ", strip=True)[:120]
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            upsert_listing(db, {"id": f"santander:{eid}", "source": "santander", "country": "PT",
+                "external_id": eid, "title": title, "description": "Imóvel Santander",
+                "tipo": "imovel", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": price, "district": None, "concelho": None, "freguesia": None,
+                "url": href, "image_url": None, "date_end": None, "raw_json": None})
+            total += 1
+        db.commit()
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("santander", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Santander: {total} listings")
+    return total
+
+
+# ─── PT: BPI Imóveis ────────────────────────────────────────────────
+
+def scrape_bpi(db: sqlite3.Connection, max_price: float = 100000):
+    """BPI bank repos — imoveis.bpi.pt"""
+    LOG.info("Scraping BPI Imóveis...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://imoveis.bpi.pt"
+    total = 0
+    for page in range(1, 20):
+        try:
+            resp = session.get(f"{base}/imoveis", params={"page": page}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"BPI p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.imovel, article, div[class*='property'], div[class*='imovel']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.titulo,.title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"BPI #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            loc_el = card.select_one(".localizacao,.location,.concelho")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            upsert_listing(db, {"id": f"bpi:{eid}", "source": "bpi", "country": "PT",
+                "external_id": eid, "title": title, "description": "Imóvel BPI",
+                "tipo": "imovel", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": price, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": None, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(1)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("bpi", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"BPI: {total} listings")
+    return total
+
+
+# ─── PT: Imobancos (aggregator) ─────────────────────────────────────
+
+def scrape_imobancos(db: sqlite3.Connection, max_price: float = 100000):
+    """Imobancos.pt — aggregates repos from all Portuguese banks."""
+    LOG.info("Scraping Imobancos.pt...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://imobancos.pt"
+    total = 0
+    for page in range(1, 30):
+        try:
+            resp = session.get(f"{base}/imoveis", params={"page": page, "preco_max": int(max_price)}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Imobancos p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.property, article.imovel, div[class*='imovel'], div[class*='property']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title,.titulo")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"Imobancos #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            bank_el = card.select_one(".bank,.banco,[class*='bank']")
+            bank = bank_el.get_text(strip=True) if bank_el else "banco"
+            loc_el = card.select_one(".location,.localizacao,.concelho")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            area_el = card.select_one(".area,[class*='area']")
+            area = None
+            if area_el:
+                am = re.search(r"(\d+)", area_el.get_text())
+                if am: area = float(am.group(1))
+            upsert_listing(db, {"id": f"imobancos:{eid}", "source": "imobancos", "country": "PT",
+                "external_id": eid, "title": title,
+                "description": f"Imóvel banco ({bank}) via Imobancos.pt",
+                "tipo": "imovel", "area_m2": area, "price": price, "current_bid": None,
+                "min_price": price, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": None, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(0.8)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("imobancos", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Imobancos: {total} listings")
+    return total
+
+
+# ─── PT: Centro de Leilões ──────────────────────────────────────────
+
+def scrape_centroleiloes(db: sqlite3.Connection, max_price: float = 100000):
+    """Centro de Leilões — bank auction house, PT."""
+    LOG.info("Scraping Centro de Leilões...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://centrodeleiloes.pt"
+    total = 0
+    for page in range(1, 15):
+        try:
+            resp = session.get(f"{base}/leiloes", params={"page": page, "categoria": "imoveis"}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"CentroLeiloes p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.lot, div.lote, article, div[class*='lot']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title,.lot-title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"CentroLeiloes #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            date_el = card.select_one(".date,.data,[class*='date']")
+            date_end = None
+            if date_el:
+                dm = re.search(r"(\d{2})[/-](\d{2})[/-](\d{4})", date_el.get_text())
+                if dm:
+                    try: date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+                    except ValueError: pass
+            upsert_listing(db, {"id": f"centroleiloes:{eid}", "source": "centroleiloes", "country": "PT",
+                "external_id": eid, "title": title, "description": "Leilão Centro de Leilões",
+                "tipo": "imovel", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": None, "district": None, "concelho": None, "freguesia": None,
+                "url": href, "image_url": None, "date_end": date_end, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(0.8)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("centroleiloes", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Centro de Leilões: {total} listings")
+    return total
+
+
+# ─── PT: Bid Leiloeira ──────────────────────────────────────────────
+
+def scrape_bidleiloeira(db: sqlite3.Connection, max_price: float = 100000):
+    """Bid Leiloeira — online auction house PT."""
+    LOG.info("Scraping Bid Leiloeira...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.bidleiloeira.pt"
+    total = 0
+    try:
+        resp = session.get(f"{base}/leiloes", timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"BidLeiloeira: {e}"); return 0
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for a in soup.select("a[href*='/leilao/'], a[href*='/lot/'], a[href*='/lote/']"):
+        href = a.get("href", "")
+        if not href.startswith("http"): href = f"{base}{href}"
+        eid_m = re.search(r"/(\d+)/?", href)
+        if not eid_m: continue
+        eid = eid_m.group(1)
+        title = a.get_text(" ", strip=True)[:200] or f"BidLeiloeira #{eid}"
+        price = _parse_euro(a.parent.get_text() if a.parent else "")
+        if price and price > max_price: continue
+        upsert_listing(db, {"id": f"bidleiloeira:{eid}", "source": "bidleiloeira", "country": "PT",
+            "external_id": eid, "title": title, "description": "Leilão Bid Leiloeira",
+            "tipo": "imovel", "area_m2": None, "price": price, "current_bid": None,
+            "min_price": None, "district": None, "concelho": None, "freguesia": None,
+            "url": href, "image_url": None, "date_end": None, "raw_json": None})
+        total += 1
+    db.commit()
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("bidleiloeira", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Bid Leiloeira: {total} listings")
+    return total
+
+
 # ─── PT: Autoridade Tributária (tax seizures) ───────────────────────
 
 def scrape_financas(db: sqlite3.Connection, max_price: float = 50000):
@@ -3458,7 +3834,9 @@ def main():
         "eleiloes", "idealista", "croatia", "fina", "spain", "france", "italy",
         "netherlands", "veilingnotaris", "leilosoc", "bcp", "citius", "whitestar",
         "financas", "zvg", "justiz_auktion", "greece", "biddit", "anaf", "poland",
-        "aeat", "pvp_giustizia", "cyprus", "all"
+        "aeat", "pvp_giustizia", "cyprus",
+        "novobanco", "cgd", "santander", "bpi", "imobancos", "centroleiloes", "bidleiloeira",
+        "all"
     ], default="all")
     parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "DE", "GR", "BE", "RO", "PL", "CY", "all"], default=None,
                         help="Scrape all sources for a country")
@@ -3496,7 +3874,7 @@ def main():
         db.commit()
 
     COUNTRY_SOURCES = {
-        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius), ("financas", scrape_financas), ("whitestar", scrape_whitestar)],
+        "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius), ("financas", scrape_financas), ("whitestar", scrape_whitestar), ("novobanco", scrape_novobanco), ("cgd", scrape_cgd), ("santander", scrape_santander), ("bpi", scrape_bpi), ("imobancos", scrape_imobancos), ("centroleiloes", scrape_centroleiloes), ("bidleiloeira", scrape_bidleiloeira)],
         "HR": [("croatia", scrape_croatia), ("fina", scrape_fina_csv)],
         "ES": [("spain", scrape_spain), ("aeat", scrape_aeat)],
         "FR": [("france", scrape_france)],
@@ -3545,6 +3923,13 @@ def main():
                 "pvp_giustizia": ("pvp_giustizia", scrape_italy_pvp),
                 "cyprus": ("cyprus", scrape_cyprus),
                 "whitestar": ("whitestar", scrape_whitestar),
+                "novobanco": ("novobanco", scrape_novobanco),
+                "cgd": ("cgd", scrape_cgd),
+                "santander": ("santander", scrape_santander),
+                "bpi": ("bpi", scrape_bpi),
+                "imobancos": ("imobancos", scrape_imobancos),
+                "centroleiloes": ("centroleiloes", scrape_centroleiloes),
+                "bidleiloeira": ("bidleiloeira", scrape_bidleiloeira),
             }
             if args.source in source_map:
                 sources_to_run.append(source_map[args.source])
