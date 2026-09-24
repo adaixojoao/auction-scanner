@@ -483,6 +483,7 @@ PRICE_POINTS = [(0, 28), (5000, 25), (15000, 20), (30000, 12), (60000, 4), (8000
 BID_RATIO_POINTS = [(0.1, 38), (0.3, 33), (0.5, 22), (0.7, 12), (1.0, 0), (1.5, -15)]
 # Price cut since first seen, in %.
 PRICE_DROP_POINTS = [(5, 0), (10, 5), (25, 10)]
+EARLIER_ROUND_POINTS = 8        # an earlier round of the same property ended unsold
 # Days left before the sale ends.
 DAYS_LEFT_POINTS = [(0.25, 9), (3, 7), (7, 3), (10, 0)]
 # Home size in m², and how far below local prices (0.4 = 40%).
@@ -579,6 +580,17 @@ def score_detail(item: dict, now: datetime | None = None,
         reasons.append("inheritance right only")
 
     # ── How cheap ─────────────────────────────────────────────────────
+    # On sale again after an earlier round ended (rounds.py): nobody bought it then,
+    # so the seller is likely to take less. First among the reasons: alerts show three.
+    er = item.get("earlier_round")
+    if er:
+        s += EARLIER_ROUND_POINTS
+        was = f" at €{er['price']:,.0f}" if er.get("price") else ""
+        reasons.insert(0, f"on sale before (ended {er['ended']}{was}) — not sold then")
+        if (er.get("cheaper_pct") or 0) >= 5:
+            s += curve(er["cheaper_pct"], PRICE_DROP_POINTS)
+            reasons.insert(1, f"{er['cheaper_pct']:.0f}% cheaper than the last round")
+
     if bid and price and price > 0:
         ratio = bid / price
         s += curve(ratio, BID_RATIO_POINTS)

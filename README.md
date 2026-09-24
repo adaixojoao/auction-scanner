@@ -199,6 +199,13 @@ than €20,001 instead of jumping at a step.
   is one where you name the price and none is published (+18). Up for forced
   and tax sales, a tiny minimum bid, ending soon. Down if occupied, no road
   access, or inheritance rights only.
+- **On sale before:** when a property is back after an earlier round of its
+  sale ended (same court case, same property; across Citius and e-leilões),
+  nobody bought it then, so the seller is likely to take less. That is the
+  first reason shown ("on sale before (ended 2026-08-12 at €40,000) — not
+  sold then"), with "25% cheaper than the last round" when it is, and the
+  listing's ⓘ panel links the earlier round. The scanner only knows rounds
+  that ended since it was installed, so this finds more the longer it runs.
 
 What is not the goal stays under the default minimum score (45), however good
 the sale looks: other (at most 35), homes needing heavy work or in an isolated
