@@ -14,7 +14,8 @@ def test_registry_is_complete():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
     optional = {s.name for s in REGISTRY.values() if not s.default}
-    assert optional == {"idealista", "courtbid"}
+    # closed / login-only / already covered by another source: not in default scans
+    assert optional == {"idealista", "courtbid", "financas", "novobanco", "aeat"}
     # every country has at least one default source, PT runs first
     assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES)
     assert sources_for(None)[0].country == "PT"
