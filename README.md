@@ -212,6 +212,11 @@ Set up in **Settings**:
 - **Telegram** — new listings above a score (one message each, or one digest
   when there are more than 5), a twice-daily list of sales ending within 4 days
   with no offer sent, a weekly summary, and a message when you mark an offer won.
+  Each new-listing message has **☆ Shortlist** and **✕ Dismiss** buttons (then
+  **↩ Undo**), which do the same as in the app. Send **/top** for the best
+  listings you have not decided on yet. While the app is open a tap works in
+  seconds; when it is closed, the background task handles it on its next round
+  (every 30 minutes). Only your own chat (the Chat ID in Settings) can use them.
 - **E-mail** — the same new-listing alerts by SMTP. The same account sends letters from the Offers page.
 
 Each listing is alerted once per channel; a failed send is retried next time.

@@ -35,7 +35,7 @@ def test_stale_lock_is_taken_over(db, fake_http):
 def test_scan_writes_report_and_sends_alerts(db, add, fake_http, monkeypatch, tmp_path):
     fake_http(lambda m, u, kw: FakeResponse("", status=500))
     sent = []
-    monkeypatch.setattr("telegram_alert.send_telegram", lambda t, c, m: sent.append(m) or True)
+    monkeypatch.setattr("telegram_alert.send_telegram", lambda t, c, m, **k: sent.append(m) or True)
     add(external_id="a", title="Moradia", price=20000)
     cfg = {"filters": {}, "report": {"out_dir": str(tmp_path / "r"), "desktop_copy": False},
            "telegram": {"enabled": True, "token": "t", "chat_id": "c", "min_score": 50}}

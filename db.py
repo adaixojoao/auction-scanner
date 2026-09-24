@@ -29,7 +29,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -203,7 +203,19 @@ def _migrate_v5(db: sqlite3.Connection):
     _add_column(db, "carta_log", "letter_filename", "TEXT")
 
 
-_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5}
+def _migrate_v6(db: sqlite3.Connection):
+    """Small named values the app keeps between runs (the Telegram update
+    offset, short references for Telegram buttons)."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS kv (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
+    """)
+
+
+_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
+               6: _migrate_v6}
 
 
 def init_db(db: sqlite3.Connection):
@@ -365,6 +377,16 @@ def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | No
                    (listing_id, status, utcnow_iso()))
     else:
         raise ValueError(f"unknown status {status!r}")
+    db.commit()
+
+
+def get_kv(db: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
+    row = db.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def set_kv(db: sqlite3.Connection, key: str, value: str):
+    db.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", (key, value))
     db.commit()
 
 

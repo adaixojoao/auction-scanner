@@ -39,17 +39,19 @@ def _dashboard_url(cfg: dict, path: str = "") -> str:
     return f"http://{d.get('host', '127.0.0.1')}:{d.get('port', 8050)}{path}"
 
 
-def send_telegram(token: str, chat_id: str, message: str) -> bool:
+def send_telegram(token: str, chat_id: str, message: str, reply_markup: dict | None = None) -> bool:
+    """Send one HTML message; `reply_markup` adds buttons (telegram_bot.py handles the taps)."""
     if not token or not chat_id:
         return False
     if len(message) > MAX_MESSAGE:
         message = message[:MAX_MESSAGE - 20] + "\n…(truncated)"
+    payload = {"chat_id": chat_id, "text": message,
+               "parse_mode": "HTML", "disable_web_page_preview": False}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message,
-                  "parse_mode": "HTML", "disable_web_page_preview": False},
-            timeout=10)
+            f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=10)
         if resp.status_code != 200:
             LOG.error(f"Telegram rejected message ({resp.status_code}): {resp.text[:200]}")
         return resp.status_code == 200
@@ -111,7 +113,10 @@ def alert_new_listings(db, cfg: dict, score_fn=None):
         return
 
     if len(fresh) <= MAX_INDIVIDUAL:
-        sent = [it["id"] for it in fresh if send_telegram(tg["token"], tg["chat_id"], format_listing(it))]
+        from telegram_bot import listing_keyboard
+        sent = [it["id"] for it in fresh
+                if send_telegram(tg["token"], tg["chat_id"], format_listing(it),
+                                 reply_markup=listing_keyboard(db, it["id"]))]
     else:
         ok = send_telegram(tg["token"], tg["chat_id"], format_digest(fresh[:15], len(fresh), cfg))
         sent = [it["id"] for it in fresh] if ok else []
