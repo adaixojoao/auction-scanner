@@ -182,7 +182,11 @@ than €20,001 instead of jumping at a step.
   location (*centro*, near the beach…) or a town we have local prices for,
   size up to about 150 m², and the discount to local prices per m². Down for
   needing some work, and a lot for an isolated location or heavy work
-  (*ruína*, *para recuperar*…).
+  (*ruína*, *para recuperar*…). Local prices in Portugal are the median price
+  per m² of homes sold in each municipality (INE), from
+  `data/pt_home_prices.csv`; refresh it with `python scripts/update_prices.py`
+  on a PC that can reach ine.pt. Elsewhere, and for any municipality the file
+  lacks, a small table of city prices is used. Each reason says which.
 - **Rural plots:** size as a multiple of the minimum (1 ha by default; about
   5× scores as large), next to water, and €/m² against the maximum (€0.50/m²
   by default). Both limits are in **Settings → What you are looking for**.
@@ -300,7 +304,7 @@ scheduler.py    timetable             telegram_alert.py, notifications.py
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access
-python -m pyflakes *.py sources/ tests/
+python -m pyflakes *.py sources/ tests/ scripts/
 ```
 
 CI runs both on every push. Rules for AI agents working here: [AGENTS.md](AGENTS.md).

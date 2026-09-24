@@ -14,6 +14,8 @@ import re
 from datetime import datetime
 
 from common import days_left, find_area, find_terms, has_term, normalize, term_regex, utcnow
+import prices
+from prices import place_key as _place_key
 
 FRAC_PATTERNS = [
     "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
@@ -344,11 +346,6 @@ _MARKET_INDEX = {
 }
 
 
-def _place_key(name: str) -> str:
-    """"Lisboa (Santa Maria Maior)" / "Porto, Porto" → "lisboa" / "porto"."""
-    return re.split(r"[,(/]| - ", normalize(name))[0].strip()
-
-
 def market_value_estimate(item: dict) -> float | None:
     """area × €/m² for the listing's municipality, if we have a figure for it.
 
@@ -358,9 +355,17 @@ def market_value_estimate(item: dict) -> float | None:
     area = item.get("area_m2") or 0
     if not area or area < 5:
         return None
-    town = _known_town(item)
-    table = _MARKET_INDEX.get(item.get("country") or "PT", {})
-    return area * table[_place_key(town)] if town else None
+    found = local_price(item)
+    return area * found[0] if found else None
+
+
+def local_price(item: dict) -> tuple[float, str] | None:
+    """(€/m² of homes where the listing is, source): every Portuguese municipality
+    from INE (prices.py), else the city table. In Portugal only the concelho
+    names the place (`district` is the district, not the town)."""
+    country = item.get("country") or "PT"
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    return prices.local_price(country, place, _MARKET_INDEX)
 
 
 def buyer_priorities(targets: dict | None = None) -> str:
@@ -708,7 +713,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         market_disc = (mv - pay) / mv
         s += curve(market_disc, MARKET_DISCOUNT_POINTS)
         if market_disc > 0.20:
-            reasons.append(f"{market_disc:.0%} below local prices")
+            reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]})")
     return s
 
 
