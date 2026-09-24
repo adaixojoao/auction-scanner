@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Listings</h1>
+    <p>Everything the scanner found, scored. ☆ puts a listing on your Offers list; ✕ dismisses it for good.</p>
+  </div>
+  <div class="menu">
+    <button class="btn" data-menu>Export report ▾</button>
+    <div class="menu-list">
+      <a href="/export/report.docx">Word (.docx)</a>
+      <a href="/export/report.pdf">PDF</a>
+      <a href="/export/report.md">Markdown</a>
+    </div>
+  </div>
+</div>
+
+<div class="stats" id="stats"></div>
+
+<div class="card filters">
+  <div class="field"><label>Country</label>
+    <select id="f-country"><option value="">All</option>
+      {% for code, name in countries %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+    </select></div>
+  <div class="field"><label>What</label>
+    <select id="f-kind">
+      <option value="">Everything</option>
+      <option value="home">Homes</option>
+      <option value="urban_plot">Urban plots</option>
+      <option value="rural_plot">Rural plots</option>
+      <option value="other">Other (shops, garages…)</option>
+    </select></div>
+  <div class="field"><label>Source</label><select id="f-source"><option value="">All</option></select></div>
+  <div class="field"><label>Show</label>
+    <select id="f-status">
+      <option value="">Open listings</option>
+      <option value="shortlisted">Shortlisted</option>
+      <option value="hidden">Hidden (why?)</option>
+    </select></div>
+  <div class="field"><label>Max price</label><input type="number" id="f-maxprice" value="{{ max_price }}" step="5000"></div>
+  <div class="field"><label>Min score</label><input type="number" id="f-minscore" value="0" step="5" min="0" max="100"></div>
+  <div class="field wide"><label>Search</label><input type="text" id="f-search" placeholder="title, place, description…"></div>
+  <label class="check"><input type="checkbox" id="f-properties" checked> Property only</label>
+  <button class="btn btn-primary" onclick="page=1; load()">Apply</button>
+</div>
+
+<table class="list">
+  <thead><tr>
+    <th class="sortable" data-sort="score">Score</th>
+    <th class="sortable" data-sort="country"></th>
+    <th class="sortable" data-sort="title">Title</th>
+    <th class="sortable" data-sort="price">Price</th>
+    <th class="sortable" data-sort="current_bid">Bid</th>
+    <th>Location</th>
+    <th class="sortable" data-sort="date_end">Ends</th>
+    <th>Why</th>
+    <th></th>
+  </tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div class="pagination" id="pagination"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let sort = "score", dir = "desc", page = 1;
+const KIND_LABEL = {home: "home", urban_plot: "urban plot", rural_plot: "rural plot", other: "other"};
+const PER_PAGE = 50;
+const $ = id => document.getElementById(id);
+
+async function load() {
+  const status = $("f-status").value;
+  const params = new URLSearchParams({
+    country: $("f-country").value, source: $("f-source").value, kind: $("f-kind").value,
+    max_price: $("f-maxprice").value, min_score: $("f-minscore").value,
+    search: $("f-search").value, properties: $("f-properties").checked ? 1 : 0,
+    show_hidden: status === "hidden" ? 1 : 0, status: status === "shortlisted" ? "shortlisted" : "",
+    sort, dir, page, per_page: PER_PAGE,
+  });
+  const data = await (await fetch("/api/listings?" + params)).json();
+  renderStats(data.stats);
+  renderRows(data.items, status === "hidden");
+  renderPages(data.total);
+}
+
+function renderStats(s) {
+  const hidden = Object.entries(s.hidden || {}).map(([k, v]) => `${v} ${k}`).join(", ");
+  $("stats").innerHTML = `
+    <div class="stat"><div class="label">Matching</div><div class="value">${s.total}</div></div>
+    <div class="stat"><div class="label">New (24 h)</div><div class="value ok">${s.new_today}</div></div>
+    <div class="stat"><div class="label">Score 70+</div><div class="value warn">${s.high_score}</div></div>
+    <div class="stat"><div class="label">Homes · urban · rural plots</div><div class="value">${s.homes} · ${s.urban_plots} · ${s.rural_plots}</div></div>
+    <div class="stat"><div class="label">Shortlisted</div><div class="value">${s.shortlisted}</div></div>
+    <div class="stat"><div class="label">Sources failing</div><div class="value ${s.sources_failing ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_failing}</a></div></div>
+    ${hidden ? `<div class="stat"><div class="label">Hidden</div><div class="small muted" style="margin-top:6px">${AS.esc(hidden)}</div></div>` : ""}`;
+}
+
+function renderRows(items, hiddenView) {
+  if (!items.length) {
+    $("rows").innerHTML = `<tr><td colspan="9"><div class="empty">
+      <h3>No listings here</h3>
+      <p>${hiddenView ? "Nothing is hidden with these filters." : "Change the filters, or run a scan."}</p>
+      ${hiddenView ? "" : `<p style="margin-top:14px"><button class="btn btn-primary" onclick="AS.startScan({countries:['PT']})">Scan Portugal now</button></p>`}
+    </div></td></tr>`;
+    return;
+  }
+  $("rows").innerHTML = items.map(it => {
+    const loc = [it.concelho, it.district].filter(Boolean).join(", ");
+    const badges = (it.kind ? `<span class="badge b-muted">${AS.esc(KIND_LABEL[it.kind])}</span>` : "")
+      + (it.is_recent ? '<span class="badge b-new">NEW</span>' : "")
+      + (it.price_drop_pct ? `<span class="badge b-drop">↓${Math.round(it.price_drop_pct)}%</span>` : "")
+      + (it.offer_outcome ? `<span class="badge b-offer">offer ${AS.esc(it.offer_outcome)}</span>` : "")
+      + (it.hidden_reason ? `<span class="badge b-hidden" title="${AS.esc(it.hidden_reason)}">${AS.esc(it.hidden_category)}</span>` : "");
+    const starred = it.status === "shortlisted";
+    // IDs go through data-id, never into the onclick source.
+    const id = AS.esc(it.id);
+    const actions = it.status === "dismissed"
+      ? `<button class="btn btn-sm" data-id="${id}" onclick="setStatus(this.dataset.id, null)">Restore</button>`
+      : `<button class="icon-btn ${starred ? "on" : ""}" title="${starred ? "Remove from Offers" : "Shortlist for an offer"}" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "★" : "☆"}</button>
+         <button class="icon-btn" title="Dismiss" data-id="${id}" onclick="setStatus(this.dataset.id, 'dismissed')">✕</button>`;
+    return `<tr class="${it.hidden_reason ? "dim" : ""}">
+      <td>${AS.scoreBadge(it.score)}</td>
+      <td>${AS.flag(it.country)}</td>
+      <td class="t-title">${AS.link(it.url, it.title || "?")}${badges}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
+      <td class="nowrap"><b>${AS.money(it.price)}</b></td>
+      <td class="nowrap muted">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
+      <td class="small muted">${AS.esc(loc)}</td>
+      <td class="nowrap small">${AS.esc(it.date_end ? it.date_end.slice(0, 10) : "–")}</td>
+      <td class="t-why">${AS.esc((it.reasons || []).join(", "))}</td>
+      <td class="nowrap">${actions}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderPages(total) {
+  const pages = Math.ceil(total / PER_PAGE), el = $("pagination");
+  if (pages <= 1) { el.innerHTML = ""; return; }
+  const first = Math.max(1, Math.min(page - 4, pages - 9)), last = Math.min(pages, first + 9);
+  let html = `<button class="btn btn-sm" ${page === 1 ? "disabled" : ""} onclick="go(${page - 1})">‹</button>`;
+  for (let i = first; i <= last; i++) html += `<button class="btn btn-sm ${i === page ? "active" : ""}" onclick="go(${i})">${i}</button>`;
+  el.innerHTML = html + `<button class="btn btn-sm" ${page === pages ? "disabled" : ""} onclick="go(${page + 1})">›</button><span class="small muted" style="align-self:center">${total} listings</span>`;
+}
+function go(p) { page = p; load(); window.scrollTo(0, 0); }
+
+async function setStatus(id, status) {
+  await AS.api("/api/listings/status", {method: "POST", body: {id, status}});
+  AS.toast(status === "shortlisted" ? "Added to Offers" : status === "dismissed" ? "Dismissed" : "Restored");
+  load();
+}
+
+document.querySelectorAll("th.sortable").forEach(th => th.addEventListener("click", () => {
+  const col = th.dataset.sort;
+  if (sort === col) dir = dir === "desc" ? "asc" : "desc";
+  else { sort = col; dir = col === "date_end" || col === "price" ? "asc" : "desc"; }
+  load();
+}));
+$("f-search").addEventListener("keydown", e => { if (e.key === "Enter") { page = 1; load(); } });
+["f-country", "f-kind", "f-source", "f-status", "f-properties"].forEach(id => $(id).addEventListener("change", () => { page = 1; load(); }));
+document.addEventListener("scan-finished", load);
+
+fetch("/api/meta").then(r => r.json()).then(d => d.sources.forEach(s => {
+  const o = document.createElement("option"); o.value = s; o.textContent = s; $("f-source").appendChild(o);
+}));
+load();
+</script>
+{% endblock %}

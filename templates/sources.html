@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Sources</h1>
+    <p>Every site the scanner reads, and whether it is working. A scraper that silently returns nothing looks exactly like "no listings today" — this page is how you tell them apart.</p>
+  </div>
+  <div class="row">
+    <button class="btn btn-primary" onclick="AS.startScan({countries: ['PT']})">Scan Portugal</button>
+    <button class="btn" onclick="AS.startScan({countries: null})">Scan all countries</button>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <div class="row small">
+    <span><b class="ok">ok</b> returned listings last run</span>
+    <span><b class="bad">broken</b> used to work, now returns nothing — usually the site changed</span>
+    <span><b class="warn">never worked</b> has never returned a listing — its page layout was never confirmed</span>
+    <span><b class="bad">error</b> the site failed; the message says how</span>
+  </div>
+</div>
+
+<table class="list">
+  <thead><tr><th>Source</th><th></th><th>State</th><th>Last run</th><th>Last count</th><th>Runs without results</th><th>Last OK</th><th>Stored</th><th>Message</th><th></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+{% endblock %}
+{% block scripts %}
+<script>
+const CLS = {"ok": "ok", "broken": "bad", "error": "bad", "never worked": "warn", "never run": "faint"};
+async function load() {
+  const rows = await (await fetch("/api/health")).json();
+  document.getElementById("rows").innerHTML = rows.map(h => `<tr>
+    <td><b>${AS.esc(h.source)}</b>${h.default ? "" : ' <span class="badge b-muted" title="Not part of country scans">on request</span>'}<div class="small faint">${AS.esc(h.description || "")}</div></td>
+    <td>${AS.flag(h.country)}</td>
+    <td class="${CLS[h.state] || ""}" style="font-weight:700">${AS.esc(h.state)}</td>
+    <td class="small nowrap">${AS.ago(h.last_run)}</td>
+    <td>${h.last_count ?? "–"}</td>
+    <td>${h.failing_runs}</td>
+    <td class="small nowrap">${h.last_ok ? AS.ago(h.last_ok) : "–"}</td>
+    <td>${h.listings}</td>
+    <td class="small muted" style="max-width:340px">${AS.esc(h.last_message || "")}</td>
+    <td><button class="btn btn-sm" data-src="${AS.esc(h.source)}" onclick="AS.startScan({source: this.dataset.src})">Run</button></td>
+  </tr>`).join("");
+}
+document.addEventListener("scan-finished", load);
+load();
+</script>
+{% endblock %}

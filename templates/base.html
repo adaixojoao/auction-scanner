@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ page_title }}{% endblock %} — Auction Scanner</title>
+<link rel="icon" href="{{ url_for('static', filename='icon.ico') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span>EU</span> Auction Scanner</div>
+  <nav class="nav">
+    {% for key, label, href in nav %}
+      <a href="{{ href }}" class="{{ 'active' if key == active else '' }}">{{ label }}{% if key == 'offers' and offers_waiting %}<span class="count">{{ offers_waiting }}</span>{% endif %}</a>
+    {% endfor %}
+  </nav>
+  <div class="scan">
+    <div class="scan-status" id="scan-status"></div>
+    <div class="menu">
+      <button class="btn btn-primary" id="scan-btn" data-menu>Scan now ▾</button>
+      <div class="menu-list">
+        <button onclick="AS.startScan({countries: ['PT']})">Portugal</button>
+        <button onclick="AS.startScan({countries: null})">All countries</button>
+        <a href="/sources">One source…</a>
+      </div>
+    </div>
+  </div>
+</header>
+{% block body %}<main class="page">{% block content %}{% endblock %}</main>{% endblock %}
+<div id="toast"></div>
+<script>window.FLAGS = {{ flags|tojson }};</script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

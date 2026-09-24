@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p>Saved to <code>config.json</code> in the app folder. Changes to what is shown apply immediately; nothing is re-scanned or deleted.</p>
+  </div>
+  <button class="btn btn-primary" onclick="save()">Save settings</button>
+</div>
+
+<div class="card">
+  <h2>What you are looking for</h2>
+  <p class="small muted" style="margin-bottom:10px">Homes and plots at very low prices. Homes score higher in a good location (a town with services, "centro", near the beach) and in good condition; they score lower when they need heavy work (ruins, "para recuperar") or are isolated. Urban plots are welcome. Rural plots only count when they are big and cheap:</p>
+  <div class="form-grid">
+    <div class="field"><label>Rural plots: at least (m²)</label><input type="number" id="rural_min_m2" min="0" step="1000">
+      <p class="help">10 000 m² = 1 hectare. Smaller rural plots are pushed down.</p></div>
+    <div class="field"><label>Rural plots: at most (EUR per m²)</label><input type="number" id="rural_max_eur_m2" min="0" step="0.05">
+      <p class="help">0.50 €/m² = €5 000 per hectare. Dearer land is pushed down; half of it scores best.</p></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Budget &amp; what to show</h2>
+  <div class="form-grid">
+    <div class="field"><label>Maximum price (EUR)</label><input type="number" id="max_price" step="5000"></div>
+    <div class="field"><label>Hide listings scoring below</label><input type="number" id="min_score" min="0" max="100" step="5"></div>
+    <div class="field"><label>Hide listings smaller than (m²)</label><input type="number" id="min_area_m2" min="0" step="10"></div>
+  </div>
+  <div class="field" style="margin-top:14px"><label>Countries to show</label>
+    <p class="help">None ticked = all countries.</p>
+    <div class="countries">
+      {% for code, name in countries %}<label class="check"><input type="checkbox" name="country" value="{{ code }}"> {{ flags[code] }} {{ name }}</label>{% endfor %}
+    </div>
+  </div>
+  <div class="field" style="margin-top:14px"><label>Hide listings mentioning (one per line)</label>
+    <p class="help">Whole words, accents ignored. "ocupado" does not hide "desocupado", and "não arrendado" is not hidden by "arrendado".</p>
+    <textarea id="exclude_keywords" rows="5"></textarea>
+  </div>
+</div>
+
+<div class="card" id="details">
+  <h2>Your details (printed on every letter)</h2>
+  <div class="form-grid">
+    <div class="field"><label>Full name</label><input id="p_nome"></div>
+    <div class="field"><label>NIF</label><input id="p_nif"></div>
+    <div class="field"><label>E-mail</label><input id="p_email" type="email"></div>
+    <div class="field"><label>Phone (optional)</label><input id="p_telefone" type="tel"></div>
+    <div class="field"><label>Town (next to the date)</label><input id="p_localidade"></div>
+  </div>
+  <div class="field" style="margin-top:12px"><label>Address</label><textarea id="p_morada" rows="2"></textarea></div>
+</div>
+
+<div class="card">
+  <h2>Automatic scanning</h2>
+  <label class="check"><input type="checkbox" id="while_app_open"> Scan on this timetable while the app is open</label>
+  <div class="form-grid" style="margin-top:12px">
+    <div class="field"><label>Portugal every (hours)</label><input type="number" id="pt_every_hours" min="0" step="1"></div>
+    <div class="field"><label>Other countries every (hours, 0 = never)</label><input type="number" id="eu_every_hours" min="0" step="1"></div>
+  </div>
+  <div style="margin-top:14px" id="background">
+    <label class="check"><input type="checkbox" id="bg_enabled"> Keep scanning when the app is closed (Windows background task, every 30 min when something is due)</label>
+    <p class="help" id="bg_help" style="margin-top:6px"></p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Telegram alerts</h2>
+  <label class="check"><input type="checkbox" id="tg_enabled"> Send Telegram alerts</label>
+  <div class="form-grid" style="margin-top:12px">
+    <div class="field"><label>Bot token</label><input id="tg_token" type="password" autocomplete="off"></div>
+    <div class="field"><label>Chat ID</label><input id="tg_chat_id"></div>
+    <div class="field"><label>Alert new listings scoring at least</label><input type="number" id="tg_min_score" min="0" max="100"></div>
+    <div class="field"><label>Deadline reminders scoring at least</label><input type="number" id="tg_deadline_min_score" min="0" max="100"></div>
+  </div>
+</div>
+
+<div class="card" id="email">
+  <h2>E-mail</h2>
+  <p class="small muted" style="margin-bottom:10px">The account the app sends from: alerts, and letters sent with <b>Send by e-mail</b> on Offers (a copy of each letter comes back to this account). Gmail: smtp.gmail.com, port 587, and an app password.</p>
+  <label class="check"><input type="checkbox" id="em_enabled"> Send e-mail alerts after each scan</label>
+  <div class="form-grid" style="margin-top:12px">
+    <div class="field"><label>SMTP server</label><input id="em_smtp_host"></div>
+    <div class="field"><label>Port</label><input type="number" id="em_smtp_port"></div>
+    <div class="field"><label>Username</label><input id="em_smtp_user" autocomplete="off"></div>
+    <div class="field"><label>Password (Gmail: app password)</label><input id="em_smtp_password" type="password" autocomplete="off"></div>
+    <div class="field"><label>Send alerts to (comma-separated)</label><input id="em_to_emails"></div>
+    <div class="field"><label>Minimum score</label><input type="number" id="em_min_score" min="0" max="100"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Reports</h2>
+  <label class="check"><input type="checkbox" id="desktop_copy"> Also put Auction-Report.docx / .pdf on the Desktop after each scan</label>
+  <p class="help" style="margin-top:6px">Reports are always available from Listings → Export report.</p>
+</div>
+
+<div class="row" style="margin-top:14px"><span class="spacer"></span><button class="btn btn-primary" onclick="save()">Save settings</button></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+const setv = (id, v) => { const el = $(id); if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; };
+const num = id => $(id).value === "" ? null : Number($(id).value);
+
+async function load() {
+  const c = await (await fetch("/api/settings")).json();
+  const f = c.filters || {}, p = c.proponente || {}, s = c.schedule || {}, t = c.telegram || {}, e = c.notifications || {};
+  setv("max_price", c.max_price); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
+  setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
+  document.querySelectorAll("input[name=country]").forEach(cb => cb.checked = (f.countries || []).includes(cb.value));
+  setv("exclude_keywords", (f.exclude_keywords || []).join("\n"));
+  ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
+  setv("while_app_open", s.while_app_open); setv("pt_every_hours", s.pt_every_hours); setv("eu_every_hours", s.eu_every_hours);
+  ["enabled", "token", "chat_id", "min_score", "deadline_min_score"].forEach(k => setv("tg_" + k, t[k]));
+  ["enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password", "min_score"].forEach(k => setv("em_" + k, e[k]));
+  setv("em_to_emails", (e.to_emails || []).join(", "));
+  setv("desktop_copy", (c.report || {}).desktop_copy);
+
+  const bg = await (await fetch("/api/background")).json();
+  $("bg_enabled").checked = bg.installed; $("bg_enabled").disabled = !bg.supported;
+  $("bg_help").textContent = bg.supported
+    ? (bg.installed ? "Installed. It runs quietly and uses the same timetable." : "Not installed.")
+    : "Only available on Windows.";
+}
+
+async function save() {
+  const body = {
+    max_price: num("max_price"),
+    filters: {
+      min_score: num("min_score") || 0, min_area_m2: num("min_area_m2") || 0,
+      rural_min_m2: num("rural_min_m2"), rural_max_eur_m2: num("rural_max_eur_m2"),
+      countries: [...document.querySelectorAll("input[name=country]:checked")].map(cb => cb.value),
+      exclude_keywords: $("exclude_keywords").value.split("\n").map(s => s.trim()).filter(Boolean),
+    },
+    proponente: Object.fromEntries(["nome", "nif", "email", "telefone", "localidade", "morada"].map(k => [k, $("p_" + k).value.trim()])),
+    schedule: {while_app_open: $("while_app_open").checked, pt_every_hours: num("pt_every_hours"), eu_every_hours: num("eu_every_hours")},
+    telegram: {enabled: $("tg_enabled").checked, token: $("tg_token").value.trim(), chat_id: $("tg_chat_id").value.trim(),
+               min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score")},
+    notifications: {enabled: $("em_enabled").checked, smtp_host: $("em_smtp_host").value.trim(), smtp_port: num("em_smtp_port"),
+                    smtp_user: $("em_smtp_user").value.trim(), smtp_password: $("em_smtp_password").value,
+                    to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},
+    report: {desktop_copy: $("desktop_copy").checked},
+  };
+  await AS.api("/api/settings", {method: "POST", body});
+  const bg = await (await fetch("/api/background")).json();
+  if (bg.supported && $("bg_enabled").checked !== bg.installed) {
+    await AS.api("/api/background", {method: "POST", body: {enabled: $("bg_enabled").checked}});
+  }
+  AS.toast("Settings saved");
+  load();
+}
+load();
+</script>
+{% endblock %}
