@@ -72,6 +72,7 @@
     <div class="field"><label>Alert new listings scoring at least</label><input type="number" id="tg_min_score" min="0" max="100"></div>
     <div class="field"><label>Deadline reminders scoring at least</label><input type="number" id="tg_deadline_min_score" min="0" max="100"></div>
   </div>
+  <label class="check" style="margin-top:10px"><input type="checkbox" id="tg_source_alerts"> Tell me when a site stops working, and when it works again</label>
 </div>
 
 <div class="card" id="email">
@@ -124,6 +125,7 @@ async function load() {
   ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
   setv("while_app_open", s.while_app_open); setv("pt_every_hours", s.pt_every_hours); setv("eu_every_hours", s.eu_every_hours);
   ["enabled", "token", "chat_id", "min_score", "deadline_min_score"].forEach(k => setv("tg_" + k, t[k]));
+  $("tg_source_alerts").checked = t.source_alerts !== false;
   ["enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password", "min_score"].forEach(k => setv("em_" + k, e[k]));
   setv("em_to_emails", (e.to_emails || []).join(", "));
   setv("desktop_copy", (c.report || {}).desktop_copy);
@@ -188,7 +190,8 @@ async function save() {
     proponente: Object.fromEntries(["nome", "nif", "email", "telefone", "localidade", "morada"].map(k => [k, $("p_" + k).value.trim()])),
     schedule: {while_app_open: $("while_app_open").checked, pt_every_hours: num("pt_every_hours"), eu_every_hours: num("eu_every_hours")},
     telegram: {enabled: $("tg_enabled").checked, token: $("tg_token").value.trim(), chat_id: $("tg_chat_id").value.trim(),
-               min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score")},
+               min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score"),
+               source_alerts: $("tg_source_alerts").checked},
     notifications: {enabled: $("em_enabled").checked, smtp_host: $("em_smtp_host").value.trim(), smtp_port: num("em_smtp_port"),
                     smtp_user: $("em_smtp_user").value.trim(), smtp_password: $("em_smtp_password").value,
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},

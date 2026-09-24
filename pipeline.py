@@ -141,6 +141,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                 if alerts:
                     _set_state(db, current="alerts")
                     send_alerts(db, cfg)
+                    try:
+                        from telegram_alert import alert_source_failures
+                        alert_source_failures(db, cfg, [r["source"] for r in results])
+                    except Exception:  # noqa: BLE001 — an alarm must never fail the scan
+                        LOG.exception("Source alarm failed")
             finally:
                 summary = {
                     "listings": sum(r["count"] for r in results),
