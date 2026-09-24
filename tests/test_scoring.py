@@ -54,17 +54,26 @@ def test_casal_is_not_a_house():
 def test_no_minimum_bonus_counted_once():
     _, reasons = score(item(title="Prédio", source="citius", price=12000))
     assert reasons.count("no minimum bid") == 1
+    _, no_price = score(item(title="Prédio", source="citius", price=None))
+    assert "no price — you set your offer" in no_price and "no minimum bid" not in no_price
     _, low_min = score(item(title="Prédio", source="citius", price=12000, min_price=200))
     assert "min bid only €200" in low_min and "no minimum bid" not in low_min
 
 
-def test_no_price_is_not_a_bargain():
-    # These filled the top of the report with "?" prices at 100.
-    court = dict(source="citius", description="Venda mediante proposta em carta fechada")
-    unknown, r_unknown = score(item(title="Prédio urbano, casa de habitação", price=0, **court))
-    priced, _ = score(item(title="Prédio urbano, casa de habitação", price=7500, area_m2=142, **court))
-    assert "price unknown — check the sale" in r_unknown and "no minimum bid" not in r_unknown
-    assert 45 <= unknown <= 60 < priced          # still shown, but under the priced deals
+def test_no_price_on_an_offer_sale_is_a_chance():
+    # Carta fechada / negociação particular: you name the price, so a missing
+    # price is an opening, not a gap.
+    home = "Prédio urbano, casa de habitação"
+    sealed, r_sealed = score(item(title=home, price=0, source="citius",
+                                  description="Venda mediante proposta em carta fechada"))
+    private, r_private = score(item(title=home, price=None, source="citius",
+                                    description="Venda por negociação particular"))
+    assert "no price — you set your offer" in r_sealed and "sealed-bid (carta fechada)" in r_sealed
+    assert "no price — you set your offer" in r_private
+    assert sealed == 100 and private >= 80
+    # an online listing whose price we simply did not read gets no such bonus
+    _, r_online = score(item(title="Moradia", source="leilosoc"))
+    assert "no price — you set your offer" not in r_online
 
 
 def test_price_outweighs_how_the_court_sells():
@@ -72,7 +81,7 @@ def test_price_outweighs_how_the_court_sells():
     dear_court, r_dear = score(item(title="Fracção - habitação no 3º andar", price=97500, **court))
     cheap_online, _ = score(item(title="Moradia", price=12000, concelho="Guarda"))
     assert "€97,500 — not a low price" in r_dear
-    assert dear_court < 80 < cheap_online
+    assert dear_court < 85 < cheap_online
 
 
 def test_half_shares_and_furniture():

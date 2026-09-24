@@ -70,6 +70,10 @@ USUFRUCT_PATTERNS = [
     "nuda propiedad", "direito de uso", "direito de habitação",
 ]
 
+# Sales where you name the price: a sealed-bid letter or a private negotiation.
+# Often no price is published at all, and that is the chance, not a gap.
+OFFER_SALE_PATTERNS = ["negociação particular", "negociacao particular", "venda por negociação"]
+
 SEALED_BID_PATTERNS = [
     "carta fechada", "proposta em carta", "propostas em carta",
     "venda por propostas", "sealed bid", "offre cachetée",
@@ -95,9 +99,6 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 # they are hidden unless you shortlist them.
 NOT_THE_GOAL_CAP = {"not a home or plot": 35, "rural plot too small": 35,
                     "needs heavy work": 40}
-# No price published: still shown (above the default minimum score), but under
-# every priced listing that fits the goal.
-PRICE_UNKNOWN_CAP = 60
 
 DWELLING_WORDS = [
     "moradia", "moradias", "apartamento", "vivenda", "habitação", "casa", "casas",
@@ -486,8 +487,8 @@ def score_detail(item: dict, now: datetime | None = None,
         s += 5
         reasons.append(f"price cut {drop:.0f}% since first seen")
 
-    # Ridiculous in absolute terms. This is the goal, so it outweighs how the
-    # sale works: a €97,500 court sale used to reach 100 on court bonuses alone.
+    # Ridiculous in absolute terms. This is the goal, so a dear sale stays out of
+    # the top even with every court bonus: a €97,500 flat used to reach 100.
     if pay >= 300:
         if pay <= 5000:
             s += 25
@@ -501,12 +502,14 @@ def score_detail(item: dict, now: datetime | None = None,
         elif pay <= 60000:
             s += 4
         else:
-            s -= 8
+            s -= 15
             reasons.append(f"€{pay:,.0f} — not a low price")
 
     # ── How the sale works ────────────────────────────────────────────
-    if has_term(full, SEALED_BID_PATTERNS, negations=False):
-        s += 8
+    # Sealed bids are a great chance: you set the price and few people bid.
+    sealed = has_term(full, SEALED_BID_PATTERNS, negations=False)
+    if sealed:
+        s += 20
         reasons.append("sealed-bid (carta fechada)")
 
     if source in FORCED_SOURCES:
@@ -517,10 +520,12 @@ def score_detail(item: dict, now: datetime | None = None,
         reasons.append("tax seizure — no reserve")
 
     # Minimum bid signal (one bonus per listing: these all describe the same fact).
-    # A sale with no price at all is not a "no minimum" sale: usually the value
-    # was not published (negociação particular) or not read.
     min_p = item.get("min_price") or 0
-    if min_p and min_p <= 500 and price and price > 1000:
+    if not pay and (sealed or source in FORCED_SOURCES
+                    or has_term(full, OFFER_SALE_PATTERNS, negations=False)):
+        s += 18
+        reasons.append("no price — you set your offer")
+    elif min_p and min_p <= 500 and price and price > 1000:
         s += 10
         reasons.append(f"min bid only €{min_p:.0f}")
     elif not min_p and pay and source in FORCED_SOURCES:
@@ -540,11 +545,6 @@ def score_detail(item: dict, now: datetime | None = None,
     if price and price < 300:
         s -= 20
         reasons.append("suspiciously cheap — likely tiny/worthless")
-
-    # Without a price nothing says it is cheap: show it, below the priced deals.
-    if not pay:
-        reasons.append("price unknown — check the sale")
-        s = min(s, PRICE_UNKNOWN_CAP)
 
     for label, cap in NOT_THE_GOAL_CAP.items():
         if any(r.startswith(label) for r in reasons):
