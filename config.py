@@ -9,23 +9,24 @@ import os
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
 DEFAULTS = {
-    "max_price": 50000,
-    "max_bid": 50000,
+    "max_price": 100000,
+    "max_bid": 100000,
 
-    # Filtering
     "filters": {
-        "countries": [],          # empty = all; e.g. ["PT", "ES"]
-        "types": [],              # empty = all; e.g. ["apartamento", "moradia"]
+        "countries": ["PT"],      # Portugal focus; [] for all EU
+        "types": [],
         "exclude_keywords": [
             "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
-            "1/10", "1/11", "1/12", "1/14", "1/16",
+            "1/10", "1/11", "1/12", "1/14", "1/16", "1/20",
             "avos", "quota", "quinhão", "quinhao", "quota-parte",
-            "fração ideal", "fracao ideal", "parte indivisa",
-            "usufruto",
+            "fração ideal", "fracao ideal", "parte indivisa", "compropriedade",
+            "usufruto", "usufruct",
+            "ocupado", "arrendado", "inquilino",
+            "sem acesso", "encravado",
         ],
         "min_area_m2": 0,
-        "min_score": 0,           # minimum investment score to include in alerts
-        "districts": [],          # empty = all; e.g. ["Lisboa", "Porto"]
+        "min_score": 45,
+        "districts": [],
     },
 
     # Proxy rotation
@@ -44,7 +45,7 @@ DEFAULTS = {
         "smtp_password": "",      # use app password for Gmail
         "from_email": "",
         "to_emails": [],          # e.g. ["you@gmail.com"]
-        "min_score": 60,          # only notify for listings scoring >= this
+        "min_score": 70,          # only notify for high-confidence deals
         "send_on": "new",         # "new" = only new listings, "all" = every run
     },
 
@@ -52,7 +53,7 @@ DEFAULTS = {
     "schedule": {
         "enabled": False,
         "interval_hours": 6,
-        "sources": "all",
+        "sources": "PT",
     },
 
     # Proponente details for carta generation

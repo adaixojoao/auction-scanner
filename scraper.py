@@ -2816,167 +2816,39 @@ def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 80, max_price: f
 
 # ─── Report generation ───────────────────────────────────────────────
 
-IMOVEL_TYPES = {
-    "apartamento/moradia", "apartamento", "moradia", "loja/escritorio",
-    "terreno_urbano", "terreno_rustico", "armazem", "outro_imovel",
-    "hotel", "industrial", "garagem", "terreno",
-    "inmueble", "nekretnina", "immobilier", "immobile", "vastgoed",
-    "nieruchomosc", "akinito",
-}
-GOLD_KEYWORDS = {"ouro", "joalharia", "bijutaria", "relojoaria", "cautela"}
-VEHICLE_KEYWORDS = {
-    "veículo", "veiculo", "automóvel", "automovel", "peugeot", "renault",
-    "volkswagen", "toyota", "toyoya", "ford", "opel", "smart", "hyundai",
-    "volvo", "bmw", "mercedes", "audi", "citroen", "fiat", "seat", "ktm",
-    "motociclo", "moto ", "ligeiro", "pesado de mercadorias", "yaris",
-    "focus", "scenic", "matricula",
-}
-
-
-def _categorize(item: dict) -> str:
-    title = (item.get("title") or "").lower()
-    tipo = (item.get("tipo") or "").lower()
-    if any(kw in title for kw in GOLD_KEYWORDS):
-        return "ouro_joias"
-    if any(kw in title for kw in VEHICLE_KEYWORDS):
-        return "outros"
-    if tipo in IMOVEL_TYPES or "prédio" in title or "terreno" in title or "moradia" in title or "apartamento" in title or "fração" in title:
-        return "imoveis"
-    if tipo == "comercio":
-        return "outros"
-    return "outros"
+from scoring import score as _score_fn, categorize as _categorize
 
 
 def investment_score(item: dict) -> tuple[float, list[str]]:
-    """Score a property 0-100 for investment value. Returns (score, [reasons])."""
-    score = 50.0
-    reasons = []
-    title = (item.get("title") or "").lower()
-    price = item.get("price") or 0
-    bid = item.get("current_bid") or 0
-    area = item.get("area_m2") or 0
-    country = item.get("country", "PT")
+    return _score_fn(item)
 
-    # --- PENALTIES (red flags) ---
 
-    # Fractional ownership — worthless, score 0
-    frac_patterns = ["1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
-                     "1/10", "1/11", "1/12", "1/14", "1/16",
-                     "avos", "quota", "quinhão", "quinhao", "quota-parte",
-                     "fração ideal", "fracao ideal", "parte indivisa"]
-    if any(p in title for p in frac_patterns):
-        return 0, ["fractional share — skip"]
-
-    # Usufruct / limited rights
-    if "usufruto" in title or "usufruct" in title or "nue-propri" in title:
-        score -= 30
-        reasons.append("usufruct only")
-
-    if "direito" in title and ("herança" in title or "heranca" in title):
-        score -= 20
-        reasons.append("inheritance right")
-
-    # Ruins / uninhabitable
-    if "ruína" in title or "ruina" in title or "ruine" in title or "rudere" in title:
-        score -= 10
-        reasons.append("ruins")
-
-    # Very cheap = likely worthless
-    if price and price < 500:
-        score -= 15
-        reasons.append("suspiciously cheap")
-
-    # Overbid (bid > 150% of asking)
-    if bid and price and bid > price * 1.5:
-        score -= 15
-        reasons.append(f"overbid {bid/price:.0%}")
-
-    # Rural/rustic with no area info
-    if ("rústico" in title or "rustico" in title or "agricole" in title) and not area:
-        score -= 5
-        reasons.append("rural/no area")
-
-    # Parking / storage only
-    if any(w in title for w in ["parking", "garagem", "garage", "box", "emplacement", "magazzino"]):
-        score -= 10
-        reasons.append("parking/storage")
-
-    # --- BONUSES ---
-
-    # Full house/apartment
-    house_words = ["moradia", "apartamento", "vivienda", "appartement", "maison",
-                   "woonhuis", "appartamento", "casa", "logement", "tussenwoning"]
-    if any(w in title for w in house_words):
-        score += 15
-        reasons.append("full dwelling")
-
-    # Discount: bid well below asking
-    if bid and price and bid < price * 0.7:
-        bonus = min(20, (1 - bid / price) * 40)
-        score += bonus
-        reasons.append(f"discount {1-bid/price:.0%}")
-    elif not bid and price:
-        score += 5
-        reasons.append("no bids yet")
-
-    # Good size
-    if area and area > 50:
-        score += 5
-        reasons.append(f"{area:.0f}m2")
-    if area and area > 100:
-        score += 5
-
-    # Urban location signals
-    urban_kw = ["lisboa", "porto", "madrid", "barcelona", "valencia", "paris",
-                "lyon", "marseille", "amsterdam", "rotterdam", "den haag",
-                "roma", "milano", "zagreb", "split"]
-    loc = " ".join(filter(None, [item.get("concelho",""), item.get("district","")])).lower()
-    full_text = f"{title} {loc}"
-    if any(c in full_text for c in urban_kw):
-        score += 10
-        reasons.append("urban location")
-
-    # Price sweet spot (5k-40k for habitable property)
-    if price and 5000 <= price <= 40000 and any(w in title for w in house_words):
-        score += 10
-        reasons.append("price sweet spot")
-
-    # Ending soon = urgency (within 7 days)
-    if item.get("date_end"):
-        try:
-            end = datetime.fromisoformat(item["date_end"].replace("Z", "+00:00"))
-            days_left = (end - datetime.now(timezone.utc)).days
-            if 0 < days_left <= 7:
-                score += 5
-                reasons.append(f"{days_left}d left")
-        except (ValueError, TypeError):
-            pass
-
-    # Citius zero-price = court dropped the minimum, motivated seller
-    source = item.get("source", "")
-    if source == "citius" and (not price or price == 0):
-        score += 15
-        reasons.append("no minimum (court sale)")
-
-    # Forced/tax sale bonus — legally must sell, often no reserve
-    forced_sources = {"financas", "zvg", "anaf", "aeat", "pvp_giustizia", "poland", "greece", "cyprus"}
-    if source in forced_sources:
-        score += 10
-        reasons.append("forced sale (must sell)")
-    if source in ("financas", "anaf", "aeat"):
-        score += 5
-        reasons.append("tax seizure")
-
-    # No minimum or very low minimum = can bid almost anything
-    min_p = item.get("min_price") or 0
-    if min_p and min_p <= 500 and price and price > 1000:
-        score += 15
-        reasons.append(f"min bid only €{min_p:.0f}")
-    elif not min_p and source in forced_sources:
-        score += 10
-        reasons.append("no minimum bid")
-
-    return max(0, min(100, score)), reasons
+def _print_sealed_bid_summary(db: sqlite3.Connection, max_price: float):
+    from scoring import SEALED_BID_PATTERNS
+    cols = [d[1] for d in db.execute("PRAGMA table_info(listings)").fetchall()]
+    rows = db.execute("SELECT * FROM listings WHERE source='citius'").fetchall()
+    items = [dict(zip(cols, r)) for r in rows]
+    sealed = []
+    for item in items:
+        full = ((item.get("title") or "") + " " + (item.get("description") or "")).lower()
+        if any(p in full for p in SEALED_BID_PATTERNS):
+            sc, reasons = investment_score(item)
+            sealed.append((item, sc, reasons))
+    sealed.sort(key=lambda x: -x[1])
+    print(f"\n{'='*60}")
+    print(f"  SEALED-BID LISTINGS (carta fechada) — {len(sealed)} found")
+    print(f"{'='*60}")
+    for item, sc, reasons in sealed[:20]:
+        raw = json.loads(item.get("raw_json") or "{}")
+        print(f"\n  [{sc:.0f}] {(item.get('title') or '?')[:60]}")
+        print(f"       Price: €{item['price']:,.0f}" if item.get('price') else "       Price: ?")
+        print(f"       Location: {', '.join(filter(None, [item.get('concelho'), item.get('district')]))}")
+        print(f"       Ends: {(item.get('date_end') or '')[:10]}")
+        print(f"       Agente: {raw.get('agente_nome','')}  Tel: {raw.get('agente_contacto','')}")
+        print(f"       Email: {raw.get('agente_email','')}")
+        print(f"       Flags: {', '.join(reasons)}")
+        print(f"       URL: {item.get('url','')}")
+    print()
 
 
 def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: float = 50000):
@@ -3196,6 +3068,9 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
         try:
             from fpdf import FPDF
 
+            def _lat1(t):
+                return t.encode("latin-1", "replace").decode("latin-1") if t else ""
+
             pdf = FPDF(orientation="L", format="A4")
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
@@ -3208,7 +3083,7 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
             for cat, label in section_names.items():
                 cat_items = categories[cat]
                 pdf.set_font("Helvetica", "B", 12)
-                pdf.cell(0, 8, f"{label} - {len(cat_items)} listings", new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(0, 8, _lat1(f"{label} - {len(cat_items)} listings"), new_x="LMARGIN", new_y="NEXT")
 
                 if not cat_items:
                     pdf.set_font("Helvetica", "I", 9)
@@ -3219,15 +3094,12 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
                 for item, ratio, inv_score, inv_reasons in cat_items:
                     by_country.setdefault(item.get("country", "PT"), []).append((item, ratio, inv_score, inv_reasons))
 
-                for cc in ["PT", "ES", "FR", "IT", "HR", "NL"]:
-                    c_items = by_country.get(cc, [])
-                    if not c_items:
-                        continue
+                for cc in sorted(by_country.keys()):
+                    c_items = by_country[cc]
                     cname = COUNTRY_NAMES.get(cc, cc)
                     pdf.set_font("Helvetica", "B", 10)
                     pdf.cell(0, 7, f"{cname} ({len(c_items)})", new_x="LMARGIN", new_y="NEXT")
 
-                    # Table header
                     pdf.set_font("Helvetica", "B", 7)
                     col_w = [8, 12, 80, 22, 45, 50, 55]
                     headers = ["#", "Score", "Title", "Price", "Location", "URL", "Flags"]
@@ -3241,11 +3113,11 @@ def generate_report(db: sqlite3.Connection, max_price: float = 50000, max_bid: f
                         cells = [
                             str(idx),
                             f"{inv_score:.0f}",
-                            (item["title"] or "?")[:45].encode("latin-1", "replace").decode("latin-1"),
+                            _lat1((item["title"] or "?")[:45]),
                             f"EUR {item['price']:,.0f}" if item["price"] else "?",
-                            ", ".join(filter(None, [item["concelho"], item["district"]]))[:25].encode("latin-1", "replace").decode("latin-1"),
+                            _lat1(", ".join(filter(None, [item["concelho"], item["district"]]))[:25]),
                             (item["url"] or "")[:30],
-                            ", ".join(inv_reasons)[:30],
+                            _lat1(", ".join(inv_reasons)[:30]),
                         ]
                         for j, c in enumerate(cells):
                             pdf.cell(col_w[j], 4, c, border=1)
@@ -3551,6 +3423,7 @@ def main():
     parser.add_argument("--check-active", action="store_true", help="Check which Citius listings are still active")
     parser.add_argument("--cartas", action="store_true", help="Generate proposal PDFs for active Citius listings")
     parser.add_argument("--cartas-top", type=int, default=15, help="Number of top listings to generate cartas for")
+    parser.add_argument("--sealed-bid", action="store_true", help="Show only venda por propostas em carta fechada listings")
     parser.add_argument("--dashboard", action="store_true", help="Launch web dashboard after scraping")
     args = parser.parse_args()
 
@@ -3641,6 +3514,9 @@ def main():
         apply_filters(db, cfg.get("filters", {}))
 
     report_path = generate_report(db, max_price=max_price)
+
+    if args.sealed_bid:
+        _print_sealed_bid_summary(db, max_price)
 
     if args.analyze:
         analysis_path = analyze_with_llm(db, max_price=max_price, category=args.analyze_category)
