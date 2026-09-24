@@ -79,7 +79,20 @@ def format_listing(item: dict) -> str:
         f"\U0001f4cb {_esc((item.get('source') or '').upper())}\n"
         f"\U0001f3f7 {_esc(', '.join(item['reasons'][:3]))}\n\n"
         f"<a href=\"{_esc(item.get('url') or '')}\">View listing →</a>"
+        + _citius_finder(item)
     )
+
+
+def _citius_finder(item: dict) -> str:
+    """Citius has no page per sale: say where to look (Listings → ⓘ has the steps)."""
+    if item.get("source") != "citius":
+        return ""
+    from listing_info import case_number, raw_of
+    court, proc = raw_of(item).get("tribunal"), case_number(item)
+    if not (court or proc):
+        return ""
+    return ("\n\U0001f50e On Citius: Tribunal <b>" + _esc(court or "?") + "</b>, Imóvel, Em venda, "
+            "Ignorar Datas → Pesquisar, then Ctrl+F <code>" + _esc(proc or "") + "</code>")
 
 
 def format_digest(items: list[dict], total: int, cfg: dict) -> str:

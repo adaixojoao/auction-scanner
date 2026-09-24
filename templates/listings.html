@@ -118,18 +118,65 @@ function renderRows(items, hiddenView) {
       ? `<button class="btn btn-sm" data-id="${id}" onclick="setStatus(this.dataset.id, null)">Restore</button>`
       : `<button class="icon-btn ${starred ? "on" : ""}" title="${starred ? "Remove from Offers" : "Shortlist for an offer"}" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "★" : "☆"}</button>
          <button class="icon-btn" title="Dismiss" data-id="${id}" onclick="setStatus(this.dataset.id, 'dismissed')">✕</button>`;
+    // Citius has no page per sale: its title opens the details, with the way to find it.
+    const titleLink = it.source === "citius"
+      ? `<a href="#" data-id="${id}" onclick="toggleDetails(this); return false">${AS.esc(it.title || "?")}</a>`
+      : AS.link(it.url, it.title || "?");
     return `<tr class="${it.hidden_reason ? "dim" : ""}">
       <td>${AS.scoreBadge(it.score)}</td>
       <td>${AS.flag(it.country)}</td>
-      <td class="t-title">${AS.link(it.url, it.title || "?")}${badges}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
+      <td class="t-title">${titleLink}${badges}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
       <td class="nowrap"><b>${AS.money(it.price)}</b></td>
       <td class="nowrap muted">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
       <td class="small muted">${AS.esc(loc)}</td>
       <td class="nowrap small">${AS.esc(it.date_end ? it.date_end.slice(0, 10) : "–")}</td>
       <td class="t-why">${AS.esc((it.reasons || []).join(", "))}</td>
-      <td class="nowrap">${actions}</td>
+      <td class="nowrap"><button class="icon-btn" title="Details" data-id="${id}" onclick="toggleDetails(this)">ⓘ</button>${actions}</td>
     </tr>`;
   }).join("");
+}
+
+// ── Details panel: everything known about one listing (listing_info.py) ──
+async function toggleDetails(el) {
+  const row = el.closest("tr"), next = row.nextElementSibling;
+  if (next && next.classList.contains("details-row")) { next.remove(); return; }
+  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id));
+  const tr = document.createElement("tr");
+  tr.className = "details-row";
+  tr.innerHTML = `<td colspan="9">${detailsHtml(d)}</td>`;
+  row.after(tr);
+}
+
+function factValue(f) {
+  const v = AS.esc(f.value);
+  if (/e-mail/i.test(f.label) && /^[^\s@]+@[^\s@]+$/.test(f.value)) return `<a href="mailto:${v}">${v}</a>`;
+  if (/phone/i.test(f.label)) return `<a href="tel:${AS.esc(f.value.replace(/[^0-9+]/g, ""))}">${v}</a>`;
+  return v;
+}
+
+function detailsHtml(d) {
+  const facts = d.facts.map(f => `<div class="fact"><span class="k">${AS.esc(f.label)}</span><span class="v">${factValue(f)}</span></div>`).join("");
+  const links = [d.url && d.source !== "citius" ? AS.link(d.url, "Open the listing ↗") : "",
+                 ...d.related.map(r => AS.link(r.url, r.label + " ↗"))].filter(Boolean).join(" · ");
+  const guide = d.how_to_find ? `<div class="guide">
+      <b>How to find this sale on ${AS.esc(d.how_to_find.site)}</b> <span class="small muted">${AS.esc(d.how_to_find.why)}</span>
+      <ol>${d.how_to_find.steps.map(s => `<li>${AS.esc(s.text)}
+        ${s.copy ? ` <code>${AS.esc(s.copy)}</code> <button class="btn btn-sm" data-copy="${AS.esc(s.copy)}" onclick="copyText(this.dataset.copy)">Copy</button>` : ""}
+        ${s.url ? ` ${AS.link(s.url, "Open Citius ↗")}` : ""}</li>`).join("")}</ol></div>` : "";
+  return `<div class="details">
+    ${d.image ? `<img class="d-img" src="${AS.esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
+    <div class="d-main">
+      ${guide}
+      ${links ? `<p class="d-links">${links}</p>` : ""}
+      ${facts ? `<div class="facts">${facts}</div>` : ""}
+      ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
+      <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>
+    </div></div>`;
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); AS.toast("Copied: " + text); }
+  catch { AS.toast("Select the text and copy it", "warn"); }
 }
 
 function renderPages(total) {

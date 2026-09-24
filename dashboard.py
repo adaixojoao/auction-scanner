@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file
 
-from common import COUNTRY_NAMES, FLAGS, lock_holder
+from common import COUNTRY_NAMES, FLAGS, lock_holder, safe_url
 from db import connect, hidden_category, load_listings, set_listing_status, source_health
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -275,6 +275,30 @@ def api_listings():
         "last_scrape": last_scrape,
     })
 
+
+@app.route("/api/listing")
+def api_listing_detail():
+    """Everything known about one listing, for the detail panel on Listings."""
+    import listing_info
+    listing_id = request.args.get("id", "")
+    db = get_db()
+    try:
+        found = load_listings(db, filters=_config().get("filters"), include_hidden=True,
+                              where="id = ?", params=(listing_id,))
+        if not found:
+            return jsonify({"error": "no such listing"}), 404
+        it = found[0]
+        related = listing_info.related(db, it)
+    finally:
+        db.close()
+    return jsonify({
+        "id": it["id"], "title": it.get("title"), "source": it.get("source"),
+        "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
+        "description": (it.get("description") or "")[:4000],
+        "score": it["score"], "reasons": it.get("reasons") or [],
+        "facts": listing_info.facts(it), "related": related,
+        "how_to_find": listing_info.how_to_find(it),
+    })
 
 @app.route("/api/listings/status", methods=["POST"])
 def api_listing_status():
