@@ -163,11 +163,34 @@ def auto_scan_loop(stop: threading.Event):
         delay = AUTO_SCAN_EVERY
         try:
             if load_config().get("schedule", {}).get("while_app_open", True):
-                ran = scheduler.tick()
+                ran = scheduler.tick(telegram=False)   # telegram_loop listens meanwhile
                 if ran:
                     LOG.info(f"Timetable ran: {', '.join(ran)}")
         except Exception:
             LOG.exception("Timetable check failed")
+
+
+def telegram_loop(stop: threading.Event):
+    """While the app is open, handle Telegram button taps within seconds."""
+    from config import load_config
+    from db import connect
+    from telegram_bot import poll_once
+    while not stop.is_set():
+        cfg = load_config()
+        if not (cfg.get("telegram") or {}).get("enabled"):
+            stop.wait(60)                  # Telegram may be switched on in Settings
+            continue
+        db = connect()
+        try:
+            started = time.monotonic()
+            handled = poll_once(db, cfg, wait=25)   # returns as soon as something arrives
+            if not handled and time.monotonic() - started < 2:
+                stop.wait(15)              # offline or refused: do not spin
+        except Exception:
+            LOG.exception("Telegram listener failed")
+            stop.wait(60)
+        finally:
+            db.close()
 
 
 def scan_running() -> bool:
@@ -247,6 +270,7 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
 
     stop = threading.Event()
     threading.Thread(target=auto_scan_loop, args=(stop,), name="timetable", daemon=True).start()
+    threading.Thread(target=telegram_loop, args=(stop,), name="telegram", daemon=True).start()
 
     started = time.monotonic()
     try:

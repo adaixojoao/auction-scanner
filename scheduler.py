@@ -225,14 +225,24 @@ def _last_runs(db) -> dict:
     return {job: job_last_run(db, job) for job in JOBS}
 
 
-def tick(dry_run: bool = False) -> list[str]:
-    """Run every due job once. Returns the jobs that ran (or would run)."""
+def tick(dry_run: bool = False, telegram: bool = True) -> list[str]:
+    """Run every due job once. Returns the jobs that ran (or would run).
+
+    `telegram`: also handle Telegram button taps waiting since the last tick.
+    The app passes False: while it is open it listens to Telegram itself."""
     from config import load_config
     from db import connect, set_job_last_run
 
-    schedule = load_config().get("schedule", {})
+    cfg = load_config()
+    schedule = cfg.get("schedule", {})
     db = connect()
     try:
+        if telegram and not dry_run:
+            try:
+                from telegram_bot import poll_once
+                poll_once(db, cfg)
+            except Exception:  # noqa: BLE001 — Telegram must not stop the timetable
+                LOG.exception("Telegram updates failed")
         now = datetime.now().astimezone()
         due = due_jobs(now, _last_runs(db), schedule)
     finally:

@@ -14,7 +14,7 @@ CFG = {"telegram": {"enabled": True, "token": "t", "chat_id": "c", "min_score": 
 def sent(monkeypatch):
     messages = []
     monkeypatch.setattr(telegram_alert, "send_telegram",
-                        lambda token, chat, msg: messages.append(msg) or True)
+                        lambda token, chat, msg, **k: messages.append(msg) or True)
     return messages
 
 
@@ -37,10 +37,10 @@ def test_many_new_listings_become_one_digest(db, add, sent):
 
 def test_failed_send_is_retried_next_run(db, add, monkeypatch):
     add(external_id="a", title="Moradia", price=20000)
-    monkeypatch.setattr(telegram_alert, "send_telegram", lambda *a: False)
+    monkeypatch.setattr(telegram_alert, "send_telegram", lambda *a, **k: False)
     telegram_alert.alert_new_listings(db, CFG)
     calls = []
-    monkeypatch.setattr(telegram_alert, "send_telegram", lambda *a: calls.append(a) or True)
+    monkeypatch.setattr(telegram_alert, "send_telegram", lambda *a, **k: calls.append(a) or True)
     telegram_alert.alert_new_listings(db, CFG)
     assert len(calls) == 1
 
@@ -153,8 +153,8 @@ def test_source_alarm_only_for_this_scan_and_can_be_off(db, sent, monkeypatch):
     assert telegram_alert.alert_source_failures(db, CFG, ["cgd"]) == 0     # not scanned now
     off = {**CFG, "telegram": {**CFG["telegram"], "source_alerts": False}}
     assert telegram_alert.alert_source_failures(db, off, ["haya"]) == 0
-    monkeypatch.setattr(telegram_alert, "send_telegram", lambda *a: False)
+    monkeypatch.setattr(telegram_alert, "send_telegram", lambda *a, **k: False)
     assert telegram_alert.alert_source_failures(db, CFG, ["haya"]) == 0    # send failed…
-    monkeypatch.setattr(telegram_alert, "send_telegram", lambda t, c, m: sent.append(m) or True)
+    monkeypatch.setattr(telegram_alert, "send_telegram", lambda t, c, m, **k: sent.append(m) or True)
     assert telegram_alert.alert_source_failures(db, CFG, ["haya"]) == 1    # …so it is retried
     assert "has not worked yet" in sent[-1]
