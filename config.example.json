@@ -38,6 +38,7 @@
   },
 
   "schedule": {
+    "while_app_open": true,
     "pt_every_hours": 2,
     "eu_every_hours": 6,
     "check_times": ["08:00", "20:00"],

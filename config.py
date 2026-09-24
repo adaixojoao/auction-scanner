@@ -63,8 +63,10 @@ DEFAULTS = {
         "deadline_min_score": 60, # "ending soon, no offer sent" alerts
     },
 
-    # Scheduling (scheduler.py)
+    # Scheduling (scheduler.py). while_app_open: scan on this timetable while
+    # the app window is open, without the Windows background task.
     "schedule": {
+        "while_app_open": True,
         "pt_every_hours": 2,
         "eu_every_hours": 6,
         "check_times": ["08:00", "20:00"],
@@ -105,9 +107,27 @@ def load_config() -> dict:
     return copy.deepcopy(DEFAULTS)
 
 
+def load_user_config() -> dict:
+    """Only what the user set in config.json, without the defaults."""
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
 def save_config(cfg: dict):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    """Write config.json atomically (a crash mid-write must not lose settings)."""
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, CONFIG_PATH)
+
+
+def update_config(changes: dict) -> dict:
+    """Merge `changes` into config.json (keys it does not mention are kept) and
+    return the full effective config."""
+    save_config(_deep_merge(load_user_config(), changes))
+    return load_config()
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

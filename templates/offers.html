@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Offers</h1>
+    <p>Prepare, send and track proposal letters. Candidates are strong Portuguese-court-style listings plus anything you ☆ on Listings.</p>
+  </div>
+</div>
+{% if not proponente_ok %}
+<div class="notice bad" style="margin:0 0 14px">Your name, NIF and address are not set, so letters will be incomplete. <a href="/settings#details">Fill them in under Settings</a>.</div>
+{% endif %}
+
+<div class="split">
+  <div>
+    <div class="tabs" id="tabs">
+      <button data-tab="review" class="active">To review <span id="n-review"></span></button>
+      <button data-tab="sent">Sent <span id="n-sent"></span></button>
+      <button data-tab="closed">Closed <span id="n-closed"></span></button>
+      <button data-tab="rejected">Rejected <span id="n-rejected"></span></button>
+    </div>
+    <div class="olist" id="olist"><div class="empty">Loading…</div></div>
+  </div>
+  <div id="detail"><div class="card empty">← Pick a property</div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRESETS = ["1.000,00", "2.500,00", "4.000,00", "5.000,00", "7.500,00", "10.000,00"];
+const KIND_LABEL = {"CARTA FECHADA": "Sealed bid", "NEGOCIACAO PARTICULAR": "Private negotiation",
+                    "ADJUDICACAO": "Adjudication", "LEILAO ELETRONICO": "e-auction"};
+let data = {review: [], sent: [], closed: [], rejected: []}, tab = "review", sel = null;
+const $ = id => document.getElementById(id);
+const bids = {};   // per-listing bid being edited: {bid, bidText}
+const EMPTY = {
+  review: "Nothing to review. ☆ listings on the Listings page, or run a scan.",
+  sent: "No offers waiting for an answer.", closed: "No closed offers yet.", rejected: "Nothing rejected.",
+};
+
+async function load() {
+  data = await (await fetch("/api/offers")).json();
+  for (const k of Object.keys(data)) $("n-" + k).textContent = data[k].length ? `(${data[k].length})` : "";
+  renderList();
+  if (sel && !current()) { sel = null; }
+  renderDetail();
+}
+function current() { return data[tab].find(x => x.key === sel); }
+
+function renderList() {
+  const items = data[tab];
+  if (!items.length) {
+    $("olist").innerHTML = `<div class="empty small">${EMPTY[tab]}</div>`;
+    return;
+  }
+  $("olist").innerHTML = items.map(c => `
+    <div class="oitem ${c.key === sel ? "sel" : ""}" data-key="${AS.esc(c.key)}" onclick="pick(this.dataset.key)">
+      <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start">
+        <div class="t" style="flex:1">${AS.flag(c.country)} ${AS.esc(c.title)}</div>${AS.scoreBadge(c.score)}
+      </div>
+      <div class="m">${AS.esc(KIND_LABEL[c.modalidade] || c.modalidade)}${c.status === "shortlisted" ? ' · <span class="warn">★ shortlisted</span>' : ""} · ${AS.esc(c.location || "")}</div>
+      <div class="m">${c.price ? "VB " + AS.money(c.price) : "no base value"}${c.offer ? ` · offered EUR ${AS.esc(c.offer.bid)} · <b>${AS.esc(c.offer.outcome)}</b>` : ` · suggested EUR ${AS.esc(c.bid)}`}
+        ${c.date_end ? " · ends " + AS.esc(c.date_end.slice(0, 10)) : ""}</div>
+    </div>`).join("");
+}
+
+function pick(key) { sel = key; renderList(); renderDetail(); }
+
+function renderDetail() {
+  const c = current();
+  if (!c) { $("detail").innerHTML = '<div class="card empty">← Pick a property</div>'; return; }
+  const b = bids[c.key] || (bids[c.key] = {bid: c.offer ? c.offer.bid : c.bid, bidText: ""});
+  const facts = [["Location", c.location], ["Area", c.area_m2 ? Math.round(c.area_m2) + " m²" : "–"],
+    ["Base value", c.price ? AS.money(c.price) : "–"], ["Current bid", c.current_bid ? AS.money(c.current_bid) : "none"],
+    ["Ends", c.date_end ? c.date_end.slice(0, 10) : "–"], ["Case", c.processo || "–"]];
+  const agent = c.agente_nome || c.agente_email || c.agente_contacto;
+  const online = c.modalidade === "LEILAO ELETRONICO";
+  $("detail").innerHTML = `
+  <div class="card">
+    <div class="row" style="align-items:flex-start">
+      <div style="flex:1">
+        <h2 style="font-size:16px;margin-bottom:6px">${AS.esc(c.title)}</h2>
+        <div class="row" style="gap:6px">
+          <span class="badge b-muted">${AS.esc(KIND_LABEL[c.modalidade] || c.modalidade)}</span>
+          <span class="badge b-muted">${AS.esc(c.categoria)}</span>${AS.scoreBadge(c.score)}
+          ${c.status === "shortlisted" ? '<span class="badge b-short">★ shortlisted</span>' : ""}
+        </div>
+      </div>
+      ${c.url ? AS.link(c.url, "Open listing ↗") : ""}
+    </div>
+    <div class="grid" style="margin-top:12px">${facts.map(([k, v]) => `<div class="cell"><div class="k">${k}</div><div class="v">${AS.esc(v || "–")}</div></div>`).join("")}</div>
+    ${c.description ? `<p class="small muted" style="margin-top:10px">${AS.esc(c.description)}</p>` : ""}
+    ${agent ? `<p class="small" style="margin-top:10px"><b>Agente de execução:</b> ${AS.esc(c.agente_nome || "")}
+       ${c.agente_contacto ? ` · <a href="tel:${AS.esc(c.agente_contacto)}">${AS.esc(c.agente_contacto)}</a>` : ""}
+       ${c.agente_email ? ` · <a href="mailto:${AS.esc(c.agente_email)}">${AS.esc(c.agente_email)}</a>` : ""}</p>` : ""}
+    <div class="tags" style="margin-top:10px">${(c.reasons || []).map(r => `<span class="tag">${AS.esc(r)}</span>`).join("")}</div>
+    <div style="margin-top:12px"><button class="btn" id="ai-btn" onclick="analyze()">AI check</button><div id="ai"></div></div>
+  </div>
+
+  ${c.offer ? outcomeCard(c) : ""}
+
+  <div class="card">
+    <h2>${c.offer ? (online ? "Bid logged" : "Offer sent") : (online ? "Your bid" : "Your offer")}</h2>
+    <div class="form-grid">
+      <div class="field"><label>Amount (EUR)</label><input id="bid" value="${AS.esc(b.bid)}" ${c.offer ? "disabled" : ""}></div>
+      <div class="field" style="grid-column: span 2"><label>In words (filled in automatically)</label><input id="bidtext" value="${AS.esc(b.bidText)}" placeholder="e.g. quatro mil euros" ${c.offer ? "disabled" : ""}></div>
+    </div>
+    ${c.offer ? "" : `<div class="row" style="margin-top:8px;gap:6px">${PRESETS.map(v => `<button class="btn btn-sm" onclick="setBid('${v}')">${v.split(",")[0]} €</button>`).join("")}</div>`}
+    <div id="bid-warn"></div>
+  </div>
+
+  ${online ? (c.offer ? "" : `<div class="card"><h2>How to bid</h2>
+    <div class="notice info" style="margin:0">This is an online auction: place your bid on the auction site${c.url ? ` (${AS.link(c.url, "open listing")})` : ""}.
+    Use this page to keep track of it — "Log my bid" records the amount you bid.</div></div>`) : `
+  <div class="card">
+    <div class="row"><h2 style="margin:0">Letter</h2><span class="spacer"></span>
+      <button class="btn btn-sm" onclick="copyLetter()">Copy</button>
+      <a class="btn btn-sm" id="pdf-link">Download PDF</a>
+      <a class="btn btn-sm" id="mail-link">Open in e-mail</a>
+    </div>
+    <textarea class="letter" id="letter" readonly style="margin-top:10px"></textarea>
+    <p class="small faint" style="margin-top:6px">Built from your details in Settings and the listing. What you see here is exactly what the PDF and e-mail contain.</p>
+  </div>`}
+
+  ${c.offer ? "" : `
+  <div class="card">
+    <h2>${online ? "Before you bid" : "Before you send"}</h2>
+    ${["Checked the land registry (conservatória)", "Checked the tax record (caderneta predial)", "No IMI or condominium debts",
+       "Property is vacant", "Visited the property, or seen recent photos", "Mortgage is cancelled by the sale"]
+      .map(l => `<label class="check" style="margin-bottom:6px"><input type="checkbox"> ${l}</label>`).join("")}
+    <div class="row" style="margin-top:12px">
+      <button class="btn btn-success" onclick="markSent()">${online ? "Log my bid" : "Mark as sent"}</button>
+      <button class="btn btn-danger" onclick="reject()">Reject</button>
+      ${c.status === "shortlisted" ? `<button class="btn" onclick="unshortlist()">Remove from shortlist</button>` : ""}
+    </div>
+  </div>`}`;
+
+  $("bid") && $("bid").addEventListener("input", e => { b.bid = e.target.value; b.bidText = ""; $("bidtext").value = ""; refreshLetter(); });
+  $("bidtext") && $("bidtext").addEventListener("input", e => { b.bidText = e.target.value; refreshLetter(); });
+  refreshLetter();
+}
+
+function outcomeCard(c) {
+  return `<div class="card"><h2>Outcome</h2>
+    <p class="small muted">Sent ${AS.esc(c.offer.sent_date || "")} · EUR ${AS.esc(c.offer.bid)} · currently <b>${AS.esc(c.offer.outcome)}</b></p>
+    <div class="row" style="margin-top:10px">
+      ${["won", "lost", "cancelled", "pending"].filter(o => o !== c.offer.outcome).map(o =>
+        `<button class="btn ${o === "won" ? "btn-success" : o === "lost" ? "btn-danger" : ""}" onclick="setOutcome(${c.offer.log_id}, '${o}')">Mark ${o}</button>`).join("")}
+    </div></div>`;
+}
+
+let letterTimer;
+function refreshLetter() {
+  clearTimeout(letterTimer);
+  letterTimer = setTimeout(async () => {
+    const c = current(); if (!c) return;
+    const b = bids[c.key];
+    const q = new URLSearchParams({id: c.id, bid: b.bid, bid_text: b.bidText});
+    const r = await (await fetch("/api/offers/letter?" + q)).json();
+    if (r.error) { AS.toast(r.error, "bad"); return; }
+    if (!b.bidText && $("bidtext")) $("bidtext").placeholder = r.bid_text;
+    if ($("letter")) {
+      $("letter").value = r.text;
+      $("pdf-link").href = "/api/offers/letter.pdf?" + q;
+      $("mail-link").href = `mailto:${encodeURIComponent(r.to || "")}?subject=${encodeURIComponent(r.subject)}&body=${encodeURIComponent(r.text)}`;
+    }
+    $("bid-warn").innerHTML = r.warning && !c.offer ? `<div class="notice bad">⚠ ${AS.esc(r.warning)}</div>` : "";
+  }, 250);
+}
+
+function setBid(v) { const c = current(); bids[c.key] = {bid: v, bidText: ""}; $("bid").value = v; $("bidtext").value = ""; refreshLetter(); }
+function copyLetter() { navigator.clipboard.writeText($("letter").value).then(() => AS.toast("Letter copied")); }
+
+async function markSent() {
+  const c = current(), b = bids[c.key];
+  const r = await AS.api("/api/offers/sent", {method: "POST", body: {id: c.id, bid: b.bid, bid_text: b.bidText}});
+  AS.toast("Logged as sent — it is now under Sent");
+  tab = "sent"; setTabs(); sel = "log:" + r.log_id; load();
+}
+async function reject() {
+  const c = current();
+  await AS.api("/api/listings/status", {method: "POST", body: {id: c.id, status: "dismissed"}});
+  AS.toast("Rejected", "warn"); sel = null; load();
+}
+async function unshortlist() {
+  const c = current();
+  await AS.api("/api/listings/status", {method: "POST", body: {id: c.id, status: null}});
+  AS.toast("Removed from shortlist"); sel = null; load();
+}
+async function setOutcome(logId, outcome) {
+  await AS.api(`/api/carta-log/${logId}`, {method: "PATCH", body: {outcome}});
+  AS.toast(outcome === "won" ? "Congratulations! 🎉" : `Marked ${outcome}`);
+  load();
+}
+
+async function analyze() {
+  const c = current(), btn = $("ai-btn"), out = $("ai");
+  btn.disabled = true; btn.textContent = "Asking Claude…";
+  try {
+    const d = await AS.api("/api/analyze-property", {method: "POST", body: {...c, bid: bids[c.key].bid}});
+    const col = d.verdict === "BUY" ? "ok" : d.verdict === "SKIP" ? "bad" : "warn";
+    const list = (title, xs, cls) => xs && xs.length ? `<div><div class="small ${cls}" style="font-weight:700">${title}</div>${xs.map(x => `<div class="small">– ${AS.esc(x)}</div>`).join("")}</div>` : "";
+    out.innerHTML = `<div class="card" style="margin-top:10px;background:var(--card-2)">
+      <div class="row"><b class="${col}" style="font-size:15px">${AS.esc(d.verdict)}</b><span class="small muted">confidence ${AS.esc(d.confidence)}/10</span></div>
+      <p style="margin:8px 0">${AS.esc(d.summary)}</p>
+      <div class="grid">${list("Positives", d.positives, "ok")}${list("Risks", d.risks, "warn")}${list("Red flags", d.red_flags, "bad")}</div>
+      <div class="grid" style="margin-top:10px">
+        <div class="cell"><div class="k">Market value</div><div class="v">${d.market_value_estimate ? AS.money(d.market_value_estimate) : "–"}</div></div>
+        <div class="cell"><div class="k">Discount</div><div class="v">${d.discount_pct != null ? Math.round(d.discount_pct) + "%" : "–"}</div></div>
+        <div class="cell"><div class="k">Renovation</div><div class="v">${d.renovation_cost ? AS.money(d.renovation_cost) : "–"}</div></div>
+        <div class="cell"><div class="k">Suggested bid / max</div><div class="v">EUR ${AS.esc(d.recommended_bid)} / ${AS.esc(d.max_bid)}</div></div>
+      </div>
+      <p class="small muted" style="margin-top:8px">${AS.esc(d.bid_reason)} ${d.visit_first ? "· Visit before bidding." : ""}</p>
+      ${list("Next steps", d.next_steps, "")}
+      ${current().offer ? "" : `<button class="btn btn-sm" style="margin-top:8px" data-bid="${AS.esc(d.recommended_bid)}" onclick="setBid(this.dataset.bid)">Use suggested bid</button>`}
+    </div>`;
+  } finally { btn.disabled = false; btn.textContent = "AI check"; }
+}
+
+function setTabs() { document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab)); }
+document.querySelectorAll("#tabs button").forEach(b => b.addEventListener("click", () => {
+  tab = b.dataset.tab; sel = null; setTabs(); renderList(); renderDetail();
+}));
+document.addEventListener("scan-finished", load);
+load();
+</script>
+{% endblock %}

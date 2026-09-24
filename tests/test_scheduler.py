@@ -57,10 +57,22 @@ def test_tick_runs_due_jobs_once_and_records_them(db, monkeypatch, tmp_path):
 
 
 def test_tick_skips_when_locked(db, monkeypatch, tmp_path):
+    import os
     lock = tmp_path / "lock"
-    lock.write_text("123")
+    lock.write_text(f"{os.getpid()} now")    # held by a live process
     monkeypatch.setattr(scheduler, "LOCK_PATH", str(lock))
     monkeypatch.setattr(scheduler, "JOB_FUNCS", {j: (lambda: 1 / 0) for j in scheduler.JOBS})
     import config
     monkeypatch.setattr(config, "load_config", lambda: {"schedule": {}})
     assert scheduler.tick() == []
+
+
+def test_lock_left_by_a_dead_process_is_taken_over(db, monkeypatch, tmp_path):
+    lock = tmp_path / "lock"
+    lock.write_text("999999999 yesterday")   # no such process
+    ran = []
+    monkeypatch.setattr(scheduler, "LOCK_PATH", str(lock))
+    monkeypatch.setattr(scheduler, "JOB_FUNCS", {j: (lambda j=j: ran.append(j)) for j in scheduler.JOBS})
+    import config
+    monkeypatch.setattr(config, "load_config", lambda: {"schedule": {}})
+    assert scheduler.tick() and ran

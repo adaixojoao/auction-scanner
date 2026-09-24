@@ -17,3 +17,8 @@ scheduler.lock
 fonts/
 cartas/
 .pytest_cache/
+config.json.tmp
+scan.lock
+reports/
+app.log*
+app-output.log

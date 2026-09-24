@@ -1,7 +1,11 @@
 """
-Generate proposal letters (cartas) for active Citius judicial sales.
-Checks live status on Citius, filters for quality properties, and generates PDFs.
+Proposal letters (cartas).
+
+build_letter() is the only place a letter is written. The Offers page preview,
+its PDF download, its "open in e-mail" button and `python scraper.py --cartas`
+all call it, so the letter you review is the letter you send.
 """
+from __future__ import annotations
 
 import json
 import logging
@@ -9,26 +13,30 @@ import os
 import re
 import sqlite3
 import time
+import urllib.request
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 import requests
 from bs4 import BeautifulSoup
+
+from common import has_term
 
 LOG = logging.getLogger("cartas")
 
 CITIUS_URL = "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx"
 
+# Whole-word terms (common.term_regex); "*" = prefix. "casa" no longer matches "Casal".
 RUSTICO_KEYWORDS = [
     "mato", "pinhal", "pastagem", "cultura arvense", "sequeiro",
-    "oliveir", "vinha", "eucalipt", "sobreir", "pasto",
+    "oliveir*", "vinha", "eucalipt*", "sobreir*", "pasto",
 ]
 CASA_KEYWORDS = [
-    "casa", "habitação", "habitacao", "moradia", "apartamento", "andar",
-    "assoalhada", "r/c", "res-do-chao", "rés-do-chão", "prédio urbano",
-    "predio urbano", "fração autónoma", "fracao autonoma",
+    "casa", "casas", "habitação", "moradia", "apartamento", "andar",
+    "assoalhada*", "r/c", "rés-do-chão", "prédio urbano", "fração autónoma",
 ]
 TERRENO_CONSTRUCAO_KEYWORDS = [
-    "construção urbana", "construcao urbana", "lote", "urbaniz",
+    "construção urbana", "lote", "urbaniz*",
 ]
 
 MIN_HERDADE_M2 = 5000
@@ -503,39 +511,232 @@ def _today_for_country(country: str, place: str = "Guarda") -> str:
 
 def build_carta_for_country(item: dict, raw: dict, bid: str, bid_text: str,
                             proponente: dict, country: str) -> str:
-    tmpl = CARTA_TEMPLATES.get(country, CARTA_TEMPLATES["DEFAULT"])
-    modalidade = raw.get("modalidade", "").lower()
-    is_neg = "negoci" in modalidade or "direct" in modalidade or "private" in modalidade
-    body_key = "negociacao" if is_neg else "carta_fechada"
+    """Old entry point; the text of build_letter()."""
+    return build_letter({**item, "country": country, "raw_json": json.dumps(raw)},
+                        bid, bid_text, proponente).text
 
-    processo = raw.get("processo", item.get("external_id", ""))
+
+# ── Amounts ──────────────────────────────────────────────────────────────────
+
+_UNITS = ["zero", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove",
+          "dez", "onze", "doze", "treze", "catorze", "quinze", "dezasseis", "dezassete",
+          "dezoito", "dezanove"]
+_TENS = ["", "", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta",
+         "oitenta", "noventa"]
+_HUNDREDS = ["", "cento", "duzentos", "trezentos", "quatrocentos", "quinhentos",
+             "seiscentos", "setecentos", "oitocentos", "novecentos"]
+
+
+def _below_1000(n: int) -> str:
+    if n == 100:
+        return "cem"
+    parts = []
+    if n >= 100:
+        parts.append(_HUNDREDS[n // 100])
+        n %= 100
+    if n >= 20:
+        parts.append(_TENS[n // 10])
+        n %= 10
+    if n or not parts:
+        parts.append(_UNITS[n])
+    return " e ".join(parts)
+
+
+def _joiner(rest: int) -> str:
+    # "dois mil e quinhentos", "dois mil e cinquenta", but "dois mil trezentos e dez"
+    return " e " if rest < 100 or rest % 100 == 0 else " "
+
+
+def por_extenso(value: float) -> str:
+    """4000 → "quatro mil euros", 2500 → "dois mil e quinhentos euros"."""
+    euros = int(round(value * 100)) // 100
+    cents = int(round(value * 100)) % 100
+    millions, rest = divmod(euros, 1_000_000)
+    thousands, units = divmod(rest, 1000)
+
+    parts = []
+    if millions:
+        parts.append("um milhão" if millions == 1 else f"{_below_1000(millions)} milhões")
+    if thousands:
+        chunk = "mil" if thousands == 1 else f"{_below_1000(thousands)} mil"
+        parts.append((_joiner(rest) if millions and not units else " " if parts else "") + chunk)
+    if units:
+        parts.append((_joiner(units) if parts else "") + _below_1000(units))
+    words = "".join(parts).strip() or "zero"
+    if millions and not rest:
+        words += " de"
+    words += " euro" if euros == 1 else " euros"
+    if cents:
+        words += f" e {_below_1000(cents)} {'cêntimo' if cents == 1 else 'cêntimos'}"
+    return words
+
+
+def format_bid(value: float) -> str:
+    """4000 → "4.000,00" (Portuguese format, as the letters print it)."""
+    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def parse_bid(text) -> float | None:
+    """"4.000,00" / "4000" / "4 000" → 4000.0"""
+    from common import parse_price
+    return parse_price(text)
+
+
+# ── Letters ──────────────────────────────────────────────────────────────────
+
+@dataclass
+class Letter:
+    country: str
+    sender: list[str]
+    place_date: str
+    recipient: list[str]
+    subject: str
+    body: str
+    processo: str = ""
+    to_email: str = ""
+    kind: str = "carta_fechada"
+    ref: str = ""
+    extra: dict = field(default_factory=dict)
+
+    @property
+    def subject_line(self) -> str:
+        return f"Assunto: {self.subject}" if self.country == "PT" else self.subject
+
+    @property
+    def text(self) -> str:
+        return "\n".join([*self.sender, "", self.place_date, "", *self.recipient, "",
+                          self.subject_line, "", self.body])
+
+    @property
+    def filename(self) -> str:
+        proc = re.sub(r"[^A-Za-z0-9.-]+", "-", self.processo or "sem-processo").strip("-")
+        return f"carta_{proc}.pdf"
+
+
+def sale_kind(modalidade: str | None) -> str:
+    m = (modalidade or "").lower()
+    if "negoci" in m or "direct" in m or "private" in m:
+        return "negociacao"
+    if "adjudica" in m:
+        return "adjudicacao"
+    return "carta_fechada"
+
+
+def build_letter(item: dict, bid: str, bid_text: str | None, proponente: dict) -> Letter:
+    """The letter for one listing. `bid` is "4.000,00"; an empty bid_text is
+    written out in words (Portuguese)."""
+    raw = {}
+    if item.get("raw_json"):
+        try:
+            raw = json.loads(item["raw_json"])
+        except (TypeError, ValueError):
+            raw = {}
+    country = item.get("country") or "PT"
+    kind = sale_kind(raw.get("modalidade"))
+    processo = str(raw.get("processo") or item.get("external_id") or "").split(",")[0].strip()
     loc = ", ".join(filter(None, [item.get("concelho"), item.get("district")]))
-    area = f"{item['area_m2']:,.0f} m²" if item.get("area_m2") else "n/a"
+    title = (item.get("title") or "Imóvel")[:120]
+    if not bid_text:
+        value = parse_bid(bid)
+        bid_text = por_extenso(value) if value else ""
 
-    header = (
-        f"{proponente['nome']}\n"
-        f"NIF/ID: {proponente['nif']}\n"
-        f"{proponente['morada']}\n\n"
-        f"{_today_for_country(country, proponente.get('localidade') or 'Guarda')}\n\n"
-        f"{tmpl['salutation']}\n"
-        f"{raw.get('tribunal', '')}\n\n"
-        f"{tmpl['subject'].format(processo=processo)}\n\n"
-    )
+    nome, nif = proponente.get("nome", ""), proponente.get("nif", "")
+    morada, email = proponente.get("morada", ""), proponente.get("email", "")
+    place = proponente.get("localidade") or "Guarda"
+    tmpl = CARTA_TEMPLATES.get(country, CARTA_TEMPLATES["DEFAULT"])
 
-    body = tmpl[body_key].format(
-        title=item.get("title", ""),
-        location=loc,
-        area=area,
-        nome=proponente["nome"],
-        nif=proponente["nif"],
-        morada=proponente["morada"],
-        email=proponente.get("email", ""),
-        bid=bid,
-        bid_text=bid_text,
+    if country == "PT":
+        area = f"{item['area_m2']:.0f} m²" if item.get("area_m2") else "área não especificada"
+        body = _pt_letter_body(kind, nome=nome, nif=nif, morada=morada, email=email, title=title,
+                               loc=loc, area=area, valor=bid, valor_texto=bid_text)
+        sender = [nome, f"NIF: {nif}", *morada.splitlines()]
+    else:
+        area = f"{item['area_m2']:,.0f} m²" if item.get("area_m2") else "n/a"
+        body = tmpl["negociacao" if kind == "negociacao" else "carta_fechada"].format(
+            title=title, location=loc, area=area, nome=nome, nif=nif, morada=morada,
+            email=email, bid=bid, bid_text=bid_text, processo=processo)
+        sender = [nome, f"NIF/ID: {nif}", *morada.splitlines()]
+
+    return Letter(
+        country=country,
+        sender=sender,
+        place_date=_today_for_country(country, place),
+        recipient=[tmpl["salutation"], *([raw["tribunal"]] if raw.get("tribunal") else [])],
+        subject=tmpl["subject"].format(processo=processo).replace("—", "-"),
+        body=body,
         processo=processo,
+        to_email=raw.get("agente_email", ""),
+        kind=kind,
+        ref=f"Ref: {raw.get('processo') or item.get('id', '')}",
+        extra={"bid_text": bid_text},
     )
 
-    return header + body
+
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+_DEJAVU = {
+    "DejaVuSans.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
+    "DejaVuSans-Bold.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf",
+}
+
+
+def _unicode_fonts() -> tuple[str, str] | None:
+    """DejaVu (full Unicode) — downloaded once into fonts/. None if unavailable."""
+    paths = {name: os.path.join(FONT_DIR, name) for name in _DEJAVU}
+    if not all(os.path.exists(p) for p in paths.values()):
+        try:
+            os.makedirs(FONT_DIR, exist_ok=True)
+            for name, url in _DEJAVU.items():
+                if not os.path.exists(paths[name]):
+                    LOG.info(f"Downloading {name} for PDF letters...")
+                    urllib.request.urlretrieve(url, paths[name])
+        except Exception as e:
+            LOG.warning(f"Could not download DejaVu font ({e}); PDFs will drop accents.")
+            return None
+    return paths["DejaVuSans.ttf"], paths["DejaVuSans-Bold.ttf"]
+
+
+def letter_pdf(letter: Letter, path: str | None = None) -> bytes:
+    """Render a letter as PDF. Writes it to `path` if given; returns the bytes."""
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=25)
+    fonts = _unicode_fonts()
+    if fonts:
+        pdf.add_font("DejaVu", "", fonts[0])
+        pdf.add_font("DejaVu", "B", fonts[1])
+        fn, s = "DejaVu", (lambda t: t or "")
+    else:
+        fn, s = "Helvetica", _safe_latin1
+
+    pdf.set_font(fn, "B", 11)
+    pdf.cell(0, 6, s(letter.sender[0]), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(fn, size=10)
+    for line in letter.sender[1:]:
+        pdf.cell(0, 5, s(line), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(8)
+    pdf.cell(0, 5, s(letter.place_date), new_x="LMARGIN", new_y="NEXT", align="R")
+    pdf.ln(6)
+    for i, line in enumerate(letter.recipient):
+        pdf.set_font(fn, "B" if i == 0 else "", 10)
+        pdf.cell(0, 5, s(line), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(8)
+    pdf.set_font(fn, "B", 10)
+    pdf.multi_cell(0, 5, s(letter.subject_line))
+    pdf.ln(4)
+    pdf.set_font(fn, size=10)
+    pdf.multi_cell(0, 5, s(letter.body))
+    if letter.ref:
+        pdf.ln(10)
+        pdf.set_font(fn, size=7)
+        pdf.cell(0, 4, s(letter.ref), new_x="LMARGIN", new_y="NEXT")
+
+    data = bytes(pdf.output())
+    if path:
+        with open(path, "wb") as f:
+            f.write(data)
+    return data
 
 
 def _safe_latin1(text: str) -> str:
@@ -557,12 +758,12 @@ def _safe_latin1(text: str) -> str:
 
 
 def classify_property(title: str, description: str, area_m2: float) -> str | None:
-    combined = (title + " " + description).lower()
+    combined = f"{title} {description}"
     area = area_m2 or 0
 
-    is_casa = any(k in combined for k in CASA_KEYWORDS)
-    is_terreno = any(k in combined for k in TERRENO_CONSTRUCAO_KEYWORDS)
-    is_rustico_small = any(k in combined for k in RUSTICO_KEYWORDS) and area < MIN_HERDADE_M2
+    is_casa = has_term(combined, CASA_KEYWORDS, negations=False)
+    is_terreno = has_term(combined, TERRENO_CONSTRUCAO_KEYWORDS, negations=False)
+    is_rustico_small = has_term(combined, RUSTICO_KEYWORDS, negations=False) and area < MIN_HERDADE_M2
     is_herdade = area >= MIN_HERDADE_M2
 
     if is_casa:
@@ -776,227 +977,82 @@ def generate_cartas(
     top_n: int = 15,
     filters: dict | None = None,
 ) -> list[dict]:
-    """Find top properties, check if active, generate PDF letters.
+    """Batch mode (`python scraper.py --cartas`): the top Citius listings that
+    Citius still shows as "Em venda" get a PDF letter each in `out_dir`.
 
-    Args:
-        score_fn, categorize_fn: ignored; kept so old callers still work.
-            Scores come from db.load_listings(), the same as every other view.
-        proponente: {"nome": ..., "nif": ..., "morada": ..., "email": ...,
-                     "localidade": town printed next to the date (default Guarda)}
-
-    Returns:
-        List of generated carta info dicts.
+    score_fn and categorize_fn are ignored (kept for old callers); scores come
+    from db.load_listings() like everywhere else. The Offers page in the app is
+    the interactive version of this.
     """
     missing = [k for k in ("nome", "nif", "morada") if not (proponente or {}).get(k)]
     if missing:
-        LOG.error(f"config.json proponente is missing {', '.join(missing)}; no cartas generated.")
+        LOG.error(f"Settings → your details is missing {', '.join(missing)}; no letters generated.")
         return []
-    try:
-        from fpdf import FPDF
-    except ImportError:
+    import importlib.util
+    if importlib.util.find_spec("fpdf") is None:
         LOG.error("fpdf2 not installed. Run: pip install fpdf2")
         return []
 
-    import urllib.request
-    font_dir = os.path.join(os.path.dirname(__file__), "fonts")
-    os.makedirs(font_dir, exist_ok=True)
-    font_path = os.path.join(font_dir, "DejaVuSans.ttf")
-    font_bold = os.path.join(font_dir, "DejaVuSans-Bold.ttf")
-    use_dejavu = True
-    if not (os.path.exists(font_path) and os.path.exists(font_bold)):
-        try:
-            LOG.info("Downloading DejaVu font for PDF generation...")
-            urllib.request.urlretrieve(
-                "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
-                font_path,
-            )
-            urllib.request.urlretrieve(
-                "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf",
-                font_bold,
-            )
-        except Exception as e:
-            LOG.warning(f"Could not download DejaVu font: {e}. Falling back to Helvetica.")
-            use_dejavu = False
-
     from db import load_listings
-    # Same visibility rules as the report and dashboard: no expired, duplicate,
-    # stale or filtered listings.
     items = load_listings(db, filters=filters, where="country='PT' AND source='citius'")
 
-    # Score and classify
     candidates = []
     for it in items:
-        if it["category"] != "imoveis":
+        if it["category"] != "imoveis" or it["score"] == 0 or (it.get("current_bid") or 0) > 10000:
             continue
-        sc, reasons = it["score"], it["reasons"]
-        if sc == 0:
-            continue
-
-        bid = it.get("current_bid") or 0
-        if bid > 10000:
-            continue
-
-        title = it.get("title") or ""
-        desc = it.get("description") or ""
-        area = it.get("area_m2") or 0
-
-        cat = classify_property(title, desc, area)
-        if cat is None:
-            continue
-
-        candidates.append((it, sc, reasons, cat))
-
-    candidates.sort(key=lambda x: -x[1])
+        if it.get("offer_outcome") and it["offer_outcome"] != "cancelled":
+            continue  # an offer was already sent
+        cat = classify_property(it.get("title") or "", it.get("description") or "", it.get("area_m2") or 0)
+        if cat is not None:
+            candidates.append((it, cat))
+    candidates.sort(key=lambda c: -c[0]["score"])
     candidates = candidates[:top_n * 2]
-
     if not candidates:
-        LOG.info("No quality properties found for cartas")
+        LOG.info("No quality properties found for letters")
         return []
 
-    # Build process -> tribunal map for active check
-    proc_trib = {}
-    proc_data = {}
-    for it, sc, reasons, cat in candidates:
-        raw = {}
-        if it.get("raw_json"):
-            try:
-                raw = json.loads(it["raw_json"])
-            except Exception:
-                pass
-        processo = raw.get("processo", "")
-        proc_key = processo.split(",")[0].strip() if processo else ""
-        tribunal = raw.get("tribunal", "")
-        if proc_key and tribunal:
-            proc_trib[proc_key] = tribunal
-            proc_data[proc_key] = (it, sc, reasons, cat, raw)
+    by_proc = {}
+    for it, cat in candidates:
+        raw = json.loads(it.get("raw_json") or "{}")
+        proc = str(raw.get("processo") or "").split(",")[0].strip()
+        if proc and raw.get("tribunal"):
+            by_proc[proc] = (it, cat, raw["tribunal"])
 
-    LOG.info(f"Checking {len(proc_trib)} processes on Citius...")
-    print(f"\nVerificando {len(proc_trib)} processos no Citius...\n")
-
-    estados = check_citius_active(proc_trib)
-
-    active_procs = []
+    print(f"\nChecking {len(by_proc)} processes on Citius...\n")
+    estados = check_citius_active({p: v[2] for p, v in by_proc.items()})
+    active = []
     for proc, estado in estados.items():
         is_active = "em venda" in estado.lower()
-        marker = "OK" if is_active else "XX"
-        cat = proc_data[proc][3] if proc in proc_data else "?"
-        print(f"  [{marker}] {proc} — {estado} ({cat})")
+        print(f"  [{'OK' if is_active else 'XX'}] {proc} — {estado} ({by_proc[proc][1]})")
         if is_active:
-            active_procs.append(proc)
-
-    print(f"\n{len(active_procs)} de {len(estados)} ativas\n")
-
-    if not active_procs:
-        print("Nenhuma ativa. Nao foram geradas cartas.")
+            active.append(proc)
+    print(f"\n{len(active)} of {len(estados)} still for sale\n")
+    if not active:
         return []
 
-    # Generate PDFs
     os.makedirs(out_dir, exist_ok=True)
     for f in os.listdir(out_dir):
         if f.startswith("carta_") and f.endswith(".pdf"):
             os.remove(os.path.join(out_dir, f))
 
-    nome = proponente["nome"]
-    nif = proponente["nif"]
-    morada = proponente["morada"]
-    email = proponente.get("email", "")
-
-    from datetime import date
-    d = date.today()
-    today = f"{d.day} de {_MONTH_NAMES['PT'][d.month - 1]} de {d.year}"
-    localidade = proponente.get("localidade") or "Guarda"
-
     generated = []
-    count = 0
-
-    for proc in active_procs:
-        if proc not in proc_data:
-            continue
-        it, sc, reasons, cat, raw = proc_data[proc]
+    for proc in active[:top_n]:
+        it, cat, _trib = by_proc[proc]
         valor, valor_texto = suggest_bid(cat, it.get("price"), it.get("area_m2"))
+        letter = build_letter(it, valor, valor_texto, proponente)
+        filepath = os.path.join(out_dir, letter.filename)
+        letter_pdf(letter, filepath)
+        print(f"  EUR {valor} | {letter.kind} | {cat}")
+        print(f"       {(it.get('title') or '')[:60]}")
+        print(f"       -> {letter.filename}\n")
+        generated.append({"processo": proc, "tribunal": _trib, "modalidade": letter.kind,
+                          "valor": valor, "categoria": cat, "filepath": filepath})
 
-        count += 1
-        processo = raw.get("processo", "")
-        tribunal = raw.get("tribunal", "")
-        modalidade = raw.get("modalidade", "")
-        title_short = (it.get("title") or "Imóvel")[:80]
-        loc = ", ".join(filter(None, [it.get("concelho", ""), it.get("district", "")]))
-        area_str = f"{it['area_m2']:.0f} m²" if it.get("area_m2") else "área não especificada"
+    total = sum(parse_bid(g["valor"]) or 0 for g in generated)
+    print(f"=== {len(generated)} letters in {out_dir} — total exposure EUR {total:,.2f} ===")
 
-        is_negociacao = "negociação particular" in modalidade.lower() or "negociacao particular" in modalidade.lower()
-        is_adjudicacao = "adjudica" in modalidade.lower()
-
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_auto_page_break(auto=True, margin=25)
-
-        if use_dejavu:
-            pdf.add_font("DejaVu", "", font_path)
-            pdf.add_font("DejaVu", "B", font_bold)
-            fn, s = "DejaVu", lambda t: t or ""
-        else:
-            fn, s = "Helvetica", _safe_latin1
-
-        pdf.set_font(fn, "B", 11)
-        pdf.cell(0, 6, s(nome), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font(fn, size=10)
-        pdf.cell(0, 5, f"NIF: {nif}", new_x="LMARGIN", new_y="NEXT")
-        pdf.multi_cell(0, 5, s(morada))
-        pdf.ln(8)
-        pdf.cell(0, 5, s(f"{localidade}, {today}"), new_x="LMARGIN", new_y="NEXT", align="R")
-        pdf.ln(6)
-
-        pdf.set_font(fn, "B", 10)
-        pdf.cell(0, 5, s("Exmo(a). Sr(a). Juiz / Agente de Execução"), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font(fn, size=10)
-        pdf.cell(0, 5, s(tribunal), new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(8)
-
-        proc_key = processo.split(",")[0].strip()
-        pdf.set_font(fn, "B", 10)
-        pdf.cell(0, 5, s(f"Assunto: Proposta de Aquisição - Processo {proc_key}"), new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(6)
-        pdf.set_font(fn, size=10)
-        body = s(_pt_letter_body(
-            "negociacao" if is_negociacao else "adjudicacao" if is_adjudicacao else "carta_fechada",
-            nome=nome, nif=nif, morada=morada, email=email, title=title_short, loc=loc,
-            area=area_str, valor=valor, valor_texto=valor_texto,
-        ))
-
-        pdf.multi_cell(0, 5, body)
-        pdf.ln(10)
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.cell(0, 4, _safe_latin1(f"Ref: {processo} | {cat}"), new_x="LMARGIN", new_y="NEXT")
-
-        filename = f"carta_{count:02d}_{proc_key.replace('/', '-')}_{valor.replace('.', '').replace(',', '_')}EUR.pdf"
-        filepath = os.path.join(out_dir, filename)
-        pdf.output(filepath)
-
-        mod_label = "NEG.PARTICULAR" if is_negociacao else "ADJUDICACAO" if is_adjudicacao else "CARTA FECHADA"
-        print(f"  [{count}] EUR {valor} | {mod_label} | {cat}")
-        print(f"       {s(title_short)[:60]}")
-        print(f"       {s(loc)}")
-        print(f"       -> {filename}")
-        print()
-
-        generated.append({
-            "processo": proc_key,
-            "tribunal": tribunal,
-            "modalidade": mod_label,
-            "valor": valor,
-            "categoria": cat,
-            "filepath": filepath,
-        })
-
-    total = sum(
-        float(g["valor"].replace(".", "").replace(",", "."))
-        for g in generated
-    )
-    print(f"=== {count} cartas geradas em {out_dir} ===")
-    print(f"Exposicao total: EUR {total:,.2f}")
-
-    import subprocess, sys
+    import subprocess
+    import sys
     if sys.platform == "win32" and generated:
         subprocess.Popen(f'explorer "{out_dir}"')
-
     return generated

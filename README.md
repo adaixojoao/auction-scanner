@@ -1,75 +1,103 @@
 # EU Auction Scanner
 
-Scrapes judicial auctions, forced sales, tax seizures and bank repossessions in
-12 EU countries, scores every listing for deep-discount potential, alerts you
-about the good ones and helps prepare the proposal letters (*cartas*) for
-Portuguese court sales.
+A desktop app that watches judicial auctions, forced sales, tax seizures and bank
+repossessions in 12 EU countries, scores every listing for deep-discount
+potential, and helps you prepare, send and track your offers.
 
 ```
-40 sources ──► SQLite (auctions.db) ──► one loader ──► report · dashboard · alerts · cartas
-                     never deleted          scores, hides expired / duplicate / stale / filtered
+40 sources ──scan──► SQLite (auctions.db) ──► Listings · Offers · Map · Sources · Settings
+                     never deleted              one score, one set of rules, everywhere
 ```
 
-## Quick start
+## Install (once)
 
-```bash
-pip install -r requirements.txt
-copy config.example.json config.json      # then fill in proponente, telegram, …
-python scraper.py --country PT            # scrape Portugal, write report.md/.docx/.pdf
-python dashboard.py                       # http://127.0.0.1:8050
-```
+1. Install [Python 3.11+](https://www.python.org/downloads/) — tick **"Add python.exe to PATH"**.
+2. In this folder, open a terminal and run:
+   ```
+   pip install -r requirements.txt
+   ```
+3. Double-click **`create_shortcut.bat`**. An **Auction Scanner** icon appears on your Desktop.
 
-On Windows, `create_shortcut.bat` puts an *Auction Scanner* icon on the desktop
-that scrapes Portugal, generates cartas and opens the dashboard (`launch.bat`).
+## Use
 
-## Command line
+Double-click **Auction Scanner** on the Desktop. The app opens in its own
+window; close the window and it quits by itself a few minutes later (after
+finishing a scan that is in progress). Opening it while it runs just opens
+another window.
 
-```bash
-python scraper.py                        # every default source, all countries
-python scraper.py --country PT           # one country …
-python scraper.py --country ES,FR,IT     # … or several
-python scraper.py --source citius        # one source
-python scraper.py --list-sources         # what exists, by country
-python scraper.py --health               # which scrapers are working (see below)
-python scraper.py --report-only          # rebuild the report from the database
-python scraper.py --max-price 30000      # budget for this run
-python scraper.py --sealed-bid           # print carta-fechada listings with agent contacts
-python scraper.py --cartas --cartas-top 20   # proposal PDFs for active Citius sales
-python scraper.py --check-active         # which Citius processes are still "Em venda"
-python scraper.py --analyze              # Claude verdicts on the top 25 (needs ANTHROPIC_API_KEY)
-python scraper.py --notify / --digest    # e-mail alerts / weekly digest
-```
-
-## Dashboard
-
-`python dashboard.py` → http://127.0.0.1:8050
-
-| Page | What it is |
+| Page | What it is for |
 |---|---|
-| `/` | All listings: filter, sort, search. **Show hidden** reveals what the filters, de-duplication and staleness rules are hiding, and why. |
-| `/cartas-review` | Review, adjust and approve proposal letters; logs what you send. Warns when an offer is below the legal minimum for a carta-fechada sale. |
-| `/map` | Portuguese listings on a map. |
-| `/health` | Every source: last run, how many listings, errors, and how many runs in a row it has returned nothing. |
+| **Listings** | Everything found, scored. ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
+| **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
+| **Map** | Portuguese listings by district. |
+| **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
+| **Settings** | Budget, what to hide, your details for letters, alerts, automatic scanning. |
 
-## Source health — read this
+**Scan now** (top right) scans Portugal or every country; progress shows
+next to it. While the app is open it also scans on the timetable in
+Settings (Portugal every 2 h, other countries every 6 h). Tick *Keep scanning
+when the app is closed* to install a quiet Windows background task that does
+the same when the app is closed.
 
-Many of the 40 scrapers were written from a site's URL without confirming the
-page layout, and sites change. A scraper that silently returns 0 looks exactly
-like "no listings today", so every run is recorded (`scrape_log`) and
-classified:
+### Offers, step by step
 
-- **ok** — returned listings last run
-- **broken** — used to return listings, now returns none (usually a layout change)
-- **never worked** — has never returned a listing (selectors unconfirmed)
-- **error** — the site failed; the message says how
+1. A listing you ☆ on Listings, or a strong court sale, appears under **To review**.
+2. Pick an amount (presets or type one). The amount in words is written for you
+   (*quatro mil euros*). The letter below updates as you type — it is built from
+   your details in Settings and the listing, and it is exactly what the PDF and
+   e-mail will contain.
+3. **Download PDF** or **Open in e-mail** (addressed to the agente de execução
+   when known).
+4. **Mark as sent**. It moves to **Sent**; when you hear back, mark it
+   **won**, **lost** or **cancelled**.
 
-It is on `/health`, at the end of every report, in the console after each run,
-and in the weekly Telegram summary. Fix a broken card-grid site by editing its
-`CardSite` spec in `sources/<country>.py`.
+e-leilões listings are online auctions: the page links to the listing and
+**Log my bid** records what you bid there, instead of a letter.
 
-## Sources
+**The 85% rule.** In Portuguese executive sales by *propostas em carta fechada*
+(and on e-leilões) the announced value is 85% of the *valor base*, and offers
+below it are normally not accepted. The Offers page warns when an amount is
+under that line. The low fixed amounts suggested by default make sense for
+*negociação particular*; confirm the sale type with the agente de execução.
 
-`python scraper.py --list-sources` is the authoritative list.
+**AI check** (on Offers) asks Claude for a verdict, risks and a suggested bid.
+It needs the `ANTHROPIC_API_KEY` environment variable.
+
+## What gets shown
+
+Listings are **never deleted**. Every page, the report and the alerts hide a
+listing when it is:
+
+1. **dismissed** by you;
+2. **expired** — the sale date has passed (a date without a time counts until the end of that day);
+3. a **duplicate** — same country + municipality, price within €500 and area within 5 m² of a more complete listing from another source;
+4. **stale** — its source has scanned successfully for 3+ days without seeing it (sold or withdrawn);
+5. **filtered** — countries, hidden words, minimum area (Settings);
+6. **low score** — below the minimum score (Settings).
+
+A shortlisted listing ignores 5 and 6: you picked it on purpose. *Listings →
+Show → Hidden* shows what is hidden and why.
+
+## Scoring (0–100)
+
+Starts at 50.
+
+- **Skip (score 0):** fractional shares (`1/2`, `1 / 2 (Um Meio)`, `½`, quota-parte, avos…) and usufruct.
+- **Down:** occupied/tenanted, no road access, inheritance rights only, overheated bidding, parking/storage only, suspiciously cheap.
+- **Up:** deep bid-to-value discount, no bids yet, price cut since first seen, sealed-bid sale, forced/tax sale, no or tiny minimum bid, full dwelling, vacant (*devoluto*), rural land, size, €1k–30k sweet spot, below the local €/m² estimate, ending within 3–7 days.
+
+Words match whole words, accents ignored, and negations are understood:
+*desocupado* is vacant, not occupied; *não arrendado* is not tenanted; *Casal
+do Mato* is not a *casa*.
+
+## Sources and their health
+
+Many scrapers were written from a site's address without confirming the page
+layout, and sites change. A scraper that silently finds nothing looks exactly
+like "no listings today", so every run is recorded and the **Sources** page
+says which state each is in: **ok**, **broken** (worked before, finds nothing
+now), **never worked**, or **error** (with the reason in plain words). Failing
+sources are also listed in the report and the weekly Telegram summary.
 
 | Country | Sources |
 |---|---|
@@ -80,94 +108,59 @@ and in the weekly Telegram summary. Fix a broken card-grid site by editing its
 | DE | zvg-portal, justiz-auktion, zwangsversteigerung.de |
 | NL | openbareverkoop, veilingnotaris, veilingbiljet |
 | BE · HR · GR · RO · PL · CY | biddit · e-oglasna, FINA · eauction · ANAF · komornik · DLS |
-| EU | *CourtBid via Apify (needs `apify_token`, on request)* |
+| EU | *CourtBid via Apify (needs `apify_token` in config.json, on request)* |
 
-Polish and Romanian sites price in PLN/RON; only amounts marked € are read, so
-most of those listings show no price.
-
-## What gets shown
-
-Listings are **never deleted**. Everything reads through `db.load_listings()`,
-which hides a listing when it is:
-
-1. **expired** — the sale date has passed (a date without a time counts until the end of that day);
-2. a **duplicate** — same country + municipality, price within €500 and area within 5 m² as a more complete listing from another source;
-3. **stale** — its source has scraped successfully for 3+ days without seeing it (sold or withdrawn);
-4. **filtered** — excluded by `filters` in config.json (countries, keywords, area, types, districts);
-5. **low score** — below `filters.min_score`.
-
-Change a filter and the next page load reflects it; nothing has to be re-scraped.
-
-## Scoring (0–100)
-
-Starts at 50. Main signals:
-
-- **Skip (score 0):** fractional shares (`1/2`, `1 / 2 (Um Meio)`, `½`, quota-parte, avos…) and usufruct.
-- **Down:** occupied/tenanted, no road access, inheritance rights only, overheated bidding, parking/storage only, suspiciously cheap.
-- **Up:** deep bid-to-value discount, no bids yet, price cut since first seen, sealed-bid sale, forced/tax sale, no or tiny minimum bid, full dwelling, vacant (*devoluto*), rural land, size, €1k–30k sweet spot, below the local €/m² estimate, ending within 3–7 days.
-
-Keywords match whole words, accent-insensitively, and ignore negations
-("não arrendado", "sem inquilinos"): *desocupado* is vacant, not occupied, and
-*Casal do Mato* is not a *casa*.
+Polish and Romanian sites price in PLN/RON; only amounts marked € are read.
 
 ## Alerts
 
-- **Telegram** (`telegram` in config.json): new listings scoring ≥ `min_score`
-  (one message each, or one digest when there are more than 5), a twice-daily
-  list of sales ending within 4 days with no offer logged, a weekly summary with
-  failing sources, and a message when you mark a carta as won.
-- **E-mail** (`notifications`): same idea via SMTP; `--digest` for a weekly top 15.
+Set up in **Settings**:
 
-A listing is alerted once per channel (`alert_log`); a failed send is retried next run.
+- **Telegram** — new listings above a score (one message each, or one digest
+  when there are more than 5), a twice-daily list of sales ending within 4 days
+  with no offer sent, a weekly summary, and a message when you mark an offer won.
+- **E-mail** — the same new-listing alerts by SMTP.
 
-## Scheduling
+Each listing is alerted once per channel; a failed send is retried next time.
+
+## Files
+
+| | |
+|---|---|
+| `auctions.db` | Everything found, your decisions and your offers. Back it up. |
+| `config.json` | Your settings (written by the Settings page). |
+| `reports/` | The latest report (`.md`, `.docx`, `.pdf`). |
+| `app.log`, `scheduler.log` | What the app and the background task did. |
+
+All of these stay on your computer and are ignored by git.
+
+## Command line (optional)
+
+Everything the app does is also available from a terminal:
 
 ```bash
-python scheduler.py install   # Windows Task Scheduler: runs `tick` every 30 min (no console window)
-python scheduler.py status    # the task, plus when each job last ran
-python scheduler.py due       # what would run now
-python scheduler.py run       # no Task Scheduler: stay open and tick every 5 min
-python scheduler.py pt|eu|morning|report   # run one job now
+python scraper.py --country PT           # scan Portugal and write the report
+python scraper.py --country ES,FR        # several countries
+python scraper.py --source citius        # one source
+python scraper.py --list-sources
+python scraper.py --health               # the Sources page, in the terminal
+python scraper.py --report-only
+python scraper.py --cartas --cartas-top 20   # batch: PDF letters for active Citius sales
+python scraper.py --check-active         # which Citius processes are still "Em venda"
+python scraper.py --analyze              # Claude verdicts on the top 25
+python scheduler.py due | tick | status  # the timetable
+python dashboard.py                      # the web interface without the desktop window
 ```
-
-Each tick runs whatever is due: Portugal every 2 h, other countries every 6 h,
-deadline checks at 08:00 and 20:00, weekly summary Monday 08:00 (all in
-`schedule` in config.json). Missed slots are caught up on the next tick, and a
-lock stops two ticks overlapping. Log: `scheduler.log`.
-
-## Configuration
-
-All settings live in `config.json` (gitignored); `config.example.json` shows
-every key and `config.py` has the defaults. Command-line flags win.
-
-| Key | |
-|---|---|
-| `max_price`, `max_bid` | Budget |
-| `filters` | What is shown (see above) |
-| `proponente` | Name, NIF, address, e-mail and town printed on every carta |
-| `telegram`, `notifications` | Alerts |
-| `schedule` | Scheduler timetable |
-| `proxies` | Proxy rotation for all scrapers |
-| `report.desktop_copy` | Also write Auction-Report.docx/.pdf to the Desktop |
-| `dashboard` | Host, port, `debug` (keep off: Flask's debugger runs code from the browser) |
-| `apify_token` | For `--source courtbid` |
-
-## Cartas and the 85% rule
-
-For Portuguese executive sales by *propostas em carta fechada* the announced
-value is 85% of the *valor base*, and offers below it are normally not
-accepted. The review page warns when an offer is under that line. The low
-fixed offers `suggest_bid()` proposes make sense for *negociação particular*;
-confirm the sale type with the agente de execução before sending.
 
 ## Development
 
 ```
-scraper.py      CLI            sources/     one module per country + registry (sources/__init__.py)
-common.py       HTTP, parsing  db.py        schema/migrations, upsert, load_listings(), health
-scoring.py      the score      report.py    Markdown/Word/PDF report, console summary
-dashboard.py    Flask app      cartas.py    proposal letters, Citius status check
-telegram_alert.py, notifications.py, scheduler.py, analysis.py
+app.py          desktop launcher      dashboard.py   Flask routes (templates/, static/)
+pipeline.py     the one scan routine  sources/       one module per country + registry
+db.py           schema, load_listings common.py      HTTP, parsing, matching
+scoring.py      the score             cartas.py      the one letter builder (+ PDF)
+report.py       report files          analysis.py    Claude calls
+scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 
 ```bash
@@ -176,8 +169,7 @@ python -m pytest -q          # offline: the suite refuses network access
 python -m pyflakes *.py sources/ tests/
 ```
 
-CI runs both on every push. Adding a source: see the docstring at the top of
-`sources/__init__.py`. Rules for AI agents working here: [AGENTS.md](AGENTS.md).
+CI runs both on every push. Rules for AI agents working here: [AGENTS.md](AGENTS.md).
 
 ## License
 

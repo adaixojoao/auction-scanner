@@ -190,3 +190,16 @@ def test_netherlands_and_croatia_mappers():
     assert netherlands_listing({"kavelNaam": "no id"}) is None
     assert _croatia_to_listing({"uuid": "u1", "title": "Oglas o prodaji nekretnine"})["country"] == "HR"
     assert _croatia_to_listing({"uuid": "u2", "title": "Poziv vjerovnicima"}) is None
+
+
+def test_errors_are_described_in_plain_words(db, fake_http):
+    import requests
+    from sources import describe_error
+
+    fake_http(lambda m, u, kw: FakeResponse("gone", status=404))
+    result = run_source(db, REGISTRY["bcp"], max_price=100000)
+    assert result["message"].startswith("HTTP 404")
+
+    err = requests.ConnectionError("boom")
+    err.request = requests.Request("GET", "https://x.pt/a").prepare()
+    assert describe_error(err) == "Could not connect to x.pt (site down, moved, or blocked)"

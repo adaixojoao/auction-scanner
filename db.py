@@ -29,7 +29,10 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# What the user decided about a listing (Listings/Offers pages).
+STATUSES = ("shortlisted", "dismissed")
 
 
 # ─── Connection & migrations ─────────────────────────────────────────
@@ -159,7 +162,32 @@ def _migrate_v2(db: sqlite3.Connection):
     """)
 
 
-_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2}
+def _migrate_v3(db: sqlite3.Connection):
+    """The user's decisions per listing, and scan progress shared between the
+    app, the scheduler and the command line."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS listing_status (
+            listing_id TEXT PRIMARY KEY,
+            status     TEXT NOT NULL,       -- shortlisted | dismissed
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS scan_state (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            running     INTEGER NOT NULL DEFAULT 0,
+            label       TEXT,
+            total       INTEGER,
+            done        INTEGER,
+            current     TEXT,
+            started_at  TEXT,
+            finished_at TEXT,
+            summary     TEXT
+        );
+        INSERT OR IGNORE INTO scan_state (id, running) VALUES (1, 0);
+        CREATE INDEX IF NOT EXISTS idx_carta_listing ON carta_log(listing_id);
+    """)
+
+
+_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3}
 
 
 def init_db(db: sqlite3.Connection):
@@ -312,6 +340,30 @@ def set_job_last_run(db: sqlite3.Connection, job: str, when: datetime | None = N
     db.commit()
 
 
+def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | None):
+    """Shortlist or dismiss a listing; None clears the decision."""
+    if status is None:
+        db.execute("DELETE FROM listing_status WHERE listing_id = ?", (listing_id,))
+    elif status in STATUSES:
+        db.execute("INSERT OR REPLACE INTO listing_status (listing_id, status, updated_at) VALUES (?,?,?)",
+                   (listing_id, status, utcnow_iso()))
+    else:
+        raise ValueError(f"unknown status {status!r}")
+    db.commit()
+
+
+def listing_statuses(db: sqlite3.Connection) -> dict[str, str]:
+    return dict(db.execute("SELECT listing_id, status FROM listing_status").fetchall())
+
+
+def latest_offers(db: sqlite3.Connection) -> dict[str, dict]:
+    """Most recent carta_log row per listing."""
+    out = {}
+    for r in db.execute("SELECT * FROM carta_log WHERE listing_id IS NOT NULL ORDER BY created_at ASC, id ASC"):
+        out[r["listing_id"]] = dict(r)
+    return out
+
+
 # ─── Source health ───────────────────────────────────────────────────
 
 def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
@@ -411,10 +463,10 @@ def filter_reason(item: dict, filters: dict | None) -> str | None:
 
 
 def hidden_category(reason: str | None) -> str | None:
-    """Group a hidden_reason into expired / duplicate / stale / filtered / low score."""
+    """Group a hidden_reason into dismissed / expired / duplicate / stale / filtered / low score."""
     if not reason:
         return None
-    for prefix, label in (("expired", "expired"), ("duplicate", "duplicate"),
+    for prefix, label in (("dismissed", "dismissed"), ("expired", "expired"), ("duplicate", "duplicate"),
                           ("stale", "stale"), ("score", "low score")):
         if reason.startswith(prefix):
             return label
@@ -436,11 +488,14 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """Every listing a view should consider, scored, with hidden ones removed.
 
     Each item gains: score, reasons, category, hidden_reason (None if visible),
-    price_drop_pct, is_recent. `where`/`params` are extra SQL conditions on the
+    price_drop_pct, is_recent, status (shortlisted/dismissed/None) and
+    offer_outcome (latest carta_log outcome, or None). `where`/`params` are extra SQL conditions on the
     listings table for cheap pre-filtering (country, source, search...).
 
-    Hidden, in order of precedence: expired, duplicate, stale (gone from its
-    source), excluded by config filters, below filters.min_score.
+    Hidden, in order of precedence: dismissed by the user, expired, duplicate,
+    stale (gone from its source), excluded by config filters, below
+    filters.min_score. A shortlisted listing ignores the last two: the user
+    picked it on purpose.
     """
     from scoring import categorize, score  # scoring imports common, not db
 
@@ -452,6 +507,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
 
     last_ok = last_ok_by_source(db)
     first_price = _first_prices(db)
+    statuses = listing_statuses(db)
+    offers = latest_offers(db)
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
 
     items = []
@@ -459,10 +516,15 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item = dict(r)
         # Rows written before safe_url() existed may still hold javascript: links.
         item["url"] = safe_url(item.get("url"))
+        item["status"] = statuses.get(item["id"])
+        offer = offers.get(item["id"])
+        item["offer_outcome"] = offer["outcome"] if offer else None
         reason = None
 
         end = effective_end(item.get("date_end"))
-        if end is not None and end <= now:
+        if item["status"] == "dismissed":
+            reason = "dismissed"
+        elif end is not None and end <= now:
             reason = "expired"
         elif item.get("duplicate_of"):
             reason = f"duplicate of {item['duplicate_of']}"
@@ -471,7 +533,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             ok = last_ok.get(item["source"])
             if seen and ok and ok - seen > STALE_AFTER:
                 reason = f"stale: gone from {item['source']} since {seen:%Y-%m-%d}"
-            else:
+            elif item["status"] != "shortlisted":
                 reason = filter_reason(item, filters)
 
         if reason and not include_hidden:
@@ -488,7 +550,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["reasons"] = reasons
         item["category"] = categorize(item)
 
-        if reason is None and min_score and sc < min_score:
+        if reason is None and min_score and sc < min_score and item["status"] != "shortlisted":
             reason = f"score {sc:.0f} < filters.min_score {min_score}"
             if not include_hidden:
                 continue

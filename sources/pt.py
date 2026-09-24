@@ -640,19 +640,22 @@ def scrape_whitestar(db, max_price: float = 50000, **_):
     base = "https://www.whitestarproperties.pt"
     total_scraped = 0
     seen_ids = set()
-    districts = [""] + [str(i) for i in range(1, 21)]
-    errors = []
+    failures_in_a_row = 0
 
-    for dist_id in districts:
+    for dist_id in [""] + [str(i) for i in range(1, 21)]:
         try:
             resp = session.post(f"{base}/Assets",
                                 data={"District": dist_id, "County": "", "PropertyType": ""},
                                 allow_redirects=True)
             resp.raise_for_status()
+            failures_in_a_row = 0
         except Exception as e:
-            errors.append(e)
-            if len(errors) == len(districts):
-                raise
+            failures_in_a_row += 1
+            if failures_in_a_row >= 3:   # the site is down, not one district
+                if total_scraped == 0:
+                    raise
+                LOG.warning(f"Whitestar: giving up after 3 failed districts ({e})")
+                break
             LOG.debug(f"Whitestar district {dist_id}: {e}")
             continue
 

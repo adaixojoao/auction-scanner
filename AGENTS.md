@@ -26,12 +26,29 @@ that disagreed with the report. Keywords go through `common.find_terms()`:
 whole words, accent-insensitive, negation-aware. Never go back to `x in text`:
 that is how "desocupado" counted as occupied and "11/2023" as a 1/2 share.
 
+## One app, one of each
+
+This is a desktop app (`app.py` → `dashboard.py` in its own window). Keep it
+congruent — one way to do each thing:
+
+- **One scan routine:** `pipeline.run_scan()`. The app's "Scan now", the
+  timetable and `scraper.py` all call it; it holds `scan.lock` and writes
+  progress to `scan_state`, which is how the app shows scans started elsewhere.
+- **One letter builder:** `cartas.build_letter()`. The Offers preview, its PDF,
+  its e-mail link and `--cartas` all use it. Never write letter text in
+  JavaScript or a second template.
+- **One layout:** every page extends `templates/base.html` and uses
+  `static/app.css` / `static/app.js`. No inline page-specific design systems,
+  no second nav. UI text is English; letters are in the sale's language.
+- **One place for user choices:** shortlist/dismiss in `listing_status`,
+  offers in `carta_log`, settings in `config.json` via the Settings page.
+
 ## Scrapers
 
 - Live in `sources/<country>.py`, registered with `@register(name, country)`.
 - Build rows with `common.make_listing()`, save with `db.upsert_listing()`.
 - Let the **first** request's exception propagate: `run_source()` records it and
-  it shows on `/health`. Swallowing it makes a dead site look like "0 listings".
+  it shows on the Sources page. Swallowing it makes a dead site look like "0 listings".
 - Parse a whole card's text with `find_price()` (needs a € sign), a dedicated
   price field with `parse_price()`.
 - Selectors for many sources are unconfirmed. Do not claim a scraper works
@@ -40,8 +57,11 @@ that is how "desocupado" counted as occupied and "11/2023" as a 1/2 share.
 ## Scraped data is untrusted
 
 URLs go through `common.safe_url()` (http/https only); titles and descriptions
-are escaped in every HTML, Markdown and Telegram output. Keep the dashboard's
-`debug` off by default.
+are escaped in every HTML, Markdown and Telegram output (`AS.esc` in the
+browser; pass IDs through `data-` attributes, never into `onclick` source).
+Keep the dashboard's `debug` off. The local server refuses foreign Host headers
+and cross-origin POSTs (`_guard_local`) — it can change settings and install a
+scheduled task, so keep that guard.
 
 ## Schema changes
 
@@ -56,6 +76,6 @@ pyflakes on every push.
 
 ## Personal data
 
-`config.json`, `auctions.db`, generated reports and cartas are gitignored;
-keep it that way. The proponente's details belong in `config.json`, and
-the review page reads them from `/api/proponente`.
+`config.json`, `auctions.db`, `reports/`, generated cartas and logs are
+gitignored; keep it that way. The proponente's details belong in `config.json`
+(edited on the Settings page).

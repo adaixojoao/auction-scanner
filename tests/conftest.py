@@ -19,6 +19,18 @@ def no_network(monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(OSError("no network in tests")))
 
 
+@pytest.fixture(autouse=True)
+def isolated_files(tmp_path, monkeypatch):
+    """Never touch the real config.json, scan lock or reports folder."""
+    import config
+    import pipeline
+    import scheduler
+    monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "config.json"))
+    monkeypatch.setattr(pipeline, "LOCK_PATH", str(tmp_path / "scan.lock"))
+    monkeypatch.setattr(pipeline, "REPORTS_DIR", str(tmp_path / "reports"))
+    monkeypatch.setattr(scheduler, "LOCK_PATH", str(tmp_path / "scheduler.lock"))
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     import db as dbmod
@@ -59,9 +71,11 @@ class FakeResponse:
             raise ValueError("not JSON")
         return self._json
 
+    reason = "Not Found"
+
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code}")
+            raise requests.HTTPError(f"{self.status_code}", response=self)
 
 
 class FakeSession:

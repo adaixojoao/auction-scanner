@@ -1,9 +1,9 @@
 """
-Auction Scanner — scrapes EU auction / forced-sale platforms, stores them in
-SQLite, scores them and reports on them.
+Auction Scanner — command line.
 
-The scrapers live in sources/ (one module per country); this file is the
-command line. Supported platforms: python scraper.py --list-sources
+The desktop app (app.py) is the normal way in; this does the same from a
+terminal. Scans go through pipeline.run_scan(), like the app's "Scan now".
+The scrapers live in sources/ (one module per country): python scraper.py --list-sources
 
 Usage:
   python scraper.py                      # scrape all default sources, write report
@@ -23,11 +23,11 @@ import os
 import sys
 
 from common import COUNTRY_NAMES, configure_http, parse_price
-from db import DB_PATH, connect, init_db, mark_duplicates, source_health, upsert_listing
+from db import DB_PATH, connect, init_db, source_health, upsert_listing
 from report import generate_report, print_console_summary, print_sealed_bid_summary
 from scoring import categorize as _categorize
 from scoring import score as _score_fn
-from sources import REGISTRY, load_all, run_source, sources_for
+from sources import REGISTRY, load_all, sources_for
 
 load_all()
 
@@ -141,13 +141,19 @@ def main(argv=None) -> int:
             return 0
 
         if not args.report_only and not args.analyze:
-            for source in select_sources(args):
-                run_source(db, source, max_price=max_price, config=cfg)
-            mark_duplicates(db)
+            from pipeline import ScanBusy, run_scan
+            label = ("all countries" if args.country is None
+                     else ", ".join(args.country) if args.country else args.source)
+            try:
+                run_scan(source_names=[s.name for s in select_sources(args)], cfg=cfg,
+                         max_price=max_price, label=label, report=False, alerts=False, db=db)
+            except ScanBusy:
+                print("Another scan is already running (app or scheduler); using the data as it is.")
 
+        from pipeline import reports_dir
         report_path = generate_report(
             db, max_price=max_price, max_bid=max_bid, filters=filters,
-            out_dir=report_cfg.get("out_dir"), desktop_copy=report_cfg.get("desktop_copy", True),
+            out_dir=reports_dir(cfg), desktop_copy=report_cfg.get("desktop_copy", True),
             known_sources=REGISTRY)
 
         if args.sealed_bid:
@@ -155,8 +161,9 @@ def main(argv=None) -> int:
 
         if args.analyze:
             from analysis import analyze_with_llm
-            analysis_path = analyze_with_llm(db, max_price=max_price,
-                                             category=args.analyze_category, filters=filters)
+            from pipeline import reports_dir
+            analysis_path = analyze_with_llm(db, max_price=max_price, category=args.analyze_category,
+                                             filters=filters, out_dir=reports_dir(cfg))
             if analysis_path:
                 print(f"Analysis: {analysis_path}")
 

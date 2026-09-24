@@ -58,6 +58,7 @@ JOBS = ("pt", "eu", "morning", "report")
 def setup_logging():
     if sys.stdout is None:  # pythonw.exe: no console
         sys.stdout = sys.stderr = open(OUTPUT_PATH, "a", encoding="utf-8", buffering=1)
+    logging.getLogger("urllib3").setLevel(logging.ERROR)   # one line per retry is noise
     root = logging.getLogger()
     if root.handlers:
         return
@@ -117,23 +118,24 @@ def due_jobs(now: datetime, last_runs: dict, schedule: dict | None = None) -> li
 
 # ─── Jobs ────────────────────────────────────────────────────────────
 
-def _max_price() -> str:
-    from config import load_config
-    return str(load_config().get("max_price", 100000))
+def _scan(countries, label):
+    from pipeline import ScanBusy, run_scan
+    try:
+        run_scan(countries=countries, label=label)
+    except ScanBusy:
+        LOG.info(f"{label}: another scan is running, skipped")
 
 
 def run_pt_scrape():
-    LOG.info("=== PT scrape starting ===")
-    from scraper import main
-    main(["--country", "PT", "--max-price", _max_price()])
+    LOG.info("=== PT scan starting ===")
+    _scan(["PT"], "Portugal (scheduled)")
 
 
 def run_eu_scrape():
     """Every country except Portugal (PT has its own, more frequent job)."""
-    LOG.info("=== EU scrape starting ===")
+    LOG.info("=== EU scan starting ===")
     from common import COUNTRY_NAMES
-    from scraper import main
-    main(["--country", ",".join(c for c in COUNTRY_NAMES if c != "PT"), "--max-price", _max_price()])
+    _scan([c for c in COUNTRY_NAMES if c != "PT"], "other countries (scheduled)")
 
 
 def run_morning_checks():
@@ -198,11 +200,15 @@ def _acquire_lock() -> bool:
                 f.write(f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n")
             return True
         except FileExistsError:
+            from common import lock_holder
             age = time.time() - os.path.getmtime(LOCK_PATH)
-            if age < LOCK_STALE_AFTER.total_seconds():
+            if age < LOCK_STALE_AFTER.total_seconds() and lock_holder(LOCK_PATH):
                 return False
-            LOG.warning("Removing stale scheduler.lock (%.0f min old)", age / 60)
-            os.remove(LOCK_PATH)
+            LOG.warning("Removing stale scheduler.lock (its process is gone)")
+            try:
+                os.remove(LOCK_PATH)
+            except FileNotFoundError:
+                pass
     return False
 
 

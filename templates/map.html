@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% endblock %}
+{% block body %}<div id="map"></div>{% endblock %}
+{% block scripts %}
+<script>
+if (typeof L === "undefined") {
+  document.getElementById("map").innerHTML =
+    '<div class="empty"><h3>The map needs an internet connection</h3><p>It loads the map library and tiles from the web.</p></div>';
+  throw new Error("Leaflet unavailable");
+}
+const map = L.map("map").setView([39.6, -8.0], 7);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "© OpenStreetMap"}).addTo(map);
+// Portuguese district capitals: listings are placed by district (or municipality) name.
+const C = {"Lisboa":[38.717,-9.139],"Porto":[41.157,-8.629],"Guarda":[40.537,-7.267],"Viseu":[40.661,-7.909],
+  "Coimbra":[40.211,-8.429],"Aveiro":[40.644,-8.645],"Braga":[41.545,-8.426],"Faro":[37.014,-7.935],
+  "Evora":[38.571,-7.909],"Beja":[38.015,-7.864],"Castelo Branco":[39.820,-7.491],"Portalegre":[39.287,-7.428],
+  "Santarem":[39.236,-8.685],"Setubal":[38.524,-8.893],"Leiria":[39.744,-8.807],"Viana do Castelo":[41.694,-8.834],
+  "Vila Real":[41.300,-7.745],"Braganca":[41.806,-6.757]};
+const norm = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+let layer = L.layerGroup().addTo(map);
+
+async function load() {
+  layer.clearLayers();
+  const data = await (await fetch("/api/listings?country=PT&properties=1&max_price={{ max_price }}&per_page=1000")).json();
+  let placed = 0;
+  data.items.forEach(it => {
+    const loc = norm([it.district, it.concelho].filter(Boolean).join(" "));
+    const key = Object.keys(C).find(k => loc.includes(norm(k)));
+    if (!key) return;
+    placed++;
+    const [lat, lng] = C[key], j = () => (Math.random() - 0.5) * 0.08;
+    const col = it.score >= 85 ? "#22c55e" : it.score >= 65 ? "#eab308" : "#94a3b8";
+    L.circleMarker([lat + j(), lng + j()], {radius: 8, fillColor: col, color: "#fff", weight: 1, fillOpacity: .85})
+      .addTo(layer)
+      .bindPopup(`<b>${AS.esc(it.title)}</b><br>Score ${Math.round(it.score)} · ${AS.money(it.price)}<br>${AS.esc([it.concelho, it.district].filter(Boolean).join(", "))}` +
+                 (it.url ? `<br>${AS.link(it.url, "Open listing")}` : ""));
+  });
+  AS.toast(`${placed} of ${data.items.length} Portuguese listings placed by district`);
+}
+document.addEventListener("scan-finished", load);
+load();
+</script>
+{% endblock %}

@@ -2,18 +2,22 @@
 Envia 5 pedidos de informação aos tribunais sobre vendas em processos executivos.
 Usa as credenciais SMTP de config.json (secção "notifications").
 
+One-off script, kept for reference: the app's Offers page now prepares letters.
+
 Uso:
-    python send_tribunais.py            -> mostra os emails (não envia)
-    python send_tribunais.py --send     -> envia de facto
+    python scripts/send_tribunais.py            -> mostra os emails (não envia)
+    python scripts/send_tribunais.py --send     -> envia de facto
 """
 
+import os
 import smtplib
 import sys
 import time
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 
-from config import load_config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import load_config  # noqa: E402
 
 FROM_EMAIL = "adaixojoao@gmail.com"
 SENDER_NAME = "João Castro Adaixo"
@@ -78,7 +82,7 @@ def main():
             print("Para:   ", m["To"])
             print("Assunto:", m["Subject"])
             print(m.get_payload(decode=True).decode("utf-8"))
-        print("\nModo de pré-visualização. Para enviar: python send_tribunais.py --send")
+        print("\nModo de pré-visualização. Para enviar: python scripts/send_tribunais.py --send")
         return
 
     cfg = load_config()["notifications"]

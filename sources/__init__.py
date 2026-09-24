@@ -66,6 +66,24 @@ def sources_for(countries=None, *, include_optional: bool = False) -> list[Sourc
     return sorted(picked, key=lambda s: (rank.get(s.country, 99), order.index(s.name)))
 
 
+def describe_error(e: Exception) -> str:
+    """One readable line for the Sources page; the full error goes to the log."""
+    import requests
+    from urllib.parse import urlsplit
+
+    url = getattr(getattr(e, "request", None), "url", None) or ""
+    host = urlsplit(url).netloc or ""
+    if isinstance(e, requests.HTTPError) and e.response is not None:
+        return f"HTTP {e.response.status_code} {e.response.reason or ''} from {host or 'the site'}".strip()
+    if isinstance(e, requests.Timeout):
+        return f"{host or 'The site'} did not answer in time"
+    if isinstance(e, (requests.ConnectionError, requests.exceptions.ProxyError)):
+        return f"Could not connect to {host or 'the site'} (site down, moved, or blocked)"
+    if isinstance(e, ValueError) and "JSON" in str(e):
+        return "The site did not return the expected data (JSON) — its API may have changed"
+    return f"{type(e).__name__}: {e}"[:300]
+
+
 def run_source(db, source: Source, *, max_price: float, config: dict | None = None) -> dict:
     """Run one scraper, never raising. Records the outcome in scrape_log."""
     from db import record_scrape
@@ -80,8 +98,8 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
     except Exception as e:  # noqa: BLE001 — one broken site must not stop the run
         db.rollback()
         count, status = 0, "error"
-        message = f"{type(e).__name__}: {e}"[:500]
-        LOG.error(f"Source {source.name} failed: {message}")
+        message = describe_error(e)
+        LOG.error(f"Source {source.name} failed: {type(e).__name__}: {e}")
     duration = round(time.monotonic() - t0, 1)
     record_scrape(db, source.name, count=count, status=status, message=message,
                   duration_s=duration, timestamp=started_iso)
