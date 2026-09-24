@@ -26,6 +26,7 @@ def test_generate_cartas_uses_visible_listings_only(db, add, tmp_path, monkeypat
     add("citius", "b", title="Moradia antiga", price=30000, date_end="2000-01-01T10:00:00",
         raw_json=json.dumps({**raw, "processo": "9/99.9X"}))
     checked = {}
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: None)   # on Windows it opens Explorer
     monkeypatch.setattr(cartas, "check_citius_active",
                         lambda procs: checked.update(procs) or {p: "Em venda" for p in procs})
 

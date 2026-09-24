@@ -37,10 +37,12 @@ congruent — one way to do each thing:
 - **One letter builder:** `letters.build_letter()`. The Offers preview, its PDF,
   its e-mail (sent or opened in a mail app) and `--cartas` all use it. Never
   write letter text in JavaScript or a second template. Which letters a sale
-  gets, and how it is bid on (`channel`: letter / online / lawyer), is decided
-  by `letters.LETTER_TYPES`; add a new letter there, with a test. Information
-  requests are logged in `carta_log` with `is_offer = 0` and never count as an
-  offer. Legal claims in letters and guidance are hedged ("normally",
+  gets, and how it is bid on (`channel`: letter / online / hearing / formal /
+  lawyer), is decided by `letters.LETTER_TYPES`; add a new letter there, with a
+  test. Information requests are logged in `carta_log` with `is_offer = 0` and
+  never count as an offer. A sent letter is a record: `carta_log.letter_text`
+  holds it exactly as sent (edits included), and the Sent tab and its PDF use
+  that text; never rebuild a sent letter from today's data. Legal claims in letters and guidance are hedged ("normally",
   "check with…"): do not state rules the code cannot confirm.
 - **One layout:** every page extends `templates/base.html` and uses
   `static/app.css` / `static/app.js`. No inline page-specific design systems,
@@ -83,4 +85,6 @@ pyflakes on every push.
 
 `config.json`, `auctions.db`, `reports/`, generated cartas and logs are
 gitignored; keep it that way. The proponente's details belong in `config.json`
-(edited on the Settings page).
+(edited on the Settings page). **This repository is public:** never put real
+names, tax numbers, addresses, phone numbers, tokens or passwords in code,
+defaults, tests or fixtures (a test checks the config defaults).

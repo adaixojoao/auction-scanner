@@ -54,26 +54,43 @@ the same when the app is closed.
    | 🇪🇸 BOE court and tax auctions | Online at subastas.boe.es (Cl@ve or certificate, 5% deposit) | Information request to the court (occupancy, visits, charges, debts) · **Log my bid** |
    | 🇪🇸 Sareb, Haya, Servihabitat | Negotiation | Purchase offer (oferta de compra) |
    | 🇫🇷 Court sales (licitor, Enchères Publiques) | Only a lawyer at that court can bid, at the hearing | Instructions to your lawyer with your maximum (mandat) · Information request to the seller's lawyer (cahier des conditions de vente, visits, occupancy) |
-   | Other countries | Varies | General offer letter in the local language |
+   | 🇩🇪 Zwangsversteigerung (zvg) | In person at the Amtsgericht hearing, 10% security | Request to the court (Gutachten, whether the hearing goes ahead, occupancy, how to pay the security) · **Log my bid** |
+   | 🇮🇹 Court sales (PVP, astegiudiziarie…) | Formal offer with a deposit, online on the PVP or in a sealed envelope | Request to the custode / delegato (visit, perizia, occupancy, condominium arrears) · **Log my offer** |
+   | 🇳🇱 Executieveiling | Online, through the notary | Request to the notary (veilingvoorwaarden, viewing, tenants) · **Log my bid** |
+   | 🇧🇪 biddit · 🇭🇷 FINA · 🇬🇷 eauction · 🇩🇪 justiz-auktion | Online | **Log my bid** |
+   | 🇵🇱 🇷🇴 🇨🇾 | Not covered yet | General offer letter in English — check how offers must be made |
 
 3. For an offer, pick an amount (presets or type one). Portuguese letters write
    it in words for you (*quatro mil euros*). The letter updates as you type. It
    is built from your details in Settings and the listing, and it is exactly
-   what the PDF and e-mail contain.
+   what the PDF and e-mail contain. **Edit text** lets you change anything,
+   such as adding your lawyer's name to a French mandat; the PDF and e-mail
+   then use your version.
 4. **Send by e-mail with PDF** sends it from the account in *Settings → E-mail*
    (a copy comes back to you), addressed to the court, agente or lawyer when
    the listing names one. Or **Download PDF** / **Open in my e-mail app** and
    then **Mark letter as sent** (e-mailed, posted, by hand, given to my lawyer).
-5. It moves to **Sent**. Mark an offer **won**, **lost** or **cancelled**; mark
+5. It moves to **Sent**, which keeps the letter exactly as you sent it (and
+   reprints that PDF). Mark an offer **won**, **lost** or **cancelled**; mark
    an information request **answered**, and the listing returns to *To review*
-   so you can make the offer.
+   so you can make the offer. A letter with no answer after 10 days is
+   flagged there, and mentioned once in the Telegram morning message.
 
-Online auctions: bid on the site, then **Log my bid** to track it.
+Online auctions, German hearings, Italian formal offers: make the bid where the
+sale says, then **Log my bid** to track it.
+
+**Calendar.** *📅 Deadlines to my calendar* (top of Offers) downloads the sale
+dates of your shortlist and pending offers as a calendar file (Outlook, Google
+Calendar, Apple Calendar), each with a reminder the day before; *Add to
+calendar* on a listing does it for one sale. Times are converted from the
+sale country's time zone.
 
 **The 85% rule.** In Portuguese executive sales by *propostas em carta fechada*
 (and on e-leilões) the announced value is 85% of the *valor base*, and offers
 below it are normally not accepted. The Offers page warns when an amount is
-under that line, and when a French maximum is below the *mise à prix*. The
+under that line, when a French maximum is below the *mise à prix*, when an
+Italian offer is below the *offerta minima* (75% of the base price) and when a
+German bid is under the 50% / 70% limits of a first hearing. The
 low fixed amounts suggested for Portuguese court sales make sense for
 *negociação particular*; confirm the sale type with the agente de execução.
 The guidance in the app is a summary, not legal advice.
@@ -186,7 +203,7 @@ pipeline.py     the one scan routine  sources/       one module per country + re
 db.py           schema, load_listings common.py      HTTP, parsing, matching
 scoring.py      the score             letters.py     the one letter builder (+ PDF)
 cartas.py       Citius batch letters  report.py      report files
-analysis.py     Claude calls
+analysis.py     Claude calls          ics_export.py  calendar files
 scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 

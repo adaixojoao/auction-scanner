@@ -6,7 +6,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # The app runs on a Windows desktop, so the suite runs on Windows too.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,6 +20,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - name: Lint (unused imports, undefined names)
+        if: runner.os == 'Linux'
         run: python -m pyflakes *.py sources/ tests/
       - name: Tests (offline — the suite refuses network access)
         run: python -m pytest -q

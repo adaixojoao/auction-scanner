@@ -307,9 +307,23 @@ def test_settings_roundtrip_keeps_other_keys(client):
     assert client.post("/api/settings", json={"filters": {"countries": ["XX"]}}).status_code == 400
 
 
-def test_background_task_is_windows_only(client):
+def test_background_task_is_windows_only(client, monkeypatch):
+    monkeypatch.setattr(dashboard.sys, "platform", "linux")
     assert client.get("/api/background").get_json()["supported"] is False
     assert client.post("/api/background", json={"enabled": True}).status_code == 400
+
+
+def test_background_task_toggle_on_windows(client, monkeypatch):
+    import scheduler
+    calls = []
+    monkeypatch.setattr(dashboard.sys, "platform", "win32")
+    monkeypatch.setattr(scheduler, "install_task", lambda: calls.append("install"))   # never a real task
+    monkeypatch.setattr(scheduler, "remove_task", lambda: calls.append("remove"))
+    monkeypatch.setattr(dashboard, "_task_installed", lambda: calls[-1:] == ["install"])
+    assert client.get("/api/background").get_json() == {"supported": True, "installed": False}
+    assert client.post("/api/background", json={"enabled": True}).get_json()["installed"] is True
+    assert client.post("/api/background", json={"enabled": False}).get_json()["installed"] is False
+    assert calls == ["install", "remove"]
 
 
 def test_export_report(client, add):
