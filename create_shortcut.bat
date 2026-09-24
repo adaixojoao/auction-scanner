@@ -40,6 +40,8 @@ powershell -Command ^
   "$s.TargetPath = '%LAUNCHER%';" ^
   "$s.WorkingDirectory = '%FOLDER%';" ^
   "$s.Description = 'Auction Scanner - Find properties below market price';" ^
+  "$ico = '%FOLDER%icon.ico';" ^
+  "if (Test-Path $ico) { $s.IconLocation = $ico };" ^
   "$s.Save()"
 
 echo.
