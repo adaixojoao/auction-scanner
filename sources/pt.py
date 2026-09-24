@@ -88,6 +88,11 @@ def scrape_eleiloes(db, max_price: float = 50000, page_size: int = 100, **_):
             break
 
         for item in items:
+            # Only property (tipoId 1): cars, machines, furniture, company shares and
+            # inheritance rights are not what the owner buys, so they are not kept.
+            # Rows saved before stay (listings are never deleted) and go stale.
+            if item.get("tipoId") not in (None, 1):
+                continue
             upsert_listing(db, _keep_details(db, _eleiloes_to_listing(item)))
             total_scraped += 1
 
