@@ -5,6 +5,7 @@ import pytest
 
 import dashboard
 import listing_info
+from conftest import FakeResponse
 
 CITIUS_RAW = {"processo": "3841/03.3TBBRR, Juízo de Execução de Almada - Juiz 1",
               "tribunal": "Almada - Tribunal Judicial da Comarca de Lisboa",
@@ -92,3 +93,83 @@ def test_ruins_marked_in_the_energy_field_score_as_ruins():
     assert "needs heavy work (ruin / full rebuild)" in reasons and sc <= 40
     assert "Ruína" not in imobancos_listing({**hit, "prop_energy_rating": "C"}, 100000)["description"]
     assert listing_info._energy("UNPARSED- isento") == "Isento" and listing_info._energy("detail-item") is None
+
+
+def test_lots_of_the_same_case_are_listed_together(db, add):
+    add("citius", "366104TBVLN", title="Prédio urbano, casa de um pavimento, com área de 142 m2", price=7500,
+        raw_json=json.dumps({"processo": "366/10.4TBVLN, Juízo de Valença"}))
+    add("citius", "366104TBVLN-2", title="Prédio Rústico de cultivo com área de 2760 m2", price=500, area_m2=2760,
+        raw_json=json.dumps({"processo": "366/10.4TBVLN, Juízo de Valença"}))
+    add("citius", "999", title="Outro processo", price=100, raw_json=json.dumps({"processo": "9/99.9XXX"}))
+    house = {"id": "citius:366104TBVLN", "source": "citius",
+             "raw_json": json.dumps({"processo": "366/10.4TBVLN, Juízo de Valença"})}
+    lots = listing_info.same_case_lots(db, house)
+    assert [(lot["id"], lot["price"], lot["area"]) for lot in lots] == [("citius:366104TBVLN-2", 500, 2760)]
+
+
+# ─── Official records ───────────────────────────────────────────────
+
+def test_portuguese_land_register_numbers_from_the_sale_text():
+    text = ("Prédio urbano sito no Lugar do Forno de Cima, composto de casa de rés-do-chão e andar; descrito na "
+            "Conservatória do Registo Predial de Penafiel sob o nº 01469/11062003 e inscrito na matriz predial "
+            "urbana sob o artigo nº 158.")
+    rec = listing_info.official_records({"country": "PT", "source": "citius", "freguesia": "Rio de Moínhos",
+                                         "description": text, "raw_json": "{}"})
+    values = {c["label"].split(" (")[0]: c["value"] for c in rec["copy"]}
+    assert values == {"Description no.": "01469/11062003", "Conservatória / concelho": "Penafiel",
+                      "Tax article": "158"}
+    assert rec["links"][0]["url"] == "https://www.predialonline.pt/PredialOnline/"
+    assert any("€15" in s["text"] for s in rec["steps"]) and any("Rio de Moínhos" in s["text"] for s in rec["steps"])
+    assert listing_info.official_records({"country": "PT", "description": "Moradia T2", "raw_json": "{}"}) is None
+
+
+def test_eleiloes_land_register_entries():
+    from sources.pt import land_register_entries
+    entries = land_register_entries({"descPredial": [{"numero": 1231, "fracao": "", "distritoDesc": "14 - Santarém",
+        "concelhoDesc": "13 - Mação", "freguesiaDesc": "08 - Penhascoso",
+        "artigos": [{"numero": "67 - Secção 1S", "tipo": "rustica"}]}]})
+    assert entries == [{"descricao": "1231", "fracao": None, "freguesia": "Penhascoso", "concelho": "Mação",
+                        "artigos": [{"numero": "67 - Secção 1S", "tipo": "rustica"}]}]
+    rec = listing_info.official_records({"country": "PT", "source": "eleiloes",
+                                         "raw_json": json.dumps({"registo_predial": entries})})
+    assert {"label": "Parish (freguesia)", "value": "Penhascoso"} in rec["copy"]
+
+
+# Trimmed from Catastro's real answer for 9872023VH5797S0001WX (Sept 2026).
+CATASTRO_ANSWER = {"consulta_dnprcResult": {"control": {"cudnp": 1, "cucons": 3}, "bico": {
+    "bi": {"idbi": {"rc": {"pc1": "9872023", "pc2": "VH5797S"}}, "ldt": "CL GLORIA 51 13730 SANTA CRUZ DE MUDELA (CIUDAD REAL)",
+           "debi": {"luso": "Residencial", "sfc": "308", "ant": "1980"}},
+    "finca": {"dff": {"ss": "397"}},
+    "lcons": [{"lcd": "VIVIENDA UNIFAMILIAR", "dfcons": {"stl": "109"}},
+              {"lcd": "ANEJOS DE VIVIENDA Y LOCALES", "dfcons": {"stl": "187"}}]}}}
+
+
+def test_catastro_answer_is_read_and_compared(db, add, fake_http):
+    from sources.es import fetch_catastro, parse_catastro
+    data = parse_catastro(CATASTRO_ANSWER)
+    assert data["built_m2"] == 308 and data["plot_m2"] == 397 and data["year"] == 1980 and data["use"] == "Residencial"
+    assert data["units"][0] == {"use": "VIVIENDA UNIFAMILIAR", "m2": 109}
+    assert parse_catastro({"consulta_dnprcResult": {"lerr": [{"err": {"des": "NO EXISTE"}}]}}) is None
+
+    add("spain", "SUB-1", "ES", title="Vivienda", area_m2=85,
+        raw_json=json.dumps({"referencia_catastral": "9872023VH5797S0001WX"}))
+    session = fake_http(lambda m, url, kw: FakeResponse(json_data=CATASTRO_ANSWER))
+    assert fetch_catastro(db, session) == 1
+    item = dict(db.execute("SELECT * FROM listings WHERE id='spain:SUB-1'").fetchone())
+    item["country"] = "ES"
+    rec = listing_info.official_records(item)
+    assert "Catastro says 308 m² built" in rec["check"] and "differ" in rec["check"]
+    assert {"label": "Year built", "value": "1980"} in rec["facts"]            # a year, not "1 980"
+    assert fetch_catastro(db, session) == 0 and len(session.calls) == 1        # read once
+
+
+def test_catastro_unreachable_is_retried(db, add, fake_http):
+    import requests
+    from sources.es import fetch_catastro
+
+    def refuse(m, url, kw):
+        raise requests.ConnectionError("Connection reset by peer")
+    add("spain", "SUB-2", "ES", title="Vivienda", raw_json=json.dumps({"referencia_catastral": "9872023VH5797S0001WX"}))
+    session = fake_http(refuse)
+    assert fetch_catastro(db, session) == 0
+    assert "catastro_checked" not in db.execute("SELECT raw_json FROM listings WHERE id='spain:SUB-2'").fetchone()[0]

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_price, make_listing, make_session, normalize, parse_date_dmy,
+from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, utcnow_iso)
 from db import upsert_listing
 from sources import SourceUnavailable, register
@@ -129,10 +129,10 @@ def _eleiloes_to_listing(item: dict) -> dict:
 # Fields the detail pass adds to raw_json. The next search-page scrape replaces
 # raw_json with the thin list item, so these are carried over (_keep_details).
 # Bumped when the detail pass reads more: sales read by an older pass are read again.
-DETAIL_VERSION = 2
+DETAIL_VERSION = 4
 ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
                         "valor_abertura", "morada", "lat", "lon", "reg_district", "reg_concelho",
-                        "reg_freguesia", "detail_checked")
+                        "reg_freguesia", "registo_predial", "detail_checked")
 _NOT_PROPERTY = ("outro", "direitos", "veiculo", "equipamento", "mobiliario")
 
 
@@ -161,13 +161,40 @@ def _registry_place(item: dict) -> dict:
             "freguesia": clean(first.get("freguesiaDesc"))}
 
 
+def land_register_entries(item: dict) -> list[dict]:
+    """The land-register descriptions (descPredial) of an e-leilões sale, as the
+    identifiers needed to look the property up: description number, fraction,
+    freguesia and concelho, and the tax articles (number, urbano/rústico)."""
+    clean = lambda v: re.sub(r"^\s*\d+\s*-\s*", "", str(v or "")).strip() or None  # noqa: E731
+    out = []
+    for d in item.get("descPredial") or []:
+        if not isinstance(d, dict) or not d.get("numero"):
+            continue
+        out.append({
+            "descricao": str(d.get("numero")).strip(),
+            "fracao": (d.get("fracao") or "").strip() or None,
+            "freguesia": clean(d.get("freguesiaDesc")), "concelho": clean(d.get("concelhoDesc")),
+            "artigos": [{"numero": str(a.get("numero") or "").strip(), "tipo": (a.get("tipo") or "").strip() or None}
+                        for a in d.get("artigos") or [] if isinstance(a, dict) and a.get("numero")],
+        })
+    return out
+
+
 def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
     """GET /api/Eventos/<referencia> → (listing fields, extra raw_json keys).
     Leaves out the executados: the people whose property is sold."""
     place = _registry_place(item)
+    description = (item.get("descricao") or "").strip() or None
+    area = to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None
+    written = find_area(description)
+    # The area field is sometimes off by a factor of 100 ("1 695 000 m²" for a plot
+    # described as "cerca de 16.950m2"): when the two disagree that much, the
+    # description wins.
+    if area and written and not (1 / 20 < area / written < 20):
+        area = written
     fields = {
-        "description": (item.get("descricao") or "").strip() or None,
-        "area_m2": to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None,
+        "description": description,
+        "area_m2": area or written,
         "freguesia": place["freguesia"] or item.get("moradaFreguesia") or None,
         "concelho": place["concelho"],
         "district": place["district"],
@@ -184,6 +211,7 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
         "lon": to_number(item.get("coordenadasLON")) or None,
         "reg_district": place["district"], "reg_concelho": place["concelho"],
         "reg_freguesia": place["freguesia"],
+        "registo_predial": land_register_entries(item) or None,
         "detail_checked": DETAIL_VERSION,
     }
     return fields, {k: v for k, v in extra.items() if v is not None}
@@ -357,54 +385,99 @@ def _guess_tipo_from_title(title: str) -> str:
 
 # ─── leilosoc.com ───────────────────────────────────────────────────
 
+LEILOSOC = "https://leilosoc.com"
+
+
+def _html_text(html) -> str:
+    return re.sub(r"\s+", " ", BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True)).strip()
+
+
+def leilosoc_lots(page_html: str) -> tuple[list[dict], bool]:
+    """(lots, has a next page) from a category page's embedded data (__NEXT_DATA__).
+    The cards' text ran everything together ("Online Auction Terreno · Seia -
+    3.576,38 € Bid Ends in 18d …"); the data has each field on its own."""
+    soup = BeautifulSoup(page_html, "html.parser")
+    tag = soup.select_one("script#__NEXT_DATA__")
+    if not tag or not tag.string:
+        return [], False
+    lots = (json.loads(tag.string).get("props", {}).get("pageProps", {}).get("lots") or {})
+    links = {}
+    for a in soup.select("a[href*='/lot/']"):
+        m = re.search(r"/lot/(\d+)/(\d+)", a.get("href", ""))
+        if m:
+            links[(m.group(1), m.group(2))] = a["href"]
+    items = []
+    for lot in lots.get("items") or []:
+        key = (str(lot.get("auctionId")), str(lot.get("batchId")))
+        items.append({**lot, "_href": links.get(key)})
+    return items, bool(lots.get("hasNextPage"))
+
+
+def leilosoc_listing(lot: dict, eid: str) -> dict | None:
+    """One Leilosoc lot → listing row; None unless it is priced in euros (Leilosoc
+    also sells in Angola and Mozambique, in kwanza and metical)."""
+    if lot.get("currencySymbol") != "€":
+        return None
+    title = (lot.get("title") or "").strip()
+    description = _html_text(lot.get("description"))
+    custom = lot.get("customFieldsValues") or {}
+    area = to_number(custom.get("building_area")) or find_area(title) or find_area(description)
+    base = to_number(lot.get("valueBase")) if lot.get("valueBasePublished", True) else None
+    minimum = to_number(lot.get("valueMinimum")) if lot.get("valueMinimumPublished") else None
+    raw = {
+        "processo": (lot.get("processNumber") or "").strip() or None,
+        "morada": (lot.get("address") or "").strip() or None,
+        "valor_abertura": to_number(lot.get("valueOpen")),
+        "lat": to_number(lot.get("addressLatitude")), "lon": to_number(lot.get("addressLongitude")),
+        "modalidade": {"leilao_online": "Leilão online", "leilao_presencial": "Leilão presencial",
+                       "buy_now": "Compra imediata"}.get(lot.get("auctionTypeCode"), lot.get("auctionTypeCode")),
+        "batch_id": lot.get("batchId"),
+    }
+    return make_listing(
+        "leilosoc", eid, "PT",
+        title=title[:200] or f"Leilosoc lot {eid}",
+        description=description[:3000] or None,
+        tipo=(title.split("·")[0].strip().lower() or "imovel") if title else "imovel",
+        area_m2=area, price=base, min_price=minimum,
+        concelho=(lot.get("addressLocation") or "").strip() or None,
+        url=lot.get("_href") or f"/en/lot/{lot.get('auctionId')}/{lot.get('batchId')}", base_url=LEILOSOC,
+        image_url=f"https://i-auctions.devscope.net/l-feat{lot['pictureDefault']}" if lot.get("pictureDefault") else None,
+        date_end=lot.get("auctionEndDateExtended") or lot.get("auctionEndDate"),
+        raw_json={k: v for k, v in raw.items() if v is not None},
+    )
+
+
 @register("leilosoc", "PT")
 def scrape_leilosoc(db, max_price: float = 50000, **_):
-    """leilosoc.com — private auction house."""
-    session = make_session(timeout=15)
-    base = "https://leilosoc.com"
-    total_scraped = 0
-
-    for page in range(1, 10):
+    """leilosoc.com — private auction house (court and insolvency sales)."""
+    session = make_session(timeout=20)
+    total = 0
+    per_auction = defaultdict(int)
+    for page in range(1, 20):
         try:
-            resp = session.get(f"{base}/en/category/5-real-estate/?page={page}")
+            resp = session.get(f"{LEILOSOC}/en/category/5-real-estate/", params={"page": page})
             resp.raise_for_status()
         except Exception:
             if page == 1:
                 raise
             break
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        lot_links = soup.select("a[href*='/lot/']")
-        if not lot_links:
-            break
-
-        seen = set()
-        for a in lot_links:
-            href = a.get("href", "")
-            if not href or href in seen:
+        lots, more = leilosoc_lots(resp.text)
+        for lot in sorted(lots, key=lambda x: (x.get("auctionId") or 0, x.get("order") or 0, x.get("batchId") or 0)):
+            # IDs were the auction's number; an auction with several lots gave them
+            # all the same ID, so the next lots now get "-<lot>" (the first keeps it).
+            auction = str(lot.get("auctionId"))
+            per_auction[auction] += 1
+            eid = auction if per_auction[auction] == 1 else f"{auction}-{lot.get('batchId')}"
+            row = leilosoc_listing(lot, eid)
+            if row is None or (row["price"] and row["price"] > max_price):
                 continue
-            seen.add(href)
-            m = re.search(r"/lot/(\d+)/", href)
-            if not m:
-                continue
-            eid = m.group(1)
-
-            title = re.sub(r"^Lot\s+\d+\s*", "", a.get_text(" ", strip=True)).strip()[:120]
-            price = find_price(a.parent.get_text(" ")) if a.parent else None
-            if price and price > max_price:
-                continue
-
-            upsert_listing(db, make_listing(
-                "leilosoc", eid, "PT",
-                title=title or f"Leilosoc lot {eid}", tipo="imovel",
-                price=price, url=href, base_url=base,
-            ))
-            total_scraped += 1
-
+            upsert_listing(db, row)
+            total += 1
         db.commit()
-        LOG.info(f"  Leilosoc page {page}: {len(seen)} lots")
+        if not more:
+            break
         time.sleep(0.5)
-    return total_scraped
+    return total
 
 
 # ─── BCP Millennium ─────────────────────────────────────────────────
@@ -551,7 +624,6 @@ def parse_citius_item(item_text: str, trib_name: str) -> dict:
 def citius_listing(f: dict, eid: str) -> dict:
     desc = f["desc"]
     district, concelho, freguesia = _citius_extract_location(desc)
-    am = re.search(r"(\d[\d\s.]*)\s*m[²2]", desc, re.I)
     desc_parts = [p for p in (
         desc[:500],
         f"Modalidade: {f['modalidade']}" if f["modalidade"] else None,
@@ -568,12 +640,14 @@ def citius_listing(f: dict, eid: str) -> dict:
         "processo", "tribunal", "modalidade", "estado", "especie", "registo",
         "art_matricial", "entidade_registo", "intervenientes", "agente_nome",
         "agente_contacto", "agente_email")}
+    raw.update({k: f[k] for k in ("html_id", "detail_checked") if f.get(k)})
     return make_listing(
         "citius", eid, "PT",
         title=desc[:120] if desc else f"Citius judicial sale {f['processo']}",
         description=". ".join(desc_parts) if desc_parts else None,
         tipo="imovel",
-        area_m2=parse_price(am.group(1)) if am else None,
+        # "área coberta de 30 m2 e descoberta com 321 m2" → 30; "4,6905 ha" → 46905
+        area_m2=find_area(desc),
         price=f["price"],
         min_price=f["price"],
         district=district, concelho=concelho, freguesia=freguesia,
@@ -582,6 +656,112 @@ def citius_listing(f: dict, eid: str) -> dict:
         date_end=f["date_end"],
         raw_json=raw,
     )
+
+
+CITIUS_DETAILS = "https://www.citius.mj.pt/portal/consultas/ConsultasVenda.aspx/GetHtmlDetails"
+CITIUS_DETAILS_PER_SCAN = 150
+# Bumped when the details pass keeps more (2: Registo, Art. Matricial): sales read
+# by an older pass are read again.
+CITIUS_DETAIL_VERSION = 2
+_CITIUS_NEXT = "ctl00$ContentPlaceHolder1$Pager1$btnNextPage"
+
+
+def citius_blocks(html: str) -> list[str]:
+    dl = BeautifulSoup(html, "html.parser").select_one("[id*='dlVenda']")
+    return re.findall(r"Tipo de Bem:(.*?)(?=Tipo de Bem:|$)", str(dl), re.S) if dl else []
+
+
+def _citius_pages(session, first_html: str, form: dict, max_pages: int = 30):
+    """The first results page, then each next page (the pager is an image button)."""
+    html = first_html
+    for _ in range(max_pages):
+        yield html
+        nxt = BeautifulSoup(html, "html.parser").select_one("#ctl00_ContentPlaceHolder1_Pager1_btnNextPage")
+        if nxt is None or nxt.has_attr("disabled"):
+            return
+        state = {i["name"]: i.get("value", "") for i in
+                 BeautifulSoup(html, "html.parser").select("input[type=hidden][name]")}
+        try:
+            resp = session.post(CITIUS_URL, data={**state, "__EVENTTARGET": "", "__EVENTARGUMENT": "", **form,
+                                                  f"{_CITIUS_NEXT}.x": "5", f"{_CITIUS_NEXT}.y": "5"})
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.debug(f"  Citius next page failed: {e}")
+            return
+        html = resp.text
+
+
+def citius_detail_text(html: str) -> str:
+    """A sale's "ver mais" details as text, without the Intervenientes (the
+    people whose property is sold and their addresses)."""
+    text = re.sub(r"\s+", " ", BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True))
+    return text.split("Intervenientes")[0].strip()
+
+
+def citius_full_description(detail: str) -> str | None:
+    m = re.search(r"Descrição do Bem:\s*(.+?)(?:\s+Art\.\s*Matricial:|\s+Registo:|\s+Entidade de Registo:|$)", detail)
+    return m.group(1).strip() if m else None
+
+
+def _keep_citius_details(db, listing_id: str, f: dict) -> dict:
+    """The list shows a cut description ("… com uma ..."); once the full one has
+    been read (fetch_citius_details) it is used on every later scan."""
+    old = db.execute("SELECT raw_json FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if old and old[0] and '"detail_checked"' in old[0]:
+        try:
+            raw = json.loads(old[0])
+        except ValueError:
+            return f
+        f = {**f, "detail_checked": raw.get("detail_checked"), "html_id": f.get("html_id") or raw.get("html_id")}
+        if raw.get("descricao_completa"):
+            f["desc"] = raw["descricao_completa"]
+            f["descricao_completa"] = raw["descricao_completa"]
+    return f
+
+
+def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> int:
+    """Read the full description of sales not read yet (one request each)."""
+    rows = db.execute("""
+        SELECT id, raw_json FROM listings WHERE source = 'citius'
+          AND raw_json LIKE '%"html_id"%' AND raw_json NOT LIKE '%"detail_checked": ' || ? || '%'
+        ORDER BY last_seen DESC LIMIT ?""", (CITIUS_DETAIL_VERSION, limit)).fetchall()
+    done = 0
+    for listing_id, raw_text in rows:
+        raw = json.loads(raw_text)
+        try:
+            resp = session.post(CITIUS_DETAILS, data="{htmlId:%s}" % int(raw["html_id"]),
+                                headers={"Content-Type": "application/json; charset=utf-8"})
+            resp.raise_for_status()
+            detail = citius_detail_text(resp.json().get("d"))
+        except Exception as e:
+            LOG.debug(f"Citius details {listing_id}: {e}")      # tried again next scan
+            continue
+        full = citius_full_description(detail)
+        raw["detail_checked"] = CITIUS_DETAIL_VERSION
+        for key, label in (("registo", r"Registo"), ("art_matricial", r"Art\.?\s*Matricial"),
+                           ("entidade_registo", r"Entidade de Registo")):
+            m = re.search(label + r":\s*(.+?)(?=\s+(?:Registo|Art\.?\s*Matricial|Entidade de Registo):|$)", detail)
+            if m and m.group(1).strip() and not raw.get(key):
+                raw[key] = re.sub(r"<[^>]+>", "", m.group(1)).strip()[:120]
+        sets = {}
+        if full:
+            raw["descricao_completa"] = full[:3000]
+            district, concelho, freguesia = _citius_extract_location(full)
+            sets = {"title": full[:120], "area_m2": find_area(full),
+                    "district": district, "concelho": concelho, "freguesia": freguesia}
+            old_desc = db.execute("SELECT description FROM listings WHERE id = ?", (listing_id,)).fetchone()[0] or ""
+            rest = old_desc.split(". Modalidade:", 1)
+            sets["description"] = full[:3000] + (". Modalidade:" + rest[1] if len(rest) > 1 else "")
+        sets = {k: v for k, v in sets.items() if v}
+        sets["raw_json"] = json.dumps(raw, ensure_ascii=False)
+        db.execute(f"UPDATE listings SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?",
+                   (*sets.values(), listing_id))
+        done += 1
+        time.sleep(0.2)
+    db.commit()
+    if rows:
+        LOG.info(f"Citius: full details read for {done} of {len(rows)} sales")
+    return done
 
 
 @register("citius", "PT")
@@ -625,29 +805,39 @@ def scrape_citius(db, max_price: float = 50000, **_):
             LOG.debug(f"  Tribunal {trib_id} error: {e}")
             continue
 
-        dl = BeautifulSoup(r2.text, "html.parser").select_one("[id*='dlVenda']")
-        if not dl:
-            continue
-
+        form = {k: v for k, v in (
+            ("ctl00$ContentPlaceHolder1$ddlTribunais", trib_id),
+            ("ctl00$ContentPlaceHolder1$txtCalendarDesde", past),
+            ("ctl00$ContentPlaceHolder1$txtCalendarAte", today),
+            ("ctl00$ContentPlaceHolder1$chkDatas", "on"),
+            ("ctl00$ContentPlaceHolder1$ddlTiposBem", "1"),
+            ("ctl00$ContentPlaceHolder1$ddlModalidades", "0"),
+            ("ctl00$ContentPlaceHolder1$ddlEstados", "927"))}
         trib_count = 0
-        for item_html in re.findall(r"Tipo de Bem:(.*?)(?=Tipo de Bem:|$)", str(dl), re.S):
-            item_text = BeautifulSoup(item_html, "html.parser").get_text(" ", strip=True)
-            f = parse_citius_item(item_text, trib_name)
-            if f["price"] and f["price"] > max_price:
-                continue
+        # Results come 10 to a page; only the first page used to be read, so a
+        # court with 35 sales showed 10.
+        for page_html in _citius_pages(session, r2.text, form):
+            for item_html in citius_blocks(page_html):
+                item_text = BeautifulSoup(item_html, "html.parser").get_text(" ", strip=True)
+                f = parse_citius_item(item_text, trib_name)
+                hid = re.search(r"Viewer\.Abrir\(this,\s*(\d+)", item_html)
+                f["html_id"] = hid.group(1) if hid else None
 
-            if f["processo"]:
-                eid = re.sub(r"[^A-Za-z0-9]", "", f["processo"])[:40]
-            else:
-                eid = stable_id(trib_id, f["desc"])
-            # One processo can sell several bens; before, they overwrote each
-            # other. The first keeps the old ID so existing rows still match.
-            per_process[eid] += 1
-            if per_process[eid] > 1:
-                eid = f"{eid}-{per_process[eid]}"
+                if f["processo"]:
+                    eid = re.sub(r"[^A-Za-z0-9]", "", f["processo"])[:40]
+                else:
+                    eid = stable_id(trib_id, f["desc"])
+                # One processo can sell several bens; before, they overwrote each
+                # other. The first keeps the old ID so existing rows still match.
+                # Counted before the budget filter, so an ID does not depend on the budget.
+                per_process[eid] += 1
+                if per_process[eid] > 1:
+                    eid = f"{eid}-{per_process[eid]}"
+                if f["price"] and f["price"] > max_price:
+                    continue
 
-            upsert_listing(db, citius_listing(f, eid))
-            trib_count += 1
+                upsert_listing(db, citius_listing(_keep_citius_details(db, f"citius:{eid}", f), eid))
+                trib_count += 1
 
         if trib_count:
             total_scraped += trib_count
@@ -655,6 +845,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
         if (i + 1) % 20 == 0:
             LOG.info(f"  Citius: {i+1}/{len(tribunais)} tribunais, {total_scraped} listings so far")
         time.sleep(0.3)
+    fetch_citius_details(db, session)
     return total_scraped
 
 
@@ -674,91 +865,92 @@ def scrape_financas(db, max_price: float = 50000, **_):
 
 # ─── Whitestar (NPL bank portfolios) ────────────────────────────────
 
+WHITESTAR = "https://www.whitestarproperties.pt"
+
+
+def parse_whitestar_page(html: str, max_price: float) -> list[dict]:
+    """Listing rows from one Assets results page. Each card holds the type,
+    "District, Concelho, FREGUESIA", the price, a description and a small table
+    (Estado, Áreas, …), so no detail page is needed. The title used to be the
+    card's whole text, and sizes were missed ("Área ( m2)" vs "Área ( m 2 )").
+    "Reservado" (already under offer) is left out."""
+    rows = []
+    for a in BeautifulSoup(html, "html.parser").select('a[href*="/Assets/Details/"]'):
+        m = re.search(r"/Assets/Details/(\d+)", a.get("href", ""))
+        if not m:
+            continue
+        text = a.get_text(" ", strip=True)
+        if re.search(r"\bReservad[oa]\b|\bVendid[oa]\b", text, re.I):
+            continue
+        pick = lambda sel: (a.select_one(sel).get_text(" ", strip=True) if a.select_one(sel) else "")  # noqa: E731
+        typology = pick(".wsi-asset-typology")
+        location = [p.strip() for p in pick(".wsi-asset-location").split(",")]
+        price = parse_price(pick(".wsi-asset-price")) or find_price(text)
+        if price and price > max_price:
+            continue
+        specs = {}
+        table = a.select_one(".wsi-asset-specs table")
+        if table:
+            heads = [td.get_text(" ", strip=True) for td in table.select("thead td")]
+            cells = [td.get_text(" ", strip=True) for td in table.select("tbody td")]
+            specs = dict(zip(heads, cells))
+        description = pick(".wsi-asset-description")
+        state = specs.get("Estado")
+        district, concelho = (location + [None, None])[:2]
+        freguesia = ", ".join(location[2:]) or None
+        rows.append(make_listing(
+            "whitestar", m.group(1), "PT",
+            title=", ".join(x for x in (typology, (freguesia or concelho or "").title()) if x)[:200]
+                  or f"Whitestar #{m.group(1)}",
+            description=" · ".join(x for x in (description, f"Estado: {state}" if state and state != "-" else "")
+                                   if x) or None,
+            tipo=typology.split(" T")[0].lower() or "imóvel",
+            area_m2=find_area(specs.get("Áreas", "")) or find_area(description),
+            price=price, min_price=price,
+            district=district or None, concelho=concelho, freguesia=freguesia,
+            url=f"{WHITESTAR}/Assets/Details/{m.group(1)}",
+        ))
+    return rows
+
+
 @register("whitestar", "PT")
 def scrape_whitestar(db, max_price: float = 50000, **_):
-    """whitestarproperties.pt — NPL portfolios (Novo Banco etc.), with detail pages."""
-    session = make_session(timeout=15)
-    base = "https://www.whitestarproperties.pt"
+    """whitestarproperties.pt — NPL portfolios (Novo Banco etc.)."""
+    # One search up to the budget, page by page (5 cards a page). The old loop
+    # over districts read only each district's first page: 21 of 218 under €30k.
+    session = make_session(timeout=20)
     total_scraped = 0
-    seen_ids = set()
-    failures_in_a_row = 0
-
-    for dist_id in [""] + [str(i) for i in range(1, 21)]:
+    seen_ids: set[str] = set()
+    expected = None
+    for page in range(1, 300):
         try:
-            resp = session.post(f"{base}/Assets",
-                                data={"District": dist_id, "County": "", "PropertyType": ""},
-                                allow_redirects=True)
+            resp = session.post(f"{WHITESTAR}/Assets", data={
+                "PropertyType": "", "District": "", "County": "",
+                "maxPrice": str(int(max_price)), "PageNumber": str(page)})
             resp.raise_for_status()
-            failures_in_a_row = 0
         except Exception as e:
-            failures_in_a_row += 1
-            if failures_in_a_row >= 3:   # the site is down, not one district
-                if total_scraped == 0:
-                    raise
-                LOG.warning(f"Whitestar: giving up after 3 failed districts ({e})")
-                break
-            LOG.debug(f"Whitestar district {dist_id}: {e}")
-            continue
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for a in soup.select('a[href*="/Assets/Details/"]'):
-            m = re.search(r"/Assets/Details/(\d+)", a.get("href", ""))
-            if not m or m.group(1) in seen_ids:
+            if page == 1:
+                raise
+            LOG.warning(f"Whitestar: page {page} failed ({e}); keeping earlier pages")
+            break
+        if expected is None:
+            m = re.search(r"(\d+)\s*(?:imóveis|Imóveis|resultados)",
+                          BeautifulSoup(resp.text, "html.parser").get_text(" "))
+            expected = int(m.group(1)) if m else None
+        new = 0
+        for row in parse_whitestar_page(resp.text, max_price):
+            if row["external_id"] in seen_ids:
                 continue
-            eid = m.group(1)
-            seen_ids.add(eid)
-
-            card_text = a.get_text(" ", strip=True)
-            price = find_price(card_text)
-            if price and price > max_price:
-                continue
-
-            tipo = ""
-            for t in ["Apartamento", "Moradia", "Terreno", "Loja", "Armazém", "Garagem", "Escritório", "Prédio"]:
-                if t.lower() in card_text.lower():
-                    tipo = t
-                    break
-            title = card_text[:80].strip() or f"Whitestar #{eid}"
-            distrito = concelho = freguesia = description = area = None
-
-            try:
-                det = session.get(f"{base}/Assets/Details/{eid}", timeout=15)
-                det.raise_for_status()
-                dsoup = BeautifulSoup(det.text, "html.parser")
-                labels = {}
-                for lbl in dsoup.select(".wsi-assetview-label"):
-                    val_el = lbl.find_next_sibling(class_="wsi-assetview-value")
-                    if val_el:
-                        labels[lbl.get_text(strip=True)] = val_el.get_text(strip=True)
-
-                distrito = labels.get("Distrito")
-                concelho = labels.get("Concelho")
-                freguesia = labels.get("Freguesia")
-                area = parse_price(labels.get("Área ( m 2 )") or labels.get("Área (m2)"))
-                desc_el = dsoup.select_one(".wsi-assetview-description")
-                description = desc_el.get_text(" ", strip=True)[:500] if desc_el else None
-                h1 = dsoup.find("h1")
-                if h1:
-                    title = re.sub(r"\s*\d[\d\s\xa0.,]*€.*", "", h1.get_text(" ", strip=True))[:80] or title
-                if not price:
-                    price = find_price(dsoup.get_text(" "))
-                    if price and price > max_price:
-                        continue
-            except Exception as e:
-                LOG.debug(f"Whitestar detail {eid}: {e}")
-
-            upsert_listing(db, make_listing(
-                "whitestar", eid, "PT",
-                title=title, description=description,
-                tipo=tipo.lower() if tipo else "imóvel",
-                area_m2=area, price=price, min_price=price,
-                district=distrito, concelho=concelho, freguesia=freguesia,
-                url=f"{base}/Assets/Details/{eid}",
-            ))
+            seen_ids.add(row["external_id"])
+            upsert_listing(db, row)
             total_scraped += 1
-
+            new += 1
         db.commit()
+        cards = len(set(re.findall(r'/Assets/Details/(\d+)', resp.text)))
+        if not cards or (expected and page * 5 >= expected + 5):
+            break
         time.sleep(0.3)
+    LOG.info(f"Whitestar: {total_scraped} listings (site reports {expected})")
     return total_scraped
 
 
@@ -1065,13 +1257,16 @@ def scrape_imobancos(db, max_price: float = 100000, **_):
     return total
 
 
+# The property section. "/leiloes?categoria=imoveis" ignored the category and
+# listed art and machinery auctions. The posts are announcements, some years
+# old and without a clear end date, so only the newest three pages are read.
 CENTROLEILOES = CardSite(
-    source="centroleiloes", country="PT", base="https://centrodeleiloes.pt", path="/leiloes",
-    card_selector="div.lot, div.lote, article, div[class*='lot']",
-    title_selector="h2,h3,.title,.lot-title",
-    date_selector=".date,.data,[class*='date']",
-    params={"categoria": "imoveis"}, max_pages=14, delay=0.8,
-    description="Leilão Centro de Leilões",
+    source="centroleiloes", country="PT", base="https://centrodeleiloes.pt", path="/leiloes/imoveis/",
+    card_selector="article",
+    title_selector="h2,h3,.entry-title",
+    date_selector=".fusion-date,time,.date",
+    page_param="paged", max_pages=3, min_cards=8, delay=0.8,
+    description="Leilão Centro de Leilões (imóveis)",
 )
 
 

@@ -183,6 +183,130 @@ def related(db, item: dict) -> list[dict]:
     return out
 
 
+def same_case_lots(db, item: dict) -> list[dict]:
+    """Other lots sold in the same court case (a house and the plot next to it,
+    several plots of one owner): worth buying together."""
+    proc = case_number(item)
+    if not proc or not item.get("id"):
+        return []
+    like = f'%"processo": "{proc}%'
+    out = []
+    for row in db.execute("""SELECT id, title, price, area_m2, url, source FROM listings
+                             WHERE source = ? AND id != ? AND raw_json LIKE ?
+                             ORDER BY price""", (item.get("source"), item["id"], like)).fetchall()[:12]:
+        out.append({"id": row["id"], "title": (row["title"] or "")[:140], "price": row["price"],
+                    "area": row["area_m2"], "url": safe_url(row["url"])})
+    return out
+
+
+PREDIAL_ONLINE = "https://www.predialonline.pt/PredialOnline/"
+
+_CONSERVATORIA = re.compile(
+    r"Conservat[óo]ria\s+(?:do\s+)?(?:Registo\s+Predial\s+)?(?:de|do|da)\s+(.+?)\s+sob\s+o\s+n[.ºo°]*\s*([\d/]+)", re.I)
+_DESCRITO_SOB = re.compile(r"descrit[oa]\s+sob\s+o\s+n[.ºo°]*\s*([\d/]+)\s+da\s+Conservat[óo]ria\s+(?:do\s+Registo\s+Predial\s+)?(?:de|do|da)\s+([^,.;]+)", re.I)
+_ARTIGO = re.compile(r"matriz(?:\s+predial)?\s+(urbana|r[úu]stica)?\s*(?:da\s+freguesia\s+de\s+[^,]+?\s+)?sob\s+o\s+art(?:igo)?\.?\s*n?[.ºo°]*\s*(\d+)", re.I)
+
+
+def _land_register_from_text(text: str) -> list[dict]:
+    """"descrito na Conservatória do Registo Predial de Penafiel sob o nº 01469/11062003 e
+    inscrito na matriz predial urbana sob o artigo nº 158" → the identifiers."""
+    found = []
+    m = _CONSERVATORIA.search(text)
+    if m:
+        found.append({"conservatoria": m.group(1).strip(" ,"), "descricao": m.group(2)})
+    else:
+        m = _DESCRITO_SOB.search(text)
+        if m:
+            found.append({"conservatoria": m.group(2).strip(" ,"), "descricao": m.group(1)})
+    art = _ARTIGO.search(text)
+    if art:
+        entry = found[0] if found else {}
+        entry["artigos"] = [{"numero": art.group(2), "tipo": (art.group(1) or "").lower() or None}]
+        if not found:
+            found.append(entry)
+    return found
+
+
+def official_records(item: dict) -> dict | None:
+    """Where the government's own record of this property is, with the numbers
+    to find it, and what that record says when it can be read for free."""
+    raw = raw_of(item)
+    country = item.get("country") or "PT"
+    if country == "ES":
+        ref = raw.get("referencia_catastral")
+        cat = raw.get("catastro")
+        if not (ref or cat):
+            return None
+        facts = []
+        if cat:
+            for label, key, unit in (("Use", "use", ""), ("Built area", "built_m2", " m²"),
+                                     ("Plot", "plot_m2", " m²"), ("Year built", "year", "")):
+                value = cat.get(key)
+                if not value:
+                    continue
+                if key == "year":
+                    value = str(int(value))
+                elif isinstance(value, (int, float)):
+                    value = f"{value:,.0f}".replace(",", " ") + unit
+                facts.append({"label": label, "value": value})
+            if cat.get("address"):
+                facts.append({"label": "Address", "value": cat["address"]})
+            for u in cat.get("units") or []:
+                facts.append({"label": "Building", "value": f"{u.get('use')} ({u.get('m2') or '?'} m²)"})
+        check = None
+        if cat and cat.get("built_m2") and item.get("area_m2"):
+            diff = abs(cat["built_m2"] - item["area_m2"]) / max(cat["built_m2"], item["area_m2"])
+            check = (f"The sale says {item['area_m2']:,.0f} m²; Catastro says {cat['built_m2']:,.0f} m² built"
+                     + (" — they differ, ask the court why." if diff > 0.2 else " — they match."))
+        return {"country": "ES", "registry": "Catastro (Spain's land registry)", "facts": facts, "check": check,
+                "copy": [{"label": "Referencia catastral", "value": ref}] if ref else [],
+                "links": [{"label": "Open in Catastro", "url": catastro_url(item)}] if catastro_url(item) else [],
+                "steps": [] if cat else [{"text": "Catastro has not been read for this sale yet (it is read "
+                                                  "during scans; open the link to see it now)."}]}
+    if country != "PT":
+        return None
+
+    entries = raw.get("registo_predial") or _land_register_from_text(
+        " ".join(str(x or "") for x in (raw.get("descricao_completa"), item.get("description"))))
+    copy = []
+    for e in entries[:3]:
+        where = e.get("conservatoria") or e.get("concelho")
+        if e.get("descricao"):
+            copy.append({"label": "Description no. (número da descrição)", "value": e["descricao"]})
+        if e.get("fracao"):
+            copy.append({"label": "Fraction (fração)", "value": e["fracao"]})
+        if e.get("freguesia"):
+            copy.append({"label": "Parish (freguesia)", "value": e["freguesia"]})
+        if where:
+            copy.append({"label": "Conservatória / concelho", "value": where})
+        for a in e.get("artigos") or []:
+            copy.append({"label": f"Tax article ({a.get('tipo') or 'artigo matricial'})", "value": a["numero"]})
+    if raw.get("art_matricial") and not any(c["label"].startswith("Tax article") for c in copy):
+        copy.append({"label": "Tax article (artigo matricial)", "value": str(raw["art_matricial"])})
+    if raw.get("registo") and not any(c["label"].startswith("Description") for c in copy):
+        copy.append({"label": "Description no. (número da descrição)", "value": str(raw["registo"])})
+    if not copy:
+        return None
+    parish = item.get("freguesia") or next((e.get("freguesia") for e in entries if e.get("freguesia")), None)
+    return {
+        "country": "PT", "registry": "Registo Predial (land register) — certidão permanente",
+        "copy": copy, "facts": [], "check": None,
+        "links": [{"label": "Predial Online", "url": PREDIAL_ONLINE}],
+        "steps": [
+            {"text": "Open Predial Online and sign in with your Cartão de Cidadão or Chave Móvel Digital."},
+            {"text": "Choose “Criar nova certidão permanente” and enter the description number"
+                     + (f", the parish ({parish})" if parish else ", the parish") + " and the fraction if there is one."},
+            {"text": "Pay €15 (you pay it yourself); the access code comes by e-mail and the certificate "
+                     "is valid for 6 months. “Consultar” with the code shows the owners, the area and "
+                     "composition, and every charge on the property (mortgages, penhoras)."},
+            {"text": "If the parish names differ between documents, use the one from the same document "
+                     "as the description number."},
+            {"text": "The tax record (caderneta predial) is visible only to its owner: ask the agente or the "
+                     "court for it in the information request, quoting the tax article."},
+        ],
+    }
+
+
 def how_to_find(item: dict) -> dict | None:
     """Steps to reach the exact sale when its link opens only a search page."""
     if item.get("source") != "citius":

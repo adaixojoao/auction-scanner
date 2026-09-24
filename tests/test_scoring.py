@@ -409,3 +409,29 @@ def test_storage_rooms_and_unclear_listings():
     assert "unclear what it is — check" in reasons
     clear, _ = score(item(source="citius", price=1372, title="Moradia sita no Montoiro"))
     assert clear > sc
+
+
+def test_a_house_sold_with_cheap_land_in_the_same_case(db, add):
+    import json
+    from db import load_listings
+    case = json.dumps({"processo": "366/10.4TBVLN, Juízo de Valença"})
+    add("citius", "366104TBVLN", title="Prédio urbano, casa de um pavimento, com área de 142 m2",
+        price=7500, raw_json=case)
+    add("citius", "366104TBVLN-2", title="Prédio Rústico composto de cultivo, com área de 2760 m2",
+        price=500, area_m2=2760, raw_json=case)
+    add("citius", "999", title="Moradia com 100 m2", price=7500,
+        raw_json=json.dumps({"processo": "9/99.9TBXXX"}))
+    add("citius", "999-2", title="Terreno rústico com 5000 m2", price=20000, area_m2=5000,   # not cheap
+        raw_json=json.dumps({"processo": "9/99.9TBXXX"}))
+    items = {it["id"]: it for it in load_listings(db, include_hidden=True)}
+    assert "land in the same case (€500, 2 760 m²)" in items["citius:366104TBVLN"]["reasons"]
+    assert not any(r.startswith("land in the same case") for r in items["citius:999"]["reasons"])
+    assert items["citius:366104TBVLN"]["rank"] > items["citius:999"]["rank"]
+
+
+def test_a_home_next_to_water():
+    from scoring import score_detail          # both reach 100: compare before the cap
+    by_river, reasons = score_detail(item(title="Moradia T2", description="Casa junto ao rio, em bom estado",
+                                          price=20000))
+    inland, _ = score_detail(item(title="Moradia T2", description="Casa em bom estado", price=20000))
+    assert "next to water (junto ao rio)" in reasons and by_river > inland

@@ -93,6 +93,7 @@ def scrape_spain(db, max_price: float = 50000, **_):
             time.sleep(1)
 
     enrich_spain_details(db, session)
+    fetch_catastro(db, session)
     return total_scraped
 
 
@@ -304,6 +305,83 @@ def spain_details(pages: dict[str, str]) -> tuple[dict, dict]:
     for tab, html in pages.items():
         extra.update({k: v for k, v in _TAB_PARSERS[tab](html).items() if v})
     return fields, extra
+
+
+# ─── Catastro: Spain's land registry, free and public ───────────────
+CATASTRO_API = "https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCallejero.svc/json/Consulta_DNPRC"
+CATASTRO_PER_SCAN = 60
+
+
+def _find(obj, key):
+    """First value under `key` anywhere in a nested dict/list."""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        obj = list(obj.values())
+    if isinstance(obj, list):
+        for v in obj:
+            found = _find(v, key)
+            if found is not None:
+                return found
+    return None
+
+
+def parse_catastro(payload: dict) -> dict | None:
+    """What Catastro's Consulta_DNPRC says about one property: address, use,
+    built area (sfc), plot area (ss), year built (ant) and the buildings on it.
+    None when it has no such property (or answers with an error)."""
+    if not isinstance(payload, dict) or _find(payload, "lerr"):
+        return None
+    units = []
+    lcons = _find(payload, "lcons")
+    for c in (lcons if isinstance(lcons, list) else [lcons] if lcons else []):
+        area = to_number(_find(c, "stl"))
+        if c and _find(c, "lcd"):
+            units.append({"use": _find(c, "lcd"), "m2": area})
+    out = {
+        "address": _find(payload, "ldt"),
+        "use": _find(payload, "luso"),
+        "built_m2": to_number(_find(payload, "sfc")),
+        "plot_m2": to_number(_find(payload, "ss")),
+        "year": to_number(_find(payload, "ant")),
+        "units": units[:10] or None,
+    }
+    out = {k: v for k, v in out.items() if v not in (None, "", [])}
+    return out or None
+
+
+def fetch_catastro(db, session, limit: int = CATASTRO_PER_SCAN) -> int:
+    """Look up BOE sales with a referencia catastral in Catastro, once each."""
+    rows = db.execute("""
+        SELECT id, raw_json FROM listings WHERE source = 'spain'
+          AND raw_json LIKE '%"referencia_catastral"%' AND raw_json NOT LIKE '%"catastro_checked"%'
+        ORDER BY last_seen DESC LIMIT ?""", (limit,)).fetchall()
+    done = 0
+    for listing_id, raw_text in rows:
+        raw = json.loads(raw_text)
+        ref = re.sub(r"[^0-9A-Za-z]", "", str(raw.get("referencia_catastral") or "")).upper()
+        if len(ref) not in (14, 20):
+            raw["catastro_checked"] = True          # not a usable reference: do not ask again
+        else:
+            try:
+                resp = session.get(CATASTRO_API, params={"RefCat": ref}, timeout=20)
+                resp.raise_for_status()
+                data = parse_catastro(resp.json())
+            except Exception as e:
+                # Catastro refuses some connections (seen from a Portuguese mobile
+                # network); try again next scan rather than marking it checked.
+                LOG.info(f"Catastro not reachable now ({type(e).__name__}); trying next scan")
+                break
+            raw["catastro_checked"] = True
+            if data:
+                raw["catastro"] = data
+                done += 1
+        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), listing_id))
+        time.sleep(0.3)
+    db.commit()
+    if done:
+        LOG.info(f"Catastro: read {done} properties")
+    return done
 
 
 def enrich_spain_details(db, session, limit: int = 100):

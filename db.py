@@ -615,6 +615,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         else:
             item["price_drop_pct"] = None
         item["earlier_round"] = rounds.earlier_round(item, cases, now)
+        item["case_land"] = rounds.land_in_case(item, cases, now, property_kind)
 
         rank, reasons = score_detail(item, now=now, targets=filters)
         sc = max(0.0, min(100.0, rank))

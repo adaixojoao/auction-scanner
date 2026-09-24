@@ -296,6 +296,7 @@ def api_listing_detail():
             return jsonify({"error": "no such listing"}), 404
         it = found[0]
         related = listing_info.related(db, it)
+        lots = listing_info.same_case_lots(db, it)
     finally:
         db.close()
     return jsonify({
@@ -303,8 +304,9 @@ def api_listing_detail():
         "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
         "description": (it.get("description") or "")[:4000],
         "score": it["score"], "reasons": it.get("reasons") or [],
-        "facts": listing_info.facts(it), "related": related,
+        "facts": listing_info.facts(it), "related": related, "same_case": lots,
         "how_to_find": listing_info.how_to_find(it),
+        "official": listing_info.official_records(it),
     })
 
 @app.route("/api/listings/status", methods=["POST"])
