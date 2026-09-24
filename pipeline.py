@@ -15,7 +15,8 @@ import os
 import time
 from datetime import timedelta
 
-from common import LOG, configure_http, lock_holder, parse_dt, utcnow, utcnow_iso
+from common import LOG, configure_http, parse_dt, utcnow, utcnow_iso
+from locks import lock_holder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCK_PATH = os.path.join(HERE, "scan.lock")
