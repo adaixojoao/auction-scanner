@@ -21,6 +21,20 @@ def test_dates_in_titles_are_not_fractions():
     assert sc > 0
 
 
+def test_any_share_is_a_fraction_but_not_dates_or_case_numbers():
+    from scoring import is_fractional_share as share
+    assert share("29/84 DE IMOVEL EM GASIELAS, TOURIM")
+    assert share("Venda de parte de bem(4986/100000)-prédio urbano")
+    assert share("Direito de 3/32 em três prédios")
+    assert not share("Moradia penhorada em 01/2025")
+    assert not share("Online Auction Loja · Rio de Mouro, Sintra - 115.000,00 € Portugal DMI-1039/2026")
+    assert not share("Citius judicial sale 1436/19.9T8VRL.1")
+    assert not share("Processo 12/18.0T8PRT, moradia")
+    assert not share("Moradia T3 no nº 12/14 da Rua Direita")          # house numbers
+    assert not share("Loja na Rua do Sol, n.º 3/5")
+    assert share("1 / 2 (Um Meio) Prédio Urbano")
+
+
 def test_vacant_is_not_occupied():
     vacant, r1 = score(item(title="Moradia", description="Imóvel devoluto e desocupado", price=20000))
     occupied, r2 = score(item(title="Moradia", description="Imóvel arrendado", price=20000))
@@ -38,9 +52,68 @@ def test_casal_is_not_a_house():
 
 
 def test_no_minimum_bonus_counted_once():
-    _, reasons = score(item(title="Prédio", source="citius", price=None))
-    assert "Citius no-minimum court sale" in reasons
-    assert "no minimum bid" not in reasons
+    _, reasons = score(item(title="Prédio", source="citius", price=12000))
+    assert reasons.count("no minimum bid") == 1
+    _, no_price = score(item(title="Prédio", source="citius", price=None))
+    assert "no price — you set your offer" in no_price and "no minimum bid" not in no_price
+    _, low_min = score(item(title="Prédio", source="citius", price=12000, min_price=200))
+    assert "min bid only €200" in low_min and "no minimum bid" not in low_min
+
+
+def test_no_price_on_an_offer_sale_is_a_chance():
+    # Carta fechada / negociação particular: you name the price, so a missing
+    # price is an opening, not a gap.
+    home = "Prédio urbano, casa de habitação"
+    sealed, r_sealed = score(item(title=home, price=0, source="citius",
+                                  description="Venda mediante proposta em carta fechada"))
+    private, r_private = score(item(title=home, price=None, source="citius",
+                                    description="Venda por negociação particular"))
+    assert "no price — you set your offer" in r_sealed and "sealed-bid (carta fechada)" in r_sealed
+    assert "no price — you set your offer" in r_private
+    assert sealed == 100 and private >= 80
+    # an online listing whose price we simply did not read gets no such bonus
+    _, r_online = score(item(title="Moradia", source="leilosoc"))
+    assert "no price — you set your offer" not in r_online
+
+
+def test_price_outweighs_how_the_court_sells():
+    court = dict(source="citius", description="Venda mediante proposta em carta fechada")
+    dear_court, r_dear = score(item(title="Fracção - habitação no 3º andar", price=97500, **court))
+    cheap_online, _ = score(item(title="Moradia", price=12000, concelho="Guarda"))
+    assert "€97,500 — not a low price" in r_dear
+    assert dear_court < 85 < cheap_online
+
+
+def test_half_shares_and_furniture():
+    for title in ("Metade da fracção autónoma identificada pela letra A",
+                  "Metade ( da habitação do 2º andar direito"):
+        sc, reasons = score(item(title=title, price=46750))
+        assert sc == 0 and "fractional" in reasons[0], title
+    from scoring import property_kind as kind
+    assert kind(item(title="Mobiliário de habitação", price=1270)) == "other"
+    assert kind(item(title="Móveis de Habitação")) == "other"
+    assert kind(item(title="Mobília de casa")) == "other"
+    assert kind(item(title="Moradia T3 com mobiliário")) == "home"   # names the building first
+    assert kind(item(title="Casa com mobília")) == "home"
+
+
+def test_what_the_portal_says_is_not_property():
+    # e-leilões typed this machine as a flat (subtype 22 of equipment, type 5).
+    from scoring import property_kind as kind
+    machine = item(title="Máquina de calcanheiras", tipo="equipamento", price=4250)
+    assert categorize(machine) == "outros" and kind(machine) == "other"
+    assert categorize(item(title="Mobília de casa", tipo="mobiliario")) == "outros"
+
+
+def test_eleiloes_types_depend_on_the_main_type():
+    from sources.pt import eleiloes_tipo
+    assert eleiloes_tipo({"tipoId": 1, "subtipoId": 2}) == "moradia"       # was "loja/escritorio"
+    assert eleiloes_tipo({"tipoId": 1, "subtipoId": 1}) == "apartamento"
+    assert eleiloes_tipo({"tipoId": 1, "subtipoId": 27}) == "terreno_rustico"
+    assert eleiloes_tipo({"tipoId": 5, "subtipoId": 22}) == "equipamento"  # not an apartment
+    assert eleiloes_tipo({"tipoId": 4, "subtipoId": 16}) == "mobiliario"
+    assert eleiloes_tipo({"tipoId": 6, "subtipoId": 37}) == "direitos"
+    assert eleiloes_tipo({"subtipoId": 21}) == "moradia"                   # no tipoId: as before
 
 
 def test_urgency_works_with_naive_dates():
