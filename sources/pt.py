@@ -129,10 +129,10 @@ def _eleiloes_to_listing(item: dict) -> dict:
 # Fields the detail pass adds to raw_json. The next search-page scrape replaces
 # raw_json with the thin list item, so these are carried over (_keep_details).
 # Bumped when the detail pass reads more: sales read by an older pass are read again.
-DETAIL_VERSION = 3
+DETAIL_VERSION = 4
 ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
                         "valor_abertura", "morada", "lat", "lon", "reg_district", "reg_concelho",
-                        "reg_freguesia", "detail_checked")
+                        "reg_freguesia", "registo_predial", "detail_checked")
 _NOT_PROPERTY = ("outro", "direitos", "veiculo", "equipamento", "mobiliario")
 
 
@@ -159,6 +159,25 @@ def _registry_place(item: dict) -> dict:
     clean = lambda v: re.sub(r"^\s*\d+\s*-\s*", "", str(v or "")).strip() or None  # noqa: E731
     return {"district": clean(first.get("distritoDesc")), "concelho": clean(first.get("concelhoDesc")),
             "freguesia": clean(first.get("freguesiaDesc"))}
+
+
+def land_register_entries(item: dict) -> list[dict]:
+    """The land-register descriptions (descPredial) of an e-leilões sale, as the
+    identifiers needed to look the property up: description number, fraction,
+    freguesia and concelho, and the tax articles (number, urbano/rústico)."""
+    clean = lambda v: re.sub(r"^\s*\d+\s*-\s*", "", str(v or "")).strip() or None  # noqa: E731
+    out = []
+    for d in item.get("descPredial") or []:
+        if not isinstance(d, dict) or not d.get("numero"):
+            continue
+        out.append({
+            "descricao": str(d.get("numero")).strip(),
+            "fracao": (d.get("fracao") or "").strip() or None,
+            "freguesia": clean(d.get("freguesiaDesc")), "concelho": clean(d.get("concelhoDesc")),
+            "artigos": [{"numero": str(a.get("numero") or "").strip(), "tipo": (a.get("tipo") or "").strip() or None}
+                        for a in d.get("artigos") or [] if isinstance(a, dict) and a.get("numero")],
+        })
+    return out
 
 
 def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
@@ -192,6 +211,7 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
         "lon": to_number(item.get("coordenadasLON")) or None,
         "reg_district": place["district"], "reg_concelho": place["concelho"],
         "reg_freguesia": place["freguesia"],
+        "registo_predial": land_register_entries(item) or None,
         "detail_checked": DETAIL_VERSION,
     }
     return fields, {k: v for k, v in extra.items() if v is not None}
@@ -640,6 +660,9 @@ def citius_listing(f: dict, eid: str) -> dict:
 
 CITIUS_DETAILS = "https://www.citius.mj.pt/portal/consultas/ConsultasVenda.aspx/GetHtmlDetails"
 CITIUS_DETAILS_PER_SCAN = 150
+# Bumped when the details pass keeps more (2: Registo, Art. Matricial): sales read
+# by an older pass are read again.
+CITIUS_DETAIL_VERSION = 2
 _CITIUS_NEXT = "ctl00$ContentPlaceHolder1$Pager1$btnNextPage"
 
 
@@ -700,8 +723,8 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
     """Read the full description of sales not read yet (one request each)."""
     rows = db.execute("""
         SELECT id, raw_json FROM listings WHERE source = 'citius'
-          AND raw_json LIKE '%"html_id"%' AND raw_json NOT LIKE '%"detail_checked"%'
-        ORDER BY last_seen DESC LIMIT ?""", (limit,)).fetchall()
+          AND raw_json LIKE '%"html_id"%' AND raw_json NOT LIKE '%"detail_checked": ' || ? || '%'
+        ORDER BY last_seen DESC LIMIT ?""", (CITIUS_DETAIL_VERSION, limit)).fetchall()
     done = 0
     for listing_id, raw_text in rows:
         raw = json.loads(raw_text)
@@ -714,7 +737,12 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
             LOG.debug(f"Citius details {listing_id}: {e}")      # tried again next scan
             continue
         full = citius_full_description(detail)
-        raw["detail_checked"] = 1
+        raw["detail_checked"] = CITIUS_DETAIL_VERSION
+        for key, label in (("registo", r"Registo"), ("art_matricial", r"Art\.?\s*Matricial"),
+                           ("entidade_registo", r"Entidade de Registo")):
+            m = re.search(label + r":\s*(.+?)(?=\s+(?:Registo|Art\.?\s*Matricial|Entidade de Registo):|$)", detail)
+            if m and m.group(1).strip() and not raw.get(key):
+                raw[key] = re.sub(r"<[^>]+>", "", m.group(1)).strip()[:120]
         sets = {}
         if full:
             raw["descricao_completa"] = full[:3000]

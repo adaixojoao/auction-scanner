@@ -184,3 +184,5 @@ tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 @media (max-width: 800px) { .details { flex-direction: column; } .details .d-img { width: 100%; } }
 .details .d-lots { font-size: 13px; margin: 8px 0; }
 .details .d-lots ul { margin: 4px 0 0 18px; }
+.details .copy-list { margin: 6px 0 0 18px; font-size: 13px; }
+.details .official { margin-top: 6px; }

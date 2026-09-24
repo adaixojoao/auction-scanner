@@ -164,10 +164,20 @@ function detailsHtml(d) {
       <ol>${d.how_to_find.steps.map(s => `<li>${AS.esc(s.text)}
         ${s.copy ? ` <code>${AS.esc(s.copy)}</code> <button class="btn btn-sm" data-copy="${AS.esc(s.copy)}" onclick="copyText(this.dataset.copy)">Copy</button>` : ""}
         ${s.url ? ` ${AS.link(s.url, "Open Citius ↗")}` : ""}</li>`).join("")}</ol></div>` : "";
+  const off = d.official;
+  const official = off ? `<div class="guide official">
+      <b>Official records: ${AS.esc(off.registry)}</b>
+      ${off.check ? `<p class="small"><b>${AS.esc(off.check)}</b></p>` : ""}
+      ${off.facts.length ? `<div class="facts">${off.facts.map(f => `<div class="fact"><span class="k">${AS.esc(f.label)}</span><span class="v">${AS.esc(f.value)}</span></div>`).join("")}</div>` : ""}
+      ${off.copy.length ? `<ul class="copy-list">${off.copy.map(c => `<li>${AS.esc(c.label)}: <code>${AS.esc(c.value)}</code> <button class="btn btn-sm" data-copy="${AS.esc(c.value)}" onclick="copyText(this.dataset.copy)">Copy</button></li>`).join("")}</ul>` : ""}
+      ${off.steps.length ? `<ol>${off.steps.map(s => `<li>${AS.esc(s.text)}</li>`).join("")}</ol>` : ""}
+      ${off.links.map(l => AS.link(l.url, l.label + " ↗")).join(" · ")}
+    </div>` : "";
   return `<div class="details">
     ${d.image ? `<img class="d-img" src="${AS.esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
     <div class="d-main">
       ${guide}
+      ${official}
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${(d.same_case || []).length ? `<div class="d-lots"><b>Also sold in this case</b> <span class="small muted">(buying together can make sense: a house and the plot next to it)</span><ul>${

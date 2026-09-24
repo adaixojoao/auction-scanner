@@ -306,6 +306,7 @@ def api_listing_detail():
         "score": it["score"], "reasons": it.get("reasons") or [],
         "facts": listing_info.facts(it), "related": related, "same_case": lots,
         "how_to_find": listing_info.how_to_find(it),
+        "official": listing_info.official_records(it),
     })
 
 @app.route("/api/listings/status", methods=["POST"])
