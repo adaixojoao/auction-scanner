@@ -14,7 +14,7 @@ import re
 
 from common import LOG, has_term, utcnow
 from db import load_listings
-from scoring import FRAC_PATTERNS, buyer_priorities
+from scoring import buyer_priorities, is_fractional_share
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = "claude-haiku-4-5"
@@ -44,7 +44,7 @@ def _rule_based(compact: list[dict], now) -> str:
     for entry in compact:
         flags = []
         title = entry["title"]
-        if has_term(title, FRAC_PATTERNS, negations=False):
+        if is_fractional_share(title):
             flags.append("FRACTIONAL SHARE — limited utility")
         if has_term(title, ["usufruto"]):
             flags.append("USUFRUCT ONLY — not full ownership")

@@ -13,17 +13,38 @@ import json
 import re
 from datetime import datetime
 
-from common import days_left, find_terms, has_term, normalize, utcnow
+from common import days_left, find_terms, has_term, normalize, term_regex, utcnow
 
 FRAC_PATTERNS = [
     "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
     "1/10", "1/11", "1/12", "1/14", "1/16", "1/20", "1/24",
     "2/3", "3/4",
-    "um meio", "metade indivisa", "mitad indivisa",
+    "um meio", "metade", "mitad indivisa",
     "avos", "quota", "quota-parte", "quinhão", "quinhao",
     "fração ideal", "fracao ideal", "parte indivisa", "compropriedade",
     "meação", "quote-part", "cuota indivisa",
 ]
+
+# Any other "N/M" share ("29/84 de imóvel", "(4986/100000)"). Not dates
+# ("11/2023"), references ending in a year ("DMI-1014/2026"), Citius case
+# numbers ("12/18.0T8…") or door numbers ("nº 12/14").
+_SHARE_RE = re.compile(r"(?<![\d/.])(\d{1,6})\s*/\s*(\d{1,6})(?![\d/.])")
+_HOUSE_NUMBER_RE = re.compile(r"(?:\bn\.?\s*[ºo°]|\bn[uú]mero|\bporta)\s*$", re.I)
+
+
+def is_fractional_share(title: str) -> bool:
+    if has_term(title, FRAC_PATTERNS, negations=False):
+        return True
+    for m in _SHARE_RE.finditer(title or ""):
+        part, whole = int(m.group(1)), int(m.group(2))
+        if 1900 <= whole <= 2100:          # "11/2023", "DMI-1014/2026": a date or a reference
+            continue
+        if _HOUSE_NUMBER_RE.search(title[:m.start()]):   # "nº 12/14": door numbers
+            continue
+        if 0 < part < whole:
+            return True
+    return False
+
 
 OCCUPANCY_PATTERNS = [
     "ocupado", "ocupada", "arrendado", "arrendada", "arrendatário*",
@@ -74,6 +95,9 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 # they are hidden unless you shortlist them.
 NOT_THE_GOAL_CAP = {"not a home or plot": 35, "rural plot too small": 35,
                     "needs heavy work": 40}
+# No price published: still shown (above the default minimum score), but under
+# every priced listing that fits the goal.
+PRICE_UNKNOWN_CAP = 60
 
 DWELLING_WORDS = [
     "moradia", "moradias", "apartamento", "vivenda", "habitação", "casa", "casas",
@@ -84,6 +108,27 @@ DWELLING_WORDS = [
     "wohnung", "haus", "einfamilienhaus", "zweifamilienhaus", "mehrfamilienhaus", "reihenhaus",
     "doppelhaushälfte", "woning", "woonhuis", "tussenwoning", "kuća", "house", "apartment",
 ]
+# Household goods sold at auction ("Mobiliário de habitação", "Mobília de casa")
+# are not homes. A text that names a building first is: "Moradia T3 com mobiliário".
+MOVABLE_WORDS = ["mobiliário", "mobília", "móveis", "eletrodomésticos", "electrodomésticos"]
+BUILDING_WORDS = ["moradia", "apartamento", "prédio", "fração", "fracção", "vivenda", "casa",
+                  "habitação", "andar"]
+# What a portal types as not property at all (e-leilões tipoId 2–6).
+NOT_PROPERTY_TYPES = {"veiculo", "equipamento", "mobiliario", "direitos"}
+
+
+def _first_at(text: str, terms) -> int | None:
+    norm = normalize(text)
+    hits = [m.start() for t in terms for m in [term_regex(t).search(norm)] if m]
+    return min(hits) if hits else None
+
+
+def _is_household_goods(text: str) -> bool:
+    goods = _first_at(text, MOVABLE_WORDS)
+    building = _first_at(text, BUILDING_WORDS)
+    return goods is not None and (building is None or goods < building)
+
+
 # Words that mean a home only when nothing says shop or garage: "Loja no rés-do-chão",
 # "Garagem no piso -1".
 WEAK_DWELLING_WORDS = ["andar", "rés-do-chão", "duplex", "piso", "villa", "stan", "flat"]
@@ -293,6 +338,8 @@ def property_kind(item: dict) -> str | None:
     urban_words = URBAN_PLOT_WORDS + (["solar"] if item.get("country") == "ES" else [])
 
     def kind_of(text: str) -> str | None:
+        if _is_household_goods(text):
+            return "other"
         if has_term(text, DWELLING_WORDS, negations=False):
             return "home"
         if has_term(text, OTHER_WORDS, negations=False):
@@ -308,6 +355,8 @@ def property_kind(item: dict) -> str | None:
             return "rural_plot" if area >= 5000 else "urban_plot"
         return None
 
+    if tipo in NOT_PROPERTY_TYPES:
+        return "other"
     found = kind_of(title)
     if found:
         return found
@@ -373,7 +422,7 @@ def score_detail(item: dict, now: datetime | None = None,
     pay     = _pay(item)
     kind    = property_kind(item)
 
-    if has_term(title, FRAC_PATTERNS, negations=False):
+    if is_fractional_share(title):
         return 0.0, ["fractional share — skip"]
 
     if has_term(full, USUFRUCT_PATTERNS):
@@ -437,42 +486,45 @@ def score_detail(item: dict, now: datetime | None = None,
         s += 5
         reasons.append(f"price cut {drop:.0f}% since first seen")
 
-    # Ridiculous in absolute terms
+    # Ridiculous in absolute terms. This is the goal, so it outweighs how the
+    # sale works: a €97,500 court sale used to reach 100 on court bonuses alone.
     if pay >= 300:
         if pay <= 5000:
-            s += 14
+            s += 25
             reasons.append(f"very cheap: €{pay:,.0f}")
         elif pay <= 15000:
-            s += 10
+            s += 20
             reasons.append(f"cheap: €{pay:,.0f}")
         elif pay <= 30000:
-            s += 6
+            s += 12
             reasons.append(f"€{pay:,.0f}")
         elif pay <= 60000:
-            s += 2
+            s += 4
+        else:
+            s -= 8
+            reasons.append(f"€{pay:,.0f} — not a low price")
 
     # ── How the sale works ────────────────────────────────────────────
     if has_term(full, SEALED_BID_PATTERNS, negations=False):
-        s += 20
+        s += 8
         reasons.append("sealed-bid (carta fechada)")
 
     if source in FORCED_SOURCES:
-        s += 12
+        s += 6
         reasons.append("forced sale (must sell)")
     if source in TAX_SOURCES:
-        s += 8
+        s += 4
         reasons.append("tax seizure — no reserve")
 
-    # Minimum bid signal (one bonus per listing: these all describe the same fact)
+    # Minimum bid signal (one bonus per listing: these all describe the same fact).
+    # A sale with no price at all is not a "no minimum" sale: usually the value
+    # was not published (negociação particular) or not read.
     min_p = item.get("min_price") or 0
-    if source == "citius" and not price:
-        s += 18
-        reasons.append("Citius no-minimum court sale")
-    elif min_p and min_p <= 500 and price and price > 1000:
-        s += 18
-        reasons.append(f"min bid only €{min_p:.0f}")
-    elif not min_p and source in FORCED_SOURCES:
+    if min_p and min_p <= 500 and price and price > 1000:
         s += 10
+        reasons.append(f"min bid only €{min_p:.0f}")
+    elif not min_p and pay and source in FORCED_SOURCES:
+        s += 4
         reasons.append("no minimum bid")
 
     # Urgency. days_left() understands naive dates; the old tz-aware subtraction
@@ -488,6 +540,11 @@ def score_detail(item: dict, now: datetime | None = None,
     if price and price < 300:
         s -= 20
         reasons.append("suspiciously cheap — likely tiny/worthless")
+
+    # Without a price nothing says it is cheap: show it, below the priced deals.
+    if not pay:
+        reasons.append("price unknown — check the sale")
+        s = min(s, PRICE_UNKNOWN_CAP)
 
     for label, cap in NOT_THE_GOAL_CAP.items():
         if any(r.startswith(label) for r in reasons):
@@ -616,7 +673,7 @@ def categorize(item: dict) -> str:
 
     if has_term(title, GOLD_KW, negations=False):
         return "ouro_joias"
-    if has_term(title, VEHICLE_KW, negations=False):
+    if has_term(title, VEHICLE_KW, negations=False) or tipo in NOT_PROPERTY_TYPES:
         return "outros"
     if tipo in IMOVEL_TYPES or has_term(title, IMOVEL_TITLE_WORDS, negations=False):
         return "imoveis"

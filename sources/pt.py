@@ -22,17 +22,29 @@ from sources._cards import CardSite, scrape_cards
 ELEILOES_API = "https://e-leiloes.pt/api/Eventos/"
 ELEILOES_DETAIL_API = "https://e-leiloes.pt/api/Eventos/{id}"
 
+# e-leilões numbers subtypes within a type, so a subtype only means something
+# together with tipoId. Read from 900 live lots (Sept 2026): tipoId 1 is
+# property; 2 vehicles; 3 and 5 equipment; 4 furniture and household goods;
+# 6 company shares and inheritance rights.
 TIPO_MAP = {
-    1: "imovel", 2: "veiculo", 3: "direito", 4: "outros"
+    1: "imovel", 2: "veiculo", 3: "equipamento", 4: "mobiliario", 5: "equipamento", 6: "direitos",
 }
+# Property subtypes (tipoId 1). 2 is houses: it used to be read as "loja/escritorio",
+# which marked houses without "moradia" in the title as not a home.
 SUBTIPO_MAP = {
-    1: "apartamento/moradia", 2: "loja/escritorio", 3: "garagem",
-    4: "armazem", 5: "terreno_urbano", 6: "terreno_rustico",
-    7: "outro_imovel", 8: "direitos", 9: "comercio",
-    10: "hotel", 11: "industrial",
-    27: "terreno_rustico", 21: "moradia", 22: "apartamento",
-    23: "loja", 24: "garagem", 25: "armazem", 26: "terreno_urbano",
+    1: "apartamento", 2: "moradia", 3: "garagem", 4: "outro_imovel",
+    5: "terreno_urbano", 6: "loja", 7: "outro_imovel", 8: "outro_imovel",
+    27: "terreno_rustico", 28: "outro_imovel",
+    # seen in older data
+    21: "moradia", 22: "apartamento", 23: "loja", 24: "garagem", 25: "armazem", 26: "terreno_urbano",
 }
+
+
+def eleiloes_tipo(item: dict) -> str:
+    tipo_id = item.get("tipoId")
+    if tipo_id not in (None, 1):
+        return TIPO_MAP.get(tipo_id, "outro")
+    return SUBTIPO_MAP.get(item.get("subtipoId"), "outro_imovel" if tipo_id == 1 else "outro")
 
 
 def _eleiloes_session():
@@ -95,7 +107,7 @@ def _eleiloes_to_listing(item: dict) -> dict:
     return make_listing(
         "eleiloes", eid, "PT",
         title=item.get("titulo", ""),
-        tipo=SUBTIPO_MAP.get(item.get("subtipoId"), "outro"),
+        tipo=eleiloes_tipo(item),
         price=item.get("valorBase"),
         current_bid=item.get("lanceAtual"),
         min_price=item.get("valorMinimo"),
