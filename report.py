@@ -303,7 +303,7 @@ def _write_docx(parts, now: datetime, max_price, n_items, out_dir, desktop):
 
 
 def _pdf_font(pdf):
-    """DejaVu (full Unicode) if cartas.py already downloaded it, else Helvetica."""
+    """DejaVu (full Unicode) if letters.py already downloaded it, else Helvetica."""
     font_dir = os.path.join(HERE, "fonts")
     regular = os.path.join(font_dir, "DejaVuSans.ttf")
     bold = os.path.join(font_dir, "DejaVuSans-Bold.ttf")

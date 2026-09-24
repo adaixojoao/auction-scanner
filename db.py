@@ -29,7 +29,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -187,7 +187,15 @@ def _migrate_v3(db: sqlite3.Connection):
     """)
 
 
-_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3}
+def _migrate_v4(db: sqlite3.Connection):
+    """Letters other than offers: which letter was sent (letters.LETTER_TYPES),
+    whether it was an offer (an information request is not), and to whom."""
+    _add_column(db, "carta_log", "letter_type", "TEXT")
+    _add_column(db, "carta_log", "is_offer", "INTEGER NOT NULL DEFAULT 1")
+    _add_column(db, "carta_log", "sent_to", "TEXT")
+
+
+_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4}
 
 
 def init_db(db: sqlite3.Connection):
@@ -357,9 +365,10 @@ def listing_statuses(db: sqlite3.Connection) -> dict[str, str]:
 
 
 def latest_offers(db: sqlite3.Connection) -> dict[str, dict]:
-    """Most recent carta_log row per listing."""
+    """Most recent offer (not information request) per listing, from carta_log."""
     out = {}
-    for r in db.execute("SELECT * FROM carta_log WHERE listing_id IS NOT NULL ORDER BY created_at ASC, id ASC"):
+    for r in db.execute("SELECT * FROM carta_log WHERE listing_id IS NOT NULL AND is_offer = 1 "
+                        "ORDER BY created_at ASC, id ASC"):
         out[r["listing_id"]] = dict(r)
     return out
 

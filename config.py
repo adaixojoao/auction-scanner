@@ -87,6 +87,7 @@ DEFAULTS = {
         "nif": "260243132",
         "morada": "Rua Antonio Sergio, n. 49, 3. Esq.\n6300-665 Guarda",
         "email": "adaixojoao@gmail.com",
+        "telefone": "",           # optional; printed on letters when set
         "localidade": "Guarda",   # printed next to the date on each carta
     },
 

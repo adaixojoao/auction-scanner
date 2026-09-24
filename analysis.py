@@ -196,7 +196,8 @@ PROPERTY DATA:
 - Area: {data.get('area_m2', '')} m²
 - Base value: €{data.get('price', '')}
 - Current bid: €{data.get('current_bid') or 'no bids'}
-- Sale type: {data.get('modalidade', '')}
+- Sale type: {data.get('sale') or data.get('modalidade', '')}
+- How it is bid: {data.get('guidance', '')}
 - Category: {data.get('categoria', '')}
 - Deadline: {data.get('date_end', '')}
 - Court/agent: {data.get('tribunal', '')}

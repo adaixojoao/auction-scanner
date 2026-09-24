@@ -203,3 +203,81 @@ def test_errors_are_described_in_plain_words(db, fake_http):
     err = requests.ConnectionError("boom")
     err.request = requests.Request("GET", "https://x.pt/a").prepare()
     assert describe_error(err) == "Could not connect to x.pt (site down, moved, or blocked)"
+
+
+BOE_GENERAL = """<table><tr><th>Tipo de subasta</th><td>JUDICIAL EN VIA DE APREMIO</td></tr>
+  <tr><th>Cuenta expediente</th><td>1234 0000 05 0456 24</td></tr>
+  <tr><th>Valor subasta</th><td>90.000,00 €</td></tr>
+  <tr><th>Importe del depósito</th><td>4.500,00 €</td></tr>
+  <tr><th>Fecha de conclusión</th><td>30-09-2099 18:00:00 CET (ISO: 2099-09-30T18:00:00+02:00)</td></tr></table>"""
+BOE_AUTHORITY = """<table><tr><th>Código</th><td>4109142003</td></tr>
+  <tr><th>Descripción</th><td>JUZGADO DE PRIMERA INSTANCIA Nº 3 DE SEVILLA</td></tr>
+  <tr><th>Dirección</th><td>AVDA. MENÉNDEZ PELAYO 2 ; 41071 SEVILLA</td></tr>
+  <tr><th>Teléfono</th><td>955 000 000</td></tr>
+  <tr><th>Correo electrónico</th><td>instancia3.sevilla@justicia.es</td></tr></table>"""
+BOE_GOODS = """<table><tr><th>Descripción</th><td>Vivienda en calle Feria 10, Sevilla, 85 m²</td></tr>
+  <tr><th>Localidad</th><td>Sevilla</td></tr><tr><th>Provincia</th><td>Sevilla</td></tr>
+  <tr><th>Situación posesoria</th><td>Ocupado por el deudor</td></tr>
+  <tr><th>Visitable</th><td>No</td></tr></table>"""
+
+
+def test_spain_detail_tabs_give_the_court_and_occupancy():
+    from sources.es import _spain_occupation, spain_details
+    fields, extra = spain_details({"general": BOE_GENERAL, "authority": BOE_AUTHORITY, "goods": BOE_GOODS})
+    assert fields["price"] == 90000 and fields["title"].startswith("Vivienda en calle Feria")
+    assert fields["concelho"] == "Sevilla" and fields["area_m2"] == 85       # not the court's name
+    assert extra["autoridad"] == "JUZGADO DE PRIMERA INSTANCIA Nº 3 DE SEVILLA"
+    assert extra["autoridad_email"] == "instancia3.sevilla@justicia.es"
+    assert extra["deposito"] == 4500 and extra["expediente"].startswith("1234")
+    assert extra["occupation"] == "occupied" and extra["visitable"] == "No"
+    assert _spain_occupation("No consta") is None and _spain_occupation("Libre de ocupantes") == "vacant"
+
+
+def test_spain_enrichment_fills_letters_and_scoring(db, add, fake_http):
+    from db import load_listings
+    from sources.es import enrich_spain_details
+    add("spain", "SUB-JA-2099-1", "ES", title="Subasta SUB-JA-2099-1", tipo="inmueble")
+    pages = {"1": BOE_GENERAL, "2": BOE_AUTHORITY, "3": BOE_GOODS}
+    session = fake_http(lambda m, url, kw: FakeResponse(pages[str(kw["params"]["ver"])]))
+    assert enrich_spain_details(db, session) == 1
+    item = load_listings(db, include_hidden=True)[0]
+    raw = json.loads(item["raw_json"])
+    assert raw["autoridad_email"] == "instancia3.sevilla@justicia.es" and raw["detail_checked"]
+    assert "occupied/tenanted" in item["reasons"]
+    assert enrich_spain_details(db, session) == 0 and len(session.calls) == 3   # checked once
+
+
+LICITOR_ANNONCE = """<html><body>
+<p class="Court">Tribunal Judiciaire de Nîmes (Gard)</p>
+<p>Publiée le 3 septembre 2026</p>
+<p>Vente aux enchères publiques · audience du jeudi 15 octobre 2026 à 14h30</p>
+<h1>Une maison d'habitation</h1><p>Libre de toute occupation.</p>
+<p>Mise à prix : 40&nbsp;000 €</p><p>Visite sur place le mardi 6 octobre 2026 de 10h à 11h.</p>
+<div>Maître Jean-Pierre Dupont, Avocat au Barreau de Nîmes - Tél.: 04 66 12 34 56
+<a href="mailto:jp.dupont@avocats-nimes.fr">Email</a></div>
+<footer>contact@licitor.com</footer></body></html>"""
+
+
+def test_licitor_annonce_parser():
+    from sources.fr import parse_licitor_annonce
+    d = parse_licitor_annonce(LICITOR_ANNONCE)
+    assert d["tribunal"] == "Tribunal Judiciaire de Nîmes" and d["tribunal_ville"] == "Nîmes"
+    assert d["audience"] == "2026-10-15T14:30:00"          # the hearing, not the publication date
+    assert d["mise_a_prix"] == 40000 and d["occupation"] == "vacant"
+    assert d["avocat_nom"] == "Jean-Pierre Dupont" and d["avocat_email"] == "jp.dupont@avocats-nimes.fr"
+    assert d["avocat_tel"] == "04 66 12 34 56" and d["visite"].startswith("sur place le mardi 6 octobre")
+    occupied = parse_licitor_annonce("<p>Un appartement occupé par le locataire. Mise à prix: 120.000 €</p>")
+    assert occupied["occupation"] == "occupied" and occupied["mise_a_prix"] == 120000
+
+
+def test_france_enrichment_sets_the_hearing_date(db, add, fake_http):
+    from datetime import datetime, timezone
+
+    from db import load_listings
+    from sources.fr import enrich_france_details
+    add("france", "101", "FR", title="Une maison", url="https://www.licitor.com/annonce/101.html")
+    session = fake_http(lambda m, url, kw: FakeResponse(LICITOR_ANNONCE))
+    assert enrich_france_details(db, session) == 1
+    item = load_listings(db, include_hidden=True, now=datetime(2026, 9, 1, tzinfo=timezone.utc))[0]
+    assert item["date_end"] == "2026-10-15T14:30:00" and item["price"] == 40000
+    assert item["district"] == "Nîmes" and "vacant (devoluto)" in item["reasons"]

@@ -125,9 +125,11 @@ def listings_page():
 
 @app.route("/offers")
 def offers_page():
-    p = _config().get("proponente", {})
+    cfg = _config()
+    p, smtp = cfg.get("proponente", {}), cfg.get("notifications", {})
     return _page("offers.html", "offers", "Offers",
-                 proponente_ok=all(p.get(k) for k in ("nome", "nif", "morada")))
+                 proponente_ok=all(p.get(k) for k in ("nome", "nif", "morada")),
+                 smtp_ok=all(smtp.get(k) for k in ("smtp_host", "smtp_user", "smtp_password")))
 
 
 @app.route("/map")
@@ -358,6 +360,7 @@ def _raw(item: dict) -> dict:
 
 
 def _modalidade(item: dict, raw: dict) -> str:
+    """The Portuguese sale type (for the 85% rule)."""
     if item.get("source") == "eleiloes":
         return "LEILAO ELETRONICO"   # bids go in online, not by letter
     m = str(raw.get("modalidade") or "CARTA FECHADA").upper()
@@ -368,50 +371,84 @@ def _modalidade(item: dict, raw: dict) -> str:
     return "CARTA FECHADA"
 
 
+def _sale_label(item: dict, raw: dict) -> str:
+    """How this sale works, in two or three words, for the Offers list."""
+    from letters import ES_SERVICER_SOURCES, PT_BANK_SOURCES, PT_COURT_SOURCES, channel
+    src, ch = item.get("source"), channel(item)
+    if ch == "lawyer":
+        return "Court hearing (lawyer)"
+    if ch == "online":
+        return "Online auction"
+    if src in PT_BANK_SOURCES or src in ES_SERVICER_SOURCES:
+        return "Bank sale"
+    if src in PT_COURT_SOURCES:
+        return {"CARTA FECHADA": "Sealed bid", "NEGOCIACAO PARTICULAR": "Private negotiation",
+                "ADJUDICACAO": "Adjudication"}[_modalidade(item, raw)]
+    return "Offer by letter"
+
+
+def _contact(item: dict, raw: dict) -> dict:
+    """Who handles the sale, when the detail page said: agente de execução (PT),
+    the court or agency (ES), the seller's lawyer (FR)."""
+    for role, keys in (("Agente de execução", ("agente_nome", "agente_email", "agente_contacto")),
+                       ("Court / authority", ("autoridad", "autoridad_email", "autoridad_telefono")),
+                       ("Seller's lawyer", ("avocat_nom", "avocat_email", "avocat_tel"))):
+        name, email, phone = (raw.get(k) or "" for k in keys)
+        if name or email or phone:
+            return {"role": role, "name": name, "email": email, "phone": phone}
+    return {}
+
+
 def _format_amount(value) -> str:
-    from cartas import format_bid
+    from letters import format_bid
     return format_bid(value) if value is not None else ""
 
 
 def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
-    from cartas import classify_property, suggest_bid
+    from letters import channel, classify_property, guidance, letter_types_for, place_of
     raw = _raw(it)
     area = it.get("area_m2") or 0
-    cat = classify_property(it.get("title") or "", it.get("description") or "", area) or "IMOVEL"
-    bid_val, _ = suggest_bid(cat, it.get("price"), area)
+    types = [t.public(it) for t in letter_types_for(it)]
+    first_offer = next((t for t in types if t["is_offer"]), None)
     return {
         "key": key,
         "id": it["id"],
+        "source": it.get("source"),
         "country": it.get("country") or "PT",
         "title": it.get("title") or "",
         "description": (it.get("description") or "")[:400],
-        "location": ", ".join(filter(None, [it.get("concelho"), it.get("district")])),
+        "location": place_of(it),
         "price": it.get("price"),
         "min_price": it.get("min_price"),
         "current_bid": it.get("current_bid"),
         "area_m2": area,
         "date_end": it.get("date_end"),
         "url": it.get("url") or "",
-        "processo": str(raw.get("processo") or "").split(",")[0].strip(),
-        "tribunal": raw.get("tribunal", ""),
+        "processo": str(raw.get("processo") or raw.get("expediente") or "").split(",")[0].strip(),
+        "tribunal": raw.get("tribunal") or raw.get("autoridad") or "",
         "modalidade": _modalidade(it, raw),
-        "categoria": cat,
+        "sale": _sale_label(it, raw),
+        "channel": channel(it),
+        "guidance": guidance(it),
+        "letter_types": types,
+        "categoria": classify_property(it.get("title") or "", it.get("description") or "", area) or "IMOVEL",
         "score": it["score"],
         "reasons": it["reasons"],
         "status": it.get("status"),
-        "bid": bid_val,
-        "agente_nome": raw.get("agente_nome", ""),
-        "agente_email": raw.get("agente_email", ""),
-        "agente_contacto": raw.get("agente_contacto", ""),
+        "bid": (first_offer or {}).get("suggested", ""),   # online-only sales: nothing to suggest
+        "contact": _contact(it, raw),
+        "visit": raw.get("visite") or raw.get("visitable") or "",
         "offer": ({"log_id": offer["id"], "bid": _format_amount(offer.get("bid_amount")),
-                   "outcome": offer.get("outcome"), "sent_date": offer.get("sent_date")}
+                   "outcome": offer.get("outcome"), "sent_date": offer.get("sent_date"),
+                   "letter_type": offer.get("letter_type"), "is_offer": bool(offer.get("is_offer", 1)),
+                   "method": offer.get("method"), "sent_to": offer.get("sent_to") or ""}
                   if offer else None),
     }
 
 
 @app.route("/api/offers")
 def api_offers():
-    from cartas import classify_property
+    from letters import channel, classify_property
 
     db = get_db()
     try:
@@ -421,13 +458,16 @@ def api_offers():
         db.close()
     by_id = {it["id"]: it for it in items}
 
-    offered = {log["listing_id"] for log in logs if log["outcome"] != "cancelled"}
+    # Out of "To review": anything waiting for an answer, and anything already offered on.
+    busy = {log["listing_id"] for log in logs
+            if log["outcome"] == "pending" or (log.get("is_offer", 1) and log["outcome"] != "cancelled")}
     review = []
     for it in items:
-        if it["id"] in offered or it["category"] != "imoveis" or it["hidden_reason"]:
+        if it["id"] in busy or it["category"] != "imoveis" or it["hidden_reason"]:
             continue
-        # e-leilões is bid on online, so it only appears here if you shortlist it.
-        candidate = (it["score"] >= 45 and it.get("source") != "eleiloes" and classify_property(
+        # Strong candidates are sales where the offer is a letter; online auctions and
+        # French court sales only appear here if you shortlist them.
+        candidate = (it["score"] >= 45 and channel(it) == "letter" and classify_property(
             it.get("title") or "", it.get("description") or "", it.get("area_m2") or 0) is not None)
         if it["status"] == "shortlisted" or candidate:
             review.append(_offer_view(it, it["id"]))
@@ -446,82 +486,147 @@ def api_offers():
     return jsonify({"review": review[:150], "sent": sent, "closed": closed, "rejected": rejected[:150]})
 
 
-def _letter_for(listing_id: str, bid: str, bid_text: str):
-    from cartas import build_letter
+def _listing(listing_id: str) -> dict | None:
     db = get_db()
     try:
         found = load_listings(db, include_hidden=True, where="id = ?", params=(listing_id,))
     finally:
         db.close()
-    if not found:
-        return None, None
-    item = found[0]
-    return item, build_letter(item, bid, bid_text, _config().get("proponente", {}))
+    return found[0] if found else None
 
 
-def bid_warning(item: dict, bid: str) -> str | None:
-    """Offers below the announced minimum are normally refused in PT carta
-    fechada / e-leilão sales (valor anunciado = 85% do valor base)."""
-    from cartas import parse_bid
-    kind = _modalidade(item, _raw(item))
-    if (item.get("country") or "PT") != "PT" or kind not in ("CARTA FECHADA", "LEILAO ELETRONICO"):
+def _letter_for(listing_id: str, bid: str, bid_text: str, letter_type: str | None = None):
+    """(listing, letter). The letter is None when the listing does not exist or
+    `letter_type` is not one of its letters."""
+    from letters import build_letter, get_type
+    item = _listing(listing_id)
+    if not item or (letter_type and not get_type(letter_type, item)):
+        return item, None
+    return item, build_letter(item, bid, bid_text, _config().get("proponente", {}), letter_type or None)
+
+
+def bid_warning(item: dict, bid: str, letter_type: str | None = None) -> str | None:
+    """Amounts that cannot work: below 85% of the valor base in Portuguese court
+    sales by sealed bid or e-leilão, or a French maximum below the mise à prix."""
+    from letters import PT_COURT_SOURCES, parse_bid
+    price, value = item.get("price"), parse_bid(bid) or 0
+    if not price:
         return None
-    if not item.get("price"):
-        return None
-    minimum = item.get("min_price") or item["price"] * 0.85
-    if (parse_bid(bid) or 0) >= minimum:
-        return None
-    return (f"This offer is below the minimum of EUR {minimum:,.0f} (85% of the base value), "
-            "so it will normally not be accepted. Confirm the sale type with the agente de execução.")
+    if (item.get("source") in PT_COURT_SOURCES | {"eleiloes"}
+            and letter_type in (None, "pt_carta_fechada", "online")
+            and _modalidade(item, _raw(item)) in ("CARTA FECHADA", "LEILAO ELETRONICO")):
+        minimum = item.get("min_price") or price * 0.85
+        if value < minimum:
+            return (f"This offer is below the minimum of EUR {minimum:,.0f} (85% of the base value), "
+                    "so it will normally not be accepted. Confirm the sale type with the agente de execução.")
+    if letter_type == "fr_mandat" and value < price:
+        return (f"Bidding starts at the mise à prix of EUR {price:,.0f}, so a maximum below it "
+                "cannot win. Final prices are usually well above it.")
+    return None
+
+
+def _letter_args(src) -> tuple[str, str, str, str]:
+    return (src.get("id", ""), src.get("bid", ""), src.get("bid_text", ""), src.get("type") or "")
 
 
 @app.route("/api/offers/letter")
 def api_offer_letter():
-    bid = request.args.get("bid", "")
-    item, letter = _letter_for(request.args.get("id", ""), bid, request.args.get("bid_text", ""))
-    if not letter:
+    listing_id, bid, bid_text, ltype = _letter_args(request.args)
+    item, letter = _letter_for(listing_id, bid, bid_text, ltype)
+    if not item:
         return jsonify({"error": "no such listing"}), 404
+    if not letter:
+        return jsonify({"error": f"no letter of type {ltype!r} for this listing"}), 400
     return jsonify({"text": letter.text, "subject": letter.subject, "to": letter.to_email,
                     "bid_text": letter.extra.get("bid_text", ""), "filename": letter.filename,
-                    "warning": bid_warning(item, bid)})
+                    "type": letter.type_key, "is_offer": letter.is_offer,
+                    "warning": bid_warning(item, bid, letter.type_key) if letter.is_offer else None})
+
+
+@app.route("/api/offers/warning")
+def api_offer_warning():
+    item = _listing(request.args.get("id", ""))
+    if not item:
+        return jsonify({"error": "no such listing"}), 404
+    return jsonify({"warning": bid_warning(item, request.args.get("bid", ""), request.args.get("type") or None)})
 
 
 @app.route("/api/offers/letter.pdf")
 def api_offer_letter_pdf():
-    from cartas import letter_pdf
-    _item, letter = _letter_for(request.args.get("id", ""), request.args.get("bid", ""),
-                                request.args.get("bid_text", ""))
+    from letters import letter_pdf
+    _item, letter = _letter_for(*_letter_args(request.args))
     if not letter:
         abort(404)
     return Response(letter_pdf(letter), mimetype="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{letter.filename}"'})
 
 
-@app.route("/api/offers/sent", methods=["POST"])
-def api_offer_sent():
-    from cartas import parse_bid
-    data = request.get_json(silent=True) or {}
-    item, letter = _letter_for(data.get("id", ""), data.get("bid", ""), data.get("bid_text", ""))
-    if not letter:
-        return jsonify({"error": "no such listing"}), 404
+def _log_sent(item: dict, *, letter=None, bid: str = "", method: str, sent_to: str = "",
+              notes: str = "") -> int:
+    from letters import parse_bid
+    raw = _raw(item)
+    is_offer = letter.is_offer if letter else True
     db = get_db()
     try:
         cur = db.execute("""
             INSERT INTO carta_log (listing_id, processo, tribunal, country, sent_date, bid_amount,
-                                   method, outcome, notes, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)""", (
-            item["id"], letter.processo, _raw(item).get("tribunal"), item.get("country") or "PT",
-            datetime.now().strftime("%Y-%m-%d"), parse_bid(data.get("bid")),
-            data.get("method") or ("online" if item.get("source") == "eleiloes" else "email"),
-            "pending", data.get("notes", ""),
-            datetime.now(timezone.utc).isoformat()))
+                                   method, outcome, notes, created_at, letter_type, is_offer, sent_to)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            item["id"], letter.processo if letter else str(raw.get("processo") or "").split(",")[0].strip(),
+            raw.get("tribunal") or raw.get("autoridad"), item.get("country") or "PT",
+            datetime.now().strftime("%Y-%m-%d"), parse_bid(bid) if is_offer else None,
+            method, "pending", notes, datetime.now(timezone.utc).isoformat(),
+            letter.type_key if letter else "online", int(is_offer), sent_to or None))
         db.commit()
-        log_id = cur.lastrowid
-        if item.get("status") == "shortlisted":
+        if is_offer and item.get("status") == "shortlisted":
             set_listing_status(db, item["id"], None)   # it is an offer now, not a shortlist entry
+        return cur.lastrowid
     finally:
         db.close()
+
+
+@app.route("/api/offers/sent", methods=["POST"])
+def api_offer_sent():
+    """Record a letter you sent yourself (post, your own e-mail, your lawyer),
+    or with method "online" a bid you placed on an auction site."""
+    data = request.get_json(silent=True) or {}
+    listing_id, bid, bid_text, ltype = _letter_args(data)
+    if data.get("method") == "online":
+        item, letter = _listing(listing_id), None
+        if not item:
+            return jsonify({"error": "no such listing"}), 404
+    else:
+        item, letter = _letter_for(listing_id, bid, bid_text, ltype)
+        if not item:
+            return jsonify({"error": "no such listing"}), 404
+        if not letter:
+            return jsonify({"error": f"no letter of type {ltype!r} for this listing"}), 400
+    method = data.get("method") or ("online" if item.get("source") == "eleiloes" else "email")
+    log_id = _log_sent(item, letter=letter, bid=bid, method=method,
+                       sent_to=data.get("to", ""), notes=data.get("notes", ""))
     return jsonify({"ok": True, "log_id": log_id})
+
+
+@app.route("/api/offers/email", methods=["POST"])
+def api_offer_email():
+    """Send the letter from here by e-mail, with its PDF attached, and log it."""
+    from letters import letter_pdf
+    from notifications import send_letter
+    data = request.get_json(silent=True) or {}
+    item, letter = _letter_for(*_letter_args(data))
+    if not item:
+        return jsonify({"error": "no such listing"}), 404
+    if not letter:
+        return jsonify({"error": "no such letter for this listing"}), 400
+    to = (data.get("to") or letter.to_email or "").strip()
+    cfg = _config()
+    error = send_letter(cfg.get("notifications", {}), to, letter.subject, letter.text,
+                        letter_pdf(letter), letter.filename,
+                        reply_to=cfg.get("proponente", {}).get("email", ""))
+    if error:
+        return jsonify({"error": error}), 400
+    log_id = _log_sent(item, letter=letter, bid=data.get("bid", ""), method="email", sent_to=to)
+    return jsonify({"ok": True, "log_id": log_id, "to": to})
 
 
 @app.route("/api/analyze-property", methods=["POST"])
@@ -569,7 +674,7 @@ def add_carta_log():
     return jsonify({"ok": True, "id": new_id})
 
 
-OUTCOMES = ("pending", "won", "lost", "cancelled", "expired")
+OUTCOMES = ("pending", "won", "lost", "cancelled", "expired", "answered")
 
 
 @app.route("/api/carta-log/<int:log_id>", methods=["PATCH"])
@@ -597,10 +702,13 @@ def update_carta_log(log_id):
     return jsonify({"ok": True})
 
 
+PROPONENTE_KEYS = ("nome", "nif", "morada", "email", "telefone", "localidade")
+
+
 @app.route("/api/proponente")
 def api_proponente():
     p = _config().get("proponente", {})
-    return jsonify({k: p.get(k, "") for k in ("nome", "nif", "morada", "email", "localidade")})
+    return jsonify({k: p.get(k, "") for k in PROPONENTE_KEYS})
 
 
 # ─── Settings ────────────────────────────────────────────────────────
@@ -609,7 +717,7 @@ def api_proponente():
 EDITABLE = {
     "max_price": None,
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2"),
-    "proponente": ("nome", "nif", "morada", "email", "localidade"),
+    "proponente": PROPONENTE_KEYS,
     "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours"),
     "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score"),
     "notifications": ("enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password",

@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 import smtplib
 from datetime import datetime
+from email.message import EmailMessage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -47,6 +49,39 @@ def _send_email(notify_cfg: dict, subject: str, html_body: str, plain: str) -> b
     except Exception as e:
         LOG.error(f"Failed to send email: {e}")
         return False
+
+
+_ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def send_letter(smtp_cfg: dict, to: str, subject: str, text: str, pdf: bytes, filename: str,
+                *, reply_to: str = "") -> str | None:
+    """E-mail one letter with its PDF attached, through the SMTP account in
+    Settings → E-mail. A copy goes to that account. Returns None when sent,
+    otherwise the reason in plain words."""
+    if not all(smtp_cfg.get(k) for k in ("smtp_host", "smtp_user", "smtp_password")):
+        return "E-mail is not set up: fill in the SMTP server, user and password under Settings → E-mail."
+    if not _ADDRESS.fullmatch(to or ""):
+        return f"Not an e-mail address: {to!r}" if to else "Who should receive it? Fill in the address."
+    sender = smtp_cfg.get("from_email") or smtp_cfg["smtp_user"]
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = sender
+        msg["To"] = to
+        if reply_to and reply_to != sender:
+            msg["Reply-To"] = reply_to
+        msg.set_content(text)
+        msg.add_attachment(pdf, maintype="application", subtype="pdf", filename=filename)
+        with smtplib.SMTP(smtp_cfg["smtp_host"], int(smtp_cfg.get("smtp_port") or 587), timeout=30) as server:
+            server.starttls()
+            server.login(smtp_cfg["smtp_user"], smtp_cfg["smtp_password"])
+            server.send_message(msg, to_addrs=[to, sender])
+    except (smtplib.SMTPException, OSError, ValueError) as e:
+        LOG.error(f"Letter e-mail to {to} failed: {e}")
+        return f"The e-mail could not be sent: {e}"
+    LOG.info(f"Letter e-mailed to {to}: {subject}")
+    return None
 
 
 def send_alerts(db, notify_cfg: dict, score_fn=None, max_price: float = 50000,

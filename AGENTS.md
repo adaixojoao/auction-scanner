@@ -34,9 +34,14 @@ congruent — one way to do each thing:
 - **One scan routine:** `pipeline.run_scan()`. The app's "Scan now", the
   timetable and `scraper.py` all call it; it holds `scan.lock` and writes
   progress to `scan_state`, which is how the app shows scans started elsewhere.
-- **One letter builder:** `cartas.build_letter()`. The Offers preview, its PDF,
-  its e-mail link and `--cartas` all use it. Never write letter text in
-  JavaScript or a second template.
+- **One letter builder:** `letters.build_letter()`. The Offers preview, its PDF,
+  its e-mail (sent or opened in a mail app) and `--cartas` all use it. Never
+  write letter text in JavaScript or a second template. Which letters a sale
+  gets, and how it is bid on (`channel`: letter / online / lawyer), is decided
+  by `letters.LETTER_TYPES`; add a new letter there, with a test. Information
+  requests are logged in `carta_log` with `is_offer = 0` and never count as an
+  offer. Legal claims in letters and guidance are hedged ("normally",
+  "check with…"): do not state rules the code cannot confirm.
 - **One layout:** every page extends `templates/base.html` and uses
   `static/app.css` / `static/app.js`. No inline page-specific design systems,
   no second nav. UI text is English; letters are in the sale's language.

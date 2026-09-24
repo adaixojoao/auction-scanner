@@ -120,7 +120,7 @@ def alert_new_listings(db, cfg: dict, score_fn=None):
 def _sent_processes(db) -> tuple[set, set]:
     procs, ids = set(), set()
     for r in db.execute("SELECT processo, listing_id FROM carta_log "
-                        "WHERE outcome NOT IN ('expired','cancelled')"):
+                        "WHERE outcome NOT IN ('expired','cancelled') AND is_offer = 1"):
         if r[0]:
             procs.add(r[0].split(",")[0].strip())
         if r[1]:

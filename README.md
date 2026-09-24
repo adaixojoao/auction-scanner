@@ -41,24 +41,50 @@ the same when the app is closed.
 
 ### Offers, step by step
 
-1. A listing you ☆ on Listings, or a strong court sale, appears under **To review**.
-2. Pick an amount (presets or type one). The amount in words is written for you
-   (*quatro mil euros*). The letter below updates as you type — it is built from
-   your details in Settings and the listing, and it is exactly what the PDF and
-   e-mail will contain.
-3. **Download PDF** or **Open in e-mail** (addressed to the agente de execução
-   when known).
-4. **Mark as sent**. It moves to **Sent**; when you hear back, mark it
-   **won**, **lost** or **cancelled**.
+1. A listing you ☆ on Listings, or a strong sale where the offer is a letter,
+   appears under **To review**.
+2. The page says how that sale is actually bid on, and offers the letters that
+   fit it (pick one at the top of the letter):
 
-e-leilões listings are online auctions: the page links to the listing and
-**Log my bid** records what you bid there, instead of a letter.
+   | Sale | How you bid | Letters |
+   |---|---|---|
+   | 🇵🇹 Court sale (Citius) | Sealed letter, or negotiation with the agente de execução | Offer (carta fechada / negociação particular / adjudicação) · Information request |
+   | 🇵🇹 e-leilões, Finanças, auction houses | Online, on the site | Information request (e-leilões) · **Log my bid** |
+   | 🇵🇹 Banks (Novo Banco, CGD, BPI…) | Negotiation | Purchase offer to the bank |
+   | 🇪🇸 BOE court and tax auctions | Online at subastas.boe.es (Cl@ve or certificate, 5% deposit) | Information request to the court (occupancy, visits, charges, debts) · **Log my bid** |
+   | 🇪🇸 Sareb, Haya, Servihabitat | Negotiation | Purchase offer (oferta de compra) |
+   | 🇫🇷 Court sales (licitor, Enchères Publiques) | Only a lawyer at that court can bid, at the hearing | Instructions to your lawyer with your maximum (mandat) · Information request to the seller's lawyer (cahier des conditions de vente, visits, occupancy) |
+   | Other countries | Varies | General offer letter in the local language |
+
+3. For an offer, pick an amount (presets or type one). Portuguese letters write
+   it in words for you (*quatro mil euros*). The letter updates as you type. It
+   is built from your details in Settings and the listing, and it is exactly
+   what the PDF and e-mail contain.
+4. **Send by e-mail with PDF** sends it from the account in *Settings → E-mail*
+   (a copy comes back to you), addressed to the court, agente or lawyer when
+   the listing names one. Or **Download PDF** / **Open in my e-mail app** and
+   then **Mark letter as sent** (e-mailed, posted, by hand, given to my lawyer).
+5. It moves to **Sent**. Mark an offer **won**, **lost** or **cancelled**; mark
+   an information request **answered**, and the listing returns to *To review*
+   so you can make the offer.
+
+Online auctions: bid on the site, then **Log my bid** to track it.
 
 **The 85% rule.** In Portuguese executive sales by *propostas em carta fechada*
 (and on e-leilões) the announced value is 85% of the *valor base*, and offers
 below it are normally not accepted. The Offers page warns when an amount is
-under that line. The low fixed amounts suggested by default make sense for
+under that line, and when a French maximum is below the *mise à prix*. The
+low fixed amounts suggested for Portuguese court sales make sense for
 *negociação particular*; confirm the sale type with the agente de execução.
+The guidance in the app is a summary, not legal advice.
+
+**Details from the sale page.** For BOE auctions the scanner also reads the
+authority, deposit and goods tabs (court name and e-mail, file number,
+*situación posesoria*, visits); for licitor it opens each annonce (tribunal,
+hearing date and time, *mise à prix*, the seller's lawyer, visits, occupancy).
+Occupancy from these pages feeds the score. These parsers were written from
+the sites' public layout and could not be tested against the live sites; the
+Sources page shows if they stop finding anything.
 
 **AI check** (on Offers) asks Claude for a verdict, risks and a suggested bid.
 It needs the `ANTHROPIC_API_KEY` environment variable.
@@ -119,7 +145,7 @@ Set up in **Settings**:
 - **Telegram** — new listings above a score (one message each, or one digest
   when there are more than 5), a twice-daily list of sales ending within 4 days
   with no offer sent, a weekly summary, and a message when you mark an offer won.
-- **E-mail** — the same new-listing alerts by SMTP.
+- **E-mail** — the same new-listing alerts by SMTP. The same account sends letters from the Offers page.
 
 Each listing is alerted once per channel; a failed send is retried next time.
 
@@ -158,8 +184,9 @@ python dashboard.py                      # the web interface without the desktop
 app.py          desktop launcher      dashboard.py   Flask routes (templates/, static/)
 pipeline.py     the one scan routine  sources/       one module per country + registry
 db.py           schema, load_listings common.py      HTTP, parsing, matching
-scoring.py      the score             cartas.py      the one letter builder (+ PDF)
-report.py       report files          analysis.py    Claude calls
+scoring.py      the score             letters.py     the one letter builder (+ PDF)
+cartas.py       Citius batch letters  report.py      report files
+analysis.py     Claude calls
 scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 

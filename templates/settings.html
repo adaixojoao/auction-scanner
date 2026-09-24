@@ -33,6 +33,7 @@
     <div class="field"><label>Full name</label><input id="p_nome"></div>
     <div class="field"><label>NIF</label><input id="p_nif"></div>
     <div class="field"><label>E-mail</label><input id="p_email" type="email"></div>
+    <div class="field"><label>Phone (optional)</label><input id="p_telefone" type="tel"></div>
     <div class="field"><label>Town (next to the date)</label><input id="p_localidade"></div>
   </div>
   <div class="field" style="margin-top:12px"><label>Address</label><textarea id="p_morada" rows="2"></textarea></div>
@@ -62,15 +63,16 @@
   </div>
 </div>
 
-<div class="card">
-  <h2>E-mail alerts</h2>
+<div class="card" id="email">
+  <h2>E-mail</h2>
+  <p class="small muted" style="margin-bottom:10px">The account the app sends from: alerts, and letters sent with <b>Send by e-mail</b> on Offers (a copy of each letter comes back to this account). Gmail: smtp.gmail.com, port 587, and an app password.</p>
   <label class="check"><input type="checkbox" id="em_enabled"> Send e-mail alerts after each scan</label>
   <div class="form-grid" style="margin-top:12px">
     <div class="field"><label>SMTP server</label><input id="em_smtp_host"></div>
     <div class="field"><label>Port</label><input type="number" id="em_smtp_port"></div>
     <div class="field"><label>Username</label><input id="em_smtp_user" autocomplete="off"></div>
     <div class="field"><label>Password (Gmail: app password)</label><input id="em_smtp_password" type="password" autocomplete="off"></div>
-    <div class="field"><label>Send to (comma-separated)</label><input id="em_to_emails"></div>
+    <div class="field"><label>Send alerts to (comma-separated)</label><input id="em_to_emails"></div>
     <div class="field"><label>Minimum score</label><input type="number" id="em_min_score" min="0" max="100"></div>
   </div>
 </div>
@@ -96,7 +98,7 @@ async function load() {
   setv("max_price", c.max_price); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
   document.querySelectorAll("input[name=country]").forEach(cb => cb.checked = (f.countries || []).includes(cb.value));
   setv("exclude_keywords", (f.exclude_keywords || []).join("\n"));
-  ["nome", "nif", "email", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
+  ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
   setv("while_app_open", s.while_app_open); setv("pt_every_hours", s.pt_every_hours); setv("eu_every_hours", s.eu_every_hours);
   ["enabled", "token", "chat_id", "min_score", "deadline_min_score"].forEach(k => setv("tg_" + k, t[k]));
   ["enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password", "min_score"].forEach(k => setv("em_" + k, e[k]));
@@ -118,7 +120,7 @@ async function save() {
       countries: [...document.querySelectorAll("input[name=country]:checked")].map(cb => cb.value),
       exclude_keywords: $("exclude_keywords").value.split("\n").map(s => s.trim()).filter(Boolean),
     },
-    proponente: Object.fromEntries(["nome", "nif", "email", "localidade", "morada"].map(k => [k, $("p_" + k).value.trim()])),
+    proponente: Object.fromEntries(["nome", "nif", "email", "telefone", "localidade", "morada"].map(k => [k, $("p_" + k).value.trim()])),
     schedule: {while_app_open: $("while_app_open").checked, pt_every_hours: num("pt_every_hours"), eu_every_hours: num("eu_every_hours")},
     telegram: {enabled: $("tg_enabled").checked, token: $("tg_token").value.trim(), chat_id: $("tg_chat_id").value.trim(),
                min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score")},

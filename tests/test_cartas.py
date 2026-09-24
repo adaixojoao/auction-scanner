@@ -13,8 +13,9 @@ def test_letter_body_has_accents():
                                   valor="4.000,00", valor_texto="quatro mil euros")
     assert "aquisição do imóvel" in body and "PROPOSTA DE AQUISIÇÃO" in body
     assert "EUR 4.000,00 (quatro mil euros)" in body
-    # Helvetica fallback still gets plain ASCII, as before
-    assert "aquisicao do imovel" in cartas._safe_latin1(body)
+    # the Helvetica fallback keeps Latin-1 accents and replaces only what it cannot print
+    assert "aquisição do imóvel" in cartas._safe_latin1(body)
+    assert cartas._safe_latin1("Proposta — €1 “x”") == 'Proposta - EUR1 "x"'
 
 
 def test_generate_cartas_uses_visible_listings_only(db, add, tmp_path, monkeypatch):
@@ -57,9 +58,11 @@ def test_one_builder_for_every_country():
     base = {"id": "x:1", "title": "Casa", "concelho": "Sevilla", "area_m2": 80,
             "raw_json": json.dumps({"processo": "SUB-1", "modalidade": "Negociación directa",
                                     "tribunal": "Juzgado 3"})}
+    # a Spanish seller with no letters of its own gets the Spanish purchase offer
     es = cartas.build_letter({**base, "country": "ES"}, "5.000,00", "", PROPONENTE)
-    assert es.kind == "negociacao" and "Estimado/a" in es.text and "EUR 5.000,00" in es.text
-    assert es.recipient[-1] == "Juzgado 3"
+    assert es.type_key == "es_oferta" and "Estimados señores" in es.text and "5.000,00 €" in es.text
+    it = cartas.build_letter({**base, "country": "IT"}, "5.000,00", "", PROPONENTE)
+    assert it.kind == "negociacao" and "Egregio" in it.text and it.recipient[-1] == "Juzgado 3"
     pt = cartas.build_letter({**base, "country": "PT"}, "5.000,00", "", PROPONENTE)
     assert pt.text.startswith("Teste Proponente\nNIF: 123456789") and "Assunto:" in pt.text
     assert "cinco mil euros" in pt.text and pt.place_date.startswith("Guarda, ")

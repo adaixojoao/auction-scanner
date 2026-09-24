@@ -9,6 +9,7 @@ Occupancy/usufruct terms also ignore negated mentions ("não arrendado").
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 
@@ -27,13 +28,15 @@ FRAC_PATTERNS = [
 OCCUPANCY_PATTERNS = [
     "ocupado", "ocupada", "arrendado", "arrendada", "arrendatário*",
     "inquilino*", "occupied", "tenant*", "locataire*", "affittuari*",
-    "ocupantes", "occupato", "occupata",
+    "ocupantes", "occupato", "occupata", "occupé", "occupée", "loué", "louée",
+    "bail en cours", "okupa*",
 ]
 
 VACANT_PATTERNS = [
     "devoluto", "devoluta", "desocupado", "desocupada",
     "livre de pessoas", "livre de ocupantes", "libre de ocupantes",
-    "vacant", "libre d'occupation", "leegstaand",
+    "vacant", "libre d'occupation", "leegstaand", "libre de toute occupation",
+    "vide de tout occupant", "inoccupé", "inoccupée", "sin ocupantes",
 ]
 
 ACCESS_PATTERNS = [
@@ -172,6 +175,16 @@ def market_value_estimate(item: dict) -> float | None:
     return area * ppm2 if ppm2 else None
 
 
+def _occupation(item: dict) -> str | None:
+    raw = item.get("raw_json") or ""
+    if '"occupation"' not in raw:
+        return None
+    try:
+        return json.loads(raw).get("occupation")
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
 def score(item: dict, now: datetime | None = None) -> tuple[float, list[str]]:
     s = 50.0
     reasons: list[str] = []
@@ -192,10 +205,11 @@ def score(item: dict, now: datetime | None = None) -> tuple[float, list[str]]:
     if has_term(full, USUFRUCT_PATTERNS):
         return 0, ["usufruct — skip"]
 
-    if has_term(full, OCCUPANCY_PATTERNS):
+    occupation = _occupation(item)   # read from the sale's detail page (ES, FR)
+    if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
         s -= 25
         reasons.append("occupied/tenanted")
-    elif has_term(full, VACANT_PATTERNS, negations=False):
+    elif occupation == "vacant" or has_term(full, VACANT_PATTERNS, negations=False):
         s += 6
         reasons.append("vacant (devoluto)")
 
@@ -337,11 +351,17 @@ IMOVEL_TYPES = {normalize(t) for t in (
     "immobilier", "immobile", "vastgoed", "nieruchomosc", "akinito",
     "imovel", "imóvel", "loja", "escritório", "prédio", "residencial",
     "residential", "house", "apartment", "land",
+    # Spanish and French portals type their listings in their own words
+    "vivienda", "piso", "chalet", "casa", "local", "local comercial", "suelo", "solar",
+    "finca", "nave", "garaje", "trastero", "edificio",
+    "maison", "appartement", "terrain", "immeuble", "logement", "local commercial",
+    "villa", "pavillon",
 )}
 IMOVEL_TITLE_WORDS = [
     "prédio", "terreno", "moradia", "apartamento", "fração", "quinta",
     "herdade", "floresta", "casa", "vivienda", "inmueble", "maison",
     "appartement", "immobile", "appartamento", "woning", "woonhuis",
+    "piso", "chalet", "adosado", "finca", "immeuble", "terrain", "logement", "pavillon",
 ]
 
 

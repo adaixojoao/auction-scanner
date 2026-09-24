@@ -69,6 +69,23 @@ def test_categorize():
     assert categorize(item(title="Anel em ouro")) == "ouro_joias"
     assert categorize(item(title="Loja", tipo="loja")) == "imoveis"
     assert categorize(item(title="Vivienda en Loja", tipo="inmueble")) == "imoveis"
+    assert categorize(item(title="3 dormitorios en Valencia", tipo="Piso")) == "imoveis"
+    assert categorize(item(title="Une maison avec jardin", tipo="")) == "imoveis"
+    assert categorize(item(title="Terrain à bâtir", tipo="")) == "imoveis"
+
+
+def test_occupancy_from_the_detail_page_wins():
+    import json
+    raw = lambda occ: json.dumps({"occupation": occ})
+    _, occupied = score(item(title="Vivienda", raw_json=raw("occupied")))
+    assert "occupied/tenanted" in occupied
+    # the page says vacant, so an "ocupado" elsewhere in the text does not count
+    _, vacant = score(item(title="Vivienda", description="antes ocupado", raw_json=raw("vacant")))
+    assert "occupied/tenanted" not in vacant and "vacant (devoluto)" in vacant
+    _, french = score(item(title="Appartement occupé par le locataire"))
+    assert "occupied/tenanted" in french
+    _, libre = score(item(title="Maison libre de toute occupation"))
+    assert "occupied/tenanted" not in libre and "vacant (devoluto)" in libre
 
 
 def test_score_bounds():

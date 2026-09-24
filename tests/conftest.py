@@ -17,6 +17,11 @@ def no_network(monkeypatch):
     import urllib.request
     monkeypatch.setattr(urllib.request, "urlretrieve",
                         lambda *a, **k: (_ for _ in ()).throw(OSError("no network in tests")))
+    import smtplib
+
+    def no_smtp(*a, **k):
+        raise AssertionError("test tried to send e-mail")
+    monkeypatch.setattr(smtplib, "SMTP", no_smtp)
 
 
 @pytest.fixture(autouse=True)

@@ -92,7 +92,7 @@ def scrape_spain(db, max_price: float = 50000, **_):
                 break
             time.sleep(1)
 
-    enrich_spain_details(db, session, limit=200)
+    enrich_spain_details(db, session)
     return total_scraped
 
 
@@ -233,39 +233,125 @@ def _spain_parse_detail(html: str) -> dict:
     }
 
 
-def enrich_spain_details(db, session, limit: int = 200):
-    """Fetch BOE detail pages for Spanish listings still missing a price."""
+# A BOE detail page has tabs: ver=1 general information, ver=2 the managing
+# authority (court or agency: name, address, e-mail), ver=3 the goods (address,
+# occupancy, visits). Tab numbers and labels are from the site's public layout
+# and unconfirmed from here, so labels are matched loosely and every field is
+# optional.
+BOE_DETAIL = "https://subastas.boe.es/detalleSubasta.php"
+BOE_TABS = (("general", 1), ("authority", 2), ("goods", 3))
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def _spain_occupation(text: str | None) -> str | None:
+    """BOE "Situación posesoria" → "occupied" / "vacant" / None (unknown)."""
+    t = (text or "").lower()
+    if not t or "no consta" in t:
+        return None
+    if "libre" in t or "desocupad" in t or "sin ocupantes" in t:
+        return "vacant"
+    if "ocupad" in t or "okupa" in t or "arrendad" in t or "inquilin" in t:
+        return "occupied"
+    return None
+
+
+def _spain_parse_general(html: str) -> dict:
+    f = _spain_table_fields(BeautifulSoup(html, "html.parser"))
+    return {
+        "tipo_subasta": _spain_field(f, "Tipo de subasta"),
+        "expediente": _spain_field(f, "Cuenta expediente", "Expediente"),
+        "deposito": parse_price(_spain_field(f, "Importe del depósito", "depósito", "deposito")),
+    }
+
+
+def _spain_parse_authority(html: str) -> dict:
+    f = _spain_table_fields(BeautifulSoup(html, "html.parser"))
+    email = _EMAIL_RE.search(_spain_field(f, "Correo", "E-mail", "Email") or "")
+    return {
+        "autoridad": _spain_field(f, "Descripción", "Descripcion", "Nombre"),
+        "autoridad_direccion": _spain_field(f, "Dirección", "Direccion"),
+        "autoridad_telefono": _spain_field(f, "Teléfono", "Telefono"),
+        "autoridad_email": email.group(0) if email else None,
+    }
+
+
+def _spain_parse_goods(html: str) -> dict:
+    f = _spain_table_fields(BeautifulSoup(html, "html.parser"))
+    posesoria = _spain_field(f, "Situación posesoria", "Situacion posesoria")
+    return {
+        "situacion_posesoria": posesoria,
+        "occupation": _spain_occupation(posesoria),
+        "visitable": _spain_field(f, "Visitable"),
+        "vivienda_habitual": _spain_field(f, "Vivienda habitual"),
+        "cargas": _spain_field(f, "Cargas"),
+        "referencia_catastral": _spain_field(f, "Referencia catastral"),
+    }
+
+
+_TAB_PARSERS = {"general": _spain_parse_general, "authority": _spain_parse_authority,
+                "goods": _spain_parse_goods}
+
+
+def spain_details(pages: dict[str, str]) -> tuple[dict, dict]:
+    """(listing fields, raw_json extras) from the fetched detail tabs."""
+    fields: dict = {}
+    for tab in ("general", "goods"):          # the authority tab's "Descripción" is the court
+        if tab in pages:
+            for k, v in _spain_parse_detail(pages[tab]).items():
+                if v is not None and fields.get(k) is None:
+                    fields[k] = v
+    extra = {}
+    for tab, html in pages.items():
+        extra.update({k: v for k, v in _TAB_PARSERS[tab](html).items() if v})
+    return fields, extra
+
+
+def enrich_spain_details(db, session, limit: int = 100):
+    """Fetch the BOE detail tabs for Spanish listings not checked yet (or still
+    without a price), soonest first: price and dates for the listing, the
+    court's name and e-mail for letters, occupancy for the score."""
     rows = db.execute("""
-        SELECT * FROM listings WHERE source='spain' AND price IS NULL LIMIT ?
+        SELECT * FROM listings WHERE source='spain'
+          AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
+        ORDER BY date_end IS NULL, date_end LIMIT ?
     """, (limit,)).fetchall()
     if not rows:
         return 0
 
-    LOG.info(f"  Spain details: fetching {len(rows)} listings missing price")
+    LOG.info(f"  Spain details: fetching {len(rows)} listings")
     filled = 0
     for row in rows:
         item = dict(row)
-        url = item.get("url") or f"https://subastas.boe.es/detalleSubasta.php?idSub={item['external_id']}"
-        try:
-            resp = session.get(url)
-            resp.raise_for_status()
-        except Exception as e:
-            LOG.debug(f"  Spain detail {item['external_id']} error: {e}")
-            time.sleep(0.5)
+        pages = {}
+        for tab, ver in BOE_TABS:
+            try:
+                resp = session.get(BOE_DETAIL, params={"idSub": item["external_id"], "ver": ver})
+                resp.raise_for_status()
+                pages[tab] = resp.text
+            except Exception as e:
+                LOG.debug(f"  Spain detail {item['external_id']} tab {tab}: {e}")
+            time.sleep(0.4)
+        if not pages:
             continue
 
-        parsed = {k: v for k, v in _spain_parse_detail(resp.text).items() if v is not None}
+        parsed, extra = spain_details(pages)
+        try:
+            raw = json.loads(item.get("raw_json") or "{}") or {}
+        except ValueError:
+            raw = {}
+        raw.update(extra)
+        raw["detail_checked"] = datetime.now().strftime("%Y-%m-%d")
         fields = {k: item.get(k) for k in (
             "title", "description", "tipo", "area_m2", "price", "current_bid", "min_price",
-            "district", "concelho", "freguesia", "url", "image_url", "date_end", "raw_json")}
+            "district", "concelho", "freguesia", "url", "image_url", "date_end")}
         fields.update(parsed)
+        fields["raw_json"] = json.dumps(raw, ensure_ascii=False)
         upsert_listing(db, make_listing("spain", item["external_id"], "ES", **fields))
         if parsed.get("price") is not None:
             filled += 1
         db.commit()
-        time.sleep(0.6)
 
-    LOG.info(f"  Spain details: filled price for {filled}/{len(rows)}")
+    LOG.info(f"  Spain details: {len(rows)} checked, price found for {filled}")
     return filled
 
 

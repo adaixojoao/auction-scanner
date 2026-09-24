@@ -156,10 +156,11 @@ def weekly_stats(db, now: datetime | None = None) -> dict:
     one = lambda sql, *p: db.execute(sql, p).fetchone()[0]  # noqa: E731
     return {
         "new": one("SELECT COUNT(*) FROM listings WHERE first_seen > ?", week_ago),
-        "sent": one("SELECT COUNT(*) FROM carta_log WHERE created_at > ?", week_ago),
-        "won": one("SELECT COUNT(*) FROM carta_log WHERE outcome='won'"),
-        "pending": one("SELECT COUNT(*) FROM carta_log WHERE outcome='pending'"),
-        "exposure": one("SELECT COALESCE(SUM(bid_amount),0) FROM carta_log WHERE outcome='pending'"),
+        "sent": one("SELECT COUNT(*) FROM carta_log WHERE is_offer=1 AND created_at > ?", week_ago),
+        "won": one("SELECT COUNT(*) FROM carta_log WHERE is_offer=1 AND outcome='won'"),
+        "pending": one("SELECT COUNT(*) FROM carta_log WHERE is_offer=1 AND outcome='pending'"),
+        "exposure": one("SELECT COALESCE(SUM(bid_amount),0) FROM carta_log "
+                        "WHERE is_offer=1 AND outcome='pending'"),
     }
 
 
