@@ -3157,6 +3157,535 @@ def scrape_cyprus(db: sqlite3.Connection, max_price: float = 50000):
     return total_scraped
 
 
+# ─── ES: Sareb (Spanish bad bank) ────────────────────────────────────
+
+def scrape_sareb(db: sqlite3.Connection, max_price: float = 100000):
+    """Sareb — Spanish state bad bank, manages 100k+ distressed properties."""
+    LOG.info("Scraping Sareb...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.sareb.es"
+    total = 0
+    for page in range(1, 50):
+        try:
+            resp = session.get(f"{base}/inmuebles/search",
+                params={"page": page, "pageSize": 50, "precioMax": int(max_price),
+                        "tipoInmueble": "residencial"}, timeout=20)
+            if resp.status_code == 404: break
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            LOG.error(f"Sareb p{page}: {e}"); break
+        items = data if isinstance(data, list) else data.get("inmuebles", data.get("items", []))
+        if not items: break
+        for item in items:
+            eid = str(item.get("id") or item.get("referencia") or hash(str(item)))
+            price = item.get("precio") or item.get("price") or 0
+            if price > max_price: continue
+            upsert_listing(db, {
+                "id": f"sareb:{eid}", "source": "sareb", "country": "ES",
+                "external_id": eid,
+                "title": (item.get("titulo") or item.get("title") or f"Sareb #{eid}")[:200],
+                "description": item.get("descripcion") or "Sareb distressed property",
+                "tipo": item.get("tipo") or "inmueble",
+                "area_m2": item.get("superficie") or item.get("area"),
+                "price": price, "current_bid": None, "min_price": price,
+                "district": item.get("provincia") or item.get("district"),
+                "concelho": item.get("municipio") or item.get("city"),
+                "freguesia": None,
+                "url": item.get("url") or f"{base}/inmueble/{eid}",
+                "image_url": item.get("imagen") or item.get("image"),
+                "date_end": None,
+                "raw_json": json.dumps(item, ensure_ascii=False)[:2000]})
+            total += 1
+        db.commit()
+        if len(items) < 50: break
+        time.sleep(0.8)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("sareb", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Sareb: {total} listings")
+    return total
+
+
+# ─── ES: Haya Real Estate ───────────────────────────────────────────
+
+def scrape_haya(db: sqlite3.Connection, max_price: float = 100000):
+    """Haya Real Estate — manages Sareb and BBVA repossessed properties."""
+    LOG.info("Scraping Haya Real Estate...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.haya.es"
+    total = 0
+    for page in range(1, 30):
+        try:
+            resp = session.get(f"{base}/inmuebles/",
+                params={"page": page, "precio_max": int(max_price)}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Haya p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.property-card, article.inmueble, div[class*='property'], div[class*='inmueble']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title,.property-title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"Haya #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            loc_el = card.select_one(".location,.localidad,.municipio")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            area_el = card.select_one(".area,.superficie,[class*='area']")
+            area = None
+            if area_el:
+                am = re.search(r"(\d+)", area_el.get_text())
+                if am: area = float(am.group(1))
+            upsert_listing(db, {"id": f"haya:{eid}", "source": "haya", "country": "ES",
+                "external_id": eid, "title": title, "description": "Haya Real Estate (Sareb/BBVA)",
+                "tipo": "inmueble", "area_m2": area, "price": price, "current_bid": None,
+                "min_price": price, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": None, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(1)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("haya", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Haya: {total} listings")
+    return total
+
+
+# ─── ES: Servihabitat (CaixaBank) ───────────────────────────────────
+
+def scrape_servihabitat(db: sqlite3.Connection, max_price: float = 100000):
+    """Servihabitat — CaixaBank repossessed properties."""
+    LOG.info("Scraping Servihabitat...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.servihabitat.com"
+    total = 0
+    for page in range(1, 30):
+        try:
+            resp = session.get(f"{base}/en/buy-houses/",
+                params={"page": page, "price_to": int(max_price)}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Servihabitat p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.property, article, div[class*='property'], li[class*='property']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"Servihabitat #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            loc_el = card.select_one(".location,.city,.municipio")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            upsert_listing(db, {"id": f"servihabitat:{eid}", "source": "servihabitat", "country": "ES",
+                "external_id": eid, "title": title, "description": "Servihabitat (CaixaBank)",
+                "tipo": "inmueble", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": price, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": None, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(1)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("servihabitat", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Servihabitat: {total} listings")
+    return total
+
+
+# ─── ES: SubastasActivas (aggregator) ───────────────────────────────
+
+def scrape_subastasactivas(db: sqlite3.Connection, max_price: float = 100000):
+    """SubastasActivas — aggregates BOE + AEAT + Social Security + notarial auctions."""
+    LOG.info("Scraping SubastasActivas...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://subastasactivas.com"
+    total = 0
+    try:
+        resp = session.get(f"{base}/subastas",
+            params={"tipo": "inmueble", "precioMax": int(max_price), "estado": "activa"}, timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"SubastasActivas: {e}"); return 0
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for card in soup.select("div.subasta, article, div[class*='subasta'], tr[class*='subasta']"):
+        link = card.select_one("a[href]")
+        if not link: continue
+        href = link.get("href", "")
+        if not href.startswith("http"): href = f"{base}{href}"
+        eid_m = re.search(r"/(\w+)/?$", href)
+        eid = eid_m.group(1) if eid_m else str(hash(href))
+        title = card.get_text(" ", strip=True)[:200]
+        price = _parse_euro(card.get_text())
+        if price and price > max_price: continue
+        date_end = None
+        dm = re.search(r"(\d{2})[/-](\d{2})[/-](\d{4})", card.get_text())
+        if dm:
+            try: date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+            except ValueError: pass
+        upsert_listing(db, {"id": f"subastasactivas:{eid}", "source": "subastasactivas", "country": "ES",
+            "external_id": eid, "title": title[:120], "description": "SubastasActivas aggregator",
+            "tipo": "inmueble", "area_m2": None, "price": price, "current_bid": None,
+            "min_price": None, "district": None, "concelho": None, "freguesia": None,
+            "url": href, "image_url": None, "date_end": date_end, "raw_json": None})
+        total += 1
+    db.commit()
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("subastasactivas", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"SubastasActivas: {total} listings")
+    return total
+
+
+# ─── FR: Enchères Publiques ─────────────────────────────────────────
+
+def scrape_encheres_publiques(db: sqlite3.Connection, max_price: float = 100000):
+    """Enchères Publiques — main French judicial property auction site."""
+    LOG.info("Scraping Enchères Publiques...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.encheres-publiques.com"
+    total = 0
+    for page in range(1, 20):
+        try:
+            resp = session.get(f"{base}/immobilier",
+                params={"page": page, "prix_max": int(max_price)}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"EncheresPubliques p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.bien, article.property, div[class*='bien'], div[class*='lot']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title,.bien-title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"EP #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            loc_el = card.select_one(".location,.ville,.commune")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            date_el = card.select_one(".date,.date-vente")
+            date_end = None
+            if date_el:
+                dm = re.search(r"(\d{2})[/-](\d{2})[/-](\d{4})", date_el.get_text())
+                if dm:
+                    try: date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+                    except ValueError: pass
+            upsert_listing(db, {"id": f"encheres_pub:{eid}", "source": "encheres_publiques", "country": "FR",
+                "external_id": eid, "title": title, "description": "Enchères Publiques France",
+                "tipo": "immobilier", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": None, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": date_end, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(0.8)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("encheres_publiques", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Enchères Publiques: {total} listings")
+    return total
+
+
+# ─── DE: Zwangsversteigerung.de (aggregator) ────────────────────────
+
+def scrape_zvg_de(db: sqlite3.Connection, max_price: float = 100000):
+    """Zwangsversteigerung.de — private aggregator of German forced auctions."""
+    LOG.info("Scraping Zwangsversteigerung.de...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.zwangsversteigerung.de"
+    total = 0
+    try:
+        resp = session.get(f"{base}/immobilien/",
+            params={"verkehrswert_max": int(max_price)}, timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"ZVG.de: {e}"); return 0
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for card in soup.select("div.object, article, div[class*='object'], tr.result"):
+        link = card.select_one("a[href]")
+        if not link: continue
+        href = link.get("href", "")
+        if not href.startswith("http"): href = f"{base}{href}"
+        eid_m = re.search(r"/(\d+)/?", href)
+        eid = eid_m.group(1) if eid_m else str(hash(href))
+        title = card.get_text(" ", strip=True)[:200]
+        price = _parse_euro(card.get_text())
+        if price and price > max_price: continue
+        date_end = None
+        dm = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", card.get_text())
+        if dm:
+            try: date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+            except ValueError: pass
+        loc_m = re.search(r"(\d{5})\s+(\w[\w\s]+)", card.get_text())
+        location = loc_m.group(2).strip() if loc_m else ""
+        upsert_listing(db, {"id": f"zvg_de:{eid}", "source": "zvg_de", "country": "DE",
+            "external_id": eid, "title": title[:120], "description": "Zwangsversteigerung.de aggregator",
+            "tipo": "imovel", "area_m2": None, "price": price, "current_bid": None,
+            "min_price": None, "district": location, "concelho": None, "freguesia": None,
+            "url": href, "image_url": None, "date_end": date_end, "raw_json": None})
+        total += 1
+    db.commit()
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("zvg_de", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Zwangsversteigerung.de: {total} listings")
+    return total
+
+
+# ─── IT: Gobid Real ─────────────────────────────────────────────────
+
+def scrape_gobidreal(db: sqlite3.Connection, max_price: float = 100000):
+    """Gobid Real — major Italian judicial property auction platform."""
+    LOG.info("Scraping Gobid Real...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.gobidreal.it"
+    total = 0
+    for page in range(1, 20):
+        try:
+            resp = session.get(f"{base}/en/real-estate-auctions/",
+                params={"page": page, "price_to": int(max_price)}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"GobidReal p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.lot-card, article.auction, div[class*='lot'], div[class*='auction']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title,.lot-title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"Gobid #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            loc_el = card.select_one(".location,.city,.comune")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            date_el = card.select_one(".date,.auction-date,.end-date")
+            date_end = None
+            if date_el:
+                dm = re.search(r"(\d{2})[/-](\d{2})[/-](\d{4})", date_el.get_text())
+                if dm:
+                    try: date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+                    except ValueError: pass
+            upsert_listing(db, {"id": f"gobidreal:{eid}", "source": "gobidreal", "country": "IT",
+                "external_id": eid, "title": title, "description": "Gobid Real Italian judicial auction",
+                "tipo": "immobile", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": None, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": date_end, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(1)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("gobidreal", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Gobid Real: {total} listings")
+    return total
+
+
+# ─── IT: Astalegale ─────────────────────────────────────────────────
+
+def scrape_astalegale(db: sqlite3.Connection, max_price: float = 100000):
+    """Astalegale.net — Italy's largest judicial property auction aggregator."""
+    LOG.info("Scraping Astalegale.net...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.astalegale.net"
+    total = 0
+    for page in range(1, 20):
+        try:
+            resp = session.get(f"{base}/aste-immobili/",
+                params={"page": page, "prezzoMax": int(max_price)}, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.error(f"Astalegale p{page}: {e}"); break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select("div.asta, article, div[class*='asta'], div[class*='immobile']")
+        if not cards: break
+        for card in cards:
+            link = card.select_one("a[href]")
+            if not link: continue
+            href = link.get("href", "")
+            if not href.startswith("http"): href = f"{base}{href}"
+            eid_m = re.search(r"/(\d+)/?", href)
+            eid = eid_m.group(1) if eid_m else str(hash(href))
+            title_el = card.select_one("h2,h3,.title,.asta-title")
+            title = title_el.get_text(strip=True)[:200] if title_el else f"Astalegale #{eid}"
+            price = _parse_euro(card.get_text())
+            if price and price > max_price: continue
+            loc_el = card.select_one(".location,.comune,.citta")
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            date_el = card.select_one(".date,.data-asta")
+            date_end = None
+            if date_el:
+                dm = re.search(r"(\d{2})[/-](\d{2})[/-](\d{4})", date_el.get_text())
+                if dm:
+                    try: date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+                    except ValueError: pass
+            upsert_listing(db, {"id": f"astalegale:{eid}", "source": "astalegale", "country": "IT",
+                "external_id": eid, "title": title, "description": "Astalegale.net judicial auction",
+                "tipo": "immobile", "area_m2": None, "price": price, "current_bid": None,
+                "min_price": None, "district": None, "concelho": location, "freguesia": None,
+                "url": href, "image_url": None, "date_end": date_end, "raw_json": None})
+            total += 1
+        db.commit()
+        if len(cards) < 6: break
+        time.sleep(1)
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("astalegale", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Astalegale: {total} listings")
+    return total
+
+
+# ─── NL: Veilingbiljet ──────────────────────────────────────────────
+
+def scrape_veilingbiljet(db: sqlite3.Connection, max_price: float = 100000):
+    """Veilingbiljet.nl — Dutch property foreclosure auctions."""
+    LOG.info("Scraping Veilingbiljet.nl...")
+    session = requests.Session()
+    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    base = "https://www.veilingbiljet.nl"
+    total = 0
+    try:
+        resp = session.get(f"{base}/objecten/", timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        LOG.error(f"Veilingbiljet: {e}"); return 0
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for card in soup.select("div.object, article, div[class*='object'], li[class*='object']"):
+        link = card.select_one("a[href]")
+        if not link: continue
+        href = link.get("href", "")
+        if not href.startswith("http"): href = f"{base}{href}"
+        eid_m = re.search(r"/(\d+)/?", href)
+        eid = eid_m.group(1) if eid_m else str(hash(href))
+        title_el = card.select_one("h2,h3,.title,.object-title")
+        title = title_el.get_text(strip=True)[:200] if title_el else f"Veilingbiljet #{eid}"
+        price = _parse_euro(card.get_text())
+        if price and price > max_price: continue
+        loc_el = card.select_one(".location,.city,.plaats")
+        location = loc_el.get_text(strip=True) if loc_el else ""
+        date_el = card.select_one(".date,.veilingdatum")
+        date_end = None
+        if date_el:
+            dm = re.search(r"(\d{2})[/-](\d{2})[/-](\d{4})", date_el.get_text())
+            if dm:
+                try: date_end = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).isoformat()
+                except ValueError: pass
+        upsert_listing(db, {"id": f"veilingbiljet:{eid}", "source": "veilingbiljet", "country": "NL",
+            "external_id": eid, "title": title, "description": "Veilingbiljet.nl executieveiling",
+            "tipo": "vastgoed", "area_m2": None, "price": price, "current_bid": None,
+            "min_price": None, "district": None, "concelho": location, "freguesia": None,
+            "url": href, "image_url": None, "date_end": date_end, "raw_json": None})
+        total += 1
+    db.commit()
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("veilingbiljet", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"Veilingbiljet: {total} listings")
+    return total
+
+
+# ─── EU: CourtBid via Apify (pan-European aggregator) ───────────────
+
+def scrape_courtbid(db: sqlite3.Connection, max_price: float = 100000, apify_token: str = ""):
+    """CourtBid.eu via Apify distressed property feed — 17 EU countries.
+    Requires Apify token in config.json under 'apify_token'.
+    """
+    if not apify_token:
+        LOG.info("CourtBid/Apify: no token set, skipping. Add 'apify_token' to config.json")
+        return 0
+    LOG.info("Scraping CourtBid via Apify...")
+    session = requests.Session()
+    session.headers["Authorization"] = f"Bearer {apify_token}"
+    total = 0
+    try:
+        run_resp = session.post(
+            "https://api.apify.com/v2/acts/studio-amba~distressed-property-feed/runs",
+            json={"maxPrice": int(max_price), "propertyType": "residential",
+                  "countries": ["PT","ES","FR","DE","IT","NL","HR","GR","BE","RO","PL","CY"]},
+            timeout=30)
+        run_resp.raise_for_status()
+        run_id = run_resp.json()["data"]["id"]
+    except Exception as e:
+        LOG.error(f"CourtBid run start: {e}"); return 0
+    for _ in range(30):
+        time.sleep(10)
+        try:
+            status_resp = session.get(
+                f"https://api.apify.com/v2/actor-runs/{run_id}", timeout=15)
+            status = status_resp.json()["data"]["status"]
+            if status == "SUCCEEDED": break
+            if status in ("FAILED", "ABORTED", "TIMED-OUT"):
+                LOG.error(f"CourtBid run {status}"); return 0
+        except Exception: pass
+    try:
+        items_resp = session.get(
+            f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items",
+            params={"format": "json", "limit": 5000}, timeout=60)
+        items_resp.raise_for_status()
+        items = items_resp.json()
+    except Exception as e:
+        LOG.error(f"CourtBid fetch results: {e}"); return 0
+    for item in items:
+        price = item.get("reservePrice") or item.get("price") or 0
+        if price and price > max_price: continue
+        country = (item.get("country") or "EU").upper()[:2]
+        eid = str(item.get("id") or item.get("lotId") or hash(str(item)))
+        upsert_listing(db, {
+            "id": f"courtbid:{eid}", "source": "courtbid", "country": country,
+            "external_id": eid,
+            "title": (item.get("title") or item.get("description") or f"CourtBid #{eid}")[:200],
+            "description": item.get("description") or item.get("details"),
+            "tipo": item.get("propertyType") or "imovel",
+            "area_m2": item.get("area") or item.get("surfaceArea"),
+            "price": price, "current_bid": item.get("currentBid"),
+            "min_price": item.get("minimumBid") or price,
+            "district": item.get("region") or item.get("province"),
+            "concelho": item.get("city") or item.get("municipality"),
+            "freguesia": None,
+            "url": item.get("url") or item.get("sourceUrl"),
+            "image_url": item.get("imageUrl"),
+            "date_end": item.get("auctionDate") or item.get("endDate"),
+            "raw_json": json.dumps(item, ensure_ascii=False)[:2000]})
+        total += 1
+    db.commit()
+    db.execute("INSERT INTO scrape_log (source,timestamp,count,status) VALUES (?,?,?,?)",
+               ("courtbid", datetime.now(timezone.utc).isoformat(), total, "ok"))
+    db.commit()
+    LOG.info(f"CourtBid (Apify): {total} listings across EU")
+    return total
+
+
 # ─── e-leiloes detail fetch ──────────────────────────────────────────
 
 def fetch_eleiloes_details(db: sqlite3.Connection, limit: int = 80, max_price: float = 50000):
@@ -3836,6 +4365,8 @@ def main():
         "financas", "zvg", "justiz_auktion", "greece", "biddit", "anaf", "poland",
         "aeat", "pvp_giustizia", "cyprus",
         "novobanco", "cgd", "santander", "bpi", "imobancos", "centroleiloes", "bidleiloeira",
+        "sareb", "haya", "servihabitat", "subastasactivas",
+        "encheres_publiques", "zvg_de", "gobidreal", "astalegale", "veilingbiljet", "courtbid",
         "all"
     ], default="all")
     parser.add_argument("--country", choices=["PT", "HR", "ES", "FR", "IT", "NL", "DE", "GR", "BE", "RO", "PL", "CY", "all"], default=None,
@@ -3876,11 +4407,11 @@ def main():
     COUNTRY_SOURCES = {
         "PT": [("eleiloes", scrape_eleiloes), ("leilosoc", scrape_leilosoc), ("bcp", scrape_bcp), ("citius", scrape_citius), ("financas", scrape_financas), ("whitestar", scrape_whitestar), ("novobanco", scrape_novobanco), ("cgd", scrape_cgd), ("santander", scrape_santander), ("bpi", scrape_bpi), ("imobancos", scrape_imobancos), ("centroleiloes", scrape_centroleiloes), ("bidleiloeira", scrape_bidleiloeira)],
         "HR": [("croatia", scrape_croatia), ("fina", scrape_fina_csv)],
-        "ES": [("spain", scrape_spain), ("aeat", scrape_aeat)],
-        "FR": [("france", scrape_france)],
-        "IT": [("italy", scrape_italy), ("pvp_giustizia", scrape_italy_pvp)],
-        "NL": [("netherlands", scrape_netherlands), ("veilingnotaris", scrape_veilingnotaris)],
-        "DE": [("zvg", scrape_zvg), ("justiz_auktion", scrape_justiz_auktion)],
+        "ES": [("spain", scrape_spain), ("aeat", scrape_aeat), ("sareb", scrape_sareb), ("haya", scrape_haya), ("servihabitat", scrape_servihabitat), ("subastasactivas", scrape_subastasactivas)],
+        "FR": [("france", scrape_france), ("encheres_publiques", scrape_encheres_publiques)],
+        "IT": [("italy", scrape_italy), ("pvp_giustizia", scrape_italy_pvp), ("gobidreal", scrape_gobidreal), ("astalegale", scrape_astalegale)],
+        "NL": [("netherlands", scrape_netherlands), ("veilingnotaris", scrape_veilingnotaris), ("veilingbiljet", scrape_veilingbiljet)],
+        "DE": [("zvg", scrape_zvg), ("justiz_auktion", scrape_justiz_auktion), ("zvg_de", scrape_zvg_de)],
         "GR": [("greece", scrape_greece)],
         "BE": [("biddit", scrape_biddit)],
         "RO": [("anaf", scrape_anaf)],
@@ -3930,6 +4461,16 @@ def main():
                 "imobancos": ("imobancos", scrape_imobancos),
                 "centroleiloes": ("centroleiloes", scrape_centroleiloes),
                 "bidleiloeira": ("bidleiloeira", scrape_bidleiloeira),
+                "sareb": ("sareb", scrape_sareb),
+                "haya": ("haya", scrape_haya),
+                "servihabitat": ("servihabitat", scrape_servihabitat),
+                "subastasactivas": ("subastasactivas", scrape_subastasactivas),
+                "encheres_publiques": ("encheres_publiques", scrape_encheres_publiques),
+                "zvg_de": ("zvg_de", scrape_zvg_de),
+                "gobidreal": ("gobidreal", scrape_gobidreal),
+                "astalegale": ("astalegale", scrape_astalegale),
+                "veilingbiljet": ("veilingbiljet", scrape_veilingbiljet),
+                "courtbid": ("courtbid", scrape_courtbid),
             }
             if args.source in source_map:
                 sources_to_run.append(source_map[args.source])

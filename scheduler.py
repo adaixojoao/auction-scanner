@@ -1,108 +1,159 @@
 """
-Set up Windows Task Scheduler to run the auction scanner automatically.
-Run: python scheduler.py install    — creates scheduled task
-     python scheduler.py remove     — removes scheduled task
-     python scheduler.py status     — shows task status
+scheduler.py — Automated scheduling for Auction Scanner.
+
+Usage:
+  python scheduler.py install    # Install Windows Task Scheduler task
+  python scheduler.py remove     # Remove task
+  python scheduler.py status     # Check status
+  python scheduler.py run        # Run loop directly (no Task Scheduler)
+  python scheduler.py pt         # PT-only scrape
+  python scheduler.py eu         # Full EU scrape
+  python scheduler.py morning    # Check deadlines + carta status
+  python scheduler.py report     # Send weekly report now
 """
-
+import argparse
+import logging
 import os
-import subprocess
+import sqlite3
 import sys
+from datetime import datetime, timezone
 
+LOG = logging.getLogger("scheduler")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
-TASK_NAME = "AuctionScanner"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PYTHON = sys.executable
-SCRAPER = os.path.join(SCRIPT_DIR, "scraper.py")
-LOG_FILE = os.path.join(SCRIPT_DIR, "scheduler.log")
+DB_PATH    = os.path.join(SCRIPT_DIR, "auctions.db")
+TASK_NAME  = "AuctionScanner"
 
 
-def install(interval_hours: int = 6):
-    # Build the command that Task Scheduler will run
-    cmd = f'"{PYTHON}" "{SCRAPER}" --source all 2>&1 >> "{LOG_FILE}"'
-
-    # Use schtasks to create a repeating task
-    schtasks_cmd = [
-        "schtasks", "/Create",
-        "/TN", TASK_NAME,
-        "/TR", cmd,
-        "/SC", "HOURLY",
-        "/MO", str(interval_hours),
-        "/ST", "00:00",
-        "/F",  # force overwrite if exists
-    ]
-
+def run_pt_scrape():
+    LOG.info("=== PT scrape starting ===")
+    sys.argv = ["scraper.py", "--country", "PT", "--max-price", "100000"]
     try:
-        result = subprocess.run(schtasks_cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"Scheduled task '{TASK_NAME}' created successfully!")
-            print(f"  Runs every {interval_hours} hours")
-            print(f"  Script: {SCRAPER}")
-            print(f"  Log: {LOG_FILE}")
-            print(f"\nTo change interval, edit config.json and re-run: python scheduler.py install")
-        else:
-            print(f"Failed to create task: {result.stderr}")
-            if "Access is denied" in result.stderr:
-                print("\nTry running as Administrator.")
-    except FileNotFoundError:
-        print("schtasks not found — this only works on Windows.")
+        from scraper import main
+        main()
+    except Exception as e:
+        LOG.error(f"PT scrape failed: {e}")
 
 
-def remove():
-    result = subprocess.run(
-        ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
-        capture_output=True, text=True,
+def run_eu_scrape():
+    LOG.info("=== EU scrape starting ===")
+    sys.argv = ["scraper.py", "--max-price", "100000"]
+    try:
+        from scraper import main
+        main()
+    except Exception as e:
+        LOG.error(f"EU scrape failed: {e}")
+
+
+def run_morning_checks():
+    LOG.info("=== Morning checks ===")
+    try:
+        from config import load_config
+        from telegram_alert import alert_carta_deadlines
+        from scoring import score as score_fn
+        cfg = load_config()
+        db  = sqlite3.connect(DB_PATH)
+        alert_carta_deadlines(db, cfg, score_fn)
+        db.close()
+        LOG.info("Morning checks complete")
+    except Exception as e:
+        LOG.error(f"Morning checks failed: {e}")
+
+
+def run_weekly_report():
+    LOG.info("=== Weekly report ===")
+    try:
+        from config import load_config
+        from telegram_alert import alert_weekly_summary
+        from datetime import timedelta
+        cfg = load_config()
+        db  = sqlite3.connect(DB_PATH)
+        now = datetime.now(timezone.utc)
+        week_ago = (now - timedelta(days=7)).isoformat()
+        stats = {
+            "new":      db.execute("SELECT COUNT(*) FROM listings WHERE first_seen > ?", (week_ago,)).fetchone()[0],
+            "sent":     db.execute("SELECT COUNT(*) FROM carta_log WHERE created_at > ?", (week_ago,)).fetchone()[0],
+            "won":      db.execute("SELECT COUNT(*) FROM carta_log WHERE outcome='won'").fetchone()[0],
+            "pending":  db.execute("SELECT COUNT(*) FROM carta_log WHERE outcome='pending'").fetchone()[0],
+            "exposure": db.execute("SELECT COALESCE(SUM(bid_amount),0) FROM carta_log WHERE outcome='pending'").fetchone()[0],
+        }
+        tg = cfg.get("telegram", {})
+        if tg.get("enabled"):
+            alert_weekly_summary(tg["token"], tg["chat_id"], stats)
+        db.close()
+    except Exception as e:
+        LOG.error(f"Weekly report failed: {e}")
+
+
+def run_loop():
+    try:
+        import schedule
+    except ImportError:
+        print("Install schedule: pip install schedule")
+        sys.exit(1)
+
+    schedule.every(2).hours.do(run_pt_scrape)
+    schedule.every(6).hours.do(run_eu_scrape)
+    schedule.every().day.at("08:00").do(run_morning_checks)
+    schedule.every().day.at("20:00").do(run_morning_checks)
+    schedule.every().monday.at("08:00").do(run_weekly_report)
+
+    LOG.info("Scheduler loop running.")
+    LOG.info("  PT scrape:    every 2h")
+    LOG.info("  EU scrape:    every 6h")
+    LOG.info("  Checks:       08:00 + 20:00 daily")
+    LOG.info("  Report:       Monday 08:00")
+    LOG.info("Press Ctrl+C to stop.")
+
+    run_pt_scrape()
+
+    import time
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+
+def install_task():
+    python = sys.executable
+    script = os.path.join(SCRIPT_DIR, "scheduler.py")
+    cmd = (
+        f'schtasks /create /tn "{TASK_NAME}" /tr "\"{python}\" \"{script}\" run" '
+        f'/sc HOURLY /mo 2 /st 00:00 /f'
     )
-    if result.returncode == 0:
-        print(f"Scheduled task '{TASK_NAME}' removed.")
+    ret = os.system(cmd)
+    if ret == 0:
+        print(f"Task '{TASK_NAME}' installed. Runs every 2 hours.")
     else:
-        print(f"Could not remove task: {result.stderr}")
+        print("Failed. Try running as Administrator, or use: python scheduler.py run")
 
 
-def status():
-    result = subprocess.run(
-        ["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST"],
-        capture_output=True, text=True,
-    )
-    if result.returncode == 0:
-        print(result.stdout)
-    else:
-        print(f"Task '{TASK_NAME}' not found. Run: python scheduler.py install")
+def remove_task():
+    ret = os.system(f'schtasks /delete /tn "{TASK_NAME}" /f')
+    print("Task removed." if ret == 0 else "Task not found.")
 
-    if os.path.exists(LOG_FILE):
-        size = os.path.getsize(LOG_FILE)
-        print(f"\nLog file: {LOG_FILE} ({size:,} bytes)")
-        # Show last 10 lines
-        with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-            if lines:
-                print("Last 10 lines:")
-                for line in lines[-10:]:
-                    print(f"  {line.rstrip()}")
+
+def status_task():
+    os.system(f'schtasks /query /tn "{TASK_NAME}" /fo LIST')
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python scheduler.py [install|remove|status]")
-        print("\n  install  — Create a Windows scheduled task to run every N hours")
-        print("  remove   — Remove the scheduled task")
-        print("  status   — Show task status and recent logs")
-        sys.exit(1)
-
-    action = sys.argv[1].lower()
-
-    if action == "install":
-        from config import load_config
-        cfg = load_config()
-        hours = cfg.get("schedule", {}).get("interval_hours", 6)
-        install(interval_hours=hours)
-    elif action == "remove":
-        remove()
-    elif action == "status":
-        status()
-    else:
-        print(f"Unknown action: {action}")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Auction Scanner Scheduler")
+    parser.add_argument("action",
+        choices=["install", "remove", "status", "run", "pt", "eu", "morning", "report"],
+        nargs="?", default="run")
+    args = parser.parse_args()
+    actions = {
+        "install": install_task,
+        "remove":  remove_task,
+        "status":  status_task,
+        "run":     run_loop,
+        "pt":      run_pt_scrape,
+        "eu":      run_eu_scrape,
+        "morning": run_morning_checks,
+        "report":  run_weekly_report,
+    }
+    actions[args.action]()
 
 
 if __name__ == "__main__":
