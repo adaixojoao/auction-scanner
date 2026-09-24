@@ -241,3 +241,68 @@ def test_firewall_refusal_is_described():
         "An attempt was made to access a socket in a way forbidden by its access permissions'))")
     err.request = requests.Request("GET", "https://www.haya.es/inmuebles/").prepare()
     assert describe_error(err) == "Could not connect to www.haya.es: blocked by this PC's firewall"
+
+
+# ─── Leilosoc (the page's embedded data) ────────────────────────────
+
+def leilosoc_page(lots, more=False):
+    import json as _json
+    data = {"props": {"pageProps": {"lots": {"items": lots, "hasNextPage": more}}}}
+    links = "".join(f'<a href="/en/lot/{x["auctionId"]}/{x["batchId"]}-lote/">x</a>' for x in lots)
+    return f'<html>{links}<script id="__NEXT_DATA__" type="application/json">{_json.dumps(data)}</script></html>'
+
+
+def leilosoc_lot(auction, batch, title, base, currency="€", **extra):
+    return {"auctionId": auction, "batchId": batch, "order": batch, "title": title, "currencySymbol": currency,
+            "valueBase": base, "valueBasePublished": True, "valueOpen": base * 0.7, "valueMinimum": None,
+            "valueMinimumPublished": False, "addressLocation": "Seia", "address": "Rua Exemplo",
+            "auctionEndDate": "2099-10-12T15:00:00Z", "processNumber": "15029/23.2T8SNT",
+            "description": "<p>Moradia com <b>120 m2</b></p>", "customFieldsValues": {"building_area": None},
+            "auctionTypeCode": "leilao_online", "pictureDefault": "/leilosoc/batch/x.jpg", **extra}
+
+
+def test_leilosoc_reads_the_embedded_data(db, fake_http):
+    page = leilosoc_page([
+        leilosoc_lot(45015, 141979, "Moradia · Seia", 20000),
+        leilosoc_lot(45015, 141980, "Terreno · Seia", 3500),                       # same auction, 2nd lot
+        leilosoc_lot(43041, 157610, "Espaço Comercial | Massango", 210480000, "Kz"),  # Angola: not kept
+        leilosoc_lot(45100, 150000, "Moradia · Lisboa", 250000),                    # over budget
+    ])
+    fake_http(lambda m, url, kw: FakeResponse(page))
+    assert REGISTRY["leilosoc"].func(db, max_price=30000) == 2
+    got = rows(db, "leilosoc")
+    assert set(got) == {"45015", "45015-141980"}         # the first lot keeps the old ID
+    house = got["45015"]
+    assert house["title"] == "Moradia · Seia" and house["price"] == 20000 and house["area_m2"] == 120
+    assert house["concelho"] == "Seia" and house["date_end"] == "2099-10-12T15:00:00Z"
+    assert house["url"] == "https://leilosoc.com/en/lot/45015/141979-lote/"
+    assert "15029/23.2T8SNT" in house["raw_json"] and house["description"] == "Moradia com 120 m2"
+
+
+# ─── Whitestar (cards, one search up to the budget) ─────────────────
+
+def whitestar_card(id_, typology, location, price, area, desc="Imóvel em bom estado", badge=""):
+    return f"""<a class="wsi-asset-link" href="/Assets/Details/{id_}"><div class="wsi-asset">{badge}
+      <p class="wsi-asset-typology">{typology}</p><p class="wsi-asset-location">{location}</p>
+      <p class="wsi-asset-price">{price} €</p><div class="wsi-asset-description"><p>{desc}</p></div>
+      <div class="wsi-asset-specs"><table><thead><tr><td>Estado</td><td>Áreas</td></tr></thead>
+      <tbody><tr><td>Usado</td><td>{area} m<sup>2</sup></td></tr></tbody></table></div></div></a>"""
+
+
+def test_whitestar_cards_and_paging(db, fake_http):
+    pages = {
+        "1": "<p>7 imóveis</p>" + whitestar_card(1, "Moradia Isolada T3", "Vila Real, Chaves, VIDAGO", "27 000", 160)
+             + whitestar_card(2, "Terreno", "Faro, Castro Marim, ODELEITE", "8 750", "9 680")
+             + whitestar_card(3, "Moradia T2", "Viseu, Tondela, TONDELA", "15 000", 90, badge="<span>Reservado</span>"),
+        "2": "<p>7 imóveis</p>" + whitestar_card(4, "Apartamento T1", "Lisboa, Amadora, VENTEIRA", "29 000", 45),
+        "3": "<p>7 imóveis</p>",
+    }
+    session = fake_http(lambda m, url, kw: FakeResponse(pages.get(kw["data"]["PageNumber"], "")))
+    assert REGISTRY["whitestar"].func(db, max_price=30000) == 3
+    got = rows(db, "whitestar")
+    assert set(got) == {"1", "2", "4"}                  # the reserved one is left out
+    house = got["1"]
+    assert house["title"] == "Moradia Isolada T3, Vidago" and house["price"] == 27000 and house["area_m2"] == 160
+    assert (house["district"], house["concelho"], house["freguesia"]) == ("Vila Real", "Chaves", "VIDAGO")
+    assert got["2"]["area_m2"] == 9680 and "Estado: Usado" in house["description"]
+    assert all(call[2]["data"]["maxPrice"] == "30000" for call in session.calls)
