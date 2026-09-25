@@ -225,6 +225,23 @@ than €20,001 instead of jumping at a step.
   are *fração ideal*, *quota-parte*, and are skipped). One whose named use is a
   laundry, linen room, shop or garage is not a home, nor is a home's furniture
   (*recheio*) sold on its own.
+- **Condition from the photos.** When the text says nothing about the state of
+  a house, Claude looks at its photos after a scan (the best homes, a few a
+  scan, each once) and the reason says *(from the photos)*. Needs an Anthropic
+  API key in Settings → Photo check.
+- **Water from the map.** For a property with an exact position (the sale's
+  coordinates or its street), OpenStreetMap is asked whether a river, stream,
+  lake or reservoir is within 300 m; it counts like the words *junto ao rio*.
+- **Local price by parish** where INE publishes one (the Porto and Lisbon
+  areas, Setúbal, the Algarve, big cities); elsewhere the municipality's.
+- **Unknown size** says *size unknown — ask* (−4), and a text that registers a
+  property at the criminal registry is flagged *confirm with the court*.
+- **Citius and e-leilões are one sale.** A Citius electronic auction is joined
+  to its e-leilões page (case number, else municipality and exact base value):
+  it gets the link, end date, photo and bids, and is listed once.
+- **Reminders.** A starred listing gets a Telegram message three days before
+  its sale ends and on the last day, with the 85% floor and the 5% cheque for a
+  Portuguese sealed offer.
 - **How far a house is from town.** "Good location" used to be guessed from
   words the listing often does not contain. When the property has a position on
   the map (its own coordinates, or the address found on OpenStreetMap) and the
