@@ -293,10 +293,20 @@ WATER_RE = re.compile(
     re.I)
 
 
-def water_nearby(text: str) -> str | None:
-    """The words that put a plot next to water, or None."""
+def water_nearby(text: str, item: dict | None = None) -> str | None:
+    """The words that put a plot next to water, else what the map found
+    within a few hundred metres of its exact position (geo.py), or None."""
     m = WATER_RE.search(text or "")
-    return m.group(0).strip() if m else None
+    if m:
+        return m.group(0).strip()
+    if item and '"water_check"' in (item.get("raw_json") or ""):
+        check = _raw(item).get("water_check") or {}
+        found = check.get("found") or []
+        if found:
+            w = found[0]
+            name = f"{w['kind']} {w['name']}" if w.get("name") else w.get("kind", "water")
+            return f"{name}, within {check.get('radius_m', 300)} m on the map"
+    return None
 
 
 # Not bare "isolada": "moradia isolada" is a detached house (and "vivienda aislada"
@@ -722,7 +732,7 @@ def score_detail(item: dict, now: datetime | None = None,
             if area < SMALL_URBAN_PLOT_M2:
                 reasons.append(f"small plot ({area:.0f} m²)")
     elif kind == "rural_plot":
-        s += _rural_points(area, pay, t, reasons, full, caps)
+        s += _rural_points(area, pay, t, reasons, full, caps, item)
     elif kind == "other":
         s -= 25
         reasons.append("not a home or plot")
@@ -896,7 +906,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         size = f", {_ha(lot['area_m2'])}" if lot.get("area_m2") else ""
         reasons.append(f"land in the same case (€{lot['price']:,.0f}{size})")
 
-    water = water_nearby(full)
+    water = water_nearby(full, item)
     if water:
         s += 6
         reasons.append(f"next to water ({water})")
@@ -952,7 +962,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
 
 
 def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: str = "",
-                  caps: list[float] | None = None) -> float:
+                  caps: list[float] | None = None, item: dict | None = None) -> float:
     """A rural plot is only interesting when it is big and cheap per m²; next
     to water it is worth more."""
     min_m2, max_eur = t["rural_min_m2"], t["rural_max_eur_m2"]
@@ -970,7 +980,7 @@ def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: st
         reasons.append(f"large rural plot ({_ha(area)})")
     else:
         reasons.append(f"medium rural plot ({_ha(area)})")
-    water = water_nearby(full)
+    water = water_nearby(full, item)
     if water:
         s += 18
         reasons.append(f"next to water ({water})")
