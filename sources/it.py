@@ -157,7 +157,9 @@ def astalegale_listing(lot: dict) -> dict | None:
     )
 
 
-@register("gobidreal", "IT")
+# Not in the default scan (Sept 2026): Gobid Real: behind a Cloudflare challenge (403); check gobidreal.it by hand.
+# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+@register("gobidreal", "IT", default=False)
 def scrape_gobidreal(db, max_price: float = 100000, **_):
     """gobidreal.it — Italian judicial property auctions."""
     return scrape_cards(db, GOBIDREAL, max_price)

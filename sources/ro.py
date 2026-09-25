@@ -9,7 +9,9 @@ from db import upsert_listing
 from sources import register
 
 
-@register("anaf", "RO")
+# Not in the default scan (Sept 2026): ANAF: the sales list needs a browser and the old REST address answers 403; check anaf.ro by hand.
+# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+@register("anaf", "RO", default=False)
 def scrape_anaf(db, max_price: float = 50000, **_):
     """anaf.ro — Romanian tax-authority forced sales. Prices are in RON, not EUR."""
     session = make_session()

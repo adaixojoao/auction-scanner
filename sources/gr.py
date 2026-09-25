@@ -10,7 +10,9 @@ from db import upsert_listing
 from sources import register
 
 
-@register("greece", "GR")
+# Not in the default scan (Sept 2026): eauction.gr: the auction list is behind an Incapsula proof-of-work check; check it by hand.
+# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+@register("greece", "GR", default=False)
 def scrape_greece(db, max_price: float = 50000, **_):
     """eauction.gr — Greek court-mandated electronic auctions."""
     session = make_session()

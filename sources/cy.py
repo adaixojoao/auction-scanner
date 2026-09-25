@@ -8,7 +8,9 @@ from db import upsert_listing
 from sources import register
 
 
-@register("cyprus", "CY")
+# Not in the default scan (Sept 2026): Cyprus DLS: mof.gov.cy sends an incomplete certificate chain; check it by hand.
+# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+@register("cyprus", "CY", default=False)
 def scrape_cyprus(db, max_price: float = 50000, **_):
     """mof.gov.cy DLS — Cyprus forced sales of foreclosed properties."""
     session = make_session()

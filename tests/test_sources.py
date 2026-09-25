@@ -15,9 +15,12 @@ def test_registry_is_complete():
         assert s.description, f"{s.name} needs a docstring"
     optional = {s.name for s in REGISTRY.values() if not s.default}
     # closed / login-only / already covered by another source: not in default scans
-    assert optional == {"idealista", "courtbid", "financas", "novobanco", "aeat"}
-    # every country has at least one default source, PT runs first
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES)
+    # (and, since Sept 2026, the ones behind a bot wall or a broken certificate)
+    assert optional == {"idealista", "courtbid", "financas", "novobanco", "aeat",
+                        "sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece"}
+    # every country has at least one default source, except those whose only
+    # source is walled off; PT runs first
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"BE", "CY", "GR", "RO"}
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name

@@ -62,3 +62,32 @@ def test_pvp_search_api_sales_to_come_within_budget(db, fake_http):
     assert house["date_end"] == "2026-10-08T18:00:00"
     assert house["url"] == "https://pvp.giustizia.it/pvp/it/detail_annuncio.page?idAnnuncio=1"
     assert "Disponibilità: occupato" in rows["pvp:4"]["description"]        # the occupancy reject sees it
+
+
+def _servi_card(lid, price, text="Casa en venta en C. Mayor, 1, Requena, Valencia 110m 2 3 hab. 1 baño"):
+    return f"""<div class="list-product-buscador product-item"><div class="row m-0">
+      <div class="col-lg-6"><div class="carousel-item"><img class="img-car" data-src="https://imagenes.servihabitat.com/i/{lid}.jpg"/></div></div>
+      <div class="col-lg-6 result-property-detail"><a class="features vivienda" href="/es/venta/vivienda-casa/valencia-x/{lid}">
+        <p class="amount"><span id="price" class="price"> {price} € </span></p><p>{text}</p></a></div></div></div>"""
+
+
+def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
+    import sources.es as es
+    monkeypatch.setattr(es, "SERVIHABITAT_PROVINCES", ("valencia", "teruel"))
+    pages = {"valencia": _servi_card(60580509, "9.500") + _servi_card(60580510, "36.000"), "teruel": ""}
+
+    def handler(method, url, kw):
+        assert kw["params"] == {"o": 4}                     # cheapest first
+        return FakeResponse(f'<div class="product-list">{pages[url.rsplit("/", 1)[1]]}</div>')
+    fake_http(handler)
+    assert REGISTRY["servihabitat"].func(db, max_price=30000) == 1
+    row = db.execute("SELECT * FROM listings WHERE source='servihabitat'").fetchone()
+    assert row["id"] == "servihabitat:60580509" and row["price"] == 9500 and row["area_m2"] == 110
+    assert row["title"] == "Casa en venta en C. Mayor, 1, Requena, Valencia" and row["concelho"] == "Requena"
+    assert row["url"] == "https://www.servihabitat.com/es/venta/vivienda-casa/valencia-x/60580509"
+    assert row["image_url"] == "https://imagenes.servihabitat.com/i/60580509.jpg"
+
+
+def test_bot_walled_sources_are_out_of_the_default_scan():
+    for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece"):
+        assert REGISTRY[name].default is False, name

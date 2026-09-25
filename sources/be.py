@@ -35,7 +35,9 @@ def biddit_listing(item: dict) -> dict | None:
     )
 
 
-@register("biddit", "BE")
+# Not in the default scan (Sept 2026): Biddit: its search API rejects anything but a browser (F5 firewall); check biddit.be by hand.
+# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+@register("biddit", "BE", default=False)
 def scrape_biddit(db, max_price: float = 50000, **_):
     """biddit.be — Belgian online notary auctions."""
     session = make_session(headers={"Accept": "application/json"})
