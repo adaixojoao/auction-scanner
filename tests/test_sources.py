@@ -1,4 +1,5 @@
 import json
+import urllib.parse
 
 import scraper
 from common import COUNTRY_NAMES
@@ -398,6 +399,24 @@ def test_a_cut_copy_of_a_text_does_not_replace_the_full_one(db):
     changed = "Moradia T2 em bom estado, 90 m2, com jardim e garagem"
     upsert_listing(db, make_listing("citius", "x", description=changed, price=23880))
     assert db.execute("SELECT description FROM listings WHERE id='citius:x'").fetchone()[0] == changed
+
+
+def test_eleiloes_steps_by_what_the_api_returns(db, fake_http):
+    """The API sends 12 rows a page even when asked for 100."""
+    pages = {}
+
+    def handler(method, url, kw):
+        if "/api/Eventos/?" in url:
+            params = json.loads(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tableParams"][0])
+            first = params["first"]
+            pages[first] = True
+            rows = [{"id": 500 + i, "tipoId": 1, "titulo": f"Moradia {i}", "valorBase": 10000,
+                     "referencia": f"LO{500 + i}"} for i in range(first, min(first + 12, 30))]
+            return FakeResponse(json_data={"list": rows, "pagination": {"first": first, "rows": 12, "total": 30}})
+        return FakeResponse(json_data={"errorsList": [{"title": "Evento não disponível"}]})
+    fake_http(handler)
+    assert REGISTRY["eleiloes"].func(db, max_price=100000) == 30
+    assert sorted(pages) == [0, 12, 24]
 
 
 def test_eleiloes_area_field_off_by_100():
