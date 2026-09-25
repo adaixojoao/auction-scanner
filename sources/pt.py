@@ -857,16 +857,120 @@ def scrape_citius(db, max_price: float = 50000, **_):
 
 # ─── Portal das Finanças (tax seizures) ─────────────────────────────
 
-@register("financas", "PT", default=False)
-def scrape_financas(db, max_price: float = 50000, **_):
-    """Portal das Finanças tax-debt seizures — needs a login, so not scanned."""
-    # The public REST list (vendas.portaldasfinancas.gov.pt/bens/rest) is gone
-    # (404); "Venda de bens" (/vendasat) now redirects to the acesso.gov.pt
-    # login. Signing in needs the owner's NIF or Cartão de Cidadão, which a
-    # scraper must not hold, so this source stays out of the default scan.
-    raise SourceUnavailable(
-        "Portal das Finanças now shows its sales only after signing in on acesso.gov.pt; "
-        "check them there by hand")
+FINANCAS = "https://vendas.portaldasfinancas.gov.pt"
+FINANCAS_DETAILS_PER_SCAN = 80
+
+
+def _euros(text: str | None) -> float | None:
+    m = re.search(r"([\d.]+,\d{2})\s*€", text or "")
+    return parse_price(m.group(1)) if m else None
+
+
+def parse_financas_list(html: str) -> list[dict]:
+    """The sales cards of /vendasat/lista/vendas (all of them on one page):
+    category, sale number, how it is sold, base value, last bid, end, photo
+    and the id the detail page takes."""
+    rows = []
+    for card in BeautifulSoup(html, "html.parser").select("div.card.card-list"):
+        spans = [x.get_text(" ", strip=True).replace(" ", " ") for x in card.select(".card-title span")]
+        button = card.select_one("#btnDetalhe")
+        if len(spans) < 2 or not button or not button.get("value"):
+            continue
+        amounts = [x.get_text(" ", strip=True) for x in card.select("strong")]
+        euros = [_euros(a) for a in amounts if "€" in a]
+        ends = re.search(r"(\d{4})-(\d{2})-(\d{2})\s*às\s*(\d{1,2}):(\d{2})", card.get_text(" "))
+        img = card.select_one("img.img-fluid")
+        mode = card.select_one(".label")
+        rows.append({
+            "categoria": spans[0], "numero": spans[1], "venda": button["value"],
+            "modalidade": mode.get_text(strip=True) if mode else "",
+            "valor_base": euros[0] if euros else None, "ultima": euros[1] if len(euros) > 1 else None,
+            "date_end": f"{ends.group(1)}-{ends.group(2)}-{ends.group(3)}T{int(ends.group(4)):02d}:{ends.group(5)}:00"
+                        if ends else None,
+            "image": img.get("src") if img else None,
+        })
+    return rows
+
+
+def _financas_photo_dir(numero: str) -> str | None:
+    """"2330.2024.1" -> "23302024000001", the folder of that sale's photos."""
+    m = re.fullmatch(r"(\d{4})\.(\d{4})\.(\d+)", numero or "")
+    return f"{m.group(1)}{m.group(2)}{int(m.group(3)):06d}" if m else None
+
+
+def parse_financas_detail(html: str, numero: str = "") -> dict:
+    """What a sale's page says about the property: the land-registry text,
+    where it is, the photos. The keeper's name (fiel depositário) is not kept."""
+    body = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S | re.I)
+    text = re.sub(r"\s+", " ", BeautifulSoup(body, "html.parser").get_text(" ")).strip()
+    out: dict = {}
+    m = re.search(r"Informação do bem\s+(.+?)\s+(?:Localização:|Ver no Mapa|Fiel Depositário)", text)
+    if m:
+        out["descricao"] = m.group(1).strip()[:3000]
+    m = re.search(r"Localização:\s*([^/]+?)\s*/\s*([^/]+?)\s*/\s*(.+?)\s+(?:Ver no Mapa|Fiel Depositário|Local, prazo)", text)
+    if m:
+        out["distrito"], out["concelho"], out["freguesia"] = (x.strip().title() for x in m.groups())
+    m = re.search(r"Data/hora limites para a aceitação das propostas:\s*\S+ \S+ a (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})", text)
+    if m:
+        out["date_end"] = f"{m.group(1)}T{m.group(2)}:00"
+    if re.search(r"\bSuspensa\b(?! terminada)", text) and "Data de fim de suspensão" in text:
+        out["suspensa_ate"] = (re.search(r"Data de fim de suspensão:\s*(\d{4}-\d{2}-\d{2})", text) or [None, None])[1]
+    folder = _financas_photo_dir(numero)       # the page also shows other sales' photos
+    fotos = re.findall(r'https://static\.portaldasfinancas\.gov\.pt/app/sigvec_static/[^"&\s]+?\.jpg', html)
+    out["fotos"] = [u for u in dict.fromkeys(fotos) if folder and f"/{folder}/" in u][:12]
+    return out
+
+
+@register("financas", "PT")
+def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **_):
+    """Portal das Finanças — tax-debt seizures and abandoned goods (with your
+    account: Settings → Accounts)."""
+    import accounts
+    session = accounts.account_session(db, config or {}, "financas")
+    if session is None:
+        LOG.info("Portal das Finanças: no account in Settings → Accounts (or signing in is paused)")
+        return 0
+    resp = session.get(accounts.FINANCAS_SALES)
+    resp.raise_for_status()
+    if "acesso.gov.pt" in resp.url:
+        raise SourceUnavailable("Portal das Finanças sent the sign-in page back after signing in")
+    total, details_left = 0, FINANCAS_DETAILS_PER_SCAN
+    for sale in parse_financas_list(resp.text):
+        if sale["categoria"] != "Imóveis":
+            continue
+        pay = sale["ultima"] or sale["valor_base"] or 0
+        if pay > max_price:
+            continue
+        lid = f"financas:{sale['numero']}"
+        known = db.execute("SELECT raw_json FROM listings WHERE id = ?", (lid,)).fetchone()
+        raw = json.loads(known[0]) if known and known[0] and '"detail_checked"' in known[0] else None
+        if raw is None and details_left > 0:
+            details_left -= 1
+            try:
+                d = session.get(f"{FINANCAS}/vendasat/detalhe", params={"venda": sale["venda"]})
+                d.raise_for_status()
+                raw = {**parse_financas_detail(d.text, sale["numero"]), "detail_checked": 1}
+            except Exception as e:  # noqa: BLE001: the card alone is still a listing
+                LOG.info(f"Portal das Finanças: details of {sale['numero']} failed ({type(e).__name__})")
+            time.sleep(0.5)
+        raw = raw or {}
+        raw.update(venda=sale["venda"], modalidade=sale["modalidade"], numero=sale["numero"])
+        desc = raw.get("descricao") or ""
+        upsert_listing(db, make_listing(
+            "financas", sale["numero"], "PT",
+            title=(desc[:120] or f"Imóvel — venda {sale['numero']}"),
+            description=". ".join(x for x in (desc, f"Modalidade: {sale['modalidade']}",
+                                              "Venda em execução fiscal (Portal das Finanças)") if x),
+            tipo="imovel", area_m2=find_area(desc), price=sale["valor_base"], min_price=sale["valor_base"],
+            current_bid=sale["ultima"], district=raw.get("distrito"), concelho=raw.get("concelho"),
+            freguesia=raw.get("freguesia"), url=f"{FINANCAS}/vendasat/detalhe?venda={sale['venda']}",
+            image_url=sale["image"], date_end=raw.get("date_end") or sale["date_end"],
+            raw_json=raw,
+        ))
+        total += 1
+    db.commit()
+    LOG.info(f"Portal das Finanças: {total} property sales")
+    return total
 
 
 # ─── Whitestar (NPL bank portfolios) ────────────────────────────────

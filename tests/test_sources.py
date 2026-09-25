@@ -17,7 +17,7 @@ def test_registry_is_complete():
     optional = {s.name for s in REGISTRY.values() if not s.default}
     # closed / login-only / already covered by another source: not in default scans
     # (and, since Sept 2026, the ones behind a bot wall or a broken certificate)
-    assert optional == {"idealista", "courtbid", "financas", "novobanco", "aeat",
+    assert optional == {"idealista", "courtbid", "novobanco", "aeat",
                         "sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece",
                         "veilingbiljet"}                  # the same lots as openbareverkoop.nl
     # every country has at least one default source, except those whose only
