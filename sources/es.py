@@ -8,7 +8,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_price, make_listing, make_session, parse_date_dmy,
+from common import (LOG, find_area, find_price, make_listing, make_session, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number)
 from db import upsert_listing
 from sources import SourceUnavailable, register
@@ -443,7 +443,9 @@ def scrape_aeat(db, max_price: float = 50000, **_):
         "come in through the Spain (BOE) source")
 
 
-@register("sareb", "ES")
+# Not in the default scan (Sept 2026): Sareb: behind an Incapsula bot wall (403); check sareb.es by hand.
+# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+@register("sareb", "ES", default=False)
 def scrape_sareb(db, max_price: float = 100000, **_):
     """sareb.es — Spanish state bad bank."""
     session = make_session()
@@ -510,15 +512,71 @@ def scrape_haya(db, max_price: float = 100000, **_):
     return scrape_cards(db, HAYA, max_price)
 
 
+# servihabitat.com (Liferay): one page per province, cheapest first with ?o=4,
+# 20 homes a page. Later pages load by script, so only the first is read; with a
+# small budget the cheapest 20 cover it (a province where all 20 are within
+# budget is logged).
+SERVIHABITAT = "https://www.servihabitat.com"
+SERVIHABITAT_PROVINCES = (
+    "alava", "albacete", "alicante", "almeria", "asturias", "avila", "badajoz", "barcelona", "burgos", "caceres",
+    "cadiz", "cantabria", "castellon", "ciudadreal", "cordoba", "lacoruna", "cuenca", "girona", "granada",
+    "guadalajara", "gipuzkoa", "huelva", "huesca", "illesbalears", "jaen", "leon", "lleida", "lugo", "madrid",
+    "malaga", "murcia", "navarra", "palencia", "laspalmas", "pontevedra", "larioja", "salamanca", "segovia",
+    "sevilla", "soria", "tarragona", "teruel", "toledo", "valencia", "valladolid", "bizkaia", "zamora",
+    "zaragoza", "ceuta", "melilla",
+)
+
+
+def parse_servihabitat_page(html: str, province: str) -> list[dict]:
+    rows = []
+    for a in BeautifulSoup(html, "html.parser").select("a.features[href]"):
+        href = a["href"]
+        m = re.search(r"/(\d+)/?$", href)
+        if not m:
+            continue
+        text = re.sub(r"\s+", " ", a.get_text(" ")).strip()
+        price_el = a.select_one(".price")
+        price = parse_price(price_el.get_text(" ")) if price_el else find_price(text)
+        title_m = re.search(r"((?:Vivienda|Casa|Piso|Chalet|Apartamento|Dúplex|Ático|Estudio|Finca|Terreno)[^0-9]*?"
+                            r"en venta en .+?)(?=\s\d+\s*m\s?2|$)", text)
+        title = (title_m.group(1) if title_m else text)[:200]
+        item = a.find_parent("div", class_="product-item")                  # the card: photos and details
+        img = item.select_one("img.img-car") if item else None
+        town = re.search(r",\s*([^,]+),\s*[^,]+$", title)
+        rows.append(make_listing(
+            "servihabitat", m.group(1), "ES", title=title, description=text[:500], tipo="vivienda",
+            area_m2=find_area(text), price=price, min_price=price, district=province,
+            concelho=town.group(1).strip() if town else None, url=href, base_url=SERVIHABITAT,
+            image_url=(img.get("data-src") or img.get("src")) if img else None,
+        ))
+    return rows
+
+
 @register("servihabitat", "ES")
 def scrape_servihabitat(db, max_price: float = 100000, **_):
-    """servihabitat.com — CaixaBank repossessions (needs a rewrite)."""
-    # /en/buy-houses is gone (404) and /en/ is disallowed in robots.txt. Listings
-    # are now per province (/es/venta/vivienda/<provincia>?delta=20&start=N),
-    # 20 at a time, and the price filter is a form POST with a session token.
-    raise SourceUnavailable(
-        "Servihabitat moved its listings to per-province pages with no price filter "
-        "in the address; this scraper needs rewriting for the new site")
+    """servihabitat.com — CaixaBank repossessions, the cheapest homes of each province."""
+    session = make_session(timeout=30)
+    total, full = 0, []
+    for province in SERVIHABITAT_PROVINCES:
+        try:
+            resp = session.get(f"{SERVIHABITAT}/es/venta/vivienda/{province}", params={"o": 4})
+            resp.raise_for_status()
+        except Exception as e:  # noqa: BLE001: one province failing is not the source failing
+            LOG.info(f"Servihabitat {province}: {type(e).__name__}")
+            continue
+        rows = parse_servihabitat_page(resp.text, province)
+        if len(rows) >= 20 and all((r["price"] or 0) <= max_price for r in rows):
+            full.append(province)
+        for row in rows:
+            if row["price"] and row["price"] <= max_price:
+                upsert_listing(db, row)
+                total += 1
+        db.commit()
+        time.sleep(0.5)
+    if full:
+        LOG.info(f"Servihabitat: more within budget than one page in {', '.join(full)}")
+    LOG.info(f"Servihabitat: {total} listings")
+    return total
 
 
 @register("subastasactivas", "ES")

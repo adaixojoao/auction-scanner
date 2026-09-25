@@ -297,15 +297,18 @@ sources are also listed in the report and the weekly Telegram summary.
 | Country | Sources |
 |---|---|
 | PT | e-leilões, Citius, leilosoc, BCP, Whitestar, CGD, Santander, BPI, Imobancos, Centro de Leilões, Bid Leiloeira · *idealista (Selenium, on request)* · not scanned: Portal das Finanças (login only), Novo Banco (portal closed) |
-| ES | BOE subastas (includes AEAT tax auctions), Sareb, Haya, Servihabitat, SubastasActivas |
+| ES | BOE subastas (includes AEAT tax auctions), Servihabitat (cheapest 20 per province), Haya, SubastasActivas · not scanned: Sareb (bot wall) |
 | FR | licitor, Enchères Publiques |
-| IT | astegiudiziarie, PVP Giustizia, Gobid Real, Astalegale |
+| IT | astegiudiziarie, PVP Giustizia (search API), Astalegale (search API) · not scanned: Gobid Real (bot wall) |
 | DE | zvg-portal, justiz-auktion, zwangsversteigerung.de |
 | NL | openbareverkoop, veilingnotaris, veilingbiljet |
-| BE · HR · GR · RO · PL · CY | biddit · e-oglasna, FINA · eauction · ANAF · komornik · DLS |
+| HR · PL | e-oglasna, FINA · komornik · not scanned (bot wall or broken certificate): biddit (BE), eauction (GR), ANAF (RO), DLS (CY) |
 | EU | *CourtBid via Apify (needs `apify_token` in config.json, on request)* |
 
 Polish and Romanian sites price in PLN/RON; only amounts marked € are read.
+
+A site behind a bot wall (Cloudflare, Incapsula, an F5 firewall) is not worked around: it leaves the
+default scan with the reason written next to it in `sources/`, and can still be run by name.
 
 ## Alerts
 
