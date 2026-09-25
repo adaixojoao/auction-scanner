@@ -318,6 +318,74 @@ def alert_carta_deadlines(db, cfg: dict, score_fn=None):
         mark_alerted(db, FOLLOW_UP_CHANNEL, [f"carta_log:{r['id']}" for r in waiting])
 
 
+# ─── Reminders for your shortlist ───────────────────────────────────
+# The morning digest covers every good sale ending soon. A listing you starred
+# gets its own message, whatever its score: three days before (time to visit,
+# to get the cheque) and on the last day. Each once.
+
+REMINDER_CHANNEL = "telegram-remind"
+REMINDERS = [(1, "last day"), (3, "3 days left")]      # (days before the end, label)
+CAUTION_SHARE = 0.05       # Portuguese court sales: a cheque visado or bank guarantee of 5%
+
+
+def _is_letter_sale(item: dict) -> bool:
+    text = f"{item.get('description') or ''} {item.get('raw_json') or ''}".lower()
+    return "carta fechada" in text or "negociação particular" in text or "negociacao particular" in text
+
+
+def shortlist_reminders(db, cfg: dict, now=None) -> list[tuple[dict, str, str]]:
+    """(listing, key, label) for starred listings that reach a reminder point
+    and have not had that reminder."""
+    now = now or utcnow()
+    due = []
+    for it in load_listings(db, filters=cfg.get("filters"), now=now, include_hidden=True, apply_min_score=False):
+        if it.get("status") != "shortlisted":
+            continue
+        left = days_left(it.get("date_end"), now)
+        if left is None or left <= 0:
+            continue
+        for days, label in REMINDERS:
+            if left <= days:
+                due.append((it, f"{it['id']}@{days}d", label))
+                break
+    told = not_yet_alerted(db, REMINDER_CHANNEL, [key for _, key, _ in due])
+    return [d for d in due if d[1] in told]
+
+
+def format_reminder(item: dict, label: str, hours: float) -> str:
+    import costs
+    from common import price_to_pay
+    pay = price_to_pay(item)
+    lines = [f"⏰ <b>{_esc(label)} — {hours:.0f}h</b> · your shortlist",
+             f"<b>{_esc((item.get('title') or '?')[:80])}</b>",
+             f"💶 {_money(pay)}  ·  ends {_esc((item.get('date_end') or '')[:16].replace('T', ' '))}"]
+    if (item.get("country") or "PT") == "PT" and _is_letter_sale(item) and item.get("price"):
+        lines.append(f"✍️ Sealed offer: at least {_money(0.85 * item['price'])} (85%), with a cheque "
+                     f"visado or bank guarantee of {_money(CAUTION_SHARE * item['price'])} (5%) to the court.")
+    est = costs.estimate(item)
+    if est:
+        lines.append(f"🧾 {_money(est['total'])} to own it (taxes and fees in)")
+    if item.get("url"):
+        lines.append(f"<a href=\"{_esc(item['url'])}\">View listing →</a>")
+    return "\n".join(lines) + _citius_finder(item)
+
+
+def alert_shortlist_reminders(db, cfg: dict, now=None) -> int:
+    tg = _tg(cfg)
+    if not tg:
+        return 0
+    now = now or utcnow()
+    sent = []
+    for it, key, label in shortlist_reminders(db, cfg, now):
+        hours = days_left(it.get("date_end"), now) * 24
+        if send_telegram(tg["token"], tg["chat_id"], format_reminder(it, label, hours)):
+            sent.append(key)
+    if sent:
+        mark_alerted(db, REMINDER_CHANNEL, sent)
+        LOG.info(f"Telegram: {len(sent)} shortlist reminders")
+    return len(sent)
+
+
 # ─── Broken-source alarm ────────────────────────────────────────────
 # A site that stops working used to show only on the Sources page and in the
 # weekly summary. Now the scan that sees it fail a second time in a row says so

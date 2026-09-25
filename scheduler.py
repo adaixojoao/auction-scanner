@@ -144,10 +144,11 @@ def run_morning_checks():
     LOG.info("=== Deadline checks ===")
     from config import load_config
     from db import connect
-    from telegram_alert import alert_carta_deadlines
+    from telegram_alert import alert_carta_deadlines, alert_shortlist_reminders
     db = connect()
     try:
         alert_carta_deadlines(db, load_config())
+        alert_shortlist_reminders(db, load_config())
     finally:
         db.close()
 
