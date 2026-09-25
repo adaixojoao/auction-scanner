@@ -364,9 +364,36 @@ def test_citius_reads_every_page_and_the_full_details(db, fake_http):
     assert "Pessoa Executada" not in house["description"] + house["raw_json"]   # owners are not stored
     assert house["concelho"] == "Tabuaço"
 
-    REGISTRY["citius"].func(db, max_price=30000)                     # the next scan keeps the full text
-    house = db.execute("SELECT description FROM listings WHERE id='citius:468176T8MBRJuzodeExecuodeViseu'").fetchone()
+    # Later scans keep the full text and what else was learned (the map position).
+    # The third scan used to lose it: the second dropped it from what was kept.
+    raw = json.loads(house["raw_json"])
+    raw["geo"] = {"lat": 41.1, "lon": -7.5, "precision": "parish"}
+    db.execute("UPDATE listings SET raw_json=? WHERE id='citius:468176T8MBRJuzodeExecuodeViseu'", (json.dumps(raw),))
+    db.commit()
+    for _ in range(3):
+        REGISTRY["citius"].func(db, max_price=30000)
+    house = db.execute("SELECT description, raw_json FROM listings "
+                       "WHERE id='citius:468176T8MBRJuzodeExecuodeViseu'").fetchone()
     assert "superficie coberta de 85 m2" in house[0]
+    kept = json.loads(house[1])
+    assert kept["geo"]["lat"] == 41.1 and "quatro andares" in kept["descricao_completa"]
+
+
+def test_a_cut_copy_of_a_text_does_not_replace_the_full_one(db):
+    """Search pages shorten texts ("… Vila Franca do Cam.... Modalidade: …");
+    the full text a detail page gave stays."""
+    from common import make_listing
+    from db import upsert_listing
+    full = ("Prédio urbano sito á Canada da Galega, nº 22, concelho de Vila Franca do Campo, constituído por "
+            "casa baixa telhada destinada a habitação com quintal. Modalidade: Venda em leilão eletrónico")
+    cut = "Prédio urbano sito á Canada da Galega, nº 22, concelho de Vila Franca do Cam.... Modalidade: Venda"
+    upsert_listing(db, make_listing("citius", "x", title=full[:120], description=full, price=23880))
+    upsert_listing(db, make_listing("citius", "x", title=cut[:120], description=cut, price=23880))
+    row = db.execute("SELECT title, description FROM listings WHERE id='citius:x'").fetchone()
+    assert row[1] == full and "casa baixa" in row[0]
+    changed = "Moradia T2 em bom estado, 90 m2, com jardim e garagem"
+    upsert_listing(db, make_listing("citius", "x", description=changed, price=23880))
+    assert db.execute("SELECT description FROM listings WHERE id='citius:x'").fetchone()[0] == changed
 
 
 def test_eleiloes_area_field_off_by_100():

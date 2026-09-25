@@ -211,6 +211,20 @@ than €20,001 instead of jumping at a step.
   `data/pt_home_prices.csv`; refresh it with `python scripts/update_prices.py`
   on a PC that can reach ine.pt. Elsewhere, and for any municipality the file
   lacks, a small table of city prices is used. Each reason says which.
+- **An old village house is not worth the town's median.** INE's median is
+  mostly sound homes in town, so the local price is scaled per house before the
+  discount is measured: condition (not stated 75%, some work 60%, heavy work
+  35%), year built (1940 → 80%, 1980 → 90%) and distance from town (5 km →
+  85%, 10 km → 70%). The reason says so: *57% below local prices (…; counted at
+  54%: condition not stated, built 1937, 4 km from town)*.
+- **Years on sale cost points.** Nobody bought it in all that time, which
+  usually has a reason: up to −12 for years since the portal published it
+  (Whitestar's detail page, read once per listing) and up to −8 for an old court
+  case (the year in the case number).
+- **A fração autónoma is a whole flat**, a home like any other (partial shares
+  are *fração ideal*, *quota-parte*, and are skipped). One whose named use is a
+  laundry, linen room, shop or garage is not a home, nor is a home's furniture
+  (*recheio*) sold on its own.
 - **How far a house is from town.** "Good location" used to be guessed from
   words the listing often does not contain. When the property has a position on
   the map (its own coordinates, or the address found on OpenStreetMap) and the

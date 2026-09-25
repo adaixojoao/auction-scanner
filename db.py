@@ -12,6 +12,7 @@ Rules this module enforces:
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -268,6 +269,19 @@ _UPDATE_FIELDS = (
 )
 
 
+def _is_cut_copy(new: str | None, old: str | None) -> bool:
+    """A search page's shortened text ("… concelho de Vila Franca do Cam....
+    Modalidade: …") of a text a detail page filled in: keeping it would lose
+    what the listing is."""
+    if not new or not old or len(new) >= len(old):
+        return False
+    cut = re.search(r"\.{3,}|…", new)
+    if not cut:
+        return False
+    stem = new[:cut.start()].rstrip()
+    return len(stem) >= 20 and old.startswith(stem[:-3])
+
+
 def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
     """Insert or refresh one listing. Returns "inserted" or "updated".
 
@@ -277,15 +291,19 @@ def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
     """
     now = utcnow_iso()
     existing = db.execute(
-        "SELECT price, current_bid FROM listings WHERE id = ?", (row["id"],)
+        "SELECT price, current_bid, title, description FROM listings WHERE id = ?", (row["id"],)
     ).fetchone()
     new_price, new_bid = row.get("price"), row.get("current_bid")
 
     if existing:
+        values = {f: row.get(f) for f in _UPDATE_FIELDS}
+        for field in ("title", "description"):
+            if _is_cut_copy(values[field], existing[2 if field == "title" else 3]):
+                values[field] = None                  # keep the full text
         sets = ", ".join(f"{f}=COALESCE(?, {f})" for f in _UPDATE_FIELDS)
         db.execute(
             f"UPDATE listings SET {sets}, last_seen=?, is_new=0 WHERE id=?",
-            tuple(row.get(f) for f in _UPDATE_FIELDS) + (now, row["id"]),
+            tuple(values[f] for f in _UPDATE_FIELDS) + (now, row["id"]),
         )
         old_price, old_bid = existing[0], existing[1]
         changed = ((new_price is not None and new_price != old_price)

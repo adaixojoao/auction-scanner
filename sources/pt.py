@@ -625,7 +625,7 @@ def citius_listing(f: dict, eid: str) -> dict:
     desc = f["desc"]
     district, concelho, freguesia = _citius_extract_location(desc)
     desc_parts = [p for p in (
-        desc[:500],
+        desc[:3000],
         f"Modalidade: {f['modalidade']}" if f["modalidade"] else None,
         f"Estado: {f['estado']}" if f["estado"] else None,
         f"Processo: {f['processo']}" if f["processo"] else None,
@@ -640,7 +640,10 @@ def citius_listing(f: dict, eid: str) -> dict:
         "processo", "tribunal", "modalidade", "estado", "especie", "registo",
         "art_matricial", "entidade_registo", "intervenientes", "agente_nome",
         "agente_contacto", "agente_email")}
-    raw.update({k: f[k] for k in ("html_id", "detail_checked") if f.get(k)})
+    raw.update({k: f[k] for k in ("html_id", "detail_checked", "descricao_completa") if f.get(k)})
+    # What earlier scans learned (the registry details, the map position) stays
+    # unless the list now says something about it.
+    raw = {**(f.get("kept_raw") or {}), **{k: v for k, v in raw.items() if v not in ("", [], None)}}
     return make_listing(
         "citius", eid, "PT",
         title=desc[:120] if desc else f"Citius judicial sale {f['processo']}",
@@ -660,9 +663,9 @@ def citius_listing(f: dict, eid: str) -> dict:
 
 CITIUS_DETAILS = "https://www.citius.mj.pt/portal/consultas/ConsultasVenda.aspx/GetHtmlDetails"
 CITIUS_DETAILS_PER_SCAN = 150
-# Bumped when the details pass keeps more (2: Registo, Art. Matricial): sales read
-# by an older pass are read again.
-CITIUS_DETAIL_VERSION = 2
+# Bumped when the details pass keeps more (2: Registo, Art. Matricial; 3: a later
+# scan no longer drops the full description): sales read by an older pass are read again.
+CITIUS_DETAIL_VERSION = 3
 _CITIUS_NEXT = "ctl00$ContentPlaceHolder1$Pager1$btnNextPage"
 
 
@@ -712,7 +715,8 @@ def _keep_citius_details(db, listing_id: str, f: dict) -> dict:
             raw = json.loads(old[0])
         except ValueError:
             return f
-        f = {**f, "detail_checked": raw.get("detail_checked"), "html_id": f.get("html_id") or raw.get("html_id")}
+        f = {**f, "detail_checked": raw.get("detail_checked"), "html_id": f.get("html_id") or raw.get("html_id"),
+             "kept_raw": raw}
         if raw.get("descricao_completa"):
             f["desc"] = raw["descricao_completa"]
             f["descricao_completa"] = raw["descricao_completa"]
