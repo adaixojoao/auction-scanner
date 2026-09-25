@@ -78,7 +78,14 @@ def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
     monkeypatch.setattr(es, "SERVIHABITAT_PROVINCES", ("valencia", "teruel"))
     pages = {"valencia": _servi_card(60580509, "9.500") + _servi_card(60580510, "36.000"), "teruel": ""}
 
+    detail = ("<html><body><h2>Descripción</h2><p>Oportunidad para inversores. Inmueble sin posesión sin "
+              "posibilidad de visita ni financiación. Casa de 3 dormitorios.</p><h3>Descargas</h3></body></html>")
+    calls = []
+
     def handler(method, url, kw):
+        calls.append(url)
+        if url.endswith("/60580509"):                       # the listing's own page
+            return FakeResponse(detail)
         assert kw["params"] == {"o": 4}                     # cheapest first
         return FakeResponse(f'<div class="product-list">{pages[url.rsplit("/", 1)[1]]}</div>')
     fake_http(handler)
@@ -88,6 +95,14 @@ def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
     assert row["title"] == "Casa en venta en C. Mayor, 1, Requena, Valencia" and row["concelho"] == "Requena"
     assert row["url"] == "https://www.servihabitat.com/es/venta/vivienda-casa/valencia-x/60580509"
     assert row["image_url"] == "https://imagenes.servihabitat.com/i/60580509.jpg"
+    # Its page is read once: "sin posesión" (occupied, no visits) reaches the description and the reject.
+    assert row["description"].startswith("Oportunidad para inversores. Inmueble sin posesión")
+    from scoring import score_detail
+    assert "rejected: occupied" in score_detail(dict(row))[1]
+    REGISTRY["servihabitat"].func(db, max_price=30000)
+    assert sum(u.endswith("/60580509") for u in calls) == 1
+    again = db.execute("SELECT description FROM listings WHERE source='servihabitat'").fetchone()[0]
+    assert "sin posesión" in again                          # kept on the next scan
 
 
 def test_bot_walled_sources_are_out_of_the_default_scan():

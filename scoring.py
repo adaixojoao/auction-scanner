@@ -56,6 +56,7 @@ OCCUPANCY_PATTERNS = [
     "ocupantes", "occupato", "occupata", "occupé", "occupée", "loué", "louée",
     "bail en cours", "okupa*",
     "verhuurd", "verhuurde", "huurder", "huurders",
+    "sin posesión", "sin posesion", "sin la posesión",
 ]
 
 VACANT_PATTERNS = [
@@ -435,6 +436,11 @@ def buyer_priorities(targets: dict | None = None) -> str:
     )
 
 
+# "Villa" before a capitalised name after a place marker is a place (Italian
+# cadastral "C.C. Villa Banale", "frazione Villa Rosa"), not a detached house.
+_VILLA_PLACE = re.compile(r"\b(C\.\s?C\.|loc\.|localit[aà]|frazione|fraz\.|comune di|in|a|di)\s+Villa\s+(?=[A-Z])")
+
+
 def property_kind(item: dict) -> str | None:
     """"home", "urban_plot", "rural_plot", "other" (shop, garage, storage…) or
     None when the listing does not say. The title and the portal's own type
@@ -446,6 +452,7 @@ def property_kind(item: dict) -> str | None:
     urban_words = URBAN_PLOT_WORDS + (["solar"] if item.get("country") == "ES" else [])
 
     def kind_of(text: str) -> str | None:
+        text = _VILLA_PLACE.sub(r"\1 ", text)
         if _is_household_goods(text):
             return "other"
         norm = normalize(text)

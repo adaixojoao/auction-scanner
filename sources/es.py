@@ -552,11 +552,49 @@ def parse_servihabitat_page(html: str, province: str) -> list[dict]:
     return rows
 
 
+SERVIHABITAT_DETAILS_PER_SCAN = 80
+
+
+def servihabitat_description(html: str) -> str | None:
+    """The "Descripción" block of a listing page: where "sin posesión" (occupied,
+    no visits, no mortgage) is written; the search card does not say it."""
+    body = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S | re.I)
+    text = re.sub(r"\s+", " ", BeautifulSoup(body, "html.parser").get_text(" ")).strip()
+    m = re.search(r"Descripción\s+(.+?)(?:\s+Descargas\b|\s+Ubicación del inmueble|\s+Que no te lo quiten|$)", text)
+    return m.group(1).strip()[:2000] if m else None
+
+
+def _servihabitat_details(db, session, rows: list[dict], budget: list[int]) -> None:
+    for row in rows:
+        known = db.execute("SELECT raw_json FROM listings WHERE id = ?", (row["id"],)).fetchone()
+        if known and known[0] and '"detail_checked"' in known[0]:
+            kept = json.loads(known[0])
+            if kept.get("descripcion"):
+                row["description"] = f"{kept['descripcion']} · {row.get('description') or ''}"[:3000]
+            row["raw_json"] = known[0]
+            continue
+        if budget[0] <= 0:
+            continue
+        budget[0] -= 1
+        try:
+            resp = session.get(row["url"])
+            resp.raise_for_status()
+        except Exception as e:  # noqa: BLE001: the card alone is still a listing
+            LOG.info(f"Servihabitat details of {row['id']} failed ({type(e).__name__})")
+            continue
+        text = servihabitat_description(resp.text)
+        row["raw_json"] = json.dumps({"detail_checked": 1, "descripcion": text}, ensure_ascii=False)
+        if text:
+            row["description"] = f"{text} · {row.get('description') or ''}"[:3000]
+        time.sleep(0.3)
+
+
 @register("servihabitat", "ES")
 def scrape_servihabitat(db, max_price: float = 100000, **_):
     """servihabitat.com — CaixaBank repossessions, the cheapest homes of each province."""
     session = make_session(timeout=30)
     total, full = 0, []
+    details_left = [SERVIHABITAT_DETAILS_PER_SCAN]
     for province in SERVIHABITAT_PROVINCES:
         try:
             resp = session.get(f"{SERVIHABITAT}/es/venta/vivienda/{province}", params={"o": 4})
@@ -567,10 +605,11 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
         rows = parse_servihabitat_page(resp.text, province)
         if len(rows) >= 20 and all((r["price"] or 0) <= max_price for r in rows):
             full.append(province)
+        rows = [row for row in rows if row["price"] and row["price"] <= max_price]
+        _servihabitat_details(db, session, rows, details_left)
         for row in rows:
-            if row["price"] and row["price"] <= max_price:
-                upsert_listing(db, row)
-                total += 1
+            upsert_listing(db, row)
+            total += 1
         db.commit()
         time.sleep(0.5)
     if full:

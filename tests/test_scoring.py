@@ -578,3 +578,12 @@ def test_an_unknown_size_and_a_text_that_does_not_add_up_are_said():
 def test_a_typed_decimal_area_is_read_whole():
     from common import find_area
     assert find_area("Habitação no 3º andar, com a área de 106, 63 m2") == 106.63
+
+
+def test_villa_in_a_place_name_is_not_a_house():
+    """Italian cadastral "C.C. Villa Banale" is a place: the lot is fields and woods."""
+    from scoring import property_kind
+    land = {"title": "C.C. Villa Banale, P.T. 343 II, P.F. 509/4; C.C. Villa Banale, P.F. 510",
+            "description": "terreni per una superficie catastale complessiva di 2.778 mq, in parte a bosco"}
+    assert property_kind(land) == "rural_plot"
+    assert property_kind({"title": "Villa singola di 171,80 mq con terreno", "description": ""}) == "home"
