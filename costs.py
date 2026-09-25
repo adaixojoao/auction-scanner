@@ -18,8 +18,8 @@ Everything here is an estimate, and it says so:
 """
 from __future__ import annotations
 
-from common import has_term, price_to_pay
-from scoring import GOOD_CONDITION, HEAVY_WORK, SOME_WORK, categorize, property_kind
+from common import price_to_pay
+from scoring import categorize, condition, property_kind
 
 IMT_YEAR = 2025
 
@@ -103,18 +103,6 @@ def imt(value: float, kind: str | None, *, own_home: bool = False) -> tuple[floa
         if limit is None or value <= limit:
             return max(0.0, value * rate - deduction), f"a dwelling, {IMT_YEAR} brackets"
     return 0.0, ""
-
-
-def condition(item: dict) -> str:
-    """"heavy", "some", "good" or "unknown" — how much work the listing admits to."""
-    text = f"{item.get('title') or ''} {item.get('description') or ''}"
-    if has_term(text, HEAVY_WORK):
-        return "heavy"
-    if has_term(text, SOME_WORK):
-        return "some"
-    if has_term(text, GOOD_CONDITION):
-        return "good"
-    return "unknown"
 
 
 def renovation(item: dict) -> dict | None:
