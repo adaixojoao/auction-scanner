@@ -149,6 +149,21 @@ def test_a_position_no_better_than_the_town_says_nothing(db):
     assert geo.distance_to_town({"country": "PT", "concelho": "Moura", "raw_json": "{}"}, towns) is None
 
 
+
+def test_a_pin_found_by_the_town_name_alone_is_the_town(db):
+    """Only the town's name was found ("Salvaterra de Magos"): the house can be
+    anywhere in the municipality, not 0.0 km from the middle of town."""
+    geo.locate_towns(db, _towns(lambda m, url, kw: FakeResponse(json_data=[{"lat": "38.14", "lon": "-7.45"}])),
+                     [{"country": "PT", "concelho": "Moura", "raw_json": "{}"}])
+    stored = {"country": "PT", "concelho": "Moura", "raw_json": json.dumps(
+        {"geo": {"lat": 38.14, "lon": -7.45, "precision": "parish", "query": "Moura"}})}
+    assert geo.distance_to_town(stored, geo.town_index(db)) is None
+    # New lookups label it as the town.
+    session = FakeSession(lambda m, url, kw: FakeResponse(
+        json_data=[{"lat": "38.14", "lon": "-7.45", "addresstype": "town"}] if kw["params"]["q"] == "Moura" else []))
+    found = geo.geocode(session, {"country": "PT", "concelho": "Moura", "raw_json": "{}", "title": "Moradia"})
+    assert found["precision"] == "municipality"
+
 def test_an_impossible_distance_means_the_wrong_town_was_found(db):
     geo.locate_towns(db, _towns(lambda m, url, kw: FakeResponse(json_data=[{"lat": "37.13", "lon": "-25.43"}])),
                      [{"country": "PT", "concelho": "Lagoa", "raw_json": "{}"}])   # the Azores one

@@ -552,6 +552,14 @@ def local_value_factor(item: dict, state: str | None = None) -> tuple[float, lis
     return factor, why
 
 
+def _inconsistent(text: str) -> str | None:
+    """A property text that names the wrong kind of registry: typed in a hurry,
+    so the rest (place, size) may be wrong too."""
+    if re.search(r"registo\s+criminal|registo\s+civil", text, re.I) and re.search(r"pr[ée]dio|im[óo]vel", text, re.I):
+        return "property registered at the criminal or civil registry"
+    return None
+
+
 _CASE_YEAR = re.compile(r"^\s*\d+/(\d{2})\.")
 
 
@@ -729,6 +737,11 @@ def score_detail(item: dict, now: datetime | None = None,
         s -= 20
         reasons.append("inheritance right only")
 
+    doubt = _inconsistent(full)
+    if doubt:
+        s -= 3
+        reasons.append(f"text does not add up ({doubt}) — confirm with the court")
+
     stale = time_on_sale(item, now)
     if stale:
         s += stale[0]
@@ -902,6 +915,10 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
             reasons.append(f"small home ({area:.0f} m²)")
         elif area >= 60:
             reasons.append(f"{area:.0f} m²")
+    else:
+        # It could be the small home you do not want: ask before you offer.
+        s -= 4
+        reasons.append("size unknown — ask")
     if pay:
         caps.append(curve(pay, EXPENSIVE_HOME_CAP))
         if pay > EXPENSIVE_HOME_EUR:

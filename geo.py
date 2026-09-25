@@ -157,8 +157,9 @@ def geocode(session, item: dict) -> dict | None:
         hits = resp.json()
         if hits:
             hit = hits[0]
-            return {"lat": float(hit["lat"]), "lon": float(hit["lon"]),
-                    "precision": _PLACE_OF.get(hit.get("addresstype"), "parish"), "query": q}
+            # Found by the town's name alone: that is the town's pin, not the house.
+            precision = "municipality" if "," not in q else _PLACE_OF.get(hit.get("addresstype"), "parish")
+            return {"lat": float(hit["lat"]), "lon": float(hit["lon"]), "precision": precision, "query": q}
     return None
 
 
@@ -289,7 +290,7 @@ def distance_to_town(item: dict, towns: dict[str, dict]) -> dict | None:
     placed at municipality level (that pin *is* the town), or when the distance
     is too big to believe."""
     pos = position(item)
-    if not pos or pos.get("precision") in TOO_VAGUE:
+    if not pos or pos.get("precision") in TOO_VAGUE or _town_only(pos):
         return None
     name = municipality(item)
     if not name:
@@ -303,6 +304,13 @@ def distance_to_town(item: dict, towns: dict[str, dict]) -> dict | None:
     approx = pos["precision"] == "parish"
     return {"km": round(km, 1), "town": town["name"], "approx": approx,
             "text": f"{'about ' if approx else ''}{km_text(km)} from {town['name']}"}
+
+
+def _town_only(pos: dict) -> bool:
+    """A stored lookup made with the town's name alone ("Salvaterra de Magos"):
+    older ones were labelled "parish", which gave a house anywhere in the
+    municipality 0.0 km and the best location score."""
+    return pos.get("precision") != "sale" and bool(pos.get("query")) and "," not in pos["query"]
 
 
 def km_text(km: float) -> str:
