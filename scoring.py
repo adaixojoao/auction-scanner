@@ -564,7 +564,8 @@ def score_detail(item: dict, now: datetime | None = None,
     desc    = item.get("description") or ""
     full    = f"{title} {desc}"
     price   = item.get("price")   or 0
-    bid     = item.get("current_bid") or 0
+    # A bid below the minimum accepted will not buy it: judge the discount on the minimum.
+    bid     = max(item.get("current_bid") or 0, item.get("min_price") or 0) if item.get("current_bid") else 0
     # No size field (licitor, some Citius): the size written in the text, so a
     # 35 m² "maison" is still a small home.
     area    = item.get("area_m2") or find_area(title) or find_area(desc) or 0

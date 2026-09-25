@@ -177,8 +177,10 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     judicial = (item.get("source") or "") in JUDICIAL_SOURCES
     if bid:
         basis = "your bid"
-    elif item.get("current_bid"):
+    elif item.get("current_bid") and item["current_bid"] >= (item.get("min_price") or 0):
         basis = "the current bid"
+    elif item.get("current_bid"):
+        basis = "the minimum accepted (the current bid is below it)"
     elif item.get("min_price") and item["min_price"] != item.get("price"):
         basis = "the minimum accepted"
     else:
