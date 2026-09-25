@@ -544,3 +544,10 @@ def test_years_on_sale_cost_points():
     o, reasons = score_detail(old_case, now=now)
     n, _ = score_detail(new_case, now=now)
     assert o < n and "court case from 2006 (20 years)" in reasons
+
+
+def test_household_contents_are_not_a_home():
+    """"Recheio de habitação" is the furniture of a home, sold on its own."""
+    from scoring import property_kind
+    assert property_kind({"title": "Recheio de habitação", "description": ""}) != "home"
+    assert property_kind({"title": "Moradia com recheio", "description": ""}) == "home"

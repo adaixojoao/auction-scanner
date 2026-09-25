@@ -156,7 +156,7 @@ DWELLING_WORDS = [
 ]
 # Household goods sold at auction ("Mobiliário de habitação", "Mobília de casa")
 # are not homes. A text that names a building first is: "Moradia T3 com mobiliário".
-MOVABLE_WORDS = ["mobiliário", "mobília", "móveis", "eletrodomésticos", "electrodomésticos"]
+MOVABLE_WORDS = ["mobiliário", "mobília", "móveis", "eletrodomésticos", "electrodomésticos", "recheio"]
 BUILDING_WORDS = ["moradia", "apartamento", "prédio", "fração", "fracção", "vivenda", "casa",
                   "habitação", "andar"]
 # What a portal types as not property at all (e-leilões tipoId 2–6).
