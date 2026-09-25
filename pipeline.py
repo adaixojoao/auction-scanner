@@ -136,6 +136,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     _set_state(db, current=source.name, done=i)
                     results.append(run_source(db, source, max_price=max_price, config=cfg))
                 _set_state(db, current="de-duplicating", done=len(chosen))
+                try:
+                    from links import link_court_sales
+                    link_court_sales(db)
+                except Exception:  # noqa: BLE001 — a join must never fail the scan
+                    LOG.exception("Joining Citius to e-leilões failed")
                 mark_duplicates(db)
                 report_path = None
                 if report:
