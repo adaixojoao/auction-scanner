@@ -375,6 +375,11 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                         and abs(other["area_m2"] - keeper["area_m2"]) < 5):
                     dup_of[other["id"]] = keeper["id"]
 
+    # A Citius sale joined to its e-leilões auction (links.py) is one sale.
+    from links import linked_pairs
+    for el, citius in linked_pairs(db).items():
+        dup_of[el] = citius
+
     db.execute("UPDATE listings SET duplicate_of = NULL WHERE duplicate_of IS NOT NULL")
     db.executemany("UPDATE listings SET duplicate_of = ? WHERE id = ?",
                    [(keeper, dup) for dup, keeper in dup_of.items()])
