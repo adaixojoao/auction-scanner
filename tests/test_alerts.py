@@ -216,3 +216,21 @@ def test_price_cuts_are_not_sent_without_telegram(db, add, sent):
     add(**house(20000))
     telegram_alert.alert_price_cuts(db, {**CFG, "telegram": {"enabled": False}})
     assert sent == []
+
+
+def test_a_starred_sale_gets_its_own_reminders(db, add, sent):
+    """Three days before and on the last day, each once, whatever the score,
+    with the 85% floor and the 5% cheque for a Portuguese sealed-offer sale."""
+    now = datetime(2026, 9, 25, 9, 0, tzinfo=timezone.utc)
+    add("citius", "r1", title="Moradia em Resende", price=20000, date_end="2026-09-27T14:30:00",
+        description="Modalidade: Venda mediante proposta em carta fechada")
+    add("citius", "r2", title="Moradia não marcada", price=20000, date_end="2026-09-27T14:30:00")
+    from db import set_listing_status
+    set_listing_status(db, "citius:r1", "shortlisted")
+    assert telegram_alert.alert_shortlist_reminders(db, CFG, now=now) == 1
+    assert "3 days left" in sent[0] and "Resende" in sent[0]
+    assert "€17,000" in sent[0] and "€1,000" in sent[0]          # 85% and the 5% cheque
+    assert telegram_alert.alert_shortlist_reminders(db, CFG, now=now) == 0      # once
+    assert telegram_alert.alert_shortlist_reminders(db, CFG, now=now + timedelta(days=1, hours=6)) == 1
+    assert "last day" in sent[1]
+    assert telegram_alert.alert_shortlist_reminders(db, CFG, now=now + timedelta(days=5)) == 0   # ended
