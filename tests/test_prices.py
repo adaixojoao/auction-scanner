@@ -74,7 +74,7 @@ def test_without_the_file_the_city_table_is_used(tmp_path, monkeypatch):
     monkeypatch.setattr(prices, "PT_FILE", str(tmp_path / "missing.csv"))
     _, reasons = score({"source": "eleiloes", "country": "PT", "title": "Moradia", "description": "",
                         "concelho": "Guarda", "area_m2": 90, "price": 25000})
-    assert any("below local prices (city estimate)" in r for r in reasons)
+    assert any("below local prices (city estimate; counted at 75%: condition not stated)" in r for r in reasons)
 
 
 def test_same_named_municipalities_get_their_own_region(tmp_path, monkeypatch):
@@ -91,3 +91,20 @@ def test_same_named_municipalities_get_their_own_region(tmp_path, monkeypatch):
     assert price("Lagoa", "Faro") == 3220 and price("Lagoa", "Ilha de São Miguel") == 1761
     assert price("São João da Madeira", "Aveiro") == 1836          # mainland, despite the name
     assert price("Calheta", None) == 697                             # no district: the first one
+
+
+def test_an_old_village_house_is_not_counted_at_the_towns_median_price(pt_prices):
+    """INE's median is mostly sound homes in town: a 1937 house needing work
+    8 km out is counted at a fraction of it, so its "discount" is honest."""
+    base = {"source": "eleiloes", "country": "PT", "concelho": "Sabugal", "area_m2": 100, "price": 9000}
+    sound = {**base, "title": "Moradia em bom estado", "description": ""}
+    old = {**base, "title": "Moradia", "description": "Moradia para remodelar. Ano de construção: 1937",
+           "town_distance": {"km": 8.0, "text": "8.0 km from Sabugal"}}
+    _, sound_reasons = score(sound)
+    _, old_reasons = score(old)
+    assert any(r.startswith("71% below local prices") for r in sound_reasons)
+    worn = next(r for r in old_reasons if "below local prices" in r)
+    assert "needs work, built 1937, 8 km from town" in worn
+    assert int(worn.split("%")[0]) < 71
+    assert "needs some work" in old_reasons                 # "para remodelar" is work
+

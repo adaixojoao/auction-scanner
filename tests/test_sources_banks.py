@@ -3,6 +3,8 @@
 Every fixture below is a trimmed copy of the live page or API shape, with
 invented addresses and references.
 """
+import json
+
 import requests
 
 from conftest import FakeResponse
@@ -297,7 +299,13 @@ def test_whitestar_cards_and_paging(db, fake_http):
         "2": "<p>7 imóveis</p>" + whitestar_card(4, "Apartamento T1", "Lisboa, Amadora, VENTEIRA", "29 000", 45),
         "3": "<p>7 imóveis</p>",
     }
-    session = fake_http(lambda m, url, kw: FakeResponse(pages.get(kw["data"]["PageNumber"], "")))
+    details = """<h3>Detalhes</h3> Referência 73734 Data Publicação 2020-02-21 Tipo Moradia Isolada Tipologia T3
+      Estado Novo Ano Construção 1937 Área ( m 2 ) 160 Class. Energética F Localidade Distrito Vila Real
+      Concelho Chaves Freguesia VIDAGO Morada Rua da Fonte, n.º 3 Código Postal 5425-301 Nas Proximidades"""
+    with_details = ["/1"]
+    session = fake_http(lambda m, url, kw: FakeResponse(
+        (details if url.endswith(tuple(with_details)) else "") if m.upper() == "GET"
+        else pages.get(kw["data"]["PageNumber"], "")))
     assert REGISTRY["whitestar"].func(db, max_price=30000) == 3
     got = rows(db, "whitestar")
     assert set(got) == {"1", "2", "4"}                  # the reserved one is left out
@@ -305,4 +313,19 @@ def test_whitestar_cards_and_paging(db, fake_http):
     assert house["title"] == "Moradia Isolada T3, Vidago" and house["price"] == 27000 and house["area_m2"] == 160
     assert (house["district"], house["concelho"], house["freguesia"]) == ("Vila Real", "Chaves", "VIDAGO")
     assert got["2"]["area_m2"] == 9680 and "Estado: Usado" in house["description"]
-    assert all(call[2]["data"]["maxPrice"] == "30000" for call in session.calls)
+    assert all(call[2]["data"]["maxPrice"] == "30000" for call in session.calls if call[0].upper() == "POST")
+    # The detail page: year built, publication date and address, kept once.
+    raw = json.loads(house["raw_json"])
+    assert raw == {"data_publicacao": "2020-02-21", "ano_construcao": "1937", "energia": "F",
+                   "morada": "Rua da Fonte, n.º 3", "codigo_postal": "5425-301"}
+    assert got["4"]["raw_json"] is None                   # nothing on its page: nothing kept
+    # Read once; a listing that already has a map position keeps it.
+    db.execute("""UPDATE listings SET raw_json = '{"geo": {"lat": 41.6}}' WHERE id = 'whitestar:4'""")
+    db.commit()
+    session.calls.clear()
+    with_details.append("/4")
+    REGISTRY["whitestar"].func(db, max_price=30000)
+    assert [c[1] for c in session.calls if c[0] == "GET"] == [
+        "https://www.whitestarproperties.pt/Assets/Details/2", "https://www.whitestarproperties.pt/Assets/Details/4"]
+    kept = json.loads(rows(db, "whitestar")["4"]["raw_json"])
+    assert kept["geo"] == {"lat": 41.6} and kept["ano_construcao"] == "1937"

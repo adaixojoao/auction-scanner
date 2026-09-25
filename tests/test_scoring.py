@@ -526,3 +526,21 @@ def test_a_bid_below_the_minimum_accepted_is_judged_at_the_minimum():
     assert not any("50%" in r for r in reasons)
     est = costs.estimate(house)
     assert est["base"] == 19975 and est["basis"].startswith("the minimum accepted")
+
+
+def test_years_on_sale_cost_points():
+    """Nobody bought it in six years: usually there is a reason."""
+    from datetime import datetime
+    import json as _json
+    now = datetime(2026, 9, 25)
+    fresh = {"source": "whitestar", "country": "PT", "title": "Moradia T2", "description": "", "price": 15000,
+             "area_m2": 90, "raw_json": _json.dumps({"data_publicacao": "2026-03-01"})}
+    stale = {**fresh, "raw_json": _json.dumps({"data_publicacao": "2020-02-21"})}
+    old_case = {**fresh, "source": "citius", "raw_json": _json.dumps({"processo": "536/06.0TTGRD-A"})}
+    new_case = {**fresh, "source": "citius", "raw_json": _json.dumps({"processo": "468/24.6T8MBR"})}
+    f, _ = score_detail(fresh, now=now)
+    s, reasons = score_detail(stale, now=now)
+    assert s < f and "on sale since 2020 (7 years)" in reasons
+    o, reasons = score_detail(old_case, now=now)
+    n, _ = score_detail(new_case, now=now)
+    assert o < n and "court case from 2006 (20 years)" in reasons

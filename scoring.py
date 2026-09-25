@@ -253,6 +253,7 @@ RUIN_WORDS = HEAVY_WORK   # older name
 SOME_WORK = [
     "necessita de obras", "precisa de obras", "necessitar de obras", "carece de obras",
     "obras de conservação", "degradad*", "necesita reforma", "necesita reformas",
+    "para remodelar", "a remodelar", "para renovar", "a renovar", "para restaurar",
     "para actualizar", "travaux à prévoir", "à rafraîchir", "a rafraichir", "da rimodernare",
     "modernisierungsbedürftig", "renovierungsbedarf",
 ]
@@ -492,6 +493,91 @@ def _occupation(item: dict) -> str | None:
         return None
 
 
+def _raw(item: dict) -> dict:
+    try:
+        raw = json.loads(item.get("raw_json") or "{}")
+        return raw if isinstance(raw, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def condition(item: dict) -> str:
+    """"heavy", "some", "good" or "unknown": how much work the listing admits to."""
+    text = f"{item.get('title') or ''} {item.get('description') or ''}"
+    if has_term(text, HEAVY_WORK):
+        return "heavy"
+    if has_term(text, SOME_WORK):
+        return "some"
+    if has_term(text, GOOD_CONDITION):
+        return "good"
+    return "unknown"
+
+
+_BUILT = re.compile(r"(?:ano\s+de\s+constru[çc][ãa]o|constru[íi]d[oa]\s+em|built\s+in)\D{0,5}((?:18|19|20)\d\d)", re.I)
+
+
+def built_year(item: dict) -> int | None:
+    """The year the building was built: the portal's field, else the text."""
+    year = _raw(item).get("ano_construcao")
+    if not year:
+        m = _BUILT.search(f"{item.get('title') or ''} {item.get('description') or ''}")
+        year = m.group(1) if m else None
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return None
+    return year if 1700 <= year <= 2100 else None
+
+
+def local_value_factor(item: dict, state: str | None = None) -> tuple[float, list[str]]:
+    """How much of the municipality's median price this home is worth before
+    any discount, and why (condition, age, distance from town)."""
+    state = state or condition(item)
+    factor, why = CONDITION_VALUE[state], []
+    if state != "good":
+        why.append({"unknown": "condition not stated", "some": "needs work", "heavy": "needs heavy work"}[state])
+    year = built_year(item)
+    if year and state != "good":
+        age = curve(year, BUILT_YEAR_VALUE)
+        if age < 1:
+            factor *= age
+            why.append(f"built {year}")
+    near = item.get("town_distance")
+    if near and near.get("km") is not None:
+        town = curve(near["km"], TOWN_KM_VALUE)
+        if town < 1:
+            factor *= town
+            why.append(f"{near['km']:.0f} km from town")
+    return factor, why
+
+
+_CASE_YEAR = re.compile(r"^\s*\d+/(\d{2})\.")
+
+
+def time_on_sale(item: dict, now: datetime | None = None) -> tuple[float, float, str] | None:
+    """(points, years, reason) for a listing that has been on sale for years:
+    the portal's publication date, else the year of the court case."""
+    now = now or utcnow()
+    raw = _raw(item)
+    published = raw.get("data_publicacao")
+    if published:
+        try:
+            since = datetime.fromisoformat(str(published)[:10])
+        except ValueError:
+            since = None
+        if since:
+            years = (now.replace(tzinfo=None) - since).days / 365.25
+            points = curve(years, YEARS_ON_SALE_POINTS)
+            return (points, years, f"on sale since {since.year} ({years:.0f} years)") if points < 0 else None
+    m = _CASE_YEAR.match(str(raw.get("processo") or ""))
+    if m:
+        year = 2000 + int(m.group(1)) if int(m.group(1)) <= now.year % 100 else 1900 + int(m.group(1))
+        years = now.year - year
+        points = curve(years, CASE_AGE_POINTS)
+        return (points, years, f"court case from {year} ({years} years)") if points < 0 else None
+    return None
+
+
 def _ha(m2: float) -> str:
     return f"{m2 / 10000:.1f} ha" if m2 >= 10000 else f"{m2:,.0f} m²".replace(",", " ")
 
@@ -537,6 +623,19 @@ RURAL_SIZE_POINTS = [(0.5, -30), (1.0, 8), (2.0, 13), (5.0, 25), (10.0, 28)]
 RURAL_EUR_M2_POINTS = [(0.2, 18), (0.5, 15), (1.0, 8), (1.5, -10), (3.0, -25)]
 # A very low minimum bid (€) on a sale with a real base value.
 LOW_MIN_BID_POINTS = [(100, 10), (500, 10), (1500, 0)]
+# INE's price per m² is the median of homes sold in the municipality, mostly
+# sound ones in town. An old village house is worth less than that: the local
+# price is scaled down by condition, age and distance from town before the
+# discount is measured (Sept 2026: an 82% "discount" on a 1937 village house
+# waiting for a full rebuild was mostly this).
+CONDITION_VALUE = {"good": 1.0, "unknown": 0.75, "some": 0.6, "heavy": 0.35}
+BUILT_YEAR_VALUE = [(1940, 0.8), (1980, 0.9), (2000, 1.0)]
+TOWN_KM_VALUE = [(2, 1.0), (5, 0.85), (10, 0.7)]
+# Years on sale (the portal's publication date) and a court case's age: nobody
+# bought it in all that time, which usually has a reason.
+YEARS_ON_SALE_POINTS = [(1.5, 0), (3, -4), (5, -8), (8, -12)]
+CASE_AGE_POINTS = [(6, 0), (10, -3), (15, -6), (20, -8)]
+
 # Kilometres from the middle of the property's own town (geo.py). Measured, so
 # it beats guessing "good location" from words the description may not contain.
 TOWN_DISTANCE_POINTS = [(0.3, 15), (1, 13), (3, 8), (6, 3), (10, -2), (20, -14), (35, -25)]
@@ -628,6 +727,11 @@ def score_detail(item: dict, now: datetime | None = None,
     if "direito" in title_n and "heranca" in title_n:
         s -= 20
         reasons.append("inheritance right only")
+
+    stale = time_on_sale(item, now)
+    if stale:
+        s += stale[0]
+        reasons.append(stale[2])
 
     # ── How cheap ─────────────────────────────────────────────────────
     # On sale again after an earlier round ended (rounds.py): nobody bought it then,
@@ -744,13 +848,14 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     """A home should be in a good place, in good condition, big enough, well
     under local prices and not expensive."""
     s = 0.0
-    if has_term(full, HEAVY_WORK):
+    state = condition(item)
+    if state == "heavy":
         s -= 25
         reasons.append("needs heavy work (ruin / full rebuild)")
-    elif has_term(full, SOME_WORK):
+    elif state == "some":
         s -= 12
         reasons.append("needs some work")
-    elif has_term(full, GOOD_CONDITION):
+    elif state == "good":
         s += 15
         reasons.append("good condition")
 
@@ -804,10 +909,13 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     # Below the local price per m² (homes only: land is not priced like buildings)
     mv = market_value_estimate(item)
     if mv and pay and area <= 1000:
+        factor, why = local_value_factor(item, state)
+        mv *= factor
         market_disc = (mv - pay) / mv
         s += curve(market_disc, MARKET_DISCOUNT_POINTS)
         if market_disc > 0.20:
-            reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]})")
+            adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
+            reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]}{adjusted})")
     return s
 
 

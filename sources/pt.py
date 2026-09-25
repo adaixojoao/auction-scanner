@@ -913,6 +913,56 @@ def parse_whitestar_page(html: str, max_price: float) -> list[dict]:
     return rows
 
 
+WHITESTAR_DETAILS_PER_SCAN = 80
+_WS_FIELDS = {"Data Publicação": "data_publicacao", "Ano Construção": "ano_construcao",
+              "Class. Energética": "energia", "Morada": "morada", "Código Postal": "codigo_postal"}
+
+
+def parse_whitestar_details(html: str) -> dict:
+    """The "Detalhes" block of an asset page: publication date, year built,
+    energy rating, street and postcode (the search card has none of them)."""
+    text = re.sub(r"\s+", " ", BeautifulSoup(html, "html.parser").get_text(" "))
+    i = text.find("Detalhes Refer")
+    text = text[i:i + 700] if i >= 0 else ""
+    labels = "|".join(re.escape(k) for k in _WS_FIELDS) + r"|Localidade|Distrito|Concelho|Freguesia|Tipo\b|" \
+        r"Tipologia|Estado|Área|Nas Proximidades"
+    out = {}
+    for label, key in _WS_FIELDS.items():
+        m = re.search(re.escape(label) + r"\s+(.*?)\s*(?=" + labels + r"|$)", text)
+        value = m.group(1).strip() if m else ""
+        if value and value not in ("-", "s/n"):
+            out[key] = value
+    if "ano_construcao" in out and not re.fullmatch(r"\d{4}", out["ano_construcao"]):
+        del out["ano_construcao"]
+    return out
+
+
+def _whitestar_details(db, session, rows: list[dict], budget: list[int]) -> None:
+    """Read each listing's detail page once (kept in raw_json), a few a scan."""
+    for row in rows:
+        if budget[0] <= 0:
+            return
+        known = db.execute("SELECT raw_json FROM listings WHERE id = ?", (row["id"],)).fetchone()
+        if known and known[0] and "data_publicacao" in known[0]:
+            continue
+        try:
+            resp = session.get(row["url"])
+            resp.raise_for_status()
+        except Exception as e:  # noqa: BLE001: the card alone is still a listing
+            LOG.info(f"Whitestar: details of {row['external_id']} failed ({type(e).__name__})")
+            continue
+        budget[0] -= 1
+        details = parse_whitestar_details(resp.text)
+        if details:
+            try:                              # keep what is there (the map position)
+                kept = json.loads(known[0]) if known and known[0] else {}
+            except ValueError:
+                kept = {}
+            row["raw_json"] = json.dumps({**(kept if isinstance(kept, dict) else {}), **details},
+                                         ensure_ascii=False)
+        time.sleep(0.3)
+
+
 @register("whitestar", "PT")
 def scrape_whitestar(db, max_price: float = 50000, **_):
     """whitestarproperties.pt — NPL portfolios (Novo Banco etc.)."""
@@ -922,6 +972,7 @@ def scrape_whitestar(db, max_price: float = 50000, **_):
     total_scraped = 0
     seen_ids: set[str] = set()
     expected = None
+    details_left = [WHITESTAR_DETAILS_PER_SCAN]
     for page in range(1, 300):
         try:
             resp = session.post(f"{WHITESTAR}/Assets", data={
@@ -938,7 +989,9 @@ def scrape_whitestar(db, max_price: float = 50000, **_):
                           BeautifulSoup(resp.text, "html.parser").get_text(" "))
             expected = int(m.group(1)) if m else None
         new = 0
-        for row in parse_whitestar_page(resp.text, max_price):
+        rows = parse_whitestar_page(resp.text, max_price)
+        _whitestar_details(db, session, rows, details_left)
+        for row in rows:
             if row["external_id"] in seen_ids:
                 continue
             seen_ids.add(row["external_id"])
