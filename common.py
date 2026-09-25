@@ -279,7 +279,14 @@ def find_area(text) -> float | None:
             value *= 10000
         if value > 0:
             return value
+    # Italian court texts put the unit first: "di MQ. 90", "mq 127,22".
+    m = _AREA_UNIT_FIRST_RE.search(str(text or ""))
+    if m:
+        return float(m.group(1).replace(".", "").replace(",", ".")) or None
     return None
+
+
+_AREA_UNIT_FIRST_RE = re.compile(r"\bmq\.?\s*(\d{1,6}(?:,\d{1,2})?)\b", re.I)
 
 
 def find_price(text) -> float | None:

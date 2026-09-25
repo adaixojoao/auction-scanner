@@ -6,7 +6,7 @@ import time
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_area, find_price, make_listing, make_session, parse_date_dmy, parse_price, stable_id
+from common import LOG, find_area, find_price, make_listing, make_session, parse_price
 from db import upsert_listing
 from sources import register
 from sources._cards import CardSite, scrape_cards
@@ -46,59 +46,67 @@ def scrape_italy(db, max_price: float = 50000, **_):
     return total_scraped
 
 
+# The portal is an Angular app; its search is a JSON API. filtroAnnunci 1 is
+# "sales to come" (about 15,000 lots); the price fields of the form are not
+# honoured by the API, so the budget is applied here.
+PVP = "https://pvp.giustizia.it"
+PVP_API = f"{PVP}/ric-496b258c-986a1b71/ric-ms/ricerca/vendite"
+PVP_PAGE = 2000
+PVP_KINDS = {"IMMOBILE_RESIDENZIALE", "ALTRA_CATEGORIA"}          # homes, and land among "other"
+PVP_OCCUPANCY = {"LIBER": "libero", "OCCUP": "occupato", "OCCST": "occupato senza titolo",
+                 "INCOR": "in corso di liberazione"}
+
+
+def pvp_listing(lot: dict) -> dict | None:
+    lid = lot.get("id")
+    if not lid:
+        return None
+    where = lot.get("indirizzo") or {}
+    coords = where.get("coordinate") or {}
+    desc = re.sub(r"\s+", " ", lot.get("descLotto") or "").strip()
+    free = sorted({PVP_OCCUPANCY[d] for d in lot.get("disponibilita") or [] if d in PVP_OCCUPANCY})
+    parts = [desc, f"Disponibilità: {', '.join(free)}" if free else "",
+             f"{lot.get('tribunale') or ''}, procedura {lot.get('procedura') or ''}".strip(", ")]
+    raw = {k: lot.get(k) for k in ("procedura", "tribunale", "numeroLotto", "categoriaLotto", "categoriaBene",
+                                   "offertaMinima", "disponibilita") if lot.get(k)}
+    if coords.get("latitudine") and coords.get("longitudine"):
+        raw.update(lat=coords["latitudine"], lon=coords["longitudine"])
+    date = lot.get("dataOraVendita") or lot.get("dataVendita")
+    return make_listing(
+        "pvp_giustizia", str(lid), "IT", id_prefix="pvp",
+        title=f"{(desc[:90] or 'Immobile')} · {where.get('citta') or ''}"[:200],
+        description=". ".join(p for p in parts if p)[:3000] or None, tipo="immobile",
+        area_m2=find_area(desc), price=lot.get("prezzoBaseAsta"), min_price=lot.get("offertaMinima"),
+        district=where.get("provincia"), concelho=where.get("citta"),
+        url=f"{PVP}/pvp/it/detail_annuncio.page?idAnnuncio={lid}",
+        date_end=f"{date}:00" if date and len(date) == 16 else date, raw_json=raw,
+    )
+
+
 @register("pvp_giustizia", "IT")
 def scrape_italy_pvp(db, max_price: float = 50000, **_):
     """pvp.giustizia.it — Portale Vendite Pubbliche (official judicial sales portal)."""
-    session = make_session()
-    base = "https://pvp.giustizia.it"
-    total_scraped = 0
-
-    for page in range(1, 20):
-        try:
-            resp = session.get(f"{base}/pvp/it/risultati_ricerca.page", params={
-                "tipoBene": "Immobile", "pag": page, "num": 50,
-                "ord": "dataVendita", "dir": "asc", "prezzoMax": int(max_price),
-            })
-            resp.raise_for_status()
-        except Exception:
-            if page == 1:
-                raise
-            break
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        items = soup.select("div.risultato, div.card-risultato, div.bene-item") \
-            or soup.select("table.risultati tr")[1:]
-        if not items:
-            break
-
-        for item_el in items:
-            link = item_el.select_one("a[href]")
-            if not link:
+    session = make_session(timeout=60)
+    total = 0
+    for page in range(0, 30):
+        resp = session.post(PVP_API, params={"page": page, "size": PVP_PAGE},
+                            json={"tipoLotto": "IMMOBILI", "filtroAnnunci": 1})
+        resp.raise_for_status()
+        body = (resp.json() or {}).get("body") or {}
+        for lot in body.get("content") or []:
+            price = lot.get("prezzoBaseAsta") or 0
+            if lot.get("categoriaLotto") not in PVP_KINDS or not price or price > max_price:
                 continue
-            title = link.get_text(strip=True)[:200]
-            href = link["href"]
-            eid_m = re.search(r'[/=](\d+)', href)
-            eid = eid_m.group(1) if eid_m else stable_id(href, title)
-            text = item_el.get_text(" ", strip=True)
-            price = find_price(text)
-            if price and price > max_price:
-                continue
-            loc_m = re.search(r"(?:Ubicazione|Comune|Provincia)[:\s]+([^\n,]+)", text, re.I)
-            upsert_listing(db, make_listing(
-                "pvp_giustizia", eid, "IT", id_prefix="pvp",
-                title=title or f"Italian judicial sale {eid}", description=text[:500],
-                tipo="immobile", price=price, min_price=price,
-                district=loc_m.group(1).strip() if loc_m else None,
-                url=href, base_url=base, date_end=parse_date_dmy(text),
-            ))
-            total_scraped += 1
-
+            row = pvp_listing(lot)
+            if row:
+                upsert_listing(db, row)
+                total += 1
         db.commit()
-        LOG.info(f"  PVP page {page}: {total_scraped} total")
-        if len(items) < 50:
+        if body.get("last", True) or page + 1 >= (body.get("totalPages") or 0):
             break
         time.sleep(1)
-    return total_scraped
+    LOG.info(f"PVP: {total} listings")
+    return total
 
 
 GOBIDREAL = CardSite(

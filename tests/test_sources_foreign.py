@@ -35,3 +35,30 @@ def test_astalegale_search_api_pages_and_masked_lots(db, fake_http):
     assert house["date_end"] == "2027-01-20T11:30:00" and house["concelho"] == "Besano"
     assert house["url"] == "https://www.astalegale.net/Aste/Detail/B1-Abitazione-Besano"
     assert json.loads(house["raw_json"])["lat"] == 45.9
+
+
+def _pvp_lot(lid, price, categoria="IMMOBILE_RESIDENZIALE", disponibilita=("LIBER",)):
+    return {"id": lid, "tipoLotto": "IMMOBILI", "categoriaLotto": categoria, "prezzoBaseAsta": price,
+            "offertaMinima": price * 0.75 if price else None, "dataOraVendita": "2026-10-08T18:00",
+            "disponibilita": list(disponibilita), "procedura": "65", "tribunale": "Tribunale di FERMO",
+            "descLotto": "Abitazione al piano primo di mq 90 con balcone",
+            "indirizzo": {"citta": "Montegranaro", "provincia": "Fermo",
+                          "coordinate": {"latitudine": 43.2, "longitudine": 13.6}}}
+
+
+def test_pvp_search_api_sales_to_come_within_budget(db, fake_http):
+    pages = {0: [_pvp_lot(1, 16537.5), _pvp_lot(2, 240000), _pvp_lot(3, 9000, categoria="IMMOBILE_COMMERCIALE")],
+             1: [_pvp_lot(4, 18562.5, disponibilita=("OCCUP",))]}
+
+    def handler(method, url, kw):
+        assert url.endswith("/ric-ms/ricerca/vendite") and kw["json"] == {"tipoLotto": "IMMOBILI", "filtroAnnunci": 1}
+        page = kw["params"]["page"]
+        return FakeResponse(json_data={"body": {"content": pages.get(page, []), "totalPages": 2, "last": page >= 1}})
+    fake_http(handler)
+    assert REGISTRY["pvp_giustizia"].func(db, max_price=30000) == 2    # not the dear one, not the shop
+    rows = {r["id"]: r for r in db.execute("SELECT * FROM listings WHERE source='pvp_giustizia'")}
+    house = rows["pvp:1"]
+    assert house["price"] == 16537.5 and house["concelho"] == "Montegranaro" and house["area_m2"] == 90
+    assert house["date_end"] == "2026-10-08T18:00:00"
+    assert house["url"] == "https://pvp.giustizia.it/pvp/it/detail_annuncio.page?idAnnuncio=1"
+    assert "Disponibilità: occupato" in rows["pvp:4"]["description"]        # the occupancy reject sees it
