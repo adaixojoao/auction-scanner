@@ -262,7 +262,7 @@ def parse_price(text) -> float | None:
 
 
 _AREA_RE = re.compile(
-    r"(\d{1,3}(?:[ .\u00a0]\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?)\s*"
+    r"(\d{1,3}(?:[ .\u00a0]\d{3})+(?:,\d+)?|\d+ ?, ?\d{1,2}(?=\s*m)|\d+(?:[.,]\d+)?)\s*"
     r"(m²|m2|m\s?2|mq|sq\.?\s?m|ha|hectares?)(?![a-z])", re.I)
 
 
@@ -273,8 +273,8 @@ def find_area(text) -> float | None:
         number = m.group(1).replace("\u00a0", " ")
         if re.fullmatch(r"\d{1,3}(?:[ .]\d{3})+(?:,\d+)?", number):
             value = float(number.replace(" ", "").replace(".", "").replace(",", "."))
-        else:
-            value = float(number.replace(",", "."))
+        else:                          # "106,63", and a typed "106, 63"
+            value = float(number.replace(" ", "").replace(",", "."))
         if m.group(2).lower().startswith("h"):
             value *= 10000
         if value > 0:

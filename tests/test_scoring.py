@@ -562,3 +562,19 @@ def test_a_hotels_laundry_room_is_not_a_home():
     flat = "Fracção autónoma designada pela letra C, correspondente ao 1º andar direito do prédio urbano"
     assert property_kind({"title": laundry, "description": ""}) == "other"
     assert property_kind({"title": flat, "description": ""}) == "home"
+
+
+def test_an_unknown_size_and_a_text_that_does_not_add_up_are_said():
+    base = {"source": "citius", "country": "PT", "price": 7500,
+            "title": "Prédio urbano, composto de casa de um pavimento, sito no lugar de Lage"}
+    with_size, _ = score_detail({**base, "area_m2": 90})
+    unknown, reasons = score_detail(base)
+    assert "size unknown — ask" in reasons
+    odd, reasons = score_detail({**base, "area_m2": 90, "description":
+                                 "descrito na Conservatória de Registo Criminal de Vila Pouca de Aguiar"})
+    assert odd < with_size and any(r.startswith("text does not add up") for r in reasons)
+
+
+def test_a_typed_decimal_area_is_read_whole():
+    from common import find_area
+    assert find_area("Habitação no 3º andar, com a área de 106, 63 m2") == 106.63
