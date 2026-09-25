@@ -170,6 +170,15 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     geo.geocode_pending(db, session, best)
                 except Exception:  # noqa: BLE001 — a map position must never fail the scan
                     LOG.exception("Locating listings failed")
+                _set_state(db, current="photo check")
+                try:
+                    import photos                    # the photos of the best homes (needs an API key)
+                    from db import load_listings
+                    best = sorted(load_listings(db, filters=cfg.get("filters")),
+                                  key=lambda it: -it.get("rank", it["score"]))
+                    photos.check_pending(db, cfg, best)
+                except Exception:  # noqa: BLE001 — a photo check must never fail the scan
+                    LOG.exception("Photo check failed")
             finally:
                 summary = {
                     "listings": sum(r["count"] for r in results),

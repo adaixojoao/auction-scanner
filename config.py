@@ -79,6 +79,14 @@ DEFAULTS = {
         "per_day": 5,             # at most this many new requests offered per day
     },
 
+    # Claude looks at the photos of the best homes to judge their condition
+    # (photos.py). Needs an Anthropic API key, here or in ANTHROPIC_API_KEY.
+    "ai": {
+        "anthropic_key": "",
+        "photo_check": True,
+        "photos_per_scan": 20,
+    },
+
     # Street View inside the listing panel: a Google Maps Embed API key (free,
     # from Google Cloud). Without one, the panel links to Street View instead.
     "maps": {

@@ -11,6 +11,7 @@ Rules this module enforces:
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -282,6 +283,24 @@ def _is_cut_copy(new: str | None, old: str | None) -> bool:
     return len(stem) >= 20 and old.startswith(stem[:-3])
 
 
+# What the app found out itself (geo.py, photos.py, links.py): a source's fresh
+# raw data does not know it, so it is carried over.
+LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "eleiloes_id")
+
+
+def _keep_learned(new: str | None, old: str | None) -> str | None:
+    if not new or not old or not any(f'"{k}"' in old for k in LEARNED_RAW_KEYS):
+        return new
+    try:
+        fresh, before = json.loads(new), json.loads(old)
+    except ValueError:
+        return new
+    if not isinstance(fresh, dict) or not isinstance(before, dict):
+        return new
+    kept = {k: before[k] for k in LEARNED_RAW_KEYS if k in before and k not in fresh}
+    return json.dumps({**fresh, **kept}, ensure_ascii=False) if kept else new
+
+
 def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
     """Insert or refresh one listing. Returns "inserted" or "updated".
 
@@ -291,12 +310,13 @@ def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
     """
     now = utcnow_iso()
     existing = db.execute(
-        "SELECT price, current_bid, title, description FROM listings WHERE id = ?", (row["id"],)
+        "SELECT price, current_bid, title, description, raw_json FROM listings WHERE id = ?", (row["id"],)
     ).fetchone()
     new_price, new_bid = row.get("price"), row.get("current_bid")
 
     if existing:
         values = {f: row.get(f) for f in _UPDATE_FIELDS}
+        values["raw_json"] = _keep_learned(values["raw_json"], existing[4])
         for field in ("title", "description"):
             if _is_cut_copy(values[field], existing[2 if field == "title" else 3]):
                 values[field] = None                  # keep the full text
