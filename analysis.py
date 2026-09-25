@@ -235,14 +235,17 @@ Money estimates are plain numbers in euros (null when unknown); bids use Portugu
 
 def analyze_property(data: dict) -> dict:
     """Ask Claude about one listing. Returns the PROPERTY_SCHEMA dict, or {"error": ...}."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return {"error": "ANTHROPIC_API_KEY is not set. Add it to your environment to use the AI check."}
+    from config import load_config
+    from photos import api_key
+    key = api_key(load_config())
+    if not key:
+        return {"error": "No Anthropic API key: add one in Settings → Photo check to use the AI check."}
     try:
         import anthropic
     except ImportError:
         return {"error": "The anthropic package is not installed (pip install anthropic)."}
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=key)
     messages = [{"role": "user", "content": _property_prompt(data)}]
     try:
         resp = client.messages.create(

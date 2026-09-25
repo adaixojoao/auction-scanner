@@ -85,6 +85,16 @@
   <div class="form-grid"><div class="field"><label>Google Maps Embed API key</label><input id="maps_google_key" type="password" autocomplete="off"></div></div>
 </div>
 
+<div class="card" id="ai">
+  <h2>Photo check</h2>
+  <p class="small muted" style="margin-bottom:10px">After each scan, Claude looks at the photos of the best homes (a few each scan, each once) and says whether the building looks sound, needs work or is a ruin. It is used when the listing's text says nothing about the condition. Needs an Anthropic API key (console.anthropic.com → API keys); it stays on this PC. The AI check on Offers uses it too.</p>
+  <div class="form-grid">
+    <div class="field"><label>Anthropic API key</label><input id="ai_anthropic_key" type="password" autocomplete="off"></div>
+    <div class="field"><label>Homes a scan</label><input id="ai_photos_per_scan" type="number" min="0" max="100"></div>
+    <div class="field"><label><input id="ai_photo_check" type="checkbox"> Check photos</label></div>
+  </div>
+</div>
+
 <div class="card" id="requests">
   <h2>Information requests</h2>
   <p class="small muted" style="margin-bottom:10px">After a scan, for strong sales where the agente, court or lawyer's e-mail is known, the app prepares the information request (is the sale still on, deadline, deposit, charges, occupancy, visits) and offers it on Telegram with <b>Send</b>, <b>Show letter</b> and <b>Skip</b>. Nothing is sent until you tap Send; sent requests appear under Offers → Sent. Needs Telegram, the e-mail account and your name and e-mail above.</p>
@@ -159,6 +169,10 @@ async function load() {
   setv("tg_cut_min_pct", t.cut_min_pct ?? 5); setv("tg_cut_min_score", t.cut_min_score ?? 60);
   $("tg_source_alerts").checked = t.source_alerts !== false;
   setv("maps_google_key", (c.maps || {}).google_key || "");
+  const ai = c.ai || {};
+  setv("ai_anthropic_key", ai.anthropic_key || "");
+  setv("ai_photos_per_scan", ai.photos_per_scan ?? 20);
+  $("ai_photo_check").checked = ai.photo_check !== false;
   const ar = c.auto_requests || {};
   $("ar_enabled").checked = ar.enabled !== false;
   setv("ar_min_score", ar.min_score ?? 75);
@@ -266,6 +280,8 @@ async function save() {
                source_alerts: $("tg_source_alerts").checked},
     auto_requests: {enabled: $("ar_enabled").checked, min_score: num("ar_min_score"), per_day: num("ar_per_day")},
     maps: {google_key: $("maps_google_key").value.trim()},
+    ai: {anthropic_key: $("ai_anthropic_key").value.trim(), photo_check: $("ai_photo_check").checked,
+         photos_per_scan: num("ai_photos_per_scan")},
     notifications: {enabled: $("em_enabled").checked, smtp_host: $("em_smtp_host").value.trim(), smtp_port: num("em_smtp_port"),
                     smtp_user: $("em_smtp_user").value.trim(), smtp_password: $("em_smtp_password").value,
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},

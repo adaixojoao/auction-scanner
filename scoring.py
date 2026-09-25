@@ -503,7 +503,8 @@ def _raw(item: dict) -> dict:
 
 
 def condition(item: dict) -> str:
-    """"heavy", "some", "good" or "unknown": how much work the listing admits to."""
+    """"heavy", "some", "good" or "unknown": how much work the listing admits
+    to, else what its photos show (photos.py) when the text says nothing."""
     text = f"{item.get('title') or ''} {item.get('description') or ''}"
     if has_term(text, HEAVY_WORK):
         return "heavy"
@@ -511,7 +512,18 @@ def condition(item: dict) -> str:
         return "some"
     if has_term(text, GOOD_CONDITION):
         return "good"
-    return "unknown"
+    seen = photo_condition(item)
+    return seen["condition"] if seen else "unknown"
+
+
+def photo_condition(item: dict) -> dict | None:
+    """What the photos showed, when the check was sure enough to use."""
+    if '"photo_check"' not in (item.get("raw_json") or ""):
+        return None
+    seen = _raw(item).get("photo_check") or {}
+    if seen.get("condition") in ("good", "some", "heavy") and seen.get("confidence") in ("high", "medium"):
+        return seen
+    return None
 
 
 _BUILT = re.compile(r"(?:ano\s+de\s+constru[çc][ãa]o|constru[íi]d[oa]\s+em|built\s+in)\D{0,5}((?:18|19|20)\d\d)", re.I)
@@ -863,15 +875,17 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     under local prices and not expensive."""
     s = 0.0
     state = condition(item)
+    seen = " (from the photos)" if state != "unknown" and not has_term(
+        full, HEAVY_WORK + SOME_WORK + GOOD_CONDITION) else ""
     if state == "heavy":
         s -= 25
-        reasons.append("needs heavy work (ruin / full rebuild)")
+        reasons.append(f"needs heavy work (ruin / full rebuild){seen}")
     elif state == "some":
         s -= 12
-        reasons.append("needs some work")
+        reasons.append(f"needs some work{seen}")
     elif state == "good":
         s += 15
-        reasons.append("good condition")
+        reasons.append(f"good condition{seen}")
 
     # Sold together with cheap land in the same case: worth buying both.
     land = [lot for lot in (item.get("case_land") or [])

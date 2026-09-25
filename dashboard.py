@@ -871,6 +871,7 @@ EDITABLE = {
     "updates": ("auto",),
     "auto_requests": ("enabled", "min_score", "per_day"),
     "maps": ("google_key",),
+    "ai": ("anthropic_key", "photo_check", "photos_per_scan"),
     "backup": ("folder", "keep"),
 }
 
