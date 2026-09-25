@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file
 
-from common import COUNTRY_NAMES, FLAGS, price_to_pay, safe_url
+from common import COUNTRY_NAMES, FLAGS, make_session, price_to_pay, safe_url
 from locks import lock_holder
 from db import connect, hidden_category, load_listings, set_listing_status, source_health
 
@@ -912,6 +912,58 @@ def api_settings_save():
         return jsonify({"error": "unknown country code"}), 400
     update_config(changes)
     return jsonify({"ok": True})
+
+
+# ─── Accounts (accounts.py) ──────────────────────────────────────────
+# Kept apart from /api/settings: the password goes one way only (in, encrypted
+# with DPAPI), and the page only learns whether one is stored.
+
+@app.route("/api/accounts", methods=["GET"])
+def api_accounts_get():
+    import accounts
+    return jsonify(accounts.public_view(_config()))
+
+
+@app.route("/api/accounts", methods=["POST"])
+def api_accounts_save():
+    import accounts
+    from config import update_config
+    data = request.get_json(silent=True) or {}
+    site = data.get("site")
+    if site not in accounts.LOGINS:
+        return jsonify({"error": "unknown site"}), 400
+    if data.get("forget"):
+        update_config({"accounts": {site: {"username": "", "secret": ""}}})
+        return jsonify({"ok": True})
+    username = str(data.get("username") or "").strip()
+    if not username:
+        return jsonify({"error": "username required"}), 400
+    try:
+        update_config(accounts.account_changes(site, username, data.get("password") or None))
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/accounts/test", methods=["POST"])
+def api_accounts_test():
+    """Sign in once now, whatever the pause, and say how it went."""
+    import accounts
+    site = (request.get_json(silent=True) or {}).get("site")
+    if site not in accounts.LOGINS:
+        return jsonify({"error": "unknown site"}), 400
+    creds = accounts.credentials(_config(), site)
+    if not creds:
+        return jsonify({"ok": False, "message": "No username and password stored."})
+    try:
+        accounts.LOGINS[site]["login"](make_session(timeout=30), *creds)
+    except accounts.LoginNeedsCode:
+        return jsonify({"ok": False, "message": "The site asked for an SMS code: the app cannot sign in on its own."})
+    except accounts.LoginFailed as e:
+        return jsonify({"ok": False, "message": str(e)})
+    except Exception as e:  # noqa: BLE001: offline, site down
+        return jsonify({"ok": False, "message": f"Could not reach the site ({type(e).__name__})."})
+    return jsonify({"ok": True, "message": "Signed in."})
 
 
 def _task_installed() -> bool:

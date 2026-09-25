@@ -85,6 +85,12 @@
   <div class="form-grid"><div class="field"><label>Google Maps Embed API key</label><input id="maps_google_key" type="password" autocomplete="off"></div></div>
 </div>
 
+<div class="card" id="accounts">
+  <h2>Accounts</h2>
+  <p class="small muted" style="margin-bottom:10px">Some sites show their best sales only to account holders (the Portal das Finanças' seized goods). With your account here the scan signs in for you. The password is encrypted by Windows for your user on this PC and never shown again. If a site asks for an SMS code, shows a CAPTCHA or refuses the password, the app stops trying for a day and tells you on Telegram.</p>
+  <div id="accounts-list"></div>
+</div>
+
 <div class="card" id="ai">
   <h2>Photo check</h2>
   <p class="small muted" style="margin-bottom:10px">After each scan, a vision model looks at the photos of the best homes (a few each scan, each once) and says whether the building looks sound, needs work or is a ruin. It is used when the listing's text says nothing about the condition. <b>Open model (Ollama)</b>: free and private, runs on this PC — install Ollama from ollama.com and run <code>ollama pull qwen2.5vl:3b</code>; without a graphics card a photo takes about a minute. <b>Claude</b>: faster, needs an Anthropic API key (it stays on this PC; the AI check on Offers uses it too).</p>
@@ -158,7 +164,38 @@ const $ = id => document.getElementById(id);
 const setv = (id, v) => { const el = $(id); if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; };
 const num = id => $(id).value === "" ? null : Number($(id).value);
 
+async function loadAccounts() {
+  const list = await (await fetch("/api/accounts")).json();
+  $("accounts-list").innerHTML = Object.entries(list).map(([site, a]) => `
+    <div class="form-grid" style="margin-bottom:8px" data-site="${AS.esc(site)}">
+      <div class="field"><label>${AS.esc(a.name)} — user</label><input class="acc-user" type="text" autocomplete="off" value="${AS.esc(a.username)}"></div>
+      <div class="field"><label>Password ${a.has_password ? "(stored)" : ""}</label><input class="acc-pass" type="password" autocomplete="new-password" placeholder="${a.has_password ? "leave blank to keep it" : ""}"></div>
+      <div class="field"><label>&nbsp;</label><span><button class="btn acc-save" type="button">Save</button>
+        <button class="btn acc-test" type="button">Test sign-in</button>
+        ${a.has_password ? '<button class="btn acc-forget" type="button">Forget</button>' : ""}</span></div>
+      <p class="small faint" style="grid-column:1/-1">${AS.esc(a.note)}</p>
+    </div>`).join("");
+  document.querySelectorAll("#accounts-list [data-site]").forEach(row => {
+    const site = row.dataset.site;
+    row.querySelector(".acc-save").onclick = async () => {
+      await AS.api("/api/accounts", {method: "POST", body: {site, username: row.querySelector(".acc-user").value,
+                                                           password: row.querySelector(".acc-pass").value}});
+      AS.toast("Account saved.", "good"); loadAccounts();
+    };
+    row.querySelector(".acc-test").onclick = async () => {
+      const r = await AS.api("/api/accounts/test", {method: "POST", body: {site}});
+      AS.toast(r.message, r.ok ? "good" : "bad");
+    };
+    const forget = row.querySelector(".acc-forget");
+    if (forget) forget.onclick = async () => {
+      await AS.api("/api/accounts", {method: "POST", body: {site, forget: true}});
+      AS.toast("Account forgotten."); loadAccounts();
+    };
+  });
+}
+
 async function load() {
+  loadAccounts();
   const c = await (await fetch("/api/settings")).json();
   const f = c.filters || {}, p = c.proponente || {}, s = c.schedule || {}, t = c.telegram || {}, e = c.notifications || {};
   setv("max_price", c.max_price); setv("max_listings", c.max_listings ?? 100); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
