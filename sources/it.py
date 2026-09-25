@@ -6,7 +6,7 @@ import time
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_price, make_listing, make_session, parse_date_dmy, stable_id
+from common import LOG, find_area, find_price, make_listing, make_session, parse_date_dmy, parse_price, stable_id
 from db import upsert_listing
 from sources import register
 from sources._cards import CardSite, scrape_cards
@@ -110,15 +110,43 @@ GOBIDREAL = CardSite(
     params={"price_to": "{max_price}"}, max_pages=19,
     description="Gobid Real Italian judicial auction", tipo="immobile",
 )
-ASTALEGALE = CardSite(
-    source="astalegale", country="IT", base="https://www.astalegale.net", path="/aste-immobili/",
-    card_selector="div.asta, article, div[class*='asta'], div[class*='immobile']",
-    title_selector="h2,h3,.title,.asta-title",
-    location_selector=".location,.comune,.citta",
-    date_selector=".date,.data-asta",
-    params={"prezzoMax": "{max_price}"}, max_pages=19,
-    description="Astalegale.net judicial auction", tipo="immobile",
-)
+ASTALEGALE = "https://www.astalegale.net"
+ASTALEGALE_API = "https://api.astalegale.net/Search"
+ASTALEGALE_MAX_PAGES = 300          # 12 a page; about 2,000 homes under €30,000
+
+
+def _astalegale_date(text: str | None) -> str | None:
+    """"16/12/2026 - 10:00" → "2026-12-16T10:00:00"."""
+    m = re.match(r"\s*(\d{2})/(\d{2})/(\d{4})(?:\s*-\s*(\d{1,2}):(\d{2}))?", text or "")
+    if not m:
+        return None
+    d, mo, y, h, mi = m.groups()
+    return f"{y}-{mo}-{d}T{int(h or 0):02d}:{mi or '00'}:00"
+
+
+def astalegale_listing(lot: dict) -> dict | None:
+    """One result of api.astalegale.net/Search as a listing."""
+    lid = str(lot.get("id") or "").strip()
+    # Lots copied from the PVP arrive masked ("XXXXXXXXXX", no price) unless logged in.
+    if not lid or re.fullmatch(r"[X\s]*", lot.get("tipologia") or "X"):
+        return None
+    desc = re.sub(r"\s+", " ", lot.get("descrizione") or "").strip()
+    pos = lot.get("posizione") or {}
+    raw = {k: lot.get(k) for k in ("proceduraNumeroAnno", "tribunale", "tipoProceduraEsteso", "modalitaVendita",
+                                   "codiceLotto", "offertaMinima", "dataAsta") if lot.get(k)}
+    if pos.get("lat") and pos.get("lng"):
+        raw.update(lat=pos["lat"], lon=pos["lng"])
+    return make_listing(
+        "astalegale", lid, "IT",
+        title=f"{lot.get('tipologia') or 'Immobile'} · {lot.get('titolo') or ''} · {lot.get('comune') or ''}"[:200],
+        description=desc[:3000] or None, tipo=(lot.get("tipologia") or "immobile").lower(),
+        area_m2=find_area(desc), price=lot.get("prezzoNum") or parse_price(lot.get("prezzo") or ""),
+        min_price=parse_price(lot.get("offertaMinima") or ""),
+        district=lot.get("provincia"), concelho=lot.get("comune"),
+        url=f"{ASTALEGALE}/Aste/Detail/{lot.get('friendlyId') or lid}",
+        image_url=lot.get("urlImmaginePrincipale"), date_end=_astalegale_date(lot.get("dataAsta")),
+        raw_json=raw,
+    )
 
 
 @register("gobidreal", "IT")
@@ -129,5 +157,28 @@ def scrape_gobidreal(db, max_price: float = 100000, **_):
 
 @register("astalegale", "IT")
 def scrape_astalegale(db, max_price: float = 100000, **_):
-    """astalegale.net — Italian judicial auction aggregator."""
-    return scrape_cards(db, ASTALEGALE, max_price)
+    """astalegale.net — Italian judicial auction aggregator (its search API:
+    homes up to the budget, 12 a page)."""
+    session = make_session(timeout=30)
+    total, seen = 0, set()
+    for page in range(1, ASTALEGALE_MAX_PAGES + 1):
+        resp = session.post(ASTALEGALE_API, json={"categories": ["residenziali"], "prezzoA": int(max_price),
+                                                  "page": page})
+        resp.raise_for_status()
+        results = (resp.json() or {}).get("results") or {}
+        lots = results.get("currentPage") or []
+        new = 0
+        for lot in lots:
+            row = astalegale_listing(lot)
+            if not row or row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            upsert_listing(db, row)
+            total += 1
+            new += 1
+        db.commit()
+        if not new or page * (results.get("pageSize") or 12) >= (results.get("totalResults") or 0):
+            break
+        time.sleep(0.3)
+    LOG.info(f"Astalegale: {total} listings")
+    return total
