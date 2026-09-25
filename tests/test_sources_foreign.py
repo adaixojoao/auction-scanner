@@ -18,14 +18,16 @@ def _asta_lot(lid, price, tipologia="Abitazione di tipo civile", titolo="Via Rom
 
 
 def test_astalegale_search_api_pages_and_masked_lots(db, fake_http):
-    pages = {1: [_asta_lot("B1", 26880), _asta_lot("P2", None, tipologia="XXXXXXXXXX", titolo="XXX")],
-             2: [_asta_lot("B3", 9300, comune="Cambiago")]}
+    masked = _asta_lot("P2", None, tipologia="XXXXXXXXXX", titolo="XXX")
+    pages = {1: [_asta_lot("B1", 26880), masked],
+             2: [masked],                                   # a page of masked copies only is not the end
+             3: [_asta_lot("B3", 9300, comune="Cambiago")]}
 
     def handler(method, url, kw):
         assert url == "https://api.astalegale.net/Search" and kw["json"]["prezzoA"] == 30000
         page = kw["json"]["page"]
         return FakeResponse(json_data={"results": {"currentPage": pages.get(page, []), "pageSize": 2,
-                                                   "totalResults": 3, "pageIndex": page}})
+                                                   "totalResults": 6, "pageIndex": page}})
     fake_http(handler)
     assert REGISTRY["astalegale"].func(db, max_price=30000) == 2        # the masked PVP copy is left out
     rows = {r["external_id"]: r for r in db.execute("SELECT * FROM listings WHERE source='astalegale'")}

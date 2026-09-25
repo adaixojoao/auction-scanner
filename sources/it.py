@@ -177,7 +177,6 @@ def scrape_astalegale(db, max_price: float = 100000, **_):
         resp.raise_for_status()
         results = (resp.json() or {}).get("results") or {}
         lots = results.get("currentPage") or []
-        new = 0
         for lot in lots:
             row = astalegale_listing(lot)
             if not row or row["id"] in seen:
@@ -185,9 +184,9 @@ def scrape_astalegale(db, max_price: float = 100000, **_):
             seen.add(row["id"])
             upsert_listing(db, row)
             total += 1
-            new += 1
         db.commit()
-        if not new or page * (results.get("pageSize") or 12) >= (results.get("totalResults") or 0):
+        # A page of masked PVP copies only is not the end: stop when the pages run out.
+        if not lots or page * (results.get("pageSize") or 12) >= (results.get("totalResults") or 0):
             break
         time.sleep(0.3)
     LOG.info(f"Astalegale: {total} listings")
