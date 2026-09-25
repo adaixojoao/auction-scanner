@@ -91,3 +91,69 @@ def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
 def test_bot_walled_sources_are_out_of_the_default_scan():
     for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece"):
         assert REGISTRY[name].default is False, name
+
+
+# ─── The Netherlands ────────────────────────────────────────────────
+
+OV_DETAIL = """<html><body><h1>Kerkstraat 18, OUD GASTEL</h1><p>Kerkstraat 18, OUD GASTEL woonpand met ondergrond, erf,
+  tuin en verdere aanhorigheden, Kerkstraat 18 te 4751 HN Oud Gastel, perceel groot 305 m.) Voor een indicatie van de
+  indeling wordt verwezen naar de schetsen.</p><p>Veiling 8 oktober 2026 vanaf 13:30 uur Internet-only Live</p>
+  <p>Attentie pand is verhuurd</p><div>Kenmerken Type registergoed Woonhuis Gebruik Verhuurd Soort eigendom Vol
+  eigendom Bouwjaar 1860 Oppervlakte wonen 228 m 2 Oppervlakte perceel 305 m 2 Inhoud 1000 m 3</div></body></html>"""
+
+
+def test_openbareverkoop_list_and_each_lots_page_once(db, fake_http):
+    lot = {"id": 4490, "kavelNaam": "Kerkstraat 18, OUD GASTEL", "woningtype": "Woonhuis", "url": "/kavel/4490/k",
+           "lat": 51.58, "lng": 4.45, "zittingdatum": "/Date(1791459000000)/", "inzet": "", "afslag": "",
+           "veilingwijze": "Internet-only Live", "image": "/img/4490.jpg"}
+    pages = []
+
+    def handler(method, url, kw):
+        pages.append(url)
+        if url.endswith("/kavels/searchresults"):
+            return FakeResponse(json_data={"results": [{"objectenPerRegio": [{"objects": [lot]}]}]})
+        return FakeResponse(OV_DETAIL if url.endswith("/kavel/4490/k") else "")
+    fake_http(handler)
+    assert REGISTRY["netherlands"].func(db, max_price=30000) == 1
+    row = db.execute("SELECT * FROM listings WHERE id='netherlands:4490'").fetchone()
+    assert row["concelho"] == "Oud Gastel" and row["area_m2"] == 228 and row["date_end"] == "2026-10-08T13:30:00"
+    assert row["description"].startswith("woonpand met ondergrond") and "Gebruik: Verhuurd" in row["description"]
+    raw = json.loads(row["raw_json"])
+    assert raw["lat"] == 51.58 and raw["ano_construcao"] == "1860"
+    from scoring import score_detail
+    assert "rejected: occupied" in score_detail(dict(row))[1]           # "verhuurd" is let
+    REGISTRY["netherlands"].func(db, max_price=30000)
+    assert sum(u.endswith("/kavel/4490/k") for u in pages) == 1          # the page once
+
+
+VGV_PAGE = """<html><script id="__NEXT_DATA__" type="application/json">{"props": {"pageProps": {"auctions": [
+  {"id": 2314, "name": "Haarlem, Kijkduinstraat 43", "plaats": "Haarlem", "provincie": "Noord-Holland",
+   "land": "nl", "status": "open", "object_type": "Tussenwoning", "startbod": 1000000,
+   "oppervlakte_object": "BAG: 114", "oppervlakte_perceel": "92", "bouwjaar": "BAG: 1940",
+   "gebruikssituatie": "huurbeding_is_niet_ingeroepen", "eindtijd": "2026-10-01T07:35:00+00:00",
+   "thumb": "https://cdn.example/1.webp", "latitude": 52.37, "longitude": 4.61, "type_verkoop": "executieveiling",
+   "kavelbeschrijving": "Het woonhuis met ondergrond en verder toebehoren te Haarlem"},
+  {"id": 2646, "name": "31 appartementen Markneukirchen", "plaats": "Markneukirchen", "land": "de", "status": "open"},
+  {"id": 2700, "name": "Iets in Roemenië", "land": "ro", "status": "open"}]}}}</script></html>"""
+
+
+def test_veilingnotaris_and_vastgoedveiling_are_one_platform(db, fake_http):
+    vn_list = ('<a href="https://veilingnotaris.nl/veilingen/2314/haarlem_kijkduinstraat_43/">Tussenwoning</a>'
+               '<a href="https://veilingnotaris.nl/veilingen/2580/kerkrade_schifferheidestraat_1_3/">Woonhuis</a>')
+
+    def handler(method, url, kw):
+        if url == "https://vastgoedveiling.nl/veilingen":
+            return FakeResponse(VGV_PAGE)
+        if url == "https://veilingnotaris.nl/veilingen/":
+            return FakeResponse(vn_list if not kw.get("params") else "")
+        return FakeResponse("<p>Over het object Type Woonhuis Gebruikssituatie Leeg Bezichtigingen</p>")
+    fake_http(handler)
+    assert REGISTRY["veilingnotaris"].func(db, max_price=30000) == 3       # 2314 once, 2580, the German one
+    rows = {r["id"]: r for r in db.execute("SELECT * FROM listings")}
+    assert set(rows) == {"veilingnotaris:2314", "veilingnotaris:2580", "veilingnotaris:2646"}
+    haarlem = rows["veilingnotaris:2314"]
+    assert haarlem["area_m2"] == 114 and haarlem["price"] is None          # "startbod" is the Dutch-auction start
+    assert haarlem["url"] == "https://vastgoedveiling.nl/veiling/2314/haarlem-kijkduinstraat-43"
+    assert haarlem["date_end"] == "2026-10-01T07:35:00" and "Bouwjaar 1940" in haarlem["description"]
+    assert rows["veilingnotaris:2646"]["country"] == "DE"
+    assert rows["veilingnotaris:2580"]["title"] == "Kerkrade, Schifferheidestraat 1 3 (Woonhuis)"
