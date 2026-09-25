@@ -80,6 +80,7 @@ _FACTS = [
     ("Bathrooms", lambda it, r: _first(r, "prop_wc", "field_nr_wcs")),
     ("Energy rating", lambda it, r: _energy(_first(r, "prop_energy_rating", "field_cls"))),
     ("Address", lambda it, r: _first(r, "morada", "field_morada_completa")),
+    ("Distance to town", lambda it, r: (it.get("town_distance") or {}).get("text")),
     ("Place", lambda it, r: ", ".join(p for p in (it.get("freguesia"), it.get("concelho"), it.get("district")) if p) or None),
     ("Occupancy", lambda it, r: _first(r, "situacion_posesoria", "occupation")),
     ("Visits", lambda it, r: _first(r, "visitable", "visite")),

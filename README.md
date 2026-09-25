@@ -59,7 +59,7 @@ another window.
 
 | Page | What it is for |
 |---|---|
-| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale. Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
+| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
@@ -153,6 +153,29 @@ listing when it is:
 A shortlisted listing ignores 5 and 6: you picked it on purpose. *Listings →
 Show → Hidden* shows what is hidden and why.
 
+## What it really costs
+
+A €20 000 house is not a €20 000 house. Under **ⓘ → What it really costs**
+(and in the Telegram alert, and in the AI check) the scanner adds up what you
+pay on top of the price:
+
+- **Portugal**: IMT at the published brackets — 1% for a dwelling up to
+  €104 261, 5% for a prédio rústico, 6.5% for anything else — plus imposto do
+  selo (0.8%) and the land registry (€250). A bank or private sale also pays for
+  the escritura; a court sale has none.
+- **Other countries**: one typical transfer tax and notary/registry figure per
+  country. Spain, Germany and Belgium set their rates by region, so those are a
+  ballpark.
+- **The work**, for a home whose floor area is known: €0–150/m² when the listing
+  says it is in good condition, €300–600/m² when it says it needs work,
+  €700–1 200/m² for a ruin, €200–500/m² when it says nothing. It is shown as a
+  range because it is a guess.
+
+All of it is an estimate. The Portuguese IMT is charged on the higher of the
+price and the taxable value (VPT), which the listings do not publish, and the
+brackets change with each Orçamento do Estado — they live in `costs.py`
+(`IMT_YEAR`), one table to update.
+
 ## Scoring (0–100)
 
 The score says how well a listing fits the goal: **homes and plots at
@@ -179,15 +202,26 @@ than €20,001 instead of jumping at a step.
 
 - **Rejected (hidden, "rejected: …"):** unfinished buildings, properties not in the land register, occupied ones (any language), and land sold only together with another lot.
 - **Skip (score 0):** fractional shares (`1/2`, `29/84`, `4986/100000`, *metade*, quota-parte, avos…), usufruct, and timeshares (*habitação periódica*, *multipropriedade*, *semana 37 de cada año*, *aprovechamiento por turno*, *multipropriété*…).
-- **Homes:** up for good condition (*bom estado*, *renovado*…), a great
-  location (*centro*, near the beach…) or a town we have local prices for,
-  size up to about 150 m², and the discount to local prices per m². Down for
+- **Homes:** up for good condition (*bom estado*, *renovado*…), **how far it
+  is from town** (below), size up to about 150 m², and the discount to local
+  prices per m². Down for
   needing some work, and a lot for an isolated location or heavy work
   (*ruína*, *para recuperar*…). Local prices in Portugal are the median price
   per m² of homes sold in each municipality (INE), from
   `data/pt_home_prices.csv`; refresh it with `python scripts/update_prices.py`
   on a PC that can reach ine.pt. Elsewhere, and for any municipality the file
   lacks, a small table of city prices is used. Each reason says which.
+- **How far a house is from town.** "Good location" used to be guessed from
+  words the listing often does not contain. When the property has a position on
+  the map (its own coordinates, or the address found on OpenStreetMap) and the
+  middle of its municipality's town has been looked up, the score uses the real
+  distance: in the town is worth about as much as the old *centro* guess, 10 km
+  out costs a little, and past 20 km the house is held down like an isolated one
+  — a house nobody can reach services from is not what you are looking for. The
+  panel shows it as *Distance to town*. A position no better than
+  "municipality" is ignored (that pin **is** the town), and so is any distance
+  over 40 km, which means the wrong town was found. Without a distance the old
+  word-matching still applies.
 - **Rural plots:** size as a multiple of the minimum (1 ha by default; about
   5× scores as large), next to water, and €/m² against the maximum (€0.50/m²
   by default). Both limits are in **Settings → What you are looking for**.
@@ -254,6 +288,12 @@ Set up in **Settings**:
   listings you have not decided on yet. While the app is open a tap works in
   seconds; when it is closed, the background task handles it on its next round
   (every 30 minutes). Only your own chat (the Chat ID in Settings) can use them.
+- **Price cuts** — when a listing's *valor base* falls by 5% or more between
+  scans, Telegram says so with the old and the new price: <s>€40,000</s> →
+  **€32,000**. Anything on your shortlist counts whatever it scores; everything
+  else from score 60 up. Both numbers are in Settings → Telegram alerts. A bid
+  going up is an auction working, not a discount, so it is not a cut. Each cut
+  is sent once, and a second, deeper cut later is sent again.
 - **Information requests, prepared for you** — after a scan, for strong sales
   (score 75+, at least 5 days before the end) where the recipient's e-mail is
   known (the agente de execução on e-leilões, the court on BOE, the seller's
@@ -266,12 +306,28 @@ Set up in **Settings**:
 - **E-mail** — the same new-listing alerts by SMTP. The same account sends letters from the Offers page.
 
 Each listing is alerted once per channel; a failed send is retried next time.
+A price cut is the one thing that can be sent about the same listing twice,
+because a second cut is news again.
+
+## Backup
+
+Everything you have decided — the shortlist, the offers, the letters, the whole
+history — is in `auctions.db`, on this PC only. **Settings → Backup** takes a
+folder that is *not* on this PC (a OneDrive or Dropbox folder, another drive, a
+memory stick) and copies the database there **once a day**, keeping the last 14
+copies. **Back up now** does it immediately.
+
+The copy is made with SQLite's own backup, so it is a whole, working database
+even if the app is busy. To go back to one: close the app, then rename the copy
+to `auctions.db` in the app's folder. The app also keeps a few copies in
+`backups/` before each update — those are on the same disk, so they do not help
+if the PC does.
 
 ## Files
 
 | | |
 |---|---|
-| `auctions.db` | Everything found, your decisions and your offers. Back it up. |
+| `auctions.db` | Everything found, your decisions and your offers. Settings → Backup copies it off this PC. |
 | `config.json` | Your settings (written by the Settings page). |
 | `reports/` | The latest report (`.md`, `.docx`, `.pdf`). |
 | `app.log`, `scheduler.log` | What the app and the background task did. |
@@ -304,8 +360,10 @@ updater.py      updates from GitHub
 pipeline.py     the one scan routine  sources/       one module per country + registry
 db.py           schema, load_listings common.py      HTTP, parsing, matching
 scoring.py      the score             letters.py     the one letter builder (+ PDF)
+costs.py        taxes, fees, work     prices.py      local €/m² (data/pt_home_prices.csv)
 cartas.py       Citius batch letters  report.py      report files
 analysis.py     Claude calls          ics_export.py  calendar files
+geo.py          map positions, towns  listing_info.py  the ⓘ panel
 scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 

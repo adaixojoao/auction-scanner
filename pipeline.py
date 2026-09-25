@@ -96,8 +96,9 @@ def send_alerts(db, cfg: dict):
         from notifications import send_alerts as send_email_alerts
         send_email_alerts(db, notify_cfg, max_price=cfg.get("max_price", 50000),
                           filters=cfg.get("filters"))
-    from telegram_alert import alert_new_listings
+    from telegram_alert import alert_new_listings, alert_price_cuts
     alert_new_listings(db, cfg)
+    alert_price_cuts(db, cfg)
 
 
 def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
@@ -158,7 +159,9 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     from db import load_listings
                     best = sorted(load_listings(db, filters=cfg.get("filters")),
                                   key=lambda it: -it.get("rank", it["score"]))
-                    geo.geocode_pending(db, make_session(), best)
+                    session = make_session()
+                    geo.locate_towns(db, session, best)
+                    geo.geocode_pending(db, session, best)
                 except Exception:  # noqa: BLE001 — a map position must never fail the scan
                     LOG.exception("Locating listings failed")
             finally:

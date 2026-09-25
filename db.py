@@ -29,7 +29,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -230,8 +230,24 @@ def _migrate_v7(db: sqlite3.Connection):
     """)
 
 
+def _migrate_v8(db: sqlite3.Connection):
+    """Where each municipality's main town is (geo.py), looked up once on
+    OpenStreetMap and kept: how far a property is from town is the honest
+    version of "good location". lat/lon NULL means "looked for, not found"."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS places (
+            key        TEXT PRIMARY KEY,   -- country:municipality, accent-free
+            country    TEXT NOT NULL,
+            name       TEXT NOT NULL,
+            lat        REAL,
+            lon        REAL,
+            checked_at TEXT NOT NULL
+        );
+    """)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
-               6: _migrate_v6, 7: _migrate_v7}
+               6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8}
 
 
 def init_db(db: sqlite3.Connection):
@@ -362,6 +378,17 @@ def not_yet_alerted(db: sqlite3.Connection, channel: str, ids: list[str]) -> set
             f"SELECT listing_id FROM alert_log WHERE channel = ? "
             f"AND listing_id IN ({','.join('?' * len(chunk))})", (channel, *chunk)))
     return set(ids) - sent
+
+
+def alerted_at(db: sqlite3.Connection, channel: str) -> dict[str, datetime]:
+    """When each listing was last alerted on this channel. For alerts that can
+    happen again (a second price cut), where "already told" is not enough."""
+    out = {}
+    for lid, sent_at in db.execute("SELECT listing_id, sent_at FROM alert_log WHERE channel = ?", (channel,)):
+        when = parse_dt(sent_at)
+        if when:
+            out[lid] = when
+    return out
 
 
 def mark_alerted(db: sqlite3.Connection, channel: str, ids):
@@ -556,7 +583,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """Every listing a view should consider, scored, with hidden ones removed.
 
     Each item gains: score, reasons, category, hidden_reason (None if visible),
-    price_drop_pct, earlier_round (rounds.py), is_recent, status
+    price_drop_pct, earlier_round (rounds.py), town_distance (geo.py), is_recent, status
     (shortlisted/dismissed/None) and offer_outcome (latest carta_log outcome, or None). `where`/`params` are extra SQL conditions on the
     listings table for cheap pre-filtering (country, source, search...).
 
@@ -565,6 +592,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     filters.min_score. A shortlisted listing ignores the last two: the user
     picked it on purpose.
     """
+    import geo
     import rounds
     from scoring import categorize, property_kind, score_detail  # scoring imports common, not db
 
@@ -579,6 +607,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     statuses = listing_statuses(db)
     offers = latest_offers(db)
     cases = rounds.index(db)       # all listings, whatever `where` picks: rounds span sites and dates
+    towns = geo.town_index(db)     # where each municipality's town is, for "X km from town"
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
 
     items = []
@@ -616,6 +645,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             item["price_drop_pct"] = None
         item["earlier_round"] = rounds.earlier_round(item, cases, now)
         item["case_land"] = rounds.land_in_case(item, cases, now, property_kind)
+        item["town_distance"] = geo.distance_to_town(item, towns) if towns else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)
         sc = max(0.0, min(100.0, rank))

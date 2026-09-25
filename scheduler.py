@@ -48,11 +48,12 @@ LOG = logging.getLogger("scheduler")
 DEFAULT_SCHEDULE = {
     "pt_every_hours": 2,
     "eu_every_hours": 6,
+    "backup_every_hours": 24,
     "check_times": ["08:00", "20:00"],
     "weekly_report": "mon 08:00",
 }
 _WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-JOBS = ("pt", "eu", "morning", "report")
+JOBS = ("pt", "eu", "backup", "morning", "report")
 
 
 def setup_logging():
@@ -86,7 +87,8 @@ def due_jobs(now: datetime, last_runs: dict, schedule: dict | None = None) -> li
     sched = {**DEFAULT_SCHEDULE, **(schedule or {})}
     due = []
 
-    for job, key in (("pt", "pt_every_hours"), ("eu", "eu_every_hours")):
+    for job, key in (("pt", "pt_every_hours"), ("eu", "eu_every_hours"),
+                     ("backup", "backup_every_hours")):
         every = sched.get(key)
         if not every:
             continue
@@ -150,6 +152,24 @@ def run_morning_checks():
         db.close()
 
 
+def run_backup():
+    """Copy auctions.db to the folder in Settings (a OneDrive folder, another
+    drive): the one copy that survives this PC. Nothing to do without one."""
+    from config import load_config
+    import updater
+    cfg = (load_config().get("backup") or {})
+    folder = (cfg.get("folder") or "").strip()
+    if not folder:
+        return
+    LOG.info("=== Backup ===")
+    try:
+        made = updater.backup_database(folder=folder, keep=int(cfg.get("keep") or 14))
+    except OSError as e:
+        LOG.warning(f"Backup to {folder} failed: {e}")   # the drive may be unplugged
+        return
+    LOG.info(f"Database copied to {made}" if made else "No database to copy yet")
+
+
 def weekly_stats(db, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     week_ago = (now - timedelta(days=7)).isoformat()
@@ -186,6 +206,7 @@ def run_weekly_report():
 JOB_FUNCS = {
     "pt": run_pt_scrape,
     "eu": run_eu_scrape,
+    "backup": run_backup,
     "morning": run_morning_checks,
     "report": run_weekly_report,
 }

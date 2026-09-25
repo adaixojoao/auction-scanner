@@ -20,7 +20,7 @@ import json
 import re
 from datetime import datetime, timedelta
 
-from common import effective_end, normalize, parse_dt
+from common import effective_end, normalize, parse_dt, price_to_pay as pay
 
 AREA_TOLERANCE = 0.15
 TITLE_OVERLAP = 0.6
@@ -68,10 +68,6 @@ def same_property(a: dict, b: dict) -> bool:
         return abs(area_a - area_b) <= AREA_TOLERANCE * max(area_a, area_b)
     wa, wb = _words(a.get("title") or ""), _words(b.get("title") or "")
     return bool(wa and wb) and len(wa & wb) / min(len(wa), len(wb)) >= TITLE_OVERLAP
-
-
-def pay(item: dict) -> float:
-    return item.get("current_bid") or item.get("min_price") or item.get("price") or 0
 
 
 def land_in_case(item: dict, idx: dict[str, list[dict]], now: datetime, kind_of) -> list[dict]:

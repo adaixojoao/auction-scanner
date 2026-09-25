@@ -65,6 +65,8 @@ DEFAULTS = {
         "chat_id": "",
         "min_score": 75,          # new-listing alerts
         "deadline_min_score": 60, # "ending soon, no offer sent" alerts
+        "cut_min_pct": 5,         # "the price just dropped" alerts: how big a cut
+        "cut_min_score": 60,      # …and from what score (your shortlist always counts)
         "source_alerts": True,    # tell me when a site stops working (and when it is back)
     },
 
@@ -83,12 +85,20 @@ DEFAULTS = {
         "google_key": "",
     },
 
+    # A copy of auctions.db somewhere that survives this PC: a OneDrive or
+    # Dropbox folder, or another drive. Empty folder = no copy is made.
+    "backup": {
+        "folder": "",             # e.g. C:\\Users\\you\\OneDrive\\Auction Scanner
+        "keep": 14,               # copies kept there; the oldest are deleted
+    },
+
     # Scheduling (scheduler.py). while_app_open: scan on this timetable while
     # the app window is open, without the Windows background task.
     "schedule": {
         "while_app_open": True,
         "pt_every_hours": 2,
         "eu_every_hours": 6,
+        "backup_every_hours": 24,
         "check_times": ["08:00", "20:00"],
         "weekly_report": "mon 08:00",
     },

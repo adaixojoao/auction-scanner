@@ -13,7 +13,8 @@ import json
 import re
 from datetime import datetime
 
-from common import days_left, find_area, find_terms, has_term, normalize, term_regex, utcnow
+from common import (days_left, find_area, find_terms, has_term, normalize,
+                    price_to_pay as _pay, term_regex, utcnow)
 import prices
 from prices import place_key as _place_key
 
@@ -491,11 +492,6 @@ def _occupation(item: dict) -> str | None:
         return None
 
 
-def _pay(item: dict) -> float:
-    """What you would realistically pay: the current bid, else the minimum, else the price."""
-    return item.get("current_bid") or item.get("min_price") or item.get("price") or 0
-
-
 def _ha(m2: float) -> str:
     return f"{m2 / 10000:.1f} ha" if m2 >= 10000 else f"{m2:,.0f} m²".replace(",", " ")
 
@@ -541,6 +537,9 @@ RURAL_SIZE_POINTS = [(0.5, -30), (1.0, 8), (2.0, 13), (5.0, 25), (10.0, 28)]
 RURAL_EUR_M2_POINTS = [(0.2, 18), (0.5, 15), (1.0, 8), (1.5, -10), (3.0, -25)]
 # A very low minimum bid (€) on a sale with a real base value.
 LOW_MIN_BID_POINTS = [(100, 10), (500, 10), (1500, 0)]
+# Kilometres from the middle of the property's own town (geo.py). Measured, so
+# it beats guessing "good location" from words the description may not contain.
+TOWN_DISTANCE_POINTS = [(0.3, 15), (1, 13), (3, 8), (6, 3), (10, -2), (20, -14), (35, -25)]
 
 # What the owner does not want, as the highest score it can reach. They slide
 # too: a 38 m² home is held down a little less than a 30 m² one.
@@ -548,6 +547,8 @@ SMALL_HOME_CAP = [(25, 35), (40, 45), (75, 130), (100, 200)]   # by m²
 EXPENSIVE_HOME_CAP = [(50000, 200), (60000, 100), (75000, 55), (90000, 40)]   # by €
 SMALL_URBAN_PLOT_CAP = [(60, 35), (150, 45), (250, 200)]   # by m²
 SMALL_RURAL_PLOT_CAP = [(0.3, 30), (1.0, 45), (1.3, 200)]  # by multiple of the minimum
+FAR_FROM_TOWN_CAP = [(12, 200), (20, 60), (30, 45), (40, 40)]  # by km from town: a house
+                                                               # far from everything is isolated
 
 
 def score_detail(item: dict, now: datetime | None = None,
@@ -771,8 +772,16 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         reasons.append("isolated location")
     else:
         spot = find_terms(full, GOOD_LOCATION, negations=False)
+        near = item.get("town_distance")
         town = _known_town(item)
-        if spot:
+        if near:
+            s += curve(near["km"], TOWN_DISTANCE_POINTS)
+            caps.append(curve(near["km"], FAR_FROM_TOWN_CAP))
+            reasons.append(near["text"])
+            if spot:
+                s += 5
+                reasons.append(f"good location ({spot[0]})")
+        elif spot:
             s += 15
             reasons.append(f"good location ({spot[0]})")
         elif town:

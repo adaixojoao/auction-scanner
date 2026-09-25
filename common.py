@@ -144,6 +144,13 @@ def to_number(value) -> float | None:
     return parse_price(value)
 
 
+def price_to_pay(item: dict) -> float:
+    """What you would realistically pay for a listing: the current bid, else the
+    minimum accepted, else the base value. One definition, used by the scorer,
+    the round matcher and the cost estimate."""
+    return item.get("current_bid") or item.get("min_price") or item.get("price") or 0
+
+
 def make_listing(source: str, external_id, country: str = "PT", *,
                  id_prefix: str | None = None, base_url: str | None = None,
                  **fields) -> dict:

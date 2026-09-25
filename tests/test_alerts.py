@@ -158,3 +158,61 @@ def test_source_alarm_only_for_this_scan_and_can_be_off(db, sent, monkeypatch):
     monkeypatch.setattr(telegram_alert, "send_telegram", lambda t, c, m, **k: sent.append(m) or True)
     assert telegram_alert.alert_source_failures(db, CFG, ["haya"]) == 1    # …so it is retried
     assert "has not worked yet" in sent[-1]
+
+
+# ─── Price cuts ──────────────────────────────────────────────────────
+
+def house(price, **over):
+    return dict(external_id="p1", title="Moradia T3", tipo="moradia", area_m2=110, price=price, **over)
+
+
+def test_a_price_cut_is_alerted_once_and_again_when_it_falls_further(db, add, sent):
+    add(**house(40000))
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert sent == []                      # one price so far: nothing was cut
+
+    add(**house(32000))
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert len(sent) == 1 and "Price cut" in sent[0] and "20% off" in sent[0]
+    assert "€40,000" in sent[0] and "€32,000" in sent[0]
+
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert len(sent) == 1                  # the same cut is never repeated
+
+    add(**house(20000))
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert len(sent) == 2 and "€20,000" in sent[1]
+
+
+def test_a_rising_bid_is_not_a_price_cut(db, add, sent):
+    add(**house(40000))
+    add(**house(40000, current_bid=45000))
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert sent == []
+
+
+def test_a_cut_too_small_to_matter_is_not_alerted(db, add, sent):
+    add(**house(40000))
+    add(**house(39000))                    # 2.5%
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert sent == []
+
+
+def test_the_shortlist_counts_whatever_it_scores(db, add, sent):
+    from db import set_listing_status
+    shop = dict(source="eleiloes", external_id="s2", title="Loja", tipo="loja/escritorio")
+    add(**shop, price=40000)
+    add(**shop, price=20000)
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert sent == []                      # a shop scores under the threshold
+
+    set_listing_status(db, "eleiloes:s2", "shortlisted")
+    telegram_alert.alert_price_cuts(db, CFG)
+    assert len(sent) == 1 and "on your shortlist" in sent[0]
+
+
+def test_price_cuts_are_not_sent_without_telegram(db, add, sent):
+    add(**house(40000))
+    add(**house(20000))
+    telegram_alert.alert_price_cuts(db, {**CFG, "telegram": {"enabled": False}})
+    assert sent == []

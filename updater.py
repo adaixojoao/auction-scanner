@@ -116,12 +116,19 @@ def status(root: str = HERE, *, fetch: bool = True) -> dict:
     return out
 
 
-def backup_database(root: str = HERE) -> str | None:
-    """Copy auctions.db to backups/ (keeping the last few). Returns the copy's path."""
+def backup_database(root: str = HERE, folder: str | None = None,
+                    keep: int = KEEP_BACKUPS) -> str | None:
+    """Copy auctions.db to `folder` (backups/ next to the app by default),
+    keeping the last `keep` copies. Returns the copy's path.
+
+    The copy is made with SQLite's own backup, so it is a consistent database
+    even while the app has it open, and it can simply be renamed back over
+    auctions.db. A folder somewhere else (OneDrive, another drive) is what
+    survives the PC dying; backups/ does not."""
     db_path = os.environ.get("AUCTION_SCANNER_DB") or os.path.join(root, "auctions.db")
     if not os.path.exists(db_path):
         return None
-    folder = os.path.join(root, "backups")
+    folder = os.path.abspath(os.path.expanduser(folder or os.path.join(root, "backups")))
     os.makedirs(folder, exist_ok=True)
     target = os.path.join(folder, f"auctions-{datetime.now():%Y%m%d-%H%M%S}.db")
     import sqlite3
@@ -131,7 +138,7 @@ def backup_database(root: str = HERE) -> str | None:
     finally:
         dst.close()
         src.close()
-    for old in sorted(glob.glob(os.path.join(folder, "auctions-*.db")))[:-KEEP_BACKUPS]:
+    for old in sorted(glob.glob(os.path.join(folder, "auctions-*.db")))[:-keep] if keep else []:
         os.remove(old)
     return target
 

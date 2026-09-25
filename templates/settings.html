@@ -72,7 +72,10 @@
     <div class="field"><label>Chat ID</label><input id="tg_chat_id"></div>
     <div class="field"><label>Alert new listings scoring at least</label><input type="number" id="tg_min_score" min="0" max="100"></div>
     <div class="field"><label>Deadline reminders scoring at least</label><input type="number" id="tg_deadline_min_score" min="0" max="100"></div>
+    <div class="field"><label>Price-cut alerts from (% off)</label><input type="number" id="tg_cut_min_pct" min="1" max="90"></div>
+    <div class="field"><label>Price cuts on listings scoring at least</label><input type="number" id="tg_cut_min_score" min="0" max="100"></div>
   </div>
+  <p class="help" style="margin-top:6px">A cut on something you shortlisted is always sent, whatever it scores.</p>
   <label class="check" style="margin-top:10px"><input type="checkbox" id="tg_source_alerts"> Tell me when a site stops working, and when it works again</label>
 </div>
 
@@ -104,6 +107,17 @@
     <div class="field"><label>Send alerts to (comma-separated)</label><input id="em_to_emails"></div>
     <div class="field"><label>Minimum score</label><input type="number" id="em_min_score" min="0" max="100"></div>
   </div>
+</div>
+
+<div class="card" id="backup">
+  <h2>Backup</h2>
+  <p class="small muted" style="margin-bottom:10px">Everything you have decided — the shortlist, the offers, the letters, the whole history — is in <code>auctions.db</code> on this PC. Give the app a folder that is <b>not</b> on this PC (a OneDrive or Dropbox folder, another drive, a memory stick) and it copies the database there once a day, keeping the last few. To go back to a copy: close the app, and rename the copy to <code>auctions.db</code> in the app's folder.</p>
+  <div class="form-grid">
+    <div class="field"><label>Folder (empty: no copies are made)</label><input id="bk_folder" placeholder="C:\Users\you\OneDrive\Auction Scanner"></div>
+    <div class="field"><label>Copies to keep there</label><input type="number" id="bk_keep" min="1" max="100"></div>
+  </div>
+  <div id="bk_state" class="small" style="margin-top:12px"></div>
+  <div class="row" style="margin-top:10px"><button class="btn" id="bk_now" onclick="backupNow()">Back up now</button></div>
 </div>
 
 <div class="card" id="updates">
@@ -142,6 +156,7 @@ async function load() {
   ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
   setv("while_app_open", s.while_app_open); setv("pt_every_hours", s.pt_every_hours); setv("eu_every_hours", s.eu_every_hours);
   ["enabled", "token", "chat_id", "min_score", "deadline_min_score"].forEach(k => setv("tg_" + k, t[k]));
+  setv("tg_cut_min_pct", t.cut_min_pct ?? 5); setv("tg_cut_min_score", t.cut_min_score ?? 60);
   $("tg_source_alerts").checked = t.source_alerts !== false;
   setv("maps_google_key", (c.maps || {}).google_key || "");
   const ar = c.auto_requests || {};
@@ -152,7 +167,10 @@ async function load() {
   setv("em_to_emails", (e.to_emails || []).join(", "));
   setv("desktop_copy", (c.report || {}).desktop_copy);
   setv("upd_auto", (c.updates || {}).auto !== false);
+  setv("bk_folder", (c.backup || {}).folder || "");
+  setv("bk_keep", (c.backup || {}).keep ?? 14);
   checkUpdates(false);
+  showBackup();
 
   const bg = await (await fetch("/api/background")).json();
   $("bg_enabled").checked = bg.installed; $("bg_enabled").disabled = !bg.supported;
@@ -160,6 +178,33 @@ async function load() {
     ? (bg.installed ? "Installed. It runs quietly and uses the same timetable." : "Not installed.")
     : "Only available on Windows.";
 }
+
+async function showBackup() {
+  const b = await (await fetch("/api/backup")).json();
+  if (!b.folder) {
+    $("bk_state").innerHTML = '<span class="faint">No folder set: the database is only on this PC.</span>';
+    return;
+  }
+  const rows = (b.copies || []).map(c => `<li><code>${AS.esc(c.name)}</code> · ${c.mb} MB</li>`).join("");
+  $("bk_state").innerHTML = (b.error ? `<div class="warn">${AS.esc(b.error)}</div>` : "")
+    + (rows ? `<div class="faint">Latest copies there:</div><ul>${rows}</ul>`
+            : '<span class="faint">Nothing copied there yet.</span>');
+}
+
+async function backupNow() {
+  const btn = $("bk_now");
+  btn.disabled = true; btn.textContent = "Copying…";
+  try {
+    // Save the folder first, so the button works right after it is typed.
+    await AS.api("/api/settings", {method: "POST", body: {backup: backupSettings()}});
+    const r = await AS.api("/api/backup", {method: "POST"});
+    AS.toast(`Database copied (${r.mb} MB)`);
+  } catch { /* the toast said what went wrong */ }
+  btn.disabled = false; btn.textContent = "Back up now";
+  showBackup();
+}
+
+const backupSettings = () => ({folder: $("bk_folder").value.trim(), keep: num("bk_keep") || 14});
 
 const commitLine = c => c ? `<code>${AS.esc(c.sha)}</code> ${AS.esc(c.date)} · ${AS.esc(c.subject)}` : "–";
 
@@ -217,6 +262,7 @@ async function save() {
     schedule: {while_app_open: $("while_app_open").checked, pt_every_hours: num("pt_every_hours"), eu_every_hours: num("eu_every_hours")},
     telegram: {enabled: $("tg_enabled").checked, token: $("tg_token").value.trim(), chat_id: $("tg_chat_id").value.trim(),
                min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score"),
+               cut_min_pct: num("tg_cut_min_pct"), cut_min_score: num("tg_cut_min_score"),
                source_alerts: $("tg_source_alerts").checked},
     auto_requests: {enabled: $("ar_enabled").checked, min_score: num("ar_min_score"), per_day: num("ar_per_day")},
     maps: {google_key: $("maps_google_key").value.trim()},
@@ -225,6 +271,7 @@ async function save() {
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},
     report: {desktop_copy: $("desktop_copy").checked},
     updates: {auto: $("upd_auto").checked},
+    backup: backupSettings(),
   };
   await AS.api("/api/settings", {method: "POST", body});
   const bg = await (await fetch("/api/background")).json();

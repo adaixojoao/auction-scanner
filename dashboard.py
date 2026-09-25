@@ -286,6 +286,7 @@ def api_listings():
 @app.route("/api/listing")
 def api_listing_detail():
     """Everything known about one listing, for the detail panel on Listings."""
+    import costs
     import listing_info
     listing_id = request.args.get("id", "")
     db = get_db()
@@ -305,6 +306,7 @@ def api_listing_detail():
         "description": (it.get("description") or "")[:4000],
         "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [],
         "facts": listing_info.facts(it), "related": related, "same_case": lots,
+        "costs": costs.estimate(it),
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
@@ -861,13 +863,15 @@ EDITABLE = {
                 "rural_max_eur_m2"),
     "proponente": PROPONENTE_KEYS,
     "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours"),
-    "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score", "source_alerts"),
+    "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score", "source_alerts",
+                 "cut_min_pct", "cut_min_score"),
     "notifications": ("enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password",
                       "to_emails", "min_score"),
     "report": ("desktop_copy",),
     "updates": ("auto",),
     "auto_requests": ("enabled", "min_score", "per_day"),
     "maps": ("google_key",),
+    "backup": ("folder", "keep"),
 }
 
 
@@ -954,6 +958,44 @@ def api_update_last():
     """What the last automatic update brought (cheap: no git), or null."""
     import updater
     return jsonify(updater.last_update())
+
+
+@app.route("/api/backup", methods=["GET"])
+def api_backup_status():
+    """The backup folder, and the copies already in it (newest first)."""
+    import glob
+    cfg = _config().get("backup") or {}
+    folder = (cfg.get("folder") or "").strip()
+    out = {"folder": folder, "keep": cfg.get("keep") or 14, "copies": [], "error": None}
+    if not folder:
+        return jsonify(out)
+    try:
+        found = sorted(glob.glob(os.path.join(os.path.expanduser(folder), "auctions-*.db")), reverse=True)
+        out["copies"] = [{"name": os.path.basename(f), "mb": round(os.path.getsize(f) / 1e6, 1),
+                          "at": datetime.fromtimestamp(os.path.getmtime(f), timezone.utc).isoformat()}
+                         for f in found[:5]]
+        if not os.path.isdir(os.path.expanduser(folder)):
+            out["error"] = "That folder does not exist (is the drive plugged in?)"
+    except OSError as e:
+        out["error"] = str(e)
+    return jsonify(out)
+
+
+@app.route("/api/backup", methods=["POST"])
+def api_backup_now():
+    """Copy the database to the backup folder now."""
+    import updater
+    cfg = _config().get("backup") or {}
+    folder = (cfg.get("folder") or "").strip()
+    if not folder:
+        return jsonify({"error": "Set a backup folder first."}), 400
+    try:
+        made = updater.backup_database(folder=folder, keep=int(cfg.get("keep") or 14))
+    except OSError as e:
+        return jsonify({"error": f"Could not write to {folder}: {e}"}), 400
+    if not made:
+        return jsonify({"error": "There is no database to copy yet."}), 400
+    return jsonify({"ok": True, "path": made, "mb": round(os.path.getsize(made) / 1e6, 1)})
 
 
 def _scan_running() -> bool:

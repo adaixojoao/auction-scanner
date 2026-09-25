@@ -12,7 +12,8 @@ import json
 import os
 import re
 
-from common import LOG, has_term, utcnow
+import costs
+from common import LOG, has_term, parse_price, utcnow
 from db import load_listings
 from scoring import buyer_priorities, is_fractional_share
 
@@ -183,6 +184,12 @@ PROPERTY_SCHEMA = {
 }
 
 
+def _costs_text(data: dict) -> str:
+    """The scanner's own estimate of what the purchase costs on top of the price."""
+    bid = parse_price(data.get("bid")) if data.get("bid") else None
+    return costs.as_text(costs.estimate(data, bid=bid))
+
+
 def _property_prompt(data: dict) -> str:
     country = data.get("country") or "PT"
     return f"""You are an expert in European judicial property auctions with 20 years of experience.
@@ -210,13 +217,16 @@ PROPERTY DATA:
 - Auto score: {data.get('score', '')}/100 ({', '.join(data.get('reasons', []))})
 - Bid the buyer is considering: EUR {data.get('bid', '')}
 
+WHAT IT COSTS ON TOP OF THE PRICE (the scanner's estimate — say so if it is wrong):
+{_costs_text(data) or "- not enough information"}
+
 Check specifically:
 1. Red flags in the description (occupants, tax debts, unclear title, usufruct, fractional ownership).
 2. Whether the case number is old (pre-2020); old cases accumulate complications.
 3. Whether the price per m² makes sense for the location.
-4. Renovation cost if it is a dwelling (€100-200/m² light, €300-500/m² heavy).
+4. Renovation cost if it is a dwelling; the estimate above uses {costs.bands_text()}.
 5. Whether it can be bid on remotely from Portugal.
-6. The realistic all-in cost (bid + taxes + fees + renovation).
+6. The realistic all-in cost (bid + taxes + fees + renovation), against the estimate above.
 7. Whether the considered bid is at or above the legal minimum for this sale type.
 
 Be direct and honest, including about what you cannot know from this data. Write in English.
