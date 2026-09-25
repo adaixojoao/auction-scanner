@@ -19,6 +19,10 @@ from common import normalize
 HERE = os.path.dirname(os.path.abspath(__file__))
 PT_FILE = os.path.join(HERE, "data", "pt_home_prices.csv")
 COLUMNS = ("municipality", "eur_m2", "period", "source")
+# Parishes, where INE has them (the Porto and Lisbon areas, Setúbal, the
+# Algarve, cities over 100,000 people): a village's price, not its municipality's.
+PT_PARISH_FILE = os.path.join(HERE, "data", "pt_parish_prices.csv")
+PARISH_COLUMNS = ("municipality", "parish", "eur_m2", "period", "source")
 
 
 def place_key(name: str) -> str:
@@ -83,8 +87,53 @@ def pt_table(path: str | None = None) -> dict[str, tuple[float, str]]:
         return {}
 
 
+def parish_names(name: str) -> list[str]:
+    """"União das freguesias de Vila do Bispo e Raposeira" → ["vila do bispo", "raposeira"]."""
+    low = normalize(name)
+    low = re.sub(r"^uniao das freguesias de\s+|^uniao de freguesias de\s+", "", low)
+    return [p.strip() for p in re.split(r",| e ", low) if p.strip()]
+
+
+@functools.lru_cache(maxsize=4)
+def _load_parishes(path: str, mtime: float) -> dict[str, tuple[float, str]]:
+    table: dict[str, tuple[float, str]] = {}
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                try:
+                    value = float(row["eur_m2"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                town = place_key(row.get("municipality") or "")
+                if not town or value <= 0:
+                    continue
+                found = (value, f"{row.get('source') or 'INE'} {row.get('period') or ''}, parish".strip())
+                for name in parish_names(row.get("parish") or ""):
+                    table.setdefault(f"{town}|{name}", found)
+    except OSError:
+        return {}
+    return table
+
+
+def parish_price(concelho: str | None, freguesia: str | None, path: str | None = None) -> tuple[float, str] | None:
+    """(€/m², source) for the listing's parish, when INE has one."""
+    if not concelho or not freguesia:
+        return None
+    path = path or PT_PARISH_FILE
+    try:
+        table = _load_parishes(path, os.path.getmtime(path))
+    except OSError:
+        return None
+    town = place_key(concelho)
+    for name in parish_names(freguesia) or [normalize(freguesia)]:
+        found = table.get(f"{town}|{name}")
+        if found:
+            return found
+    return None
+
+
 def local_price(country: str, place: str | None, fallback: dict[str, dict[str, float]],
-                district: str | None = None) -> tuple[float, str] | None:
+                district: str | None = None, parish: str | None = None) -> tuple[float, str] | None:
     """(€/m² of homes in that municipality, where the figure comes from), or None.
     `fallback` is the hand-made city table {country: {key: €/m²}}. `district`
     tells same-named municipalities apart (Calheta in Madeira or the Azores)."""
@@ -92,6 +141,9 @@ def local_price(country: str, place: str | None, fallback: dict[str, dict[str, f
         return None
     key = place_key(place)
     if country == "PT":
+        found = parish_price(place, parish)
+        if found:
+            return found
         table = pt_table()
         region = region_of_place(district)
         found = (table.get(f"{key}|{region}") if region else None) or table.get(key)
