@@ -285,7 +285,7 @@ def _is_cut_copy(new: str | None, old: str | None) -> bool:
 
 # What the app found out itself (geo.py, photos.py, links.py): a source's fresh
 # raw data does not know it, so it is carried over.
-LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "eleiloes_id")
+LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "eleiloes_id", "water_check")
 
 
 def _keep_learned(new: str | None, old: str | None) -> str | None:

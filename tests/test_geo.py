@@ -182,3 +182,26 @@ def test_the_loader_and_the_panel_carry_the_distance(db, add):
     assert item["town_distance"]["text"] == "2.2 km from Moura"
     assert "2.2 km from Moura" in item["reasons"]
     assert {"label": "Distance to town", "value": "2.2 km from Moura"} in listing_info.facts(item)
+
+
+# ─── Water next to the property ─────────────────────────────────────
+
+def test_water_is_asked_only_for_an_exact_position_and_counts_like_the_words(db, add):
+    from scoring import score_detail
+    exact = add("citius", "w1", title="Prédio rústico de cultivo com 3 ha", price=12000, area_m2=30000,
+                raw_json=json.dumps({"geo": {"lat": 40.1, "lon": -8.2, "precision": "street"}}))
+    add("citius", "w2", title="Prédio rústico de cultivo com 3 ha", price=12000, area_m2=30000,
+        raw_json=json.dumps({"geo": {"lat": 40.1, "lon": -8.2, "precision": "village"}}))
+    session = FakeSession(lambda m, url, kw: FakeResponse(json_data={"elements": [
+        {"tags": {"waterway": "stream"}}, {"tags": {"waterway": "river", "name": "Rio Alva"}}]}))
+    items = [dict(r) for r in db.execute("SELECT * FROM listings ORDER BY id")]
+    assert geo.check_water_pending(db, session, items) == 1          # the village pin is not the plot
+    assert "around:300,40.100000,-8.200000" in session.calls[0][2]["data"]["data"]
+    row = dict(db.execute("SELECT * FROM listings WHERE id='citius:w1'").fetchone())
+    assert json.loads(row["raw_json"])["water_check"]["found"][0] == {"name": "Rio Alva", "kind": "river"}
+    wet, reasons = score_detail(row)
+    dry, _ = score_detail(dict(db.execute("SELECT * FROM listings WHERE id='citius:w2'").fetchone()))
+    assert wet > dry and "next to water (river Rio Alva, within 300 m on the map)" in reasons
+    # Once each; nothing found is remembered too.
+    assert geo.check_water_pending(db, session, [row]) == 0
+    assert exact["external_id"] == "w1"

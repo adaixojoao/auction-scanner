@@ -315,3 +315,64 @@ def _town_only(pos: dict) -> bool:
 
 def km_text(km: float) -> str:
     return f"{km:.1f} km" if km < 10 else f"{km:.0f} km"
+
+
+# ─── Water next to the property (OpenStreetMap, Overpass) ───────────
+# "Next to water" was only known when the text said so. With a position that
+# is the property itself (the sale's coordinates or its street), the map says
+# whether a river, stream, canal, lake or reservoir is within WATER_RADIUS_M.
+# A village or parish pin is not the plot, so it is not asked.
+
+OVERPASS = "https://overpass-api.de/api/interpreter"
+WATER_RADIUS_M = 300
+WATER_PER_SCAN = 40
+EXACT_ENOUGH = {"sale", "street"}
+_WATER_KIND = {"river": "river", "stream": "stream", "canal": "canal", "reservoir": "reservoir",
+               "lake": "lake", "pond": "pond", "water": "water"}
+
+
+def water_query(pos: dict, radius: int = WATER_RADIUS_M) -> str:
+    at = f"around:{radius},{pos['lat']:.6f},{pos['lon']:.6f}"
+    return (f'[out:json][timeout:25];(way({at})["waterway"~"^(river|stream|canal)$"];'
+            f'way({at})["natural"="water"];relation({at})["natural"="water"];);out tags 10;')
+
+
+def water_near(session, pos: dict, radius: int = WATER_RADIUS_M) -> list[dict]:
+    """[{"name", "kind"}] of the water within `radius` metres, named ones first."""
+    resp = session.post(OVERPASS, data={"data": water_query(pos, radius)},
+                        headers={"User-Agent": USER_AGENT}, timeout=40)
+    resp.raise_for_status()
+    found = []
+    for el in resp.json().get("elements", []):
+        tags = el.get("tags") or {}
+        kind = _WATER_KIND.get(tags.get("waterway") or tags.get("water") or "water", "water")
+        entry = {"name": tags.get("name") or "", "kind": kind}
+        if entry not in found:
+            found.append(entry)
+    found.sort(key=lambda w: (not w["name"], w["kind"] not in ("river", "reservoir", "lake")))
+    return found[:5]
+
+
+def check_water_pending(db, session, items: list[dict], limit: int = WATER_PER_SCAN) -> int:
+    """Ask the map about water next to the best properties with an exact position, once each."""
+    done = 0
+    for item in items:
+        if done >= limit:
+            break
+        raw = _raw(item)
+        pos = position(item)
+        if "water_check" in raw or not pos or pos.get("precision") not in EXACT_ENOUGH:
+            continue
+        try:
+            found = water_near(session, pos)
+        except Exception as e:  # noqa: BLE001 — offline or busy: next scan
+            LOG.info(f"Water lookup failed ({type(e).__name__}); trying next scan")
+            break
+        raw["water_check"] = {"radius_m": WATER_RADIUS_M, "found": found}
+        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        db.commit()
+        done += 1
+        time.sleep(1.1)
+    if done:
+        LOG.info(f"OpenStreetMap: water checked for {done} listings")
+    return done
