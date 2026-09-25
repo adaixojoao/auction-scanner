@@ -30,7 +30,7 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-from prices import COLUMNS, PT_FILE  # noqa: E402
+from prices import COLUMNS, PARISH_COLUMNS, PT_FILE, PT_PARISH_FILE  # noqa: E402
 
 API = "https://www.ine.pt/ine/json_indicador/pindica.jsp"
 DEFAULT_INDICATOR = "0012234"
@@ -67,6 +67,33 @@ def parse_ine(payload) -> tuple[list[dict], str, str]:
     return rows, period, title
 
 
+def parse_ine_parishes(payload) -> list[dict]:
+    """The parishes INE gives a figure for (9-character codes: the Porto and
+    Lisbon areas, Setúbal, the Algarve and cities over 100,000 people), each
+    under its municipality (the first 7 characters of its code)."""
+    entry = payload[0] if isinstance(payload, list) else payload
+    data = entry.get("Dados") or {}
+    if not data:
+        return []
+    period = entry.get("UltimoPref") if entry.get("UltimoPref") in data else list(data)[-1]
+    towns = {str(r.get("geocod")): r.get("geodsg", "").strip() for r in data[period]
+             if len(str(r.get("geocod", ""))) == 7}
+    rows = []
+    for rec in data[period]:
+        code = str(rec.get("geocod", ""))
+        extra = [v for k, v in rec.items() if k.startswith("dim_") and k.endswith("_t")]
+        if len(code) != 9 or code[:7] not in towns or (
+                extra and not all(str(v).strip().lower() in ("total", "t") for v in extra)):
+            continue
+        try:
+            value = float(str(rec.get("valor", "")).replace(",", "."))
+        except ValueError:
+            continue
+        rows.append({"municipality": towns[code[:7]], "parish": rec.get("geodsg", "").strip(),
+                     "eur_m2": round(value), "period": period, "source": "INE"})
+    return sorted(rows, key=lambda r: (r["municipality"], r["parish"]))
+
+
 def main(argv=None) -> int:
     import requests
 
@@ -94,6 +121,13 @@ def main(argv=None) -> int:
     print("Cheapest:", ", ".join(f"{x['municipality']} €{x['eur_m2']}/m²" for x in cheapest))
     print("Dearest: ", ", ".join(f"{x['municipality']} €{x['eur_m2']}/m²" for x in dearest))
     print(f"Written to {args.out}")
+    parishes = parse_ine_parishes(r.json())
+    if parishes and args.out == PT_FILE:
+        with open(PT_PARISH_FILE, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=PARISH_COLUMNS)
+            writer.writeheader()
+            writer.writerows(parishes)
+        print(f"{len(parishes)} parishes written to {PT_PARISH_FILE}")
     return 0
 
 

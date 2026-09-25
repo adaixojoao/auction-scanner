@@ -38,6 +38,7 @@ def isolated_files(tmp_path, monkeypatch):
     # table unless they supply their own price file (tests/test_prices.py).
     import prices
     monkeypatch.setattr(prices, "PT_FILE", str(tmp_path / "no_pt_home_prices.csv"))
+    monkeypatch.setattr(prices, "PT_PARISH_FILE", str(tmp_path / "no_pt_parish_prices.csv"))
 
 
 @pytest.fixture
