@@ -55,6 +55,7 @@ OCCUPANCY_PATTERNS = [
     "inquilino*", "occupied", "tenant*", "locataire*", "affittuari*",
     "ocupantes", "occupato", "occupata", "occupé", "occupée", "loué", "louée",
     "bail en cours", "okupa*",
+    "verhuurd", "verhuurde", "huurder", "huurders",
 ]
 
 VACANT_PATTERNS = [

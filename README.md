@@ -303,7 +303,7 @@ sources are also listed in the report and the weekly Telegram summary.
 | FR | licitor, Enchères Publiques |
 | IT | astegiudiziarie, PVP Giustizia (search API), Astalegale (search API) · not scanned: Gobid Real (bot wall) |
 | DE | zvg-portal, justiz-auktion, zwangsversteigerung.de |
-| NL | openbareverkoop, veilingnotaris, veilingbiljet |
+| NL | openbareverkoop (each lot's page: size, year, use, date), veilingnotaris + vastgoedveiling (one platform, read as one; also its German lots) · not scanned: veilingbiljet (the same lots as openbareverkoop) |
 | HR · PL | e-oglasna, FINA · komornik · not scanned (bot wall or broken certificate): biddit (BE), eauction (GR), ANAF (RO), DLS (CY) |
 | EU | *CourtBid via Apify (needs `apify_token` in config.json, on request)* |
 
