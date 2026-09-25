@@ -79,12 +79,16 @@ DEFAULTS = {
         "per_day": 5,             # at most this many new requests offered per day
     },
 
-    # Claude looks at the photos of the best homes to judge their condition
-    # (photos.py). Needs an Anthropic API key, here or in ANTHROPIC_API_KEY.
+    # A vision model looks at the photos of the best homes to judge their
+    # condition (photos.py): an open model on this PC through Ollama (free), or
+    # Claude with an Anthropic API key. photos_per_scan 0 = 5 locally, 20 on Claude.
     "ai": {
+        "provider": "ollama",
+        "ollama_url": "http://127.0.0.1:11434",
+        "ollama_model": "qwen2.5vl:3b",
         "anthropic_key": "",
         "photo_check": True,
-        "photos_per_scan": 20,
+        "photos_per_scan": 0,
     },
 
     # Street View inside the listing panel: a Google Maps Embed API key (free,

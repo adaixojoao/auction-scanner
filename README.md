@@ -226,9 +226,11 @@ than €20,001 instead of jumping at a step.
   laundry, linen room, shop or garage is not a home, nor is a home's furniture
   (*recheio*) sold on its own.
 - **Condition from the photos.** When the text says nothing about the state of
-  a house, Claude looks at its photos after a scan (the best homes, a few a
-  scan, each once) and the reason says *(from the photos)*. Needs an Anthropic
-  API key in Settings → Photo check.
+  a house, a vision model looks at its photos after a scan (the best homes, a
+  few a scan, each once) and the reason says *(from the photos)*. By default an
+  open model on this PC through [Ollama](https://ollama.com) (free and private:
+  install it, then `ollama pull qwen2.5vl:3b`); or Claude with an Anthropic API
+  key. Settings → Photo check.
 - **Water from the map.** For a property with an exact position (the sale's
   coordinates or its street), OpenStreetMap is asked whether a river, stream,
   lake or reservoir is within 300 m; it counts like the words *junto ao rio*.
