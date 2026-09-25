@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file
 
-from common import COUNTRY_NAMES, FLAGS, safe_url
+from common import COUNTRY_NAMES, FLAGS, price_to_pay, safe_url
 from locks import lock_holder
 from db import connect, hidden_category, load_listings, set_listing_status, source_health
 
@@ -528,7 +528,7 @@ def api_offers():
             continue
         # Strong candidates: your minimum score and budget, sales where the offer is a
         # letter; online auctions and French court sales only if you shortlist them.
-        pay = it.get("current_bid") or it.get("min_price") or it.get("price") or 0
+        pay = price_to_pay(it)
         if (it["score"] >= min_score and (not budget or pay <= budget) and channel(it) == "letter"
                 and classify_property(it.get("title") or "", it.get("description") or "",
                                       it.get("area_m2") or 0) is not None):

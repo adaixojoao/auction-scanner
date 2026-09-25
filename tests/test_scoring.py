@@ -2,7 +2,7 @@ import pytest
 
 from datetime import datetime, timedelta, timezone
 
-from scoring import categorize, market_value_estimate, score
+from scoring import categorize, market_value_estimate, score, score_detail
 
 
 def item(**kw):
@@ -508,3 +508,21 @@ def test_a_house_is_scored_on_how_far_it_really_is_from_town():
                            town_distance={"km": 0.5, "town": "Moura", "approx": False,
                                           "text": "0.5 km from Moura"}))
     assert "isolated location" in remote and "0.5 km from Moura" not in remote
+
+
+def test_a_bid_below_the_minimum_accepted_is_judged_at_the_minimum():
+    """e-leilões opens at 50% of the base value but accepts from 85%: the €11,750
+    opening bid does not buy a €23,500 house, €19,975 does."""
+    from common import price_to_pay
+    import costs
+    house = {"title": "Moradia em Felgueiras", "description": "Moradia de r/c e 1º andar, 100 m2",
+             "price": 23500, "min_price": 19975, "current_bid": 11750, "area_m2": 100,
+             "source": "eleiloes", "country": "PT", "concelho": "Resende", "category": "imoveis"}
+    assert price_to_pay(house) == 19975
+    assert price_to_pay({**house, "current_bid": 21000}) == 21000
+    assert price_to_pay({**house, "current_bid": None}) == 19975
+    at_floor, reasons = score_detail({**house, "current_bid": 19975})
+    assert score_detail(house)[0] == at_floor            # the low bid earns nothing extra
+    assert not any("50%" in r for r in reasons)
+    est = costs.estimate(house)
+    assert est["base"] == 19975 and est["basis"].startswith("the minimum accepted")
