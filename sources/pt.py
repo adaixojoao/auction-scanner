@@ -97,7 +97,9 @@ def scrape_eleiloes(db, max_price: float = 50000, page_size: int = 100, **_):
             total_scraped += 1
 
         db.commit()
-        offset += page_size
+        # The API answers 12 rows whatever is asked: step by what came back, or
+        # 88 of every 100 sales are skipped (80 read of about 1,100 in Sept 2026).
+        offset += len(items)
         LOG.info(f"  ... {offset}/{total} processed")
         if offset >= total:
             break
