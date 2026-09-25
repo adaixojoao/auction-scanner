@@ -229,6 +229,7 @@ OTHER_WORDS = [   # not a home and not a plot
     "negozio", "magazzino", "capannone", "ufficio", "posto auto",
     "stellplatz", "tiefgarage", "lager", "büro", "gewerbe*", "bedrijfspand", "kantoor",
     "hotel", "restaurante", "café",
+    "lavandaria", "lavanderia", "rouparia", "portaria", "casa das máquinas", "ginásio", "sala de condomínio",
 ]
 OTHER_TYPES = {normalize(t) for t in (
     "loja/escritorio", "loja", "escritório", "armazem", "industrial", "garagem", "hotel",

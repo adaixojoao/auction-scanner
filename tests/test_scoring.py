@@ -551,3 +551,14 @@ def test_household_contents_are_not_a_home():
     from scoring import property_kind
     assert property_kind({"title": "Recheio de habitação", "description": ""}) != "home"
     assert property_kind({"title": "Moradia com recheio", "description": ""}) == "home"
+
+
+def test_a_hotels_laundry_room_is_not_a_home():
+    """A "fração autónoma" is a whole flat, but in an apartment hotel it can be
+    the laundry: the use named decides."""
+    from scoring import property_kind
+    laundry = ("A fracção autónoma, do edificio em propriedade horizontal, denominado Flats 1, "
+               "sito no Corpo C, 1º. piso, lavandaria, com 498,65 m2")
+    flat = "Fracção autónoma designada pela letra C, correspondente ao 1º andar direito do prédio urbano"
+    assert property_kind({"title": laundry, "description": ""}) == "other"
+    assert property_kind({"title": flat, "description": ""}) == "home"
