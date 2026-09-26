@@ -23,6 +23,9 @@ COLUMNS = ("municipality", "eur_m2", "period", "source")
 # Algarve, cities over 100,000 people): a village's price, not its municipality's.
 PT_PARISH_FILE = os.path.join(HERE, "data", "pt_parish_prices.csv")
 PARISH_COLUMNS = ("municipality", "parish", "eur_m2", "period", "source")
+# The median monthly rent per m² of new leases in each municipality (INE), for
+# "what would it rent for". Same columns as PT_FILE; eur_m2 is € a month.
+PT_RENT_FILE = os.path.join(HERE, "data", "pt_rents.csv")
 
 
 def place_key(name: str) -> str:
@@ -130,6 +133,16 @@ def parish_price(concelho: str | None, freguesia: str | None, path: str | None =
         if found:
             return found
     return None
+
+
+def pt_rent(concelho: str | None, district: str | None = None,
+            path: str | None = None) -> tuple[float, str] | None:
+    """(€ a month per m² of new leases, source) in that municipality, or None."""
+    if not concelho:
+        return None
+    table = pt_table(path or PT_RENT_FILE)
+    key, region = place_key(concelho), region_of_place(district)
+    return (table.get(f"{key}|{region}") if region else None) or table.get(key)
 
 
 def local_price(country: str, place: str | None, fallback: dict[str, dict[str, float]],

@@ -73,10 +73,12 @@ def _cost_line(item: dict) -> str:
     est = costs.estimate(item)
     if not est:
         return ""
+    rent = est.get("rent")
+    rent = f"\n\U0001f3e0 rents ~{_money(rent['monthly'])}/month \u2192 {rent['yield_pct']}% a year" if rent else ""
     if est["all_in"]:
         low, high = est["all_in"]["low"], est["all_in"]["high"]
-        return f"\n\U0001f9fe {_money(low)}\u2013{high:,.0f} all-in (taxes, fees and the work)"
-    return f"\n\U0001f9fe {_money(est['total'])} to own it (taxes and fees in)"
+        return f"\n\U0001f9fe {_money(low)}\u2013{high:,.0f} all-in (taxes, fees and the work)" + rent
+    return f"\n\U0001f9fe {_money(est['total'])} to own it (taxes and fees in)" + rent
 
 
 def format_listing(item: dict) -> str:

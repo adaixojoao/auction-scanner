@@ -30,13 +30,18 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-from prices import COLUMNS, PARISH_COLUMNS, PT_FILE, PT_PARISH_FILE  # noqa: E402
+from prices import COLUMNS, PARISH_COLUMNS, PT_FILE, PT_PARISH_FILE, PT_RENT_FILE  # noqa: E402
 
 API = "https://www.ine.pt/ine/json_indicador/pindica.jsp"
 DEFAULT_INDICATOR = "0012234"
+# `--rents`: "Valor mediano das rendas de novos contratos de arrendamento de
+# alojamentos familiares nos últimos 12 meses (€/m²) por Localização geográfica",
+# every six months, into data/pt_rents.csv. INE keeps small municipalities with
+# too few leases secret, so there are fewer rows than for the sale prices.
+RENT_INDICATOR = "0012598"
 
 
-def parse_ine(payload) -> tuple[list[dict], str, str]:
+def parse_ine(payload, digits: int = 0) -> tuple[list[dict], str, str]:
     """(rows, period, indicator title) from INE's JSON API answer: the latest
     period's values for municipalities, for all kinds of dwelling ("Total")
     when the indicator splits them.
@@ -62,7 +67,7 @@ def parse_ine(payload) -> tuple[list[dict], str, str]:
             value = float(str(rec.get("valor", "")).replace(",", "."))
         except ValueError:
             continue
-        rows.append({"municipality": rec.get("geodsg", "").strip(), "eur_m2": round(value),
+        rows.append({"municipality": rec.get("geodsg", "").strip(), "eur_m2": round(value, digits or None),
                      "period": period, "source": "INE"})
     return rows, period, title
 
@@ -94,13 +99,34 @@ def parse_ine_parishes(payload) -> list[dict]:
     return sorted(rows, key=lambda r: (r["municipality"], r["parish"]))
 
 
+def update_rents(requests) -> int:
+    r = requests.get(API, params={"op": "2", "varcd": RENT_INDICATOR, "lang": "PT"}, timeout=120)
+    r.raise_for_status()
+    rows, period, title = parse_ine(r.json(), digits=2)
+    print(f"Indicator {RENT_INDICATOR}: {title}")
+    print(f"Period: {period} — {len(rows)} municipalities")
+    if len(rows) < 150:
+        print("Fewer than 150 municipalities: probably not the right indicator. Nothing written.")
+        return 1
+    rows.sort(key=lambda row: row["municipality"])
+    with open(PT_RENT_FILE, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Written to {PT_RENT_FILE}")
+    return 0
+
+
 def main(argv=None) -> int:
     import requests
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--indicator", default=DEFAULT_INDICATOR)
     ap.add_argument("--out", default=PT_FILE)
+    ap.add_argument("--rents", action="store_true", help="the monthly rents per m², into data/pt_rents.csv")
     args = ap.parse_args(argv)
+    if args.rents:
+        return update_rents(requests)
 
     r = requests.get(API, params={"op": "2", "varcd": args.indicator, "lang": "PT"}, timeout=60)
     r.raise_for_status()

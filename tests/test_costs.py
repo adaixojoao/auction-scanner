@@ -122,3 +122,43 @@ def test_a_car_pays_no_imt(client, add):
     assert costs.estimate({"title": "Veículo ligeiro Opel Corsa", "price": 2000, "country": "PT"}) is None
     add("eleiloes", "c3", title="Automóvel Opel Corsa", tipo="veiculo", price=2000)
     assert client.get("/api/listing?id=eleiloes:c3").get_json()["costs"] is None
+
+
+@pytest.fixture
+def pt_rents(tmp_path, monkeypatch):
+    import prices
+    path = tmp_path / "pt_rents.csv"
+    path.write_text("municipality,eur_m2,period,source\n"
+                    "Reguengos de Monsaraz,5.2,1.º Semestre de 2026,INE\n", encoding="utf-8")
+    monkeypatch.setattr(prices, "PT_RENT_FILE", str(path))
+
+
+def test_a_home_shows_what_it_would_rent_for_and_the_yield(pt_rents):
+    house = {"title": "Moradia T3", "tipo": "moradia", "country": "PT", "source": "financas",
+             "concelho": "Reguengos de Monsaraz", "district": "Évora", "area_m2": 100,
+             "price": 28211, "description": "Moradia em bom estado"}
+    est = costs.estimate(house)
+    rent = est["rent"]
+    assert rent["monthly"] == 520 and rent["eur_m2"] == 5.2
+    cost = (est["all_in"]["low"] + est["all_in"]["high"]) / 2 if est["all_in"] else est["total"]
+    assert rent["yield_pct"] == round(1200 * 520 / cost, 1)
+    assert rent["payback_years"] == round(cost / (12 * 520), 1)
+    assert "Reguengos de Monsaraz" in rent["note"] and "Rent: about €520" in costs.as_text(est)
+    from telegram_alert import _cost_line
+    assert "rents ~€520/month" in _cost_line(house)
+    # A mansion rents like a 200 m² house; a plot, another country or an unknown town: no figure.
+    assert costs.estimate({**house, "area_m2": 400})["rent"]["monthly"] == 1040
+    assert costs.estimate({**house, "title": "Terreno rústico", "tipo": "terreno"})["rent"] is None
+    assert costs.estimate({**house, "country": "ES"})["rent"] is None
+    assert costs.estimate({**house, "concelho": "Nowhere"})["rent"] is None
+
+
+def test_rents_keep_their_cents():
+    import sys
+    sys.path.insert(0, "scripts")
+    import update_prices
+    answer = [{"IndicadorDsg": "rendas", "UltimoPref": "S1", "Dados": {"S1": [
+        {"geocod": "1870705", "geodsg": "Reguengos de Monsaraz", "valor": "5.23"}]}}]
+    rows, _, _ = update_prices.parse_ine(answer, digits=2)
+    assert rows[0]["eur_m2"] == 5.23
+    assert update_prices.parse_ine(answer)[0][0]["eur_m2"] == 5
