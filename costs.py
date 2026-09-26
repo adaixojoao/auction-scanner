@@ -153,16 +153,19 @@ RENT_MAX_M2 = 200            # a bigger house does not rent for proportionally m
 
 
 def rent(item: dict, cost: float) -> dict | None:
-    """What a Portuguese home would rent for, from the median rent per m² of new
-    leases in its municipality (INE), and the gross yield on `cost` (what it
-    takes to own it, with the work). None without an area or a figure."""
-    if (item.get("country") or "PT").upper() != "PT" or (item.get("kind") or property_kind(item)) != "home":
+    """What a home would rent for, from the rent per m² in its municipality
+    (Portugal: INE's median of new leases; France: the carte des loyers), and
+    the gross yield on `cost` (what it takes to own it, with the work). None
+    without an area or a figure."""
+    if (item.get("kind") or property_kind(item)) != "home":
         return None
+    country = (item.get("country") or "PT").upper()
     area = item.get("area_m2") or 0
     if not area or area > MAX_HOME_M2 or cost <= 0:
         return None
     import prices
-    found = prices.pt_rent(item.get("concelho"), item.get("district"))
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    found = prices.rent_per_m2(country, place, item.get("district"))
     if not found:
         return None
     eur_m2, source = found
@@ -172,7 +175,7 @@ def rent(item: dict, cost: float) -> dict | None:
         return None
     return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
             "yield_pct": round(1200 * monthly / cost, 1), "payback_years": round(cost / (12 * monthly), 1),
-            "note": f"€{eur_m2:.2f}/m² a month for new leases in {item.get('concelho')} ({source}), "
+            "note": f"€{eur_m2:.2f}/m² a month in {place} ({source}), "
                     f"over {used:.0f} m²; gross, before IMI, insurance and empty months"}
 
 

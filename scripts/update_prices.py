@@ -30,7 +30,7 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-from prices import COLUMNS, PARISH_COLUMNS, PT_FILE, PT_PARISH_FILE, PT_RENT_FILE  # noqa: E402
+from prices import COLUMNS, PARISH_COLUMNS, PT_FILE, PT_PARISH_FILE, PT_RENT_FILE, RENT_FILES  # noqa: E402
 
 API = "https://www.ine.pt/ine/json_indicador/pindica.jsp"
 DEFAULT_INDICATOR = "0012234"
@@ -39,6 +39,9 @@ DEFAULT_INDICATOR = "0012234"
 # every six months, into data/pt_rents.csv. INE keeps small municipalities with
 # too few leases secret, so there are fewer rows than for the sale prices.
 RENT_INDICATOR = "0012598"
+# `--rents-fr`: France's "carte des loyers" (Ministère du Logement / ANIL), the
+# predicted rent per m² of a house in every commune, from data.gouv.fr.
+FR_RENTS_DATASET = "https://www.data.gouv.fr/api/1/datasets/?q=carte%20des%20loyers%20par%20commune&page_size=20"
 
 
 def parse_ine(payload, digits: int = 0) -> tuple[list[dict], str, str]:
@@ -117,6 +120,52 @@ def update_rents(requests) -> int:
     return 0
 
 
+def parse_fr_rents(text: str, year: str) -> list[dict]:
+    """The carte des loyers CSV (";"-separated, decimal commas, LIBGEO and
+    loypredm2 columns) → rows; a commune name found twice keeps its first figure."""
+    rows, seen = [], set()
+    for rec in csv.DictReader(text.splitlines(), delimiter=";"):
+        name = (rec.get("LIBGEO") or "").strip()
+        try:
+            value = float((rec.get("loypredm2") or "").replace(",", "."))
+        except ValueError:
+            continue
+        if not name or value <= 0 or name in seen:
+            continue
+        seen.add(name)
+        rows.append({"municipality": name, "eur_m2": round(value, 2), "period": year,
+                     "source": "Carte des loyers"})
+    return sorted(rows, key=lambda r: r["municipality"])
+
+
+def update_rents_fr(requests) -> int:
+    import re
+    found = []
+    for ds in requests.get(FR_RENTS_DATASET, timeout=60).json().get("data", []):
+        year = re.search(r"par commune en (\d{4})", ds.get("title", ""))
+        house = next((r["url"] for r in ds.get("resources", []) if "maison" in r.get("title", "").lower()
+                      and r["url"].endswith(".csv")), None)
+        if year and house:
+            found.append((year.group(1), house))
+    if not found:
+        print("No carte des loyers found on data.gouv.fr. Nothing written.")
+        return 1
+    year, url = max(found)
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    rows = parse_fr_rents(r.content.decode("latin-1"), year)
+    print(f"Carte des loyers {year}: {len(rows)} communes")
+    if len(rows) < 20000:
+        print("Fewer than 20,000 communes: probably not the right file. Nothing written.")
+        return 1
+    with open(RENT_FILES["FR"], "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Written to {RENT_FILES['FR']}")
+    return 0
+
+
 def main(argv=None) -> int:
     import requests
 
@@ -124,9 +173,12 @@ def main(argv=None) -> int:
     ap.add_argument("--indicator", default=DEFAULT_INDICATOR)
     ap.add_argument("--out", default=PT_FILE)
     ap.add_argument("--rents", action="store_true", help="the monthly rents per m², into data/pt_rents.csv")
+    ap.add_argument("--rents-fr", action="store_true", help="France's rents per m² per commune, into data/fr_rents.csv")
     args = ap.parse_args(argv)
     if args.rents:
         return update_rents(requests)
+    if args.rents_fr:
+        return update_rents_fr(requests)
 
     r = requests.get(API, params={"op": "2", "varcd": args.indicator, "lang": "PT"}, timeout=60)
     r.raise_for_status()

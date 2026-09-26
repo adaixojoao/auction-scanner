@@ -162,3 +162,25 @@ def test_rents_keep_their_cents():
     rows, _, _ = update_prices.parse_ine(answer, digits=2)
     assert rows[0]["eur_m2"] == 5.23
     assert update_prices.parse_ine(answer)[0][0]["eur_m2"] == 5
+
+
+def test_a_french_house_rents_at_the_communes_carte_des_loyers(tmp_path, monkeypatch):
+    import prices
+    path = tmp_path / "fr_rents.csv"
+    path.write_text("municipality,eur_m2,period,source\nAast,9.74,2025,Carte des loyers\n", encoding="utf-8")
+    monkeypatch.setitem(prices.RENT_FILES, "FR", str(path))
+    house = {"title": "Maison avec jardin", "tipo": "maison", "country": "FR", "source": "france",
+             "district": "Aast", "area_m2": 100, "price": 20000}
+    rent = costs.estimate(house)["rent"]
+    assert rent["monthly"] == 974 and "Aast (Carte des loyers 2025)" in rent["note"]
+    assert costs.estimate({**house, "country": "IT"})["rent"] is None       # no table for Italy
+
+
+def test_the_carte_des_loyers_csv_is_read():
+    import sys
+    sys.path.insert(0, "scripts")
+    import update_prices
+    text = ('"id_zone";"INSEE_C";"LIBGEO";"loypredm2"\n"1";"37099";"Druye";8,9564\n'
+            '"2";"99999";"Druye";12,1\n"3";"1";"";5\n')
+    assert update_prices.parse_fr_rents(text, "2025") == [
+        {"municipality": "Druye", "eur_m2": 8.96, "period": "2025", "source": "Carte des loyers"}]

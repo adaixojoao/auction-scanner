@@ -26,6 +26,9 @@ PARISH_COLUMNS = ("municipality", "parish", "eur_m2", "period", "source")
 # The median monthly rent per m² of new leases in each municipality (INE), for
 # "what would it rent for". Same columns as PT_FILE; eur_m2 is € a month.
 PT_RENT_FILE = os.path.join(HERE, "data", "pt_rents.csv")
+# Other countries, where an official table per municipality can be had
+# (scripts/update_prices.py): France's "carte des loyers" (houses, per commune).
+RENT_FILES = {"FR": os.path.join(HERE, "data", "fr_rents.csv")}
 
 
 def place_key(name: str) -> str:
@@ -143,6 +146,18 @@ def pt_rent(concelho: str | None, district: str | None = None,
     table = pt_table(path or PT_RENT_FILE)
     key, region = place_key(concelho), region_of_place(district)
     return (table.get(f"{key}|{region}") if region else None) or table.get(key)
+
+
+def rent_per_m2(country: str, place: str | None, district: str | None = None) -> tuple[float, str] | None:
+    """(€ a month per m², source) for a municipality in any country that has a
+    rent table; None elsewhere."""
+    country = (country or "PT").upper()
+    if country == "PT":
+        return pt_rent(place, district)
+    path = RENT_FILES.get(country)
+    if not place or not path:
+        return None
+    return pt_table(path).get(place_key(place))
 
 
 def local_price(country: str, place: str | None, fallback: dict[str, dict[str, float]],
