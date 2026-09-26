@@ -164,11 +164,14 @@ function costsHtml(c) {
   const work = c.renovation ? row("Work", eur(c.renovation.low) + "\u2013" + eur(c.renovation.high), c.renovation.note) : "";
   const total = `${eur(c.total)} to own it`
     + (c.all_in ? ` \u00b7 ${eur(c.all_in.low)}\u2013${eur(c.all_in.high)} all-in with the work` : "");
+  const rent = c.rent ? `<div class="cost-total">Rents for about ${eur(c.rent.monthly)}/month \u00b7
+      ${c.rent.yield_pct}% a year \u00b7 paid back in ${c.rent.payback_years} years</div>
+      <p class="small muted">${AS.esc(c.rent.note)}</p>` : "";
   return `<div class="guide">
     <b>What it really costs</b> <span class="small muted">on ${AS.esc(c.basis)}, ${eur(c.base)}</span>
     <div class="facts">${lines}${work}</div>
     <div class="cost-total">${total}</div>
-    <p class="small muted">${AS.esc(c.note)}</p></div>`;
+    <p class="small muted">${AS.esc(c.note)}</p>${rent}</div>`;
 }
 
 function detailsHtml(d) {

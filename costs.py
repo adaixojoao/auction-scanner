@@ -149,6 +149,36 @@ def _other_lines(value: float, country: str) -> list[dict]:
     return lines
 
 
+RENT_MAX_M2 = 200            # a bigger house does not rent for proportionally more
+
+
+def rent(item: dict, cost: float) -> dict | None:
+    """What a home would rent for, from the rent per m² in its municipality
+    (Portugal: INE's median of new leases; France: the carte des loyers), and
+    the gross yield on `cost` (what it takes to own it, with the work). None
+    without an area or a figure."""
+    if (item.get("kind") or property_kind(item)) != "home":
+        return None
+    country = (item.get("country") or "PT").upper()
+    area = item.get("area_m2") or 0
+    if not area or area > MAX_HOME_M2 or cost <= 0:
+        return None
+    import prices
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    found = prices.rent_per_m2(country, place, item.get("district") if place != item.get("district") else None)
+    if not found:
+        return None
+    eur_m2, source = found
+    used = min(area, RENT_MAX_M2)
+    monthly = round(used * eur_m2)
+    if monthly <= 0:
+        return None
+    return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
+            "yield_pct": round(1200 * monthly / cost, 1), "payback_years": round(cost / (12 * monthly), 1),
+            "note": f"€{eur_m2:.2f}/m² a month in {place} ({source}), "
+                    f"over {used:.0f} m²; gross, before property tax, insurance and empty months"}
+
+
 def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) -> dict | None:
     """What buying this listing really costs.
 
@@ -184,6 +214,8 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
                     else "Estimate: one typical rate per country; regional rates differ.")}
     if work:
         out["all_in"] = {"low": value + fees + work["low"], "high": value + fees + work["high"]}
+    cost = (out["all_in"]["low"] + out["all_in"]["high"]) / 2 if work else out["total"]
+    out["rent"] = rent(item, cost)
     return out
 
 
@@ -198,5 +230,9 @@ def as_text(est: dict | None) -> str:
         work = est["renovation"]
         rows.append(f"- Work: €{work['low']:,.0f}–{work['high']:,.0f} ({work['note']})")
         rows.append(f"- All-in: €{est['all_in']['low']:,.0f}–{est['all_in']['high']:,.0f}")
+    if est.get("rent"):
+        r = est["rent"]
+        rows.append(f"- Rent: about €{r['monthly']:,.0f} a month, {r['yield_pct']}% a year gross, "
+                    f"paid back in {r['payback_years']} years ({r['note']})")
     rows.append(f"- {est['note']}")
     return "\n".join(rows)

@@ -1,0 +1,3532 @@
+municipality,eur_m2,period,source
+Alegría-Dulantzi,6.75,2024,SERPAVI
+Amurrio,6.34,2024,SERPAVI
+Aramaio,5.2,2024,SERPAVI
+Artziniega,6.53,2024,SERPAVI
+Asparrena,5.26,2024,SERPAVI
+Ayala/Aiara,4.92,2024,SERPAVI
+Campezo/Kanpezu,4.54,2024,SERPAVI
+Labastida/Bastida,5.79,2024,SERPAVI
+Laguardia,6.13,2024,SERPAVI
+Lapuebla de Labarca,4.64,2024,SERPAVI
+Laudio/Llodio,7.42,2024,SERPAVI
+Okondo,5.53,2024,SERPAVI
+Oyón-Oion,5.22,2024,SERPAVI
+Erriberagoitia/Ribera Alta,4.61,2024,SERPAVI
+Ribera Baja/Erriberabeitia,6.87,2024,SERPAVI
+Agurain/Salvatierra,5.97,2024,SERPAVI
+Urkabustaiz,5.32,2024,SERPAVI
+Legutio,6.3,2024,SERPAVI
+Vitoria-Gasteiz,9.21,2024,SERPAVI
+Zuia,6.21,2024,SERPAVI
+Iruña Oka/Iruña de Oca,5.61,2024,SERPAVI
+Albacete,5.98,2024,SERPAVI
+Alcalá del Júcar,4.68,2024,SERPAVI
+Alcaraz,3.54,2024,SERPAVI
+Almansa,4.21,2024,SERPAVI
+Alpera,2.6,2024,SERPAVI
+Balazote,3.49,2024,SERPAVI
+Barrax,2.15,2024,SERPAVI
+Bonete,3.1,2022,SERPAVI
+"Bonillo, El",1.91,2024,SERPAVI
+Casas de Juan Núñez,2.36,2024,SERPAVI
+Casas-Ibáñez,3.5,2024,SERPAVI
+Caudete,3.02,2024,SERPAVI
+Cenizate,2.12,2024,SERPAVI
+Chinchilla de Monte-Aragón,5.22,2024,SERPAVI
+Elche de la Sierra,2.64,2024,SERPAVI
+Fuente-Álamo,1.73,2024,SERPAVI
+Fuentealbilla,2.82,2024,SERPAVI
+"Gineta, La",3.56,2024,SERPAVI
+Hellín,3.54,2024,SERPAVI
+Higueruela,1.91,2024,SERPAVI
+Madrigueras,3.07,2024,SERPAVI
+Mahora,2.87,2024,SERPAVI
+Minaya,2.28,2024,SERPAVI
+Montealegre del Castillo,2.91,2024,SERPAVI
+Motilleja,3.31,2022,SERPAVI
+Munera,2.51,2024,SERPAVI
+Ontur,3.08,2024,SERPAVI
+Pozohondo,2.68,2024,SERPAVI
+Riópar,3.29,2024,SERPAVI
+"Roda, La",3.44,2024,SERPAVI
+Tarazona de la Mancha,2.68,2024,SERPAVI
+Tobarra,2.72,2024,SERPAVI
+Valdeganga,3.4,2024,SERPAVI
+Villalgordo del Júcar,2.33,2024,SERPAVI
+Villamalea,3.29,2024,SERPAVI
+Villarrobledo,3.4,2024,SERPAVI
+Yeste,2.55,2024,SERPAVI
+Pozo Cañada,3.53,2024,SERPAVI
+Adsubia,3.14,2024,SERPAVI
+Agost,3.38,2024,SERPAVI
+Aigües,5.36,2024,SERPAVI
+Albatera,3.54,2024,SERPAVI
+Alcalalí,5.01,2024,SERPAVI
+Alcoy/Alcoi,4.49,2024,SERPAVI
+"Alfàs del Pi, l'",7.88,2024,SERPAVI
+Algorfa,6.67,2024,SERPAVI
+Algueña,2.25,2024,SERPAVI
+Alicante/Alacant,7.11,2024,SERPAVI
+Almoradí,4.34,2024,SERPAVI
+"Alqueria d'Asnar, l'",3.08,2024,SERPAVI
+Altea,7.06,2024,SERPAVI
+Aspe,4.16,2024,SERPAVI
+Banyeres de Mariola,3.23,2024,SERPAVI
+Beneixama,3.18,2024,SERPAVI
+Benejúzar,4.02,2024,SERPAVI
+Benferri,5.16,2024,SERPAVI
+Beniarbeig,6.22,2024,SERPAVI
+Benigembla,3.32,2024,SERPAVI
+Benidoleig,4.97,2024,SERPAVI
+Benidorm,8.45,2024,SERPAVI
+Benijófar,5.23,2024,SERPAVI
+Benimantell,6.34,2024,SERPAVI
+Benimeli,5.77,2024,SERPAVI
+Benissa,4.47,2024,SERPAVI
+"Benitachell/Poble Nou de Benitatxell, el",5.26,2024,SERPAVI
+Biar,3.75,2024,SERPAVI
+Bigastro,3.54,2024,SERPAVI
+Busot,5.95,2024,SERPAVI
+Calp,7.24,2024,SERPAVI
+Callosa d'En Sarrià,3.89,2024,SERPAVI
+Callosa de Segura,3.22,2024,SERPAVI
+"Campello, el",8.57,2024,SERPAVI
+Cañada,2.34,2024,SERPAVI
+Castalla,3.94,2024,SERPAVI
+Catral,4.25,2024,SERPAVI
+Cocentaina,3.39,2024,SERPAVI
+Cox,3.5,2024,SERPAVI
+Crevillent,3.9,2024,SERPAVI
+Daya Nueva,5.57,2024,SERPAVI
+Daya Vieja,7.35,2024,SERPAVI
+Dénia,6.65,2024,SERPAVI
+Dolores,4.03,2024,SERPAVI
+Elche/Elx,5.45,2024,SERPAVI
+Elda,4.5,2024,SERPAVI
+Finestrat,8.01,2024,SERPAVI
+Formentera del Segura,6.51,2024,SERPAVI
+Gata de Gorgos,3.88,2024,SERPAVI
+Granja de Rocamora,4.76,2024,SERPAVI
+"Castell de Guadalest, el",4.79,2024,SERPAVI
+Guardamar del Segura,6.85,2024,SERPAVI
+"Fondó de les Neus, el/Hondón de las Nieves",4.08,2024,SERPAVI
+Hondón de los Frailes,4.19,2024,SERPAVI
+Ibi,4.02,2024,SERPAVI
+Jacarilla,4.79,2024,SERPAVI
+Xaló,4.59,2024,SERPAVI
+Jávea/Xàbia,7.14,2024,SERPAVI
+Jijona/Xixona,3.62,2024,SERPAVI
+Llíber,5.09,2024,SERPAVI
+Monforte del Cid,4.01,2024,SERPAVI
+Monóvar/Monòver,3.33,2024,SERPAVI
+Mutxamel,6.35,2024,SERPAVI
+Murla,3.25,2024,SERPAVI
+Muro de Alcoy,3.4,2024,SERPAVI
+Novelda,3.92,2024,SERPAVI
+"Nucia, la",5.53,2024,SERPAVI
+Ondara,4.85,2024,SERPAVI
+Onil,3.78,2024,SERPAVI
+Orba,4.16,2024,SERPAVI
+Orxeta,4.69,2024,SERPAVI
+Orihuela,4.89,2024,SERPAVI
+Parcent,2.52,2024,SERPAVI
+Pedreguer,4.73,2024,SERPAVI
+Pego,4.25,2024,SERPAVI
+Petrer,4.43,2024,SERPAVI
+"Pinós, el/Pinoso",3.76,2024,SERPAVI
+Polop,5.03,2024,SERPAVI
+Rafal,3.72,2024,SERPAVI
+"Ràfol d'Almúnia, El",2.06,2024,SERPAVI
+Redován,3.47,2024,SERPAVI
+Relleu,3.07,2024,SERPAVI
+Rojales,5.89,2024,SERPAVI
+"Romana, la",2.99,2024,SERPAVI
+Salinas,3.26,2024,SERPAVI
+Sanet y Negrals,5.03,2024,SERPAVI
+San Fulgencio,4.01,2024,SERPAVI
+Sant Joan d'Alacant,6.36,2024,SERPAVI
+San Miguel de Salinas,4.49,2024,SERPAVI
+Santa Pola,6.82,2024,SERPAVI
+San Vicente del Raspeig/Sant Vicent del Raspeig,6.44,2024,SERPAVI
+Sax,3.92,2024,SERPAVI
+Sella,3.41,2024,SERPAVI
+Senija,2.73,2024,SERPAVI
+Tàrbena,2.99,2020,SERPAVI
+Teulada,6.41,2024,SERPAVI
+Tibi,4.83,2024,SERPAVI
+"Torremanzanas/Torre de les Maçanes, la",2.65,2024,SERPAVI
+Torrevieja,6.6,2024,SERPAVI
+Vall de Gallinera,2.06,2024,SERPAVI
+"Vall de Laguar, la",3.12,2024,SERPAVI
+"Verger, el",5.44,2024,SERPAVI
+"Villajoyosa/Vila Joiosa, la",6.68,2024,SERPAVI
+Villena,3.87,2024,SERPAVI
+"Poblets, els",6.65,2024,SERPAVI
+Pilar de la Horadada,5.34,2024,SERPAVI
+"Montesinos, Los",4.67,2024,SERPAVI
+San Isidro,5.0,2024,SERPAVI
+Abla,2.61,2024,SERPAVI
+Adra,4.15,2024,SERPAVI
+Albox,3.59,2024,SERPAVI
+Alhama de Almería,3.77,2024,SERPAVI
+Almería,6.77,2024,SERPAVI
+Antas,3.51,2024,SERPAVI
+Arboleas,4.13,2024,SERPAVI
+Bédar,3.04,2024,SERPAVI
+Benahadux,4.82,2024,SERPAVI
+Berja,4.07,2024,SERPAVI
+Cantoria,4.58,2024,SERPAVI
+Carboneras,5.25,2024,SERPAVI
+Cuevas del Almanzora,4.55,2024,SERPAVI
+Chirivel,2.34,2024,SERPAVI
+Dalías,4.23,2024,SERPAVI
+Enix,5.53,2021,SERPAVI
+Fines,3.68,2024,SERPAVI
+Fiñana,2.87,2022,SERPAVI
+Fondón,4.02,2024,SERPAVI
+Gádor,3.76,2024,SERPAVI
+"Gallardos, Los",3.69,2024,SERPAVI
+Garrucha,5.29,2024,SERPAVI
+Huércal de Almería,6.33,2024,SERPAVI
+Huércal-Overa,4.17,2024,SERPAVI
+Láujar de Andarax,3.09,2022,SERPAVI
+Macael,3.43,2024,SERPAVI
+Mojácar,7.33,2024,SERPAVI
+Níjar,4.14,2024,SERPAVI
+Olula del Río,3.78,2024,SERPAVI
+Partaloa,4.95,2024,SERPAVI
+Pechina,5.03,2024,SERPAVI
+Pulpí,4.25,2024,SERPAVI
+Roquetas de Mar,6.06,2024,SERPAVI
+Sorbas,3.03,2024,SERPAVI
+Tabernas,3.6,2024,SERPAVI
+Tíjola,3.21,2024,SERPAVI
+Turre,5.08,2024,SERPAVI
+Vélez-Blanco,1.25,2024,SERPAVI
+Vélez-Rubio,2.59,2024,SERPAVI
+Vera,6.06,2024,SERPAVI
+Viator,5.49,2024,SERPAVI
+Vícar,5.29,2024,SERPAVI
+Zurgena,4.61,2024,SERPAVI
+"Ejido, El",5.26,2024,SERPAVI
+"Mojonera, La",4.06,2024,SERPAVI
+Balanegra,4.21,2024,SERPAVI
+"Adrada, La",4.05,2024,SERPAVI
+Arenas de San Pedro,4.38,2024,SERPAVI
+Arévalo,4.17,2024,SERPAVI
+Ávila,5.92,2024,SERPAVI
+"Barco de Ávila, El",3.99,2024,SERPAVI
+"Barraco, El",3.2,2024,SERPAVI
+Burgohondo,3.06,2024,SERPAVI
+Candeleda,3.79,2024,SERPAVI
+Casavieja,3.16,2024,SERPAVI
+Casillas,2.78,2024,SERPAVI
+Cebreros,3.96,2024,SERPAVI
+"Colilla, La",3.2,2021,SERPAVI
+Cuevas del Valle,3.36,2024,SERPAVI
+Fontiveros,2.73,2021,SERPAVI
+"Fresno, El",4.25,2024,SERPAVI
+Guisando,3.45,2024,SERPAVI
+Herradón de Pinares,2.94,2024,SERPAVI
+"Hoyo de Pinares, El",3.6,2024,SERPAVI
+Madrigal de las Altas Torres,2.01,2023,SERPAVI
+Maello,4.97,2024,SERPAVI
+Mijares,2.88,2024,SERPAVI
+Mingorría,4.25,2024,SERPAVI
+Mombeltrán,3.52,2024,SERPAVI
+Navalperal de Pinares,3.31,2024,SERPAVI
+Navaluenga,3.26,2024,SERPAVI
+Navarredonda de Gredos,4.22,2022,SERPAVI
+"Navas del Marqués, Las",4.67,2024,SERPAVI
+Pedro Bernardo,2.65,2024,SERPAVI
+Peguerinos,4.28,2024,SERPAVI
+Piedrahíta,3.62,2024,SERPAVI
+Piedralaves,4.27,2024,SERPAVI
+Sanchidrián,3.64,2024,SERPAVI
+San Esteban del Valle,2.7,2024,SERPAVI
+San Pedro del Arroyo,2.83,2022,SERPAVI
+Santa María del Tiétar,3.46,2024,SERPAVI
+Sotillo de la Adrada,3.93,2024,SERPAVI
+"Tiemblo, El",3.95,2024,SERPAVI
+Tornadizos de Ávila,4.42,2024,SERPAVI
+Aceuchal,3.04,2024,SERPAVI
+Alange,2.73,2024,SERPAVI
+"Albuera, La",3.29,2024,SERPAVI
+Alburquerque,3.13,2024,SERPAVI
+Almendralejo,3.71,2024,SERPAVI
+Arroyo de San Serván,3.4,2024,SERPAVI
+Azuaga,2.83,2024,SERPAVI
+Badajoz,5.89,2024,SERPAVI
+Barcarrota,2.49,2024,SERPAVI
+Berlanga,3.06,2024,SERPAVI
+Burguillos del Cerro,2.36,2024,SERPAVI
+Cabeza del Buey,2.44,2024,SERPAVI
+Calamonte,3.39,2024,SERPAVI
+Campanario,1.87,2024,SERPAVI
+Casas de Don Pedro,2.18,2024,SERPAVI
+Castuera,2.64,2024,SERPAVI
+"Codosera, La",1.98,2024,SERPAVI
+"Coronada, La",1.96,2023,SERPAVI
+Don Benito,4.32,2024,SERPAVI
+Fregenal de la Sierra,3.54,2024,SERPAVI
+Fuente de Cantos,3.09,2024,SERPAVI
+Fuente del Maestre,2.69,2024,SERPAVI
+Fuentes de León,2.59,2024,SERPAVI
+Granja de Torrehermosa,2.16,2024,SERPAVI
+Guareña,3.43,2024,SERPAVI
+Herrera del Duque,3.28,2024,SERPAVI
+Higuera la Real,2.87,2024,SERPAVI
+Hornachos,2.02,2024,SERPAVI
+Jerez de los Caballeros,3.39,2024,SERPAVI
+Lobón,3.09,2024,SERPAVI
+Llerena,3.79,2024,SERPAVI
+Mérida,5.11,2024,SERPAVI
+Monesterio,3.17,2024,SERPAVI
+Monterrubio de la Serena,1.52,2024,SERPAVI
+Montijo,3.57,2024,SERPAVI
+Navalvillar de Pela,2.21,2024,SERPAVI
+Oliva de la Frontera,1.99,2024,SERPAVI
+Olivenza,3.61,2024,SERPAVI
+Orellana la Vieja,3.92,2024,SERPAVI
+Puebla de Alcocer,1.72,2024,SERPAVI
+Puebla de la Calzada,3.38,2024,SERPAVI
+Puebla de Sancho Pérez,2.54,2024,SERPAVI
+Quintana de la Serena,1.74,2024,SERPAVI
+Ribera del Fresno,2.71,2024,SERPAVI
+Santa Amalia,2.56,2024,SERPAVI
+Santa Marta,2.92,2024,SERPAVI
+"Santos de Maimona, Los",3.24,2024,SERPAVI
+San Vicente de Alcántara,2.43,2024,SERPAVI
+Siruela,2.09,2024,SERPAVI
+Solana de los Barros,1.82,2024,SERPAVI
+Talarrubias,2.11,2024,SERPAVI
+Talavera la Real,3.67,2024,SERPAVI
+Trujillanos,2.9,2024,SERPAVI
+Valverde de Leganés,3.02,2024,SERPAVI
+Villafranca de los Barros,3.49,2024,SERPAVI
+Villanueva de la Serena,3.78,2024,SERPAVI
+Villanueva del Fresno,2.29,2024,SERPAVI
+Villar del Rey,2.55,2024,SERPAVI
+Zafra,4.71,2024,SERPAVI
+Zalamea de la Serena,2.17,2024,SERPAVI
+"Zarza, La",2.39,2024,SERPAVI
+Valdelacalzada,2.57,2024,SERPAVI
+Pueblonuevo del Guadiana,2.78,2024,SERPAVI
+Guadiana,2.45,2024,SERPAVI
+Alaró,7.8,2024,SERPAVI
+Alaior,6.97,2024,SERPAVI
+Alcúdia,8.11,2024,SERPAVI
+Algaida,6.16,2024,SERPAVI
+Andratx,9.27,2024,SERPAVI
+Artà,6.12,2024,SERPAVI
+Banyalbufar,10.19,2024,SERPAVI
+Binissalem,7.06,2024,SERPAVI
+Búger,5.06,2024,SERPAVI
+Bunyola,7.55,2024,SERPAVI
+Calvià,12.72,2024,SERPAVI
+Campanet,5.88,2024,SERPAVI
+Campos,7.43,2024,SERPAVI
+Capdepera,8.31,2024,SERPAVI
+Ciutadella de Menorca,7.79,2024,SERPAVI
+Consell,6.47,2024,SERPAVI
+Costitx,5.83,2024,SERPAVI
+Deyá,7.67,2024,SERPAVI
+Esporles,8.62,2024,SERPAVI
+Estellencs,6.32,2024,SERPAVI
+Felanitx,6.25,2024,SERPAVI
+Ferreries,5.52,2024,SERPAVI
+Formentera,13.57,2024,SERPAVI
+Fornalutx,6.85,2024,SERPAVI
+Eivissa,12.67,2024,SERPAVI
+Inca,7.0,2024,SERPAVI
+Lloret de Vistalegre,5.65,2024,SERPAVI
+Lloseta,5.82,2024,SERPAVI
+Llubí,5.3,2024,SERPAVI
+Llucmajor,10.09,2024,SERPAVI
+Maó,6.89,2024,SERPAVI
+Manacor,6.25,2024,SERPAVI
+Mancor de la Vall,6.11,2024,SERPAVI
+Maria de la Salut,6.78,2024,SERPAVI
+Marratxí,9.09,2024,SERPAVI
+"Mercadal, Es",7.13,2024,SERPAVI
+Montuïri,7.28,2024,SERPAVI
+Muro,6.9,2024,SERPAVI
+Palma,9.84,2024,SERPAVI
+Petra,4.57,2024,SERPAVI
+Pollença,7.87,2024,SERPAVI
+Porreres,6.46,2024,SERPAVI
+"Pobla, Sa",5.88,2024,SERPAVI
+Puigpunyent,6.65,2024,SERPAVI
+Sant Antoni de Portmany,11.98,2024,SERPAVI
+Sencelles,7.26,2024,SERPAVI
+Sant Josep de sa Talaia,14.63,2024,SERPAVI
+Sant Joan,6.67,2024,SERPAVI
+Sant Joan de Labritja,12.13,2024,SERPAVI
+Sant Llorenç des Cardassar,8.24,2024,SERPAVI
+Sant Lluís,7.34,2024,SERPAVI
+Santa Eugènia,6.29,2024,SERPAVI
+Santa Eulalia del Río,12.9,2024,SERPAVI
+Santa Margalida,8.18,2024,SERPAVI
+Santa María del Camí,7.74,2024,SERPAVI
+Santanyí,7.39,2024,SERPAVI
+Selva,5.7,2024,SERPAVI
+"Salines, Ses",7.99,2024,SERPAVI
+Sineu,7.14,2024,SERPAVI
+Sóller,8.46,2024,SERPAVI
+Son Servera,6.82,2024,SERPAVI
+Valldemossa,7.59,2024,SERPAVI
+"Castell, Es",8.05,2024,SERPAVI
+Vilafranca de Bonany,6.9,2024,SERPAVI
+Ariany,4.58,2024,SERPAVI
+"Migjorn Gran, Es",6.25,2024,SERPAVI
+Abrera,7.86,2024,SERPAVI
+Aguilar de Segarra,1.39,2022,SERPAVI
+Alella,12.71,2024,SERPAVI
+Alpens,4.34,2024,SERPAVI
+"Ametlla del Vallès, L'",9.53,2024,SERPAVI
+Arenys de Mar,8.52,2024,SERPAVI
+Arenys de Munt,8.04,2024,SERPAVI
+Argentona,8.91,2024,SERPAVI
+Artés,5.9,2024,SERPAVI
+Avià,4.77,2024,SERPAVI
+Avinyó,4.93,2024,SERPAVI
+Avinyonet del Penedès,5.16,2024,SERPAVI
+Aiguafreda,6.21,2024,SERPAVI
+Badalona,10.17,2024,SERPAVI
+Bagà,5.28,2024,SERPAVI
+Balenyà,6.61,2024,SERPAVI
+Balsareny,5.69,2024,SERPAVI
+Barcelona,13.68,2024,SERPAVI
+Begues,10.16,2024,SERPAVI
+Berga,4.84,2024,SERPAVI
+Bigues i Riells,7.97,2024,SERPAVI
+Borredà,3.25,2024,SERPAVI
+"Bruc, El",9.95,2024,SERPAVI
+"Cabanyes, Les",5.73,2024,SERPAVI
+Cabrera d'Anoia,6.8,2024,SERPAVI
+Cabrera de Mar,11.33,2024,SERPAVI
+Cabrils,9.85,2024,SERPAVI
+Calaf,4.38,2024,SERPAVI
+Caldes d'Estrac,9.9,2024,SERPAVI
+Caldes de Montbui,8.36,2024,SERPAVI
+Calders,3.62,2024,SERPAVI
+Calella,8.09,2024,SERPAVI
+Calldetenes,6.76,2024,SERPAVI
+Callús,5.97,2024,SERPAVI
+Campins,6.88,2024,SERPAVI
+Canet de Mar,8.47,2024,SERPAVI
+Canovelles,7.64,2024,SERPAVI
+Cànoves i Samalús,7.2,2024,SERPAVI
+Canyelles,9.72,2024,SERPAVI
+Capellades,5.5,2024,SERPAVI
+Cardedeu,8.68,2024,SERPAVI
+Cardona,4.02,2024,SERPAVI
+Carme,3.6,2024,SERPAVI
+Casserres,4.62,2024,SERPAVI
+Castellar del Vallès,7.86,2024,SERPAVI
+Castellbell i el Vilar,6.3,2024,SERPAVI
+Castellbisbal,8.32,2024,SERPAVI
+Castellcir,5.97,2024,SERPAVI
+Castelldefels,12.8,2024,SERPAVI
+Castellet i la Gornal,5.86,2024,SERPAVI
+Castellgalí,7.64,2024,SERPAVI
+Castellnou de Bages,5.54,2024,SERPAVI
+Castellolí,5.7,2022,SERPAVI
+Castellterçol,5.87,2024,SERPAVI
+Castellví de la Marca,5.25,2024,SERPAVI
+Castellví de Rosanes,7.91,2024,SERPAVI
+Centelles,6.96,2024,SERPAVI
+Cervelló,8.97,2024,SERPAVI
+Collbató,7.55,2024,SERPAVI
+Collsuspina,3.02,2023,SERPAVI
+Corbera de Llobregat,8.21,2024,SERPAVI
+Cornellà de Llobregat,11.34,2024,SERPAVI
+Cubelles,9.11,2024,SERPAVI
+Dosrius,8.67,2024,SERPAVI
+Esparreguera,7.99,2024,SERPAVI
+Esplugues de Llobregat,12.93,2024,SERPAVI
+"Estany, L'",7.65,2024,SERPAVI
+Fogars de Montclús,3.38,2024,SERPAVI
+Fogars de la Selva,5.94,2024,SERPAVI
+Folgueroles,7.62,2024,SERPAVI
+Fonollosa,5.0,2024,SERPAVI
+Font-rubí,3.69,2024,SERPAVI
+"Franqueses del Vallès, Les",9.22,2024,SERPAVI
+"Garriga, La",8.9,2024,SERPAVI
+Gavà,10.46,2024,SERPAVI
+Gelida,7.64,2024,SERPAVI
+Gironella,4.5,2024,SERPAVI
+"Granada, La",6.78,2024,SERPAVI
+Granollers,8.73,2024,SERPAVI
+Gualba,6.16,2024,SERPAVI
+Sant Salvador de Guardiola,7.29,2024,SERPAVI
+Guardiola de Berguedà,5.06,2024,SERPAVI
+Gurb,4.81,2024,SERPAVI
+"Hospitalet de Llobregat, L'",13.0,2024,SERPAVI
+Igualada,6.62,2024,SERPAVI
+Jorba,7.23,2024,SERPAVI
+"Llacuna, La",5.48,2024,SERPAVI
+"Llagosta, La",8.66,2024,SERPAVI
+Llinars del Vallès,8.31,2024,SERPAVI
+Lliçà d'Amunt,8.38,2024,SERPAVI
+Lliçà de Vall,8.29,2024,SERPAVI
+Lluçà,3.28,2024,SERPAVI
+Malgrat de Mar,7.59,2024,SERPAVI
+Malla,2.48,2020,SERPAVI
+Manlleu,5.33,2024,SERPAVI
+Manresa,6.32,2024,SERPAVI
+Martorell,7.94,2024,SERPAVI
+Martorelles,7.69,2024,SERPAVI
+"Masies de Roda, Les",3.89,2024,SERPAVI
+"Masies de Voltregà, Les",5.51,2024,SERPAVI
+"Masnou, El",10.33,2024,SERPAVI
+Masquefa,7.69,2024,SERPAVI
+Matadepera,10.02,2024,SERPAVI
+Mataró,8.93,2024,SERPAVI
+Mediona,4.26,2024,SERPAVI
+Molins de Rei,9.75,2024,SERPAVI
+Mollet del Vallès,8.44,2024,SERPAVI
+Montcada i Reixac,8.91,2024,SERPAVI
+Montgat,10.95,2024,SERPAVI
+Monistrol de Montserrat,6.69,2024,SERPAVI
+Monistrol de Calders,5.0,2024,SERPAVI
+Muntanyola,5.56,2024,SERPAVI
+Montesquiu,5.57,2024,SERPAVI
+Montmajor,2.67,2024,SERPAVI
+Figaró-Montmany,6.34,2024,SERPAVI
+Montmeló,7.77,2024,SERPAVI
+Montornès del Vallès,7.96,2024,SERPAVI
+Montseny,7.79,2024,SERPAVI
+Moià,6.23,2024,SERPAVI
+Navarcles,6.27,2024,SERPAVI
+Navàs,5.17,2024,SERPAVI
+"Nou de Berguedà, La",2.29,2022,SERPAVI
+Òdena,7.18,2024,SERPAVI
+Olvan,5.18,2024,SERPAVI
+Olèrdola,8.26,2024,SERPAVI
+Olesa de Bonesvalls,6.49,2024,SERPAVI
+Olesa de Montserrat,8.07,2024,SERPAVI
+Olivella,8.27,2024,SERPAVI
+Olost,5.26,2024,SERPAVI
+Oristà,2.46,2024,SERPAVI
+Òrrius,7.17,2024,SERPAVI
+Pacs del Penedès,6.5,2024,SERPAVI
+Palafolls,8.42,2024,SERPAVI
+Palau-solità i Plegamans,8.45,2024,SERPAVI
+Pallejà,9.46,2024,SERPAVI
+"Papiol, El",8.41,2024,SERPAVI
+Parets del Vallès,8.77,2024,SERPAVI
+Perafita,1.95,2024,SERPAVI
+Piera,6.86,2024,SERPAVI
+"Hostalets de Pierola, Els",6.98,2024,SERPAVI
+Pineda de Mar,7.97,2024,SERPAVI
+"Pla del Penedès, El",6.68,2024,SERPAVI
+"Pobla de Claramunt, La",5.34,2024,SERPAVI
+"Pobla de Lillet, La",5.69,2024,SERPAVI
+Polinyà,8.66,2024,SERPAVI
+Pontons,4.0,2024,SERPAVI
+"Prat de Llobregat, El",10.94,2024,SERPAVI
+"Prats de Rei, Els",1.42,2023,SERPAVI
+Prats de Lluçanès,4.44,2024,SERPAVI
+Premià de Mar,9.68,2024,SERPAVI
+Puigdàlber,4.04,2024,SERPAVI
+Puig-reig,4.65,2024,SERPAVI
+Rajadell,5.46,2024,SERPAVI
+Rellinars,4.35,2024,SERPAVI
+Ripollet,9.38,2024,SERPAVI
+"Roca del Vallès, La",8.56,2024,SERPAVI
+"Pont de Vilomara i Rocafort, El",5.77,2024,SERPAVI
+Roda de Ter,6.54,2024,SERPAVI
+Rubí,9.18,2024,SERPAVI
+Sabadell,8.57,2024,SERPAVI
+Saldes,6.21,2024,SERPAVI
+Sallent,6.11,2024,SERPAVI
+Santpedor,6.76,2024,SERPAVI
+Sant Iscle de Vallalta,6.92,2024,SERPAVI
+Sant Adrià de Besòs,11.0,2024,SERPAVI
+Sant Andreu de la Barca,8.53,2024,SERPAVI
+Sant Andreu de Llavaneres,9.81,2024,SERPAVI
+Sant Antoni de Vilamajor,8.38,2024,SERPAVI
+Sant Bartomeu del Grau,2.05,2024,SERPAVI
+Sant Boi de Llobregat,10.87,2024,SERPAVI
+Sant Boi de Lluçanès,4.63,2024,SERPAVI
+Sant Celoni,7.44,2024,SERPAVI
+Sant Cebrià de Vallalta,7.12,2024,SERPAVI
+Sant Climent de Llobregat,9.63,2024,SERPAVI
+Sant Cugat del Vallès,13.55,2024,SERPAVI
+Sant Cugat Sesgarrigues,3.98,2024,SERPAVI
+Sant Esteve de Palautordera,7.75,2024,SERPAVI
+Sant Esteve Sesrovires,8.02,2024,SERPAVI
+Sant Fost de Campsentelles,9.04,2024,SERPAVI
+Sant Feliu de Codines,7.28,2024,SERPAVI
+Sant Feliu de Llobregat,11.36,2024,SERPAVI
+Sant Feliu Sasserra,3.47,2024,SERPAVI
+Sant Fruitós de Bages,6.34,2024,SERPAVI
+Vilassar de Dalt,9.73,2024,SERPAVI
+Sant Hipòlit de Voltregà,5.62,2024,SERPAVI
+Sant Joan Despí,11.58,2024,SERPAVI
+Sant Joan de Vilatorrada,6.34,2024,SERPAVI
+Vilassar de Mar,10.4,2024,SERPAVI
+Sant Julià de Vilatorta,6.44,2024,SERPAVI
+Sant Just Desvern,12.82,2024,SERPAVI
+Sant Llorenç d'Hortons,7.32,2024,SERPAVI
+Sant Llorenç Savall,5.34,2024,SERPAVI
+Sant Martí de Centelles,6.46,2024,SERPAVI
+Sant Martí de Tous,5.27,2024,SERPAVI
+Sant Martí Sarroca,6.95,2024,SERPAVI
+Sant Martí Sesgueioles,2.59,2024,SERPAVI
+Sant Mateu de Bages,4.87,2024,SERPAVI
+Premià de Dalt,10.36,2024,SERPAVI
+Sant Pere de Ribes,9.47,2024,SERPAVI
+Sant Pere de Riudebitlles,6.29,2024,SERPAVI
+Sant Pere de Torelló,6.16,2024,SERPAVI
+Sant Pere de Vilamajor,7.26,2024,SERPAVI
+Sant Pol de Mar,8.7,2024,SERPAVI
+Sant Quintí de Mediona,5.78,2024,SERPAVI
+Sant Quirze de Besora,5.08,2024,SERPAVI
+Sant Quirze del Vallès,10.01,2024,SERPAVI
+Sant Quirze Safaja,4.63,2024,SERPAVI
+Sant Sadurní d'Anoia,7.29,2024,SERPAVI
+Marganell,3.42,2022,SERPAVI
+Santa Coloma de Cervelló,9.39,2024,SERPAVI
+Santa Coloma de Gramenet,9.92,2024,SERPAVI
+Santa Eugènia de Berga,6.66,2024,SERPAVI
+Santa Eulàlia de Riuprimer,8.09,2024,SERPAVI
+Santa Eulàlia de Ronçana,8.0,2024,SERPAVI
+Santa Margarida de Montbui,5.67,2024,SERPAVI
+Santa Margarida i els Monjos,6.67,2024,SERPAVI
+Barberà del Vallès,9.18,2024,SERPAVI
+Santa Maria de Besora,2.94,2024,SERPAVI
+Santa Maria de Corcó,4.85,2024,SERPAVI
+Santa Maria de Martorelles,6.87,2024,SERPAVI
+Santa Maria d'Oló,4.36,2024,SERPAVI
+Santa Maria de Palautordera,7.71,2024,SERPAVI
+Santa Perpètua de Mogoda,9.0,2024,SERPAVI
+Santa Susanna,8.59,2024,SERPAVI
+Sant Vicenç de Castellet,6.48,2024,SERPAVI
+Sant Vicenç dels Horts,9.04,2024,SERPAVI
+Sant Vicenç de Montalt,10.91,2024,SERPAVI
+Sant Vicenç de Torelló,5.65,2024,SERPAVI
+Cerdanyola del Vallès,10.04,2024,SERPAVI
+Sentmenat,7.82,2024,SERPAVI
+Cercs,3.69,2024,SERPAVI
+Seva,5.56,2024,SERPAVI
+Sitges,13.37,2024,SERPAVI
+Sora,2.78,2024,SERPAVI
+Subirats,6.41,2024,SERPAVI
+Súria,5.51,2024,SERPAVI
+Tavèrnoles,2.02,2024,SERPAVI
+Tagamanent,4.43,2024,SERPAVI
+Talamanca,4.39,2023,SERPAVI
+Taradell,6.17,2024,SERPAVI
+Terrassa,8.9,2024,SERPAVI
+Tavertet,1.46,2011,SERPAVI
+Teià,10.18,2024,SERPAVI
+Tiana,11.45,2024,SERPAVI
+Tona,6.68,2024,SERPAVI
+Tordera,7.45,2024,SERPAVI
+Torelló,5.44,2024,SERPAVI
+"Torre de Claramunt, La",6.25,2024,SERPAVI
+Torrelavit,6.33,2024,SERPAVI
+Torrelles de Foix,6.04,2024,SERPAVI
+Torrelles de Llobregat,9.23,2024,SERPAVI
+Ullastrell,7.54,2024,SERPAVI
+Vacarisses,6.1,2024,SERPAVI
+Vallbona d'Anoia,5.63,2024,SERPAVI
+Vallcebre,2.51,2024,SERPAVI
+Vallgorguina,7.13,2024,SERPAVI
+Vallirana,8.53,2024,SERPAVI
+Vallromanes,8.73,2024,SERPAVI
+Vic,7.07,2024,SERPAVI
+Vilada,2.3,2024,SERPAVI
+Viladecavalls,10.42,2024,SERPAVI
+Viladecans,10.27,2024,SERPAVI
+Vilanova del Camí,6.16,2024,SERPAVI
+Vilanova de Sau,3.06,2024,SERPAVI
+Vilobí del Penedès,3.85,2024,SERPAVI
+Vilafranca del Penedès,7.44,2024,SERPAVI
+Vilalba Sasserra,7.92,2024,SERPAVI
+Vilanova i la Geltrú,8.84,2024,SERPAVI
+Rupit i Pruit,1.9,2024,SERPAVI
+Vilanova del Vallès,9.06,2024,SERPAVI
+Sant Julià de Cerdanyola,2.09,2024,SERPAVI
+Badia del Vallès,6.68,2024,SERPAVI
+"Palma de Cervelló, La",9.29,2024,SERPAVI
+Aranda de Duero,6.2,2024,SERPAVI
+Arcos,4.07,2024,SERPAVI
+Belorado,3.93,2024,SERPAVI
+Briviesca,4.08,2024,SERPAVI
+Buniel,3.75,2024,SERPAVI
+Burgos,7.09,2024,SERPAVI
+Cardeñadijo,6.06,2024,SERPAVI
+Cardeñajimeno,3.98,2024,SERPAVI
+Castrillo del Val,4.05,2024,SERPAVI
+Cogollos,3.4,2024,SERPAVI
+Espinosa de los Monteros,3.63,2024,SERPAVI
+Fresnillo de las Dueñas,4.41,2024,SERPAVI
+Fuentespina,3.15,2024,SERPAVI
+Ibeas de Juarros,3.72,2024,SERPAVI
+Lerma,4.27,2024,SERPAVI
+Medina de Pomar,4.17,2024,SERPAVI
+Melgar de Fernamental,3.99,2024,SERPAVI
+Miranda de Ebro,6.26,2024,SERPAVI
+Modúbar de la Emparedada,3.82,2023,SERPAVI
+"Puebla de Arganzón, La",8.2,2024,SERPAVI
+Quintanar de la Sierra,3.74,2024,SERPAVI
+Quintanilla Vivar,4.19,2024,SERPAVI
+Revillarruz,4.4,2024,SERPAVI
+Roa,4.75,2024,SERPAVI
+Salas de los Infantes,3.95,2024,SERPAVI
+Tardajos,2.43,2021,SERPAVI
+Trespaderne,3.25,2024,SERPAVI
+Valdorros,3.37,2024,SERPAVI
+Valle de Mena,4.99,2024,SERPAVI
+Valle de Tobalina,2.81,2024,SERPAVI
+Villadiego,3.92,2024,SERPAVI
+Villagonzalo Pedernales,3.49,2024,SERPAVI
+Villalba de Duero,3.47,2024,SERPAVI
+Villalbilla de Burgos,7.43,2024,SERPAVI
+Villariezo,4.28,2023,SERPAVI
+Villarcayo de Merindad de Castilla la Vieja,3.91,2024,SERPAVI
+Merindad de Río Ubierna,3.39,2024,SERPAVI
+Alfoz de Quintanadueñas,6.55,2024,SERPAVI
+Ahigal,1.53,2011,SERPAVI
+Alcántara,3.61,2024,SERPAVI
+Alcuéscar,2.27,2024,SERPAVI
+Aldeanueva de la Vera,2.8,2024,SERPAVI
+Aldeanueva del Camino,2.52,2023,SERPAVI
+Almaraz,3.43,2024,SERPAVI
+Almoharín,2.53,2024,SERPAVI
+Arroyo de la Luz,2.99,2024,SERPAVI
+Belvís de Monroy,2.37,2024,SERPAVI
+Cabezuela del Valle,3.31,2024,SERPAVI
+Cáceres,5.4,2024,SERPAVI
+Caminomorisco,2.1,2024,SERPAVI
+Cañamero,1.54,2024,SERPAVI
+Cañaveral,1.55,2024,SERPAVI
+Carcaboso,1.97,2022,SERPAVI
+Casar de Cáceres,3.38,2024,SERPAVI
+Casas del Monte,2.17,2024,SERPAVI
+Ceclavín,0.97,2016,SERPAVI
+Coria,3.54,2024,SERPAVI
+Garrovillas de Alconétar,2.5,2023,SERPAVI
+"Gordo, El",6.45,2024,SERPAVI
+Guadalupe,3.14,2024,SERPAVI
+Hervás,3.94,2024,SERPAVI
+Hoyos,2.64,2024,SERPAVI
+Jaraíz de la Vera,3.0,2024,SERPAVI
+Jarandilla de la Vera,3.36,2024,SERPAVI
+Jerte,2.45,2022,SERPAVI
+Logrosán,2.21,2024,SERPAVI
+Losar de la Vera,2.5,2024,SERPAVI
+Madrigal de la Vera,3.9,2024,SERPAVI
+Malpartida de Cáceres,3.0,2024,SERPAVI
+Malpartida de Plasencia,4.08,2024,SERPAVI
+Miajadas,3.21,2024,SERPAVI
+Montánchez,2.05,2024,SERPAVI
+Montehermoso,2.08,2024,SERPAVI
+Moraleja,2.99,2024,SERPAVI
+Navaconcejo,2.95,2024,SERPAVI
+Navalmoral de la Mata,4.41,2024,SERPAVI
+Pinofranqueado,2.5,2024,SERPAVI
+Plasencia,4.45,2024,SERPAVI
+Serradilla,1.82,2024,SERPAVI
+Sierra de Fuentes,2.38,2024,SERPAVI
+Talayuela,3.09,2024,SERPAVI
+"Torno, El",3.01,2024,SERPAVI
+Torrejoncillo,2.45,2024,SERPAVI
+Torreorgaz,2.43,2023,SERPAVI
+Trujillo,4.09,2024,SERPAVI
+Valencia de Alcántara,2.75,2024,SERPAVI
+Valverde del Fresno,2.01,2024,SERPAVI
+Villanueva de la Vera,3.68,2024,SERPAVI
+Villar del Pedroso,2.65,2024,SERPAVI
+Zarza de Granadilla,2.3,2024,SERPAVI
+Rosalejo,2.83,2024,SERPAVI
+Alcalá de los Gazules,4.06,2024,SERPAVI
+Alcalá del Valle,2.59,2024,SERPAVI
+Algeciras,6.77,2024,SERPAVI
+Algodonales,2.87,2024,SERPAVI
+Arcos de la Frontera,4.19,2024,SERPAVI
+Barbate,6.4,2024,SERPAVI
+"Barrios, Los",6.16,2024,SERPAVI
+Benaocaz,4.05,2022,SERPAVI
+Bornos,3.43,2024,SERPAVI
+"Bosque, El",4.67,2024,SERPAVI
+Cádiz,9.07,2024,SERPAVI
+Castellar de la Frontera,4.65,2024,SERPAVI
+Conil de la Frontera,7.11,2024,SERPAVI
+Chiclana de la Frontera,6.71,2024,SERPAVI
+Chipiona,6.85,2024,SERPAVI
+"Gastor, El",1.53,2019,SERPAVI
+Grazalema,4.23,2024,SERPAVI
+Jerez de la Frontera,6.51,2024,SERPAVI
+Jimena de la Frontera,4.97,2024,SERPAVI
+"Línea de la Concepción, La",7.79,2024,SERPAVI
+Medina-Sidonia,4.24,2024,SERPAVI
+Olvera,3.24,2024,SERPAVI
+Paterna de Rivera,3.24,2024,SERPAVI
+Prado del Rey,3.97,2024,SERPAVI
+"Puerto de Santa María, El",7.53,2024,SERPAVI
+Puerto Real,6.68,2024,SERPAVI
+Puerto Serrano,2.37,2023,SERPAVI
+Rota,8.1,2024,SERPAVI
+San Fernando,6.72,2024,SERPAVI
+Sanlúcar de Barrameda,6.63,2024,SERPAVI
+San Roque,8.08,2024,SERPAVI
+Setenil de las Bodegas,2.77,2024,SERPAVI
+Tarifa,8.7,2024,SERPAVI
+Trebujena,4.77,2024,SERPAVI
+Ubrique,4.47,2024,SERPAVI
+Vejer de la Frontera,4.81,2024,SERPAVI
+Villamartín,3.99,2024,SERPAVI
+Benalup-Casas Viejas,4.6,2024,SERPAVI
+San José del Valle,4.49,2024,SERPAVI
+San Martín del Tesorillo,4.01,2024,SERPAVI
+Atzeneta del Maestrat,2.08,2024,SERPAVI
+Albocàsser,5.14,2024,SERPAVI
+Alcalà de Xivert,4.82,2024,SERPAVI
+"Alcora, l'",3.49,2024,SERPAVI
+Algimia de Almonacid,3.63,2023,SERPAVI
+Almazora/Almassora,4.65,2024,SERPAVI
+Almenara,6.45,2024,SERPAVI
+Altura,3.75,2024,SERPAVI
+Artana,3.09,2024,SERPAVI
+Azuébar,1.21,2022,SERPAVI
+Betxí,3.71,2024,SERPAVI
+Benafer,1.25,2021,SERPAVI
+Benasal,2.92,2024,SERPAVI
+Benicarló,5.21,2024,SERPAVI
+Benicasim/Benicàssim,7.41,2024,SERPAVI
+Benlloch,3.62,2024,SERPAVI
+Borriol,4.72,2024,SERPAVI
+Borriana/Burriana,4.48,2024,SERPAVI
+Cabanes,4.36,2024,SERPAVI
+Càlig,4.15,2024,SERPAVI
+Castellnovo,3.84,2024,SERPAVI
+Castellón de la Plana/Castelló de la Plana,5.43,2024,SERPAVI
+Catí,2.72,2024,SERPAVI
+Caudiel,3.38,2024,SERPAVI
+Cortes de Arenoso,3.24,2024,SERPAVI
+Costur,3.86,2024,SERPAVI
+"Coves de Vinromà, les",2.89,2024,SERPAVI
+Chilches/Xilxes,6.15,2024,SERPAVI
+Eslida,4.09,2024,SERPAVI
+Forcall,1.92,2024,SERPAVI
+Geldo,4.03,2024,SERPAVI
+Jérica,3.85,2024,SERPAVI
+Lucena del Cid,3.24,2024,SERPAVI
+"Llosa, la",6.4,2024,SERPAVI
+Moncofa,6.67,2024,SERPAVI
+Montanejos,4.17,2024,SERPAVI
+Morella,4.34,2024,SERPAVI
+Navajas,4.86,2024,SERPAVI
+Nules,4.09,2024,SERPAVI
+Onda,4.55,2024,SERPAVI
+Oropesa del Mar/Orpesa,6.93,2024,SERPAVI
+Peníscola/Peñíscola,5.19,2024,SERPAVI
+"Pobla Tornesa, la",5.42,2024,SERPAVI
+Ribesalbes,2.91,2024,SERPAVI
+Sant Jordi/San Jorge,5.72,2024,SERPAVI
+Sant Mateu,3.19,2024,SERPAVI
+San Rafael del Río,5.12,2024,SERPAVI
+Segorbe,3.78,2024,SERPAVI
+Sierra Engarcerán,3.13,2024,SERPAVI
+Soneja,3.86,2024,SERPAVI
+Sot de Ferrer,3.12,2024,SERPAVI
+Sueras/Suera,2.65,2023,SERPAVI
+Tales,2.84,2024,SERPAVI
+Torreblanca,4.03,2024,SERPAVI
+Traiguera,2.94,2024,SERPAVI
+Vall d'Alba,3.41,2024,SERPAVI
+"Vall d'Uixó, la",4.3,2024,SERPAVI
+Vilafamés,4.04,2024,SERPAVI
+Villafranca del Cid/Vilafranca,3.86,2024,SERPAVI
+Vilanova d'Alcolea,1.9,2024,SERPAVI
+Vila-real,4.87,2024,SERPAVI
+"Vilavella, la",3.48,2024,SERPAVI
+Vinaròs,5.24,2024,SERPAVI
+Vistabella del Maestrazgo,4.04,2024,SERPAVI
+Viver,2.96,2024,SERPAVI
+Alquerías del Niño Perdido,4.9,2024,SERPAVI
+Sant Joan de Moró,3.71,2024,SERPAVI
+Alcázar de San Juan,5.44,2024,SERPAVI
+Almadén,2.52,2024,SERPAVI
+Almagro,3.72,2024,SERPAVI
+Almodóvar del Campo,3.86,2024,SERPAVI
+Argamasilla de Alba,3.95,2024,SERPAVI
+Argamasilla de Calatrava,3.73,2024,SERPAVI
+Bolaños de Calatrava,3.74,2024,SERPAVI
+Calzada de Calatrava,3.15,2024,SERPAVI
+Campo de Criptana,3.91,2024,SERPAVI
+Carrión de Calatrava,4.05,2024,SERPAVI
+Castellar de Santiago,2.26,2024,SERPAVI
+Ciudad Real,5.79,2024,SERPAVI
+Corral de Calatrava,2.51,2022,SERPAVI
+Daimiel,3.87,2024,SERPAVI
+Fuente el Fresno,2.32,2024,SERPAVI
+Herencia,3.59,2024,SERPAVI
+Malagón,3.53,2024,SERPAVI
+Manzanares,4.33,2024,SERPAVI
+Membrilla,3.82,2024,SERPAVI
+Miguelturra,4.5,2024,SERPAVI
+Moral de Calatrava,2.8,2024,SERPAVI
+Pedro Muñoz,4.46,2024,SERPAVI
+Piedrabuena,2.12,2024,SERPAVI
+Poblete,4.48,2024,SERPAVI
+Porzuna,2.46,2024,SERPAVI
+Pozuelo de Calatrava,3.4,2024,SERPAVI
+Puertollano,4.49,2024,SERPAVI
+Santa Cruz de Mudela,2.78,2024,SERPAVI
+Socuéllamos,3.43,2024,SERPAVI
+"Solana, La",3.85,2024,SERPAVI
+Tomelloso,4.51,2024,SERPAVI
+Torralba de Calatrava,2.28,2024,SERPAVI
+Torre de Juan Abad,2.38,2024,SERPAVI
+Torrenueva,1.95,2024,SERPAVI
+Valdepeñas,5.0,2024,SERPAVI
+Villanueva de los Infantes,2.73,2024,SERPAVI
+Villarrubia de los Ojos,3.13,2024,SERPAVI
+Villarta de San Juan,2.2,2024,SERPAVI
+Viso del Marqués,2.24,2024,SERPAVI
+"Robledo, El",2.0,2024,SERPAVI
+Adamuz,2.29,2024,SERPAVI
+Aguilar de la Frontera,3.33,2024,SERPAVI
+Alcaracejos,2.27,2024,SERPAVI
+Almodóvar del Río,4.43,2024,SERPAVI
+Baena,3.6,2024,SERPAVI
+Belalcázar,1.9,2024,SERPAVI
+Belmez,3.9,2024,SERPAVI
+Benamejí,3.25,2024,SERPAVI
+Bujalance,4.05,2024,SERPAVI
+Cabra,3.96,2024,SERPAVI
+Carcabuey,2.93,2024,SERPAVI
+"Carlota, La",3.72,2024,SERPAVI
+"Carpio, El",4.05,2024,SERPAVI
+Castro del Río,2.68,2024,SERPAVI
+Córdoba,7.14,2024,SERPAVI
+Doña Mencía,3.13,2024,SERPAVI
+Espiel,3.6,2024,SERPAVI
+Fernán-Núñez,3.76,2024,SERPAVI
+Fuente Obejuna,3.09,2024,SERPAVI
+Fuente Palmera,3.93,2024,SERPAVI
+Guadalcázar,3.51,2024,SERPAVI
+Hinojosa del Duque,2.03,2024,SERPAVI
+Hornachuelos,3.38,2024,SERPAVI
+Lucena,4.59,2024,SERPAVI
+Montalbán de Córdoba,2.89,2024,SERPAVI
+Montemayor,2.49,2024,SERPAVI
+Montilla,4.55,2024,SERPAVI
+Montoro,3.56,2024,SERPAVI
+Moriles,1.65,2024,SERPAVI
+Nueva Carteya,4.39,2024,SERPAVI
+Obejo,5.0,2024,SERPAVI
+Palma del Río,4.12,2024,SERPAVI
+Pedro Abad,3.17,2024,SERPAVI
+Peñarroya-Pueblonuevo,3.58,2024,SERPAVI
+Posadas,4.24,2024,SERPAVI
+Pozoblanco,3.63,2024,SERPAVI
+Priego de Córdoba,3.44,2024,SERPAVI
+Puente Genil,4.22,2024,SERPAVI
+"Rambla, La",3.58,2024,SERPAVI
+Rute,3.49,2024,SERPAVI
+Santaella,2.78,2024,SERPAVI
+"Victoria, La",3.27,2024,SERPAVI
+Villa del Río,3.85,2024,SERPAVI
+Villafranca de Córdoba,4.15,2024,SERPAVI
+Villaharta,3.18,2024,SERPAVI
+Villanueva de Córdoba,2.55,2024,SERPAVI
+Villaviciosa de Córdoba,2.57,2024,SERPAVI
+"Viso, El",2.3,2024,SERPAVI
+Abegondo,4.01,2024,SERPAVI
+Ames,5.6,2024,SERPAVI
+Aranga,2.53,2024,SERPAVI
+Ares,5.15,2024,SERPAVI
+Arteixo,5.11,2024,SERPAVI
+Arzúa,3.81,2024,SERPAVI
+"Baña, A",2.59,2024,SERPAVI
+Bergondo,4.63,2024,SERPAVI
+Betanzos,5.17,2024,SERPAVI
+Boimorto,2.41,2024,SERPAVI
+Boiro,4.17,2024,SERPAVI
+Boqueixón,4.74,2024,SERPAVI
+Brión,6.03,2024,SERPAVI
+Cabana de Bergantiños,4.27,2024,SERPAVI
+Cabanas,6.14,2024,SERPAVI
+Camariñas,2.48,2024,SERPAVI
+Cambre,6.01,2024,SERPAVI
+Carballo,3.64,2024,SERPAVI
+Carnota,4.36,2024,SERPAVI
+Carral,4.5,2024,SERPAVI
+Cedeira,3.66,2024,SERPAVI
+Cee,3.72,2024,SERPAVI
+Cerceda,3.45,2024,SERPAVI
+Cerdido,2.01,2024,SERPAVI
+Coirós,3.79,2024,SERPAVI
+Corcubión,4.19,2024,SERPAVI
+Coristanco,2.81,2024,SERPAVI
+"Coruña, A",7.1,2024,SERPAVI
+Culleredo,6.1,2024,SERPAVI
+Curtis,3.27,2024,SERPAVI
+Dodro,3.12,2024,SERPAVI
+Dumbría,2.46,2024,SERPAVI
+Fene,4.03,2024,SERPAVI
+Ferrol,4.76,2024,SERPAVI
+Fisterra,3.82,2024,SERPAVI
+Frades,2.42,2024,SERPAVI
+Irixoa,2.31,2024,SERPAVI
+Laxe,3.14,2024,SERPAVI
+"Laracha, A",3.78,2024,SERPAVI
+Lousame,1.91,2024,SERPAVI
+Malpica de Bergantiños,4.57,2024,SERPAVI
+Mañón,2.34,2024,SERPAVI
+Mazaricos,2.85,2024,SERPAVI
+Melide,3.23,2024,SERPAVI
+Mesía,2.67,2021,SERPAVI
+Miño,4.76,2024,SERPAVI
+Moeche,2.91,2024,SERPAVI
+Monfero,1.69,2024,SERPAVI
+Mugardos,4.4,2024,SERPAVI
+Muxía,3.01,2024,SERPAVI
+Muros,3.42,2024,SERPAVI
+Narón,4.25,2024,SERPAVI
+Neda,3.2,2024,SERPAVI
+Negreira,3.65,2024,SERPAVI
+Noia,3.81,2024,SERPAVI
+Oleiros,6.69,2024,SERPAVI
+Ordes,3.85,2024,SERPAVI
+Oroso,4.66,2024,SERPAVI
+Ortigueira,3.49,2024,SERPAVI
+Outes,3.04,2024,SERPAVI
+Paderne,3.06,2024,SERPAVI
+Padrón,4.41,2024,SERPAVI
+"Pino, O",4.44,2024,SERPAVI
+"Pobra do Caramiñal, A",4.17,2024,SERPAVI
+Ponteceso,2.92,2024,SERPAVI
+Pontedeume,4.24,2024,SERPAVI
+"Pontes de García Rodríguez, As",3.03,2024,SERPAVI
+Porto do Son,4.72,2024,SERPAVI
+Rianxo,4.01,2024,SERPAVI
+Ribeira,4.71,2024,SERPAVI
+Rois,4.71,2024,SERPAVI
+Sada,5.77,2024,SERPAVI
+San Sadurniño,2.65,2024,SERPAVI
+Santa Comba,3.16,2024,SERPAVI
+Santiago de Compostela,7.21,2024,SERPAVI
+Sobrado,2.89,2024,SERPAVI
+"Somozas, As",3.18,2024,SERPAVI
+Teo,5.24,2024,SERPAVI
+Tordoia,2.65,2024,SERPAVI
+Touro,2.94,2024,SERPAVI
+Trazo,2.78,2024,SERPAVI
+Valdoviño,4.32,2024,SERPAVI
+Val do Dubra,3.14,2024,SERPAVI
+Vedra,3.21,2024,SERPAVI
+Vilasantar,2.94,2024,SERPAVI
+Vilarmaior,2.97,2024,SERPAVI
+Vimianzo,2.38,2024,SERPAVI
+Zas,2.61,2024,SERPAVI
+Cariño,3.18,2024,SERPAVI
+Oza-Cesuras,4.08,2024,SERPAVI
+Chillarón de Cuenca,5.42,2024,SERPAVI
+Barajas de Melo,4.32,2024,SERPAVI
+Belmonte,3.1,2024,SERPAVI
+Campillo de Altobuey,3.18,2024,SERPAVI
+Cañete,2.55,2024,SERPAVI
+Carboneras de Guadazaón,2.17,2024,SERPAVI
+Casasimarro,2.79,2024,SERPAVI
+Cuenca,5.62,2024,SERPAVI
+Fuente de Pedro Naharro,2.81,2024,SERPAVI
+Honrubia,3.13,2024,SERPAVI
+Horcajo de Santiago,4.01,2024,SERPAVI
+Huete,2.68,2022,SERPAVI
+Iniesta,3.14,2024,SERPAVI
+Landete,2.17,2024,SERPAVI
+Ledaña,2.29,2024,SERPAVI
+"Mesas, Las",1.85,2024,SERPAVI
+Minglanilla,2.82,2024,SERPAVI
+Mira,1.84,2024,SERPAVI
+Montalbo,3.41,2024,SERPAVI
+Mota del Cuervo,2.84,2024,SERPAVI
+Motilla del Palancar,4.57,2024,SERPAVI
+Palomera,3.62,2024,SERPAVI
+"Pedroñeras, Las",3.24,2024,SERPAVI
+"Picazo, El",2.91,2024,SERPAVI
+Priego,2.35,2024,SERPAVI
+"Provencio, El",2.2,2024,SERPAVI
+Quintanar del Rey,2.94,2024,SERPAVI
+Saelices,2.52,2024,SERPAVI
+San Clemente,3.27,2024,SERPAVI
+San Lorenzo de la Parrilla,2.19,2024,SERPAVI
+Sisante,2.61,2024,SERPAVI
+Talayuelas,1.93,2024,SERPAVI
+Tarancón,5.26,2024,SERPAVI
+Valverde de Júcar,2.44,2024,SERPAVI
+Villamayor de Santiago,2.48,2024,SERPAVI
+Villanueva de la Jara,3.51,2024,SERPAVI
+Villar de Olalla,4.79,2024,SERPAVI
+Zarza de Tajo,4.32,2024,SERPAVI
+Fuentenava de Jábaga,2.99,2023,SERPAVI
+Arcas del Villar,4.92,2024,SERPAVI
+Agullana,4.31,2024,SERPAVI
+Aiguaviva,4.59,2024,SERPAVI
+Albanyà,2.73,2024,SERPAVI
+Albons,7.26,2024,SERPAVI
+"Far d'Empordà, El",4.37,2022,SERPAVI
+Alp,8.21,2024,SERPAVI
+Amer,5.41,2024,SERPAVI
+Anglès,5.29,2024,SERPAVI
+Arbúcies,5.44,2024,SERPAVI
+Argelaguer,4.13,2024,SERPAVI
+"Armentera, L'",4.92,2024,SERPAVI
+Avinyonet de Puigventós,5.27,2024,SERPAVI
+Begur,7.84,2024,SERPAVI
+"Vajol, La",5.06,2024,SERPAVI
+Banyoles,6.45,2024,SERPAVI
+Bàscara,6.49,2024,SERPAVI
+Bellcaire d'Empordà,6.58,2024,SERPAVI
+Besalú,6.43,2024,SERPAVI
+Bescanó,6.93,2024,SERPAVI
+Beuda,1.5,2018,SERPAVI
+"Bisbal d'Empordà, La",5.71,2024,SERPAVI
+Blanes,7.94,2024,SERPAVI
+Bolvir,8.33,2024,SERPAVI
+Bordils,6.76,2024,SERPAVI
+Borrassà,5.0,2024,SERPAVI
+Breda,5.95,2024,SERPAVI
+Brunyola,2.38,2024,SERPAVI
+Boadella i les Escaules,2.52,2024,SERPAVI
+Cabanes,7.45,2024,SERPAVI
+Cabanelles,3.87,2021,SERPAVI
+Cadaqués,9.44,2024,SERPAVI
+Caldes de Malavella,7.29,2024,SERPAVI
+Calonge,8.49,2024,SERPAVI
+Camós,5.06,2024,SERPAVI
+Campdevànol,5.43,2024,SERPAVI
+Campllong,5.08,2024,SERPAVI
+Camprodon,6.26,2024,SERPAVI
+Canet d'Adri,2.92,2024,SERPAVI
+Cantallops,4.44,2024,SERPAVI
+Capmany,3.4,2024,SERPAVI
+Cassà de la Selva,6.77,2024,SERPAVI
+Castellfollit de la Roca,5.88,2024,SERPAVI
+Castelló d'Empúries,8.27,2024,SERPAVI
+Castell-Platja d'Aro,9.72,2024,SERPAVI
+Celrà,7.04,2024,SERPAVI
+Cervià de Ter,4.51,2024,SERPAVI
+Colera,6.36,2024,SERPAVI
+Colomers,2.42,2020,SERPAVI
+Cornellà del Terri,6.88,2024,SERPAVI
+Corçà,5.46,2024,SERPAVI
+Crespià,3.46,2023,SERPAVI
+Darnius,3.76,2024,SERPAVI
+Das,5.28,2024,SERPAVI
+"Escala, L'",7.84,2024,SERPAVI
+Espinelves,5.33,2024,SERPAVI
+Espolla,3.47,2024,SERPAVI
+Esponellà,2.82,2024,SERPAVI
+Figueres,6.14,2024,SERPAVI
+Flaçà,6.59,2024,SERPAVI
+Foixà,3.5,2024,SERPAVI
+Fontanals de Cerdanya,7.2,2024,SERPAVI
+Fontcoberta,5.22,2024,SERPAVI
+Fornells de la Selva,9.24,2024,SERPAVI
+Fortià,3.74,2024,SERPAVI
+Garrigàs,5.32,2024,SERPAVI
+Garriguella,5.01,2024,SERPAVI
+Ger,6.09,2024,SERPAVI
+Girona,9.13,2024,SERPAVI
+Gualta,3.65,2024,SERPAVI
+Guils de Cerdanya,5.64,2024,SERPAVI
+Hostalric,6.34,2024,SERPAVI
+Isòvol,3.7,2024,SERPAVI
+"Jonquera, La",5.79,2024,SERPAVI
+Juià,3.87,2024,SERPAVI
+Lladó,4.41,2024,SERPAVI
+Llagostera,6.49,2024,SERPAVI
+Llambilles,5.55,2024,SERPAVI
+Llanars,6.44,2024,SERPAVI
+Llançà,7.65,2024,SERPAVI
+Llers,4.18,2024,SERPAVI
+Llívia,8.11,2024,SERPAVI
+Lloret de Mar,8.68,2024,SERPAVI
+Madremanya,3.77,2024,SERPAVI
+Maià de Montcal,4.48,2024,SERPAVI
+Massanes,2.24,2024,SERPAVI
+Maçanet de Cabrenys,5.38,2024,SERPAVI
+Maçanet de la Selva,5.94,2024,SERPAVI
+Mieres,3.48,2024,SERPAVI
+Molló,3.93,2024,SERPAVI
+Montagut i Oix,3.74,2024,SERPAVI
+Mont-ras,4.11,2024,SERPAVI
+Navata,6.98,2024,SERPAVI
+Ogassa,4.1,2020,SERPAVI
+Olot,6.18,2024,SERPAVI
+Osor,4.2,2024,SERPAVI
+Palafrugell,6.72,2024,SERPAVI
+Palamós,7.77,2024,SERPAVI
+Palau-saverdera,6.1,2024,SERPAVI
+Palau-sator,3.37,2024,SERPAVI
+Pals,7.5,2024,SERPAVI
+Pardines,6.03,2023,SERPAVI
+Parlavà,4.42,2024,SERPAVI
+Pau,3.68,2024,SERPAVI
+"Pera, La",2.98,2024,SERPAVI
+Peralada,6.35,2024,SERPAVI
+"Planes d'Hostoles, Les",5.14,2024,SERPAVI
+Planoles,5.62,2020,SERPAVI
+Pontós,2.96,2024,SERPAVI
+Porqueres,6.38,2024,SERPAVI
+Portbou,5.35,2024,SERPAVI
+"Preses, Les",6.25,2024,SERPAVI
+"Port de la Selva, El",8.19,2024,SERPAVI
+Puigcerdà,6.96,2024,SERPAVI
+Quart,8.64,2024,SERPAVI
+Rabós,4.21,2024,SERPAVI
+Ribes de Freser,5.22,2024,SERPAVI
+Riells i Viabrea,8.51,2024,SERPAVI
+Ripoll,5.58,2024,SERPAVI
+Riudarenes,7.81,2024,SERPAVI
+Riudaura,5.39,2024,SERPAVI
+Riudellots de la Selva,7.31,2024,SERPAVI
+Riumors,3.27,2024,SERPAVI
+Roses,7.38,2024,SERPAVI
+Rupià,4.3,2024,SERPAVI
+Salt,6.55,2024,SERPAVI
+Sant Climent Sescebes,2.82,2024,SERPAVI
+Sant Feliu de Buixalleu,5.97,2024,SERPAVI
+Sant Feliu de Guíxols,7.38,2024,SERPAVI
+Sant Feliu de Pallerols,5.8,2024,SERPAVI
+Sant Gregori,7.76,2024,SERPAVI
+Sant Hilari Sacalm,5.31,2024,SERPAVI
+Sant Jaume de Llierca,6.84,2024,SERPAVI
+Sant Jordi Desvalls,8.35,2024,SERPAVI
+Sant Joan de les Abadesses,4.64,2024,SERPAVI
+Sant Joan de Mollet,5.72,2024,SERPAVI
+Sant Julià de Ramis,8.51,2024,SERPAVI
+Sant Llorenç de la Muga,5.07,2024,SERPAVI
+Sant Martí de Llémena,3.72,2024,SERPAVI
+Sant Miquel de Fluvià,3.85,2024,SERPAVI
+Sant Mori,2.52,2024,SERPAVI
+Sant Pau de Segúries,5.38,2024,SERPAVI
+Sant Pere Pescador,5.61,2024,SERPAVI
+Santa Coloma de Farners,6.69,2024,SERPAVI
+Santa Cristina d'Aro,6.59,2024,SERPAVI
+Santa Llogaia d'Àlguema,4.13,2024,SERPAVI
+Sant Aniol de Finestres,3.96,2024,SERPAVI
+Santa Pau,5.36,2024,SERPAVI
+Sant Joan les Fonts,5.96,2024,SERPAVI
+Sarrià de Ter,7.4,2024,SERPAVI
+"Saus, Camallera i Llampaies",4.93,2024,SERPAVI
+"Selva de Mar, La",4.85,2021,SERPAVI
+"Cellera de Ter, La",5.02,2024,SERPAVI
+Serinyà,6.5,2024,SERPAVI
+Serra de Daró,6.01,2018,SERPAVI
+Setcases,5.37,2024,SERPAVI
+Sils,7.4,2024,SERPAVI
+"Tallada d'Empordà, La",2.63,2024,SERPAVI
+Terrades,3.15,2024,SERPAVI
+Torroella de Fluvià,6.78,2024,SERPAVI
+Torroella de Montgrí,6.65,2024,SERPAVI
+Tortellà,3.43,2024,SERPAVI
+Tossa de Mar,8.26,2024,SERPAVI
+Ultramort,4.21,2024,SERPAVI
+Ullà,5.09,2024,SERPAVI
+Ullastret,4.74,2024,SERPAVI
+"Vall d'en Bas, La",6.07,2024,SERPAVI
+"Vall de Bianya, La",4.21,2024,SERPAVI
+Vall-llobrega,4.13,2024,SERPAVI
+Ventalló,4.87,2024,SERPAVI
+Verges,5.29,2024,SERPAVI
+Vidreres,6.57,2024,SERPAVI
+Vilabertran,6.25,2024,SERPAVI
+Vilablareix,9.75,2024,SERPAVI
+Viladamat,4.78,2024,SERPAVI
+Vilademuls,3.28,2024,SERPAVI
+Viladrau,6.53,2024,SERPAVI
+Vilafant,6.98,2024,SERPAVI
+Vilajuïga,6.43,2024,SERPAVI
+Vilallonga de Ter,5.2,2024,SERPAVI
+Vilamacolum,4.76,2023,SERPAVI
+Vilamalla,7.38,2024,SERPAVI
+Vilanant,3.8,2024,SERPAVI
+Vila-sacra,6.28,2024,SERPAVI
+Vilopriu,3.82,2024,SERPAVI
+Vilobí d'Onyar,6.13,2024,SERPAVI
+"Cruïlles, Monells i Sant Sadurní de l'Heura",4.92,2024,SERPAVI
+Forallac,7.96,2024,SERPAVI
+Sant Julià del Llor i Bonmatí,5.91,2024,SERPAVI
+Albolote,6.34,2024,SERPAVI
+Albuñol,4.44,2024,SERPAVI
+Alfacar,4.49,2024,SERPAVI
+Alhama de Granada,3.67,2024,SERPAVI
+Alhendín,6.04,2024,SERPAVI
+Almuñécar,6.78,2024,SERPAVI
+Armilla,6.76,2024,SERPAVI
+Atarfe,5.23,2024,SERPAVI
+Baza,3.66,2024,SERPAVI
+Beas de Granada,3.07,2024,SERPAVI
+Benalúa,2.97,2024,SERPAVI
+Cájar,6.46,2024,SERPAVI
+Caniles,2.81,2024,SERPAVI
+Capileira,2.13,2024,SERPAVI
+Cenes de la Vega,6.2,2024,SERPAVI
+Cijuela,5.47,2024,SERPAVI
+Cogollos de la Vega,4.21,2024,SERPAVI
+Cortes de Baza,2.27,2023,SERPAVI
+Cúllar,2.71,2024,SERPAVI
+Cúllar Vega,5.39,2024,SERPAVI
+Chauchina,3.82,2024,SERPAVI
+Churriana de la Vega,6.08,2024,SERPAVI
+Deifontes,3.4,2024,SERPAVI
+Dílar,3.9,2024,SERPAVI
+Dúrcal,3.05,2024,SERPAVI
+Fuente Vaqueros,4.48,2024,SERPAVI
+Gójar,5.32,2024,SERPAVI
+Granada,6.85,2024,SERPAVI
+Guadix,4.15,2024,SERPAVI
+Gualchos,5.21,2024,SERPAVI
+Güejar Sierra,5.36,2024,SERPAVI
+Güevéjar,5.43,2024,SERPAVI
+Huéneja,2.49,2024,SERPAVI
+Huéscar,2.91,2024,SERPAVI
+Huétor de Santillán,3.68,2024,SERPAVI
+Huétor Tájar,3.57,2024,SERPAVI
+Huétor Vega,6.28,2024,SERPAVI
+Illora,3.4,2024,SERPAVI
+Iznalloz,3.32,2024,SERPAVI
+Jun,4.7,2024,SERPAVI
+Láchar,5.0,2024,SERPAVI
+Lanjarón,3.87,2024,SERPAVI
+Lecrín,2.85,2024,SERPAVI
+Loja,3.53,2024,SERPAVI
+"Malahá, La",5.6,2024,SERPAVI
+Maracena,5.88,2024,SERPAVI
+Moclín,2.45,2024,SERPAVI
+Molvízar,3.1,2024,SERPAVI
+Monachil,6.45,2024,SERPAVI
+Montefrío,2.72,2024,SERPAVI
+Moraleda de Zafayona,4.83,2024,SERPAVI
+Motril,5.44,2024,SERPAVI
+Nigüelas,3.09,2024,SERPAVI
+Nívar,2.99,2024,SERPAVI
+Ogíjares,6.11,2024,SERPAVI
+Órgiva,3.42,2024,SERPAVI
+Otura,5.49,2024,SERPAVI
+Padul,4.41,2024,SERPAVI
+Pampaneira,1.85,2024,SERPAVI
+Peligros,5.28,2024,SERPAVI
+Pinos Genil,5.84,2024,SERPAVI
+Pinos Puente,3.51,2024,SERPAVI
+Polopos,4.65,2024,SERPAVI
+Pulianas,5.42,2024,SERPAVI
+Quéntar,2.92,2024,SERPAVI
+Rubite,5.75,2022,SERPAVI
+Salobreña,5.0,2024,SERPAVI
+Santa Fe,5.06,2024,SERPAVI
+Sorvilán,4.06,2024,SERPAVI
+Ugíjar,3.16,2024,SERPAVI
+Vélez de Benaudalla,5.67,2024,SERPAVI
+Ventas de Huelma,3.9,2024,SERPAVI
+Víznar,3.66,2024,SERPAVI
+Zafarraya,2.88,2024,SERPAVI
+"Zubia, La",5.93,2024,SERPAVI
+Zújar,2.12,2024,SERPAVI
+"Taha, La",1.6,2024,SERPAVI
+"Gabias, Las",6.08,2024,SERPAVI
+"Guajares, Los",3.15,2024,SERPAVI
+Valle del Zalabí,2.56,2024,SERPAVI
+Vegas del Genil,4.69,2024,SERPAVI
+Cuevas del Campo,3.52,2024,SERPAVI
+Torrenueva Costa,6.29,2024,SERPAVI
+Albalate de Zorita,4.42,2024,SERPAVI
+Albares,3.22,2024,SERPAVI
+Almoguera,2.45,2024,SERPAVI
+Almonacid de Zorita,3.13,2024,SERPAVI
+Alovera,7.54,2024,SERPAVI
+Armuña de Tajuña,3.52,2024,SERPAVI
+Atienza,2.33,2024,SERPAVI
+Azuqueca de Henares,7.58,2024,SERPAVI
+Brihuega,4.84,2024,SERPAVI
+Cabanillas del Campo,7.1,2024,SERPAVI
+Campillo de Ranas,3.62,2024,SERPAVI
+"Casar, El",7.56,2024,SERPAVI
+Cifuentes,4.19,2024,SERPAVI
+Cogolludo,3.54,2024,SERPAVI
+Corduente,2.16,2023,SERPAVI
+Chiloeches,6.97,2024,SERPAVI
+Espinosa de Henares,2.84,2024,SERPAVI
+Fontanar,5.56,2024,SERPAVI
+Fuentenovilla,3.88,2024,SERPAVI
+Galápagos,5.97,2024,SERPAVI
+Guadalajara,7.25,2024,SERPAVI
+Hita,3.16,2024,SERPAVI
+Horche,6.26,2024,SERPAVI
+Humanes,6.0,2024,SERPAVI
+Illana,5.01,2024,SERPAVI
+Jadraque,3.31,2024,SERPAVI
+Loranca de Tajuña,6.56,2024,SERPAVI
+Lupiana,3.09,2024,SERPAVI
+Marchamalo,7.52,2024,SERPAVI
+Molina de Aragón,4.04,2024,SERPAVI
+Mondéjar,4.45,2024,SERPAVI
+Pareja,4.39,2024,SERPAVI
+Pastrana,3.96,2024,SERPAVI
+Pioz,5.95,2024,SERPAVI
+Pozo de Guadalajara,7.09,2024,SERPAVI
+Quer,5.8,2024,SERPAVI
+Sacedón,4.62,2024,SERPAVI
+Sigüenza,4.78,2024,SERPAVI
+Tendilla,4.43,2024,SERPAVI
+Torija,3.91,2024,SERPAVI
+Torrejón del Rey,7.0,2024,SERPAVI
+Tórtola de Henares,4.23,2024,SERPAVI
+Trijueque,7.4,2024,SERPAVI
+Trillo,2.98,2024,SERPAVI
+Uceda,5.99,2024,SERPAVI
+Valdeaveruelo,5.19,2024,SERPAVI
+Villanueva de la Torre,8.57,2024,SERPAVI
+Yebes,6.25,2024,SERPAVI
+Yebra,1.89,2024,SERPAVI
+Yunquera de Henares,6.47,2024,SERPAVI
+Aduna,7.56,2024,SERPAVI
+Aizarnazabal,7.4,2024,SERPAVI
+Alegia,7.2,2024,SERPAVI
+Amezketa,7.39,2024,SERPAVI
+Andoain,9.1,2024,SERPAVI
+Anoeta,7.78,2024,SERPAVI
+Antzuola,6.12,2024,SERPAVI
+Aretxabaleta,8.36,2024,SERPAVI
+Asteasu,7.46,2024,SERPAVI
+Ataun,6.02,2024,SERPAVI
+Aia,7.51,2024,SERPAVI
+Azkoitia,7.02,2024,SERPAVI
+Azpeitia,6.96,2024,SERPAVI
+Beasain,8.77,2024,SERPAVI
+Berastegi,7.14,2024,SERPAVI
+Berrobi,7.26,2024,SERPAVI
+Zegama,6.33,2024,SERPAVI
+Zestoa,6.55,2024,SERPAVI
+Zizurkil,7.73,2024,SERPAVI
+Deba,9.05,2024,SERPAVI
+Eibar,8.64,2024,SERPAVI
+Elgoibar,7.56,2024,SERPAVI
+Elgeta,6.22,2024,SERPAVI
+Eskoriatza,7.42,2024,SERPAVI
+Ezkio-Itsaso,5.96,2022,SERPAVI
+Hondarribia,11.26,2024,SERPAVI
+Gabiria,4.54,2024,SERPAVI
+Getaria,9.5,2024,SERPAVI
+Hernani,9.78,2024,SERPAVI
+Ibarra,7.92,2024,SERPAVI
+Idiazabal,8.13,2024,SERPAVI
+Ikaztegieta,5.31,2024,SERPAVI
+Irun,9.88,2024,SERPAVI
+Irura,8.8,2024,SERPAVI
+Itsasondo,7.16,2024,SERPAVI
+Lazkao,7.38,2024,SERPAVI
+Leaburu,7.87,2024,SERPAVI
+Legazpi,7.02,2024,SERPAVI
+Legorreta,6.6,2024,SERPAVI
+Lezo,10.16,2024,SERPAVI
+Lizartza,6.67,2024,SERPAVI
+Arrasate / Mondragón,9.01,2024,SERPAVI
+Mutriku,8.06,2024,SERPAVI
+Olaberria,6.61,2024,SERPAVI
+Oñati,6.69,2024,SERPAVI
+Orio,9.15,2024,SERPAVI
+Ormaiztegi,6.98,2024,SERPAVI
+Oiartzun,9.01,2024,SERPAVI
+Pasaia,10.92,2024,SERPAVI
+Soraluze-Placencia de las Armas,7.71,2024,SERPAVI
+Errenteria,10.83,2024,SERPAVI
+Donostia / San Sebastián,13.99,2024,SERPAVI
+Segura,7.18,2024,SERPAVI
+Tolosa,9.01,2024,SERPAVI
+Urnieta,9.47,2024,SERPAVI
+Usurbil,9.8,2024,SERPAVI
+Bergara,7.74,2024,SERPAVI
+Villabona,8.09,2024,SERPAVI
+Ordizia,8.41,2024,SERPAVI
+Urretxu,7.32,2024,SERPAVI
+Zaldibia,6.15,2024,SERPAVI
+Zarautz,11.38,2024,SERPAVI
+Zumarraga,7.85,2024,SERPAVI
+Zumaia,9.25,2024,SERPAVI
+Mendaro,7.32,2024,SERPAVI
+Lasarte-Oria,10.63,2024,SERPAVI
+Astigarraga,11.4,2024,SERPAVI
+Aljaraque,7.07,2024,SERPAVI
+Almonaster la Real,3.04,2024,SERPAVI
+Almonte,5.54,2024,SERPAVI
+Alosno,3.21,2024,SERPAVI
+Aracena,4.54,2024,SERPAVI
+Aroche,2.62,2024,SERPAVI
+Ayamonte,5.2,2024,SERPAVI
+Beas,3.71,2024,SERPAVI
+Bollullos Par del Condado,4.02,2024,SERPAVI
+Bonares,3.35,2024,SERPAVI
+Cala,3.64,2022,SERPAVI
+Calañas,3.69,2024,SERPAVI
+"Campillo, El",4.06,2024,SERPAVI
+Cartaya,4.65,2024,SERPAVI
+"Cerro de Andévalo, El",3.5,2024,SERPAVI
+Corteconcepción,3.11,2023,SERPAVI
+Cortegana,3.93,2024,SERPAVI
+Chucena,3.76,2022,SERPAVI
+Fuenteheridos,3.95,2024,SERPAVI
+Galaroza,2.48,2024,SERPAVI
+Gibraleón,4.69,2024,SERPAVI
+Higuera de la Sierra,3.78,2024,SERPAVI
+Hinojos,3.5,2024,SERPAVI
+Huelva,6.79,2024,SERPAVI
+Isla Cristina,5.48,2024,SERPAVI
+Jabugo,2.98,2024,SERPAVI
+Lepe,5.09,2024,SERPAVI
+Lucena del Puerto,3.46,2024,SERPAVI
+Minas de Riotinto,5.43,2024,SERPAVI
+Moguer,5.34,2024,SERPAVI
+Nerva,2.89,2024,SERPAVI
+Niebla,4.12,2024,SERPAVI
+"Palma del Condado, La",4.23,2024,SERPAVI
+Palos de la Frontera,4.94,2024,SERPAVI
+Paterna del Campo,3.11,2024,SERPAVI
+Puebla de Guzmán,2.29,2024,SERPAVI
+Punta Umbría,6.35,2024,SERPAVI
+Rociana del Condado,3.15,2024,SERPAVI
+San Bartolomé de la Torre,3.34,2024,SERPAVI
+San Juan del Puerto,4.66,2024,SERPAVI
+Trigueros,3.57,2024,SERPAVI
+Valverde del Camino,3.48,2024,SERPAVI
+Villablanca,3.59,2024,SERPAVI
+Villanueva de los Castillejos,2.61,2024,SERPAVI
+Villarrasa,3.27,2024,SERPAVI
+Zalamea la Real,3.08,2024,SERPAVI
+Zufre,3.31,2024,SERPAVI
+Albalate de Cinca,3.62,2024,SERPAVI
+Albelda,2.53,2024,SERPAVI
+Alcolea de Cinca,3.56,2024,SERPAVI
+Almudévar,4.71,2024,SERPAVI
+Almunia de San Juan,2.1,2023,SERPAVI
+Altorricón,3.93,2024,SERPAVI
+Ayerbe,3.82,2024,SERPAVI
+Barbastro,5.34,2024,SERPAVI
+Belver de Cinca,3.12,2024,SERPAVI
+Benabarre,4.11,2024,SERPAVI
+Benasque,7.36,2024,SERPAVI
+Bielsa,5.2,2024,SERPAVI
+Biescas,6.92,2024,SERPAVI
+Binaced,3.0,2024,SERPAVI
+Binéfar,5.04,2024,SERPAVI
+Boltaña,4.87,2024,SERPAVI
+Broto,6.2,2024,SERPAVI
+Caldearenas,1.18,2017,SERPAVI
+Campo,4.77,2024,SERPAVI
+Candasnos,2.5,2024,SERPAVI
+Canfranc,8.65,2024,SERPAVI
+Castejón de Sos,6.35,2024,SERPAVI
+Castiello de Jaca,7.78,2024,SERPAVI
+Castillonroy,2.94,2024,SERPAVI
+Esplús,3.14,2024,SERPAVI
+Estadilla,2.92,2024,SERPAVI
+Fonz,3.22,2024,SERPAVI
+Fraga,5.42,2024,SERPAVI
+Grañén,3.16,2024,SERPAVI
+Graus,3.92,2024,SERPAVI
+Gurrea de Gállego,3.12,2024,SERPAVI
+Huesca,6.67,2024,SERPAVI
+Igriés,7.31,2024,SERPAVI
+Jaca,6.67,2024,SERPAVI
+Lalueza,1.92,2024,SERPAVI
+Lanaja,2.88,2024,SERPAVI
+Loporzano,3.56,2024,SERPAVI
+Monzón,4.96,2024,SERPAVI
+Nueno,5.18,2024,SERPAVI
+Panticosa,7.26,2024,SERPAVI
+Peralta de Alcofea,1.95,2024,SERPAVI
+Sabiñánigo,5.37,2024,SERPAVI
+Sahún,5.03,2024,SERPAVI
+Sallent de Gállego,7.63,2024,SERPAVI
+San Esteban de Litera,3.75,2024,SERPAVI
+Sariñena,4.35,2024,SERPAVI
+Sena,2.54,2024,SERPAVI
+Sesué,6.29,2024,SERPAVI
+Siétamo,4.26,2023,SERPAVI
+Tamarite de Litera,4.29,2024,SERPAVI
+Tardienta,2.8,2024,SERPAVI
+Tierz,6.54,2024,SERPAVI
+Torrente de Cinca,3.68,2024,SERPAVI
+Velilla de Cinca,2.51,2024,SERPAVI
+Villanova,7.09,2024,SERPAVI
+Villanúa,7.14,2024,SERPAVI
+Zaidín,4.16,2024,SERPAVI
+Valle de Hecho,3.33,2017,SERPAVI
+Puente la Reina de Jaca,4.06,2022,SERPAVI
+San Miguel del Cinca,3.05,2024,SERPAVI
+"Sotonera, La",3.86,2024,SERPAVI
+Aínsa-Sobrarbe,5.3,2024,SERPAVI
+Vencillón,2.93,2024,SERPAVI
+Alcalá la Real,3.59,2024,SERPAVI
+Alcaudete,3.11,2024,SERPAVI
+Andújar,3.66,2024,SERPAVI
+Arjona,2.98,2024,SERPAVI
+Arjonilla,2.83,2024,SERPAVI
+Baeza,3.67,2024,SERPAVI
+Bailén,3.41,2024,SERPAVI
+Beas de Segura,3.32,2024,SERPAVI
+Canena,1.41,2024,SERPAVI
+"Carolina, La",3.28,2024,SERPAVI
+Castellar,0.8,2024,SERPAVI
+Castillo de Locubín,2.35,2024,SERPAVI
+Cazorla,3.5,2024,SERPAVI
+Fuerte del Rey,2.24,2024,SERPAVI
+"Guardia de Jaén, La",4.56,2024,SERPAVI
+Guarromán,3.0,2021,SERPAVI
+Huelma,3.0,2024,SERPAVI
+"Iruela, La",5.87,2024,SERPAVI
+Jabalquinto,1.76,2024,SERPAVI
+Jaén,5.92,2024,SERPAVI
+Jamilena,3.16,2024,SERPAVI
+Jódar,3.48,2024,SERPAVI
+Linares,4.17,2024,SERPAVI
+Lopera,3.54,2024,SERPAVI
+Mancha Real,3.3,2024,SERPAVI
+Marmolejo,3.05,2024,SERPAVI
+Martos,4.04,2024,SERPAVI
+Mengíbar,3.42,2024,SERPAVI
+Navas de San Juan,1.97,2022,SERPAVI
+Peal de Becerro,3.13,2024,SERPAVI
+Porcuna,2.92,2024,SERPAVI
+Pozo Alcón,3.35,2024,SERPAVI
+Puente de Génave,4.29,2024,SERPAVI
+"Puerta de Segura, La",3.21,2024,SERPAVI
+Quesada,2.84,2024,SERPAVI
+Rus,2.97,2024,SERPAVI
+Sabiote,2.43,2024,SERPAVI
+Santa Elena,2.54,2022,SERPAVI
+Santisteban del Puerto,2.86,2024,SERPAVI
+Segura de la Sierra,4.34,2024,SERPAVI
+Siles,2.61,2024,SERPAVI
+Sorihuela del Guadalimar,1.64,2024,SERPAVI
+Torre del Campo,3.63,2024,SERPAVI
+Torredonjimeno,3.32,2024,SERPAVI
+Torreperogil,2.92,2024,SERPAVI
+Úbeda,3.85,2024,SERPAVI
+Vilches,2.99,2024,SERPAVI
+Villacarrillo,3.01,2024,SERPAVI
+Villanueva de la Reina,2.3,2024,SERPAVI
+Villanueva del Arzobispo,3.0,2024,SERPAVI
+"Villares, Los",4.26,2024,SERPAVI
+Villatorres,3.07,2024,SERPAVI
+Santiago-Pontones,2.66,2023,SERPAVI
+Arroyo del Ojanco,1.34,2024,SERPAVI
+Arganza,2.36,2021,SERPAVI
+Astorga,3.64,2024,SERPAVI
+"Bañeza, La",3.85,2024,SERPAVI
+Bembibre,3.26,2024,SERPAVI
+Benavides,3.42,2024,SERPAVI
+Boñar,3.46,2024,SERPAVI
+Cabañas Raras,3.3,2024,SERPAVI
+Cacabelos,3.49,2024,SERPAVI
+Camponaraya,3.79,2024,SERPAVI
+Carracedelo,3.39,2024,SERPAVI
+Carrizo,3.26,2024,SERPAVI
+Castropodame,2.29,2024,SERPAVI
+Cistierna,4.26,2024,SERPAVI
+Congosto,2.99,2024,SERPAVI
+Cuadros,3.42,2024,SERPAVI
+Cubillos del Sil,3.02,2024,SERPAVI
+Chozas de Abajo,3.53,2024,SERPAVI
+Fabero,2.81,2024,SERPAVI
+Folgoso de la Ribera,2.08,2024,SERPAVI
+Garrafe de Torío,3.79,2024,SERPAVI
+Hospital de Órbigo,3.24,2024,SERPAVI
+León,5.63,2024,SERPAVI
+Mansilla de las Mulas,3.68,2024,SERPAVI
+Matallana de Torío,3.29,2024,SERPAVI
+Onzonilla,3.41,2024,SERPAVI
+"Pola de Gordón, La",3.48,2024,SERPAVI
+Ponferrada,5.01,2024,SERPAVI
+Puebla de Lillo,6.33,2024,SERPAVI
+Puente de Domingo Flórez,2.47,2024,SERPAVI
+Riaño,4.55,2024,SERPAVI
+"Robla, La",3.33,2024,SERPAVI
+Sahagún,3.67,2024,SERPAVI
+San Andrés del Rabanedo,5.44,2024,SERPAVI
+San Justo de la Vega,3.64,2024,SERPAVI
+Santa María del Páramo,3.53,2024,SERPAVI
+Santovenia de la Valdoncina,4.02,2024,SERPAVI
+Sariegos,6.01,2024,SERPAVI
+Toreno,2.44,2024,SERPAVI
+Torre del Bierzo,1.95,2024,SERPAVI
+Valdefresno,3.63,2024,SERPAVI
+Valderas,3.49,2024,SERPAVI
+Val de San Lorenzo,2.42,2024,SERPAVI
+Valencia de Don Juan,4.05,2024,SERPAVI
+Valverde de la Virgen,5.71,2024,SERPAVI
+Vega de Espinareda,2.46,2024,SERPAVI
+Vega de Infanzones,3.55,2024,SERPAVI
+Vegas del Condado,2.52,2024,SERPAVI
+Villablino,3.28,2024,SERPAVI
+Villadangos del Páramo,6.19,2024,SERPAVI
+Toral de los Vados,3.63,2024,SERPAVI
+Villafranca del Bierzo,3.7,2024,SERPAVI
+Villaquilambre,5.74,2024,SERPAVI
+Villarejo de Órbigo,3.65,2024,SERPAVI
+Villasabariego,4.66,2024,SERPAVI
+Villaturiel,3.53,2024,SERPAVI
+Àger,5.05,2024,SERPAVI
+Agramunt,4.06,2024,SERPAVI
+"Alamús, Els",5.84,2024,SERPAVI
+Albatàrrec,5.12,2024,SERPAVI
+Albesa,4.86,2024,SERPAVI
+Alcarràs,6.09,2024,SERPAVI
+Alcoletge,5.81,2024,SERPAVI
+Alfarràs,3.85,2024,SERPAVI
+Alguaire,4.13,2024,SERPAVI
+Almacelles,4.73,2024,SERPAVI
+Almenar,4.05,2024,SERPAVI
+Alpicat,5.86,2024,SERPAVI
+Alt Àneu,6.33,2024,SERPAVI
+Naut Aran,7.87,2024,SERPAVI
+Anglesola,4.46,2024,SERPAVI
+Arbeca,3.78,2024,SERPAVI
+Artesa de Lleida,2.91,2024,SERPAVI
+Artesa de Segre,3.57,2024,SERPAVI
+Aitona,3.98,2024,SERPAVI
+Balaguer,4.41,2024,SERPAVI
+"Vall de Boí, La",6.49,2024,SERPAVI
+Belianes,3.21,2024,SERPAVI
+Bellcaire d'Urgell,5.41,2024,SERPAVI
+Bell-lloc d'Urgell,4.51,2024,SERPAVI
+Bellpuig,4.73,2024,SERPAVI
+Bellver de Cerdanya,5.69,2024,SERPAVI
+Bellvís,4.94,2024,SERPAVI
+Benavent de Segrià,4.68,2024,SERPAVI
+"Borges Blanques, Les",4.69,2024,SERPAVI
+Bossòst,5.76,2024,SERPAVI
+Camarasa,3.41,2024,SERPAVI
+Castellnou de Seana,5.0,2024,SERPAVI
+Castellserà,3.8,2024,SERPAVI
+Cervera,4.24,2024,SERPAVI
+Cervià de les Garrigues,3.29,2024,SERPAVI
+Coll de Nargó,2.7,2024,SERPAVI
+Corbins,3.63,2024,SERPAVI
+Espot,5.71,2024,SERPAVI
+Esterri d'Àneu,5.79,2024,SERPAVI
+"Fuliola, La",3.06,2024,SERPAVI
+Golmés,3.63,2024,SERPAVI
+Gósol,3.25,2024,SERPAVI
+Guissona,4.52,2024,SERPAVI
+Guixers,1.03,2024,SERPAVI
+Ivars d'Urgell,3.29,2024,SERPAVI
+Isona i Conca Dellà,3.25,2024,SERPAVI
+Juneda,4.24,2024,SERPAVI
+Lleida,6.61,2024,SERPAVI
+Les,6.29,2024,SERPAVI
+Linyola,4.8,2024,SERPAVI
+Lladurs,2.28,2024,SERPAVI
+Llavorsí,5.15,2024,SERPAVI
+Maials,3.65,2024,SERPAVI
+Menàrguens,4.79,2024,SERPAVI
+Miralcamp,4.92,2024,SERPAVI
+Mollerussa,5.22,2024,SERPAVI
+Montellà i Martinet,4.08,2024,SERPAVI
+Montferrer i Castellbò,6.33,2024,SERPAVI
+Oliana,3.01,2024,SERPAVI
+Olius,3.79,2024,SERPAVI
+Organyà,4.4,2024,SERPAVI
+Os de Balaguer,4.82,2024,SERPAVI
+"Palau d'Anglesola, El",5.15,2024,SERPAVI
+"Coma i la Pedra, La",3.28,2024,SERPAVI
+Peramola,4.35,2024,SERPAVI
+"Pobla de Segur, La",3.62,2024,SERPAVI
+Ponts,3.89,2024,SERPAVI
+"Pont de Suert, El",5.23,2024,SERPAVI
+Prats i Sansor,6.41,2024,SERPAVI
+Prullans,3.87,2024,SERPAVI
+Rialp,5.73,2024,SERPAVI
+Ribera d'Urgellet,5.69,2024,SERPAVI
+Rosselló,6.19,2024,SERPAVI
+Salàs de Pallars,4.88,2024,SERPAVI
+Sant Guim de Freixenet,3.62,2024,SERPAVI
+Sant Llorenç de Morunys,4.64,2024,SERPAVI
+Senterada,4.01,2024,SERPAVI
+"Seu d'Urgell, La",5.57,2024,SERPAVI
+Seròs,4.95,2024,SERPAVI
+Sidamon,3.15,2022,SERPAVI
+Solsona,4.29,2024,SERPAVI
+Soriguera,2.66,2024,SERPAVI
+Sort,5.59,2024,SERPAVI
+Soses,3.57,2024,SERPAVI
+Sudanell,4.2,2024,SERPAVI
+Talarn,4.57,2024,SERPAVI
+Tàrrega,5.37,2024,SERPAVI
+Térmens,5.35,2024,SERPAVI
+Torà,3.84,2024,SERPAVI
+"Torre de Cabdella, La",5.23,2024,SERPAVI
+Torrefarrera,6.02,2024,SERPAVI
+Torregrossa,4.16,2024,SERPAVI
+Torres de Segre,4.91,2024,SERPAVI
+Tremp,4.04,2024,SERPAVI
+"Valls de Valira, Les",6.42,2024,SERPAVI
+Vallfogona de Balaguer,4.67,2024,SERPAVI
+Verdú,5.69,2024,SERPAVI
+Vielha e Mijaran,8.33,2024,SERPAVI
+Vilagrassa,5.73,2024,SERPAVI
+Vilaller,4.07,2024,SERPAVI
+Vilanova de Bellpuig,3.65,2024,SERPAVI
+Vilanova de Segrià,5.01,2024,SERPAVI
+Vila-sana,3.43,2024,SERPAVI
+Vilanova de la Barca,4.86,2024,SERPAVI
+Vall de Cardós,4.97,2024,SERPAVI
+"Guingueta d'Àneu, La",5.81,2024,SERPAVI
+Ribera d'Ondara,3.18,2021,SERPAVI
+Gimenells i el Pla de la Font,3.36,2024,SERPAVI
+Riu de Cerdanya,3.89,2018,SERPAVI
+Agoncillo,4.11,2024,SERPAVI
+Albelda de Iregua,4.39,2024,SERPAVI
+Alberite,4.21,2024,SERPAVI
+Alcanadre,3.1,2023,SERPAVI
+Aldeanueva de Ebro,3.3,2024,SERPAVI
+Alfaro,4.29,2024,SERPAVI
+Anguciana,4.96,2024,SERPAVI
+Arnedillo,4.96,2024,SERPAVI
+Arnedo,4.65,2024,SERPAVI
+Arrúbal,5.16,2024,SERPAVI
+Autol,3.88,2024,SERPAVI
+Baños de Río Tobía,3.57,2024,SERPAVI
+Calahorra,5.4,2024,SERPAVI
+Casalarreina,4.98,2024,SERPAVI
+Cenicero,4.31,2024,SERPAVI
+Cervera del Río Alhama,4.12,2024,SERPAVI
+Cirueña,4.4,2021,SERPAVI
+Entrena,3.86,2024,SERPAVI
+Ezcaray,5.82,2024,SERPAVI
+Fuenmayor,4.3,2024,SERPAVI
+Haro,5.37,2024,SERPAVI
+Lardero,6.21,2024,SERPAVI
+Logroño,6.44,2024,SERPAVI
+Murillo de Río Leza,3.58,2024,SERPAVI
+Nájera,4.33,2024,SERPAVI
+Nalda,4.12,2020,SERPAVI
+Navarrete,4.51,2024,SERPAVI
+Pradejón,3.94,2024,SERPAVI
+Quel,3.57,2024,SERPAVI
+Ribafrecha,3.39,2024,SERPAVI
+Rincón de Soto,3.72,2024,SERPAVI
+San Asensio,3.37,2024,SERPAVI
+Santo Domingo de la Calzada,4.28,2024,SERPAVI
+San Vicente de la Sonsierra,4.42,2024,SERPAVI
+Sojuela,4.08,2024,SERPAVI
+Villamediana de Iregua,5.8,2024,SERPAVI
+"Villar de Arnedo, El",2.86,2024,SERPAVI
+Abadín,2.64,2024,SERPAVI
+Alfoz,1.77,2024,SERPAVI
+Antas de Ulla,2.61,2024,SERPAVI
+Baleira,2.01,2024,SERPAVI
+Barreiros,5.33,2024,SERPAVI
+Becerreá,2.52,2024,SERPAVI
+Begonte,2.86,2024,SERPAVI
+Carballedo,2.28,2024,SERPAVI
+Castro de Rei,3.31,2024,SERPAVI
+Castroverde,1.86,2024,SERPAVI
+Cervo,3.65,2024,SERPAVI
+"Corgo, O",3.13,2024,SERPAVI
+Cospeito,2.13,2024,SERPAVI
+Chantada,3.21,2024,SERPAVI
+"Fonsagrada, A",3.07,2024,SERPAVI
+Foz,4.57,2024,SERPAVI
+Friol,2.71,2024,SERPAVI
+Xermade,2.1,2024,SERPAVI
+Guitiriz,3.5,2024,SERPAVI
+Guntín,2.78,2024,SERPAVI
+Xove,3.66,2024,SERPAVI
+Láncara,2.41,2024,SERPAVI
+Lourenzá,2.51,2024,SERPAVI
+Lugo,4.88,2024,SERPAVI
+Meira,3.61,2024,SERPAVI
+Mondoñedo,3.21,2024,SERPAVI
+Monforte de Lemos,3.49,2024,SERPAVI
+Monterroso,3.07,2024,SERPAVI
+Outeiro de Rei,4.05,2024,SERPAVI
+Palas de Rei,2.65,2024,SERPAVI
+Pantón,2.6,2024,SERPAVI
+"Pastoriza, A",2.27,2024,SERPAVI
+Pol,1.67,2024,SERPAVI
+"Pobra do Brollón, A",3.17,2024,SERPAVI
+"Pontenova, A",2.47,2024,SERPAVI
+Portomarín,3.06,2024,SERPAVI
+Quiroga,2.62,2024,SERPAVI
+Ribadeo,4.55,2024,SERPAVI
+Ribas de Sil,3.11,2024,SERPAVI
+Rábade,2.53,2024,SERPAVI
+Sarria,3.3,2024,SERPAVI
+"Saviñao, O",2.66,2024,SERPAVI
+Sober,3.4,2024,SERPAVI
+Taboada,3.32,2024,SERPAVI
+"Valadouro, O",2.82,2024,SERPAVI
+"Vicedo, O",2.63,2024,SERPAVI
+Vilalba,3.45,2024,SERPAVI
+Viveiro,4.17,2024,SERPAVI
+Baralla,2.7,2024,SERPAVI
+Burela,3.64,2024,SERPAVI
+Ajalvir,9.38,2024,SERPAVI
+Alameda del Valle,5.48,2024,SERPAVI
+"Álamo, El",8.57,2024,SERPAVI
+Alcalá de Henares,9.42,2024,SERPAVI
+Alcobendas,11.84,2024,SERPAVI
+Alcorcón,10.19,2024,SERPAVI
+Aldea del Fresno,6.88,2024,SERPAVI
+Algete,8.11,2024,SERPAVI
+Alpedrete,9.09,2024,SERPAVI
+Ambite,5.73,2024,SERPAVI
+Anchuelo,7.46,2024,SERPAVI
+Aranjuez,7.9,2024,SERPAVI
+Arganda del Rey,8.12,2024,SERPAVI
+Arroyomolinos,9.31,2024,SERPAVI
+Batres,6.85,2024,SERPAVI
+Becerril de la Sierra,7.3,2024,SERPAVI
+Belmonte de Tajo,5.42,2024,SERPAVI
+Berzosa del Lozoya,4.46,2024,SERPAVI
+"Berrueco, El",5.84,2024,SERPAVI
+Boadilla del Monte,12.64,2024,SERPAVI
+"Boalo, El",8.45,2024,SERPAVI
+Brunete,9.09,2024,SERPAVI
+Buitrago del Lozoya,5.78,2024,SERPAVI
+Bustarviejo,6.76,2024,SERPAVI
+Cabanillas de la Sierra,5.45,2024,SERPAVI
+"Cabrera, La",7.05,2024,SERPAVI
+Cadalso de los Vidrios,4.05,2024,SERPAVI
+Camarma de Esteruelas,8.62,2024,SERPAVI
+Campo Real,7.58,2024,SERPAVI
+Canencia,5.13,2024,SERPAVI
+Carabaña,5.95,2024,SERPAVI
+Casarrubuelos,6.69,2024,SERPAVI
+Cenicientos,4.32,2024,SERPAVI
+Cercedilla,8.12,2024,SERPAVI
+Ciempozuelos,8.04,2024,SERPAVI
+Cobeña,9.6,2024,SERPAVI
+Colmenar del Arroyo,5.22,2024,SERPAVI
+Colmenar de Oreja,4.8,2024,SERPAVI
+Colmenarejo,8.33,2024,SERPAVI
+Colmenar Viejo,8.72,2024,SERPAVI
+Collado Mediano,8.47,2024,SERPAVI
+Collado Villalba,9.49,2024,SERPAVI
+Corpa,7.14,2024,SERPAVI
+Coslada,9.79,2024,SERPAVI
+Cubas de la Sagra,7.81,2024,SERPAVI
+Chapinería,6.03,2024,SERPAVI
+Chinchón,6.63,2024,SERPAVI
+Daganzo de Arriba,9.02,2024,SERPAVI
+"Escorial, El",8.63,2024,SERPAVI
+Estremera,3.66,2024,SERPAVI
+Fresnedillas de la Oliva,5.41,2024,SERPAVI
+Fresno de Torote,7.25,2024,SERPAVI
+Fuenlabrada,9.04,2024,SERPAVI
+Fuente el Saz de Jarama,8.96,2024,SERPAVI
+Fuentidueña de Tajo,4.25,2024,SERPAVI
+Galapagar,8.56,2024,SERPAVI
+Garganta de los Montes,6.12,2024,SERPAVI
+Gargantilla del Lozoya y Pinilla de Buitrago,4.4,2024,SERPAVI
+Getafe,10.2,2024,SERPAVI
+Griñón,7.95,2024,SERPAVI
+Guadalix de la Sierra,7.45,2024,SERPAVI
+Guadarrama,8.45,2024,SERPAVI
+Horcajo de la Sierra-Aoslos,5.91,2024,SERPAVI
+Hoyo de Manzanares,9.1,2024,SERPAVI
+Humanes de Madrid,8.42,2024,SERPAVI
+Leganés,9.76,2024,SERPAVI
+Loeches,7.02,2024,SERPAVI
+Lozoya,4.81,2024,SERPAVI
+Madrid,13.97,2024,SERPAVI
+Majadahonda,13.21,2024,SERPAVI
+Manzanares el Real,8.85,2024,SERPAVI
+Meco,8.05,2024,SERPAVI
+Mejorada del Campo,8.78,2024,SERPAVI
+Miraflores de la Sierra,7.56,2024,SERPAVI
+"Molar, El",8.23,2024,SERPAVI
+"Molinos, Los",7.38,2024,SERPAVI
+Montejo de la Sierra,5.25,2024,SERPAVI
+Moraleja de Enmedio,6.8,2024,SERPAVI
+Moralzarzal,9.05,2024,SERPAVI
+Morata de Tajuña,6.58,2024,SERPAVI
+Móstoles,9.22,2024,SERPAVI
+Navacerrada,8.49,2024,SERPAVI
+Navalafuente,6.52,2024,SERPAVI
+Navalagamella,7.38,2024,SERPAVI
+Navalcarnero,7.99,2024,SERPAVI
+Navas del Rey,5.11,2024,SERPAVI
+Nuevo Baztán,5.79,2024,SERPAVI
+Olmeda de las Fuentes,5.36,2024,SERPAVI
+Orusco de Tajuña,5.07,2024,SERPAVI
+Paracuellos de Jarama,9.98,2024,SERPAVI
+Parla,8.21,2024,SERPAVI
+Patones,5.53,2024,SERPAVI
+Pedrezuela,8.49,2024,SERPAVI
+Pelayos de la Presa,5.35,2024,SERPAVI
+Perales de Tajuña,6.54,2024,SERPAVI
+Pezuela de las Torres,4.44,2024,SERPAVI
+Pinilla del Valle,4.14,2024,SERPAVI
+Pinto,9.43,2024,SERPAVI
+Piñuécar-Gandullas,3.35,2024,SERPAVI
+Pozuelo de Alarcón,13.67,2024,SERPAVI
+Pozuelo del Rey,7.3,2024,SERPAVI
+Prádena del Rincón,4.31,2024,SERPAVI
+Quijorna,7.92,2024,SERPAVI
+Rascafría,5.37,2024,SERPAVI
+Redueña,4.81,2024,SERPAVI
+Ribatejada,5.71,2024,SERPAVI
+Rivas-Vaciamadrid,9.16,2024,SERPAVI
+Robledo de Chavela,6.79,2024,SERPAVI
+"Rozas de Madrid, Las",13.4,2024,SERPAVI
+Rozas de Puerto Real,3.76,2024,SERPAVI
+San Agustín del Guadalix,9.94,2024,SERPAVI
+San Fernando de Henares,9.7,2024,SERPAVI
+San Lorenzo de El Escorial,8.93,2024,SERPAVI
+San Martín de la Vega,6.95,2024,SERPAVI
+San Martín de Valdeiglesias,5.47,2024,SERPAVI
+San Sebastián de los Reyes,11.48,2024,SERPAVI
+Santa María de la Alameda,4.72,2024,SERPAVI
+Santorcaz,5.75,2024,SERPAVI
+"Santos de la Humosa, Los",6.73,2024,SERPAVI
+Serranillos del Valle,7.21,2024,SERPAVI
+Sevilla la Nueva,8.83,2024,SERPAVI
+Soto del Real,8.36,2024,SERPAVI
+Talamanca de Jarama,7.8,2024,SERPAVI
+Tielmes,6.87,2024,SERPAVI
+Titulcia,4.62,2024,SERPAVI
+Torrejón de Ardoz,9.21,2024,SERPAVI
+Torrejón de la Calzada,7.58,2024,SERPAVI
+Torrejón de Velasco,7.11,2024,SERPAVI
+Torrelaguna,6.63,2024,SERPAVI
+Torrelodones,11.86,2024,SERPAVI
+Torremocha de Jarama,5.44,2024,SERPAVI
+Torres de la Alameda,7.24,2024,SERPAVI
+Valdeavero,8.06,2024,SERPAVI
+Valdelaguna,5.65,2024,SERPAVI
+Valdemanco,4.86,2024,SERPAVI
+Valdemaqueda,4.24,2024,SERPAVI
+Valdemorillo,9.16,2024,SERPAVI
+Valdemoro,8.96,2024,SERPAVI
+Valdeolmos-Alalpardo,8.09,2024,SERPAVI
+Valdepiélagos,5.72,2024,SERPAVI
+Valdetorres de Jarama,7.38,2024,SERPAVI
+Valdilecha,6.25,2024,SERPAVI
+Valverde de Alcalá,5.56,2024,SERPAVI
+Velilla de San Antonio,8.76,2024,SERPAVI
+"Vellón, El",7.94,2024,SERPAVI
+Venturada,6.12,2024,SERPAVI
+Villaconejos,4.0,2024,SERPAVI
+Villa del Prado,6.11,2024,SERPAVI
+Villalbilla,8.58,2024,SERPAVI
+Villamanrique de Tajo,7.06,2024,SERPAVI
+Villamanta,6.21,2024,SERPAVI
+Villamantilla,7.25,2024,SERPAVI
+Villanueva de la Cañada,11.78,2024,SERPAVI
+Villanueva del Pardillo,10.58,2024,SERPAVI
+Villanueva de Perales,6.2,2024,SERPAVI
+Villar del Olmo,5.32,2024,SERPAVI
+Villarejo de Salvanés,5.62,2024,SERPAVI
+Villaviciosa de Odón,12.91,2024,SERPAVI
+Villavieja del Lozoya,5.0,2024,SERPAVI
+Zarzalejo,4.95,2024,SERPAVI
+Lozoyuela-Navas-Sieteiglesias,5.56,2024,SERPAVI
+Puentes Viejas,5.03,2024,SERPAVI
+Tres Cantos,11.5,2024,SERPAVI
+Alameda,3.68,2024,SERPAVI
+Alcaucín,6.22,2024,SERPAVI
+Algarrobo,8.11,2024,SERPAVI
+Alhaurín de la Torre,8.69,2024,SERPAVI
+Alhaurín el Grande,6.61,2024,SERPAVI
+Almáchar,3.45,2024,SERPAVI
+Almogía,4.52,2024,SERPAVI
+Álora,4.87,2024,SERPAVI
+Alozaina,3.32,2024,SERPAVI
+Antequera,5.5,2024,SERPAVI
+Archidona,3.26,2024,SERPAVI
+Ardales,3.83,2024,SERPAVI
+Arenas,3.32,2023,SERPAVI
+Arriate,3.3,2024,SERPAVI
+Benahavís,10.77,2024,SERPAVI
+Benalmádena,10.08,2024,SERPAVI
+Benamocarra,3.26,2024,SERPAVI
+"Burgo, El",2.08,2024,SERPAVI
+Campillos,4.07,2024,SERPAVI
+Canillas de Aceituno,6.42,2024,SERPAVI
+Cártama,7.57,2024,SERPAVI
+Casabermeja,5.95,2024,SERPAVI
+Casarabonela,4.96,2024,SERPAVI
+Casares,10.29,2024,SERPAVI
+Coín,5.95,2024,SERPAVI
+Colmenar,3.28,2024,SERPAVI
+Comares,3.23,2024,SERPAVI
+Cómpeta,4.82,2024,SERPAVI
+Cortes de la Frontera,1.33,2024,SERPAVI
+Cuevas del Becerro,2.63,2024,SERPAVI
+Cuevas de San Marcos,2.3,2024,SERPAVI
+Estepona,8.36,2024,SERPAVI
+Frigiliana,7.53,2024,SERPAVI
+Fuengirola,9.29,2024,SERPAVI
+Fuente de Piedra,4.57,2024,SERPAVI
+Gaucín,3.13,2024,SERPAVI
+Guaro,8.01,2024,SERPAVI
+Humilladero,3.43,2024,SERPAVI
+Istán,6.33,2024,SERPAVI
+Macharaviaya,4.88,2024,SERPAVI
+Málaga,9.55,2024,SERPAVI
+Manilva,8.13,2024,SERPAVI
+Marbella,9.63,2024,SERPAVI
+Mijas,8.68,2024,SERPAVI
+Mollina,4.36,2024,SERPAVI
+Monda,7.47,2024,SERPAVI
+Nerja,7.92,2024,SERPAVI
+Ojén,8.35,2024,SERPAVI
+Periana,4.24,2024,SERPAVI
+Pizarra,5.89,2024,SERPAVI
+Rincón de la Victoria,8.74,2024,SERPAVI
+Riogordo,3.59,2024,SERPAVI
+Ronda,5.1,2024,SERPAVI
+Sayalonga,5.36,2024,SERPAVI
+Sedella,4.38,2024,SERPAVI
+Sierra de Yeguas,2.94,2024,SERPAVI
+Tolox,4.17,2024,SERPAVI
+Torrox,7.76,2024,SERPAVI
+Totalán,5.32,2024,SERPAVI
+Vélez-Málaga,6.84,2024,SERPAVI
+Villanueva de Algaidas,4.11,2024,SERPAVI
+Villanueva del Rosario,2.85,2024,SERPAVI
+Villanueva del Trabuco,2.97,2024,SERPAVI
+Viñuela,4.71,2024,SERPAVI
+Yunquera,4.11,2024,SERPAVI
+Torremolinos,10.17,2024,SERPAVI
+Villanueva de la Concepción,2.75,2024,SERPAVI
+Abanilla,3.27,2024,SERPAVI
+Abarán,3.2,2024,SERPAVI
+Águilas,4.88,2024,SERPAVI
+Alcantarilla,4.31,2024,SERPAVI
+Alguazas,3.84,2024,SERPAVI
+Alhama de Murcia,4.69,2024,SERPAVI
+Archena,4.32,2024,SERPAVI
+Beniel,3.88,2024,SERPAVI
+Blanca,2.77,2024,SERPAVI
+Bullas,3.52,2024,SERPAVI
+Calasparra,3.31,2024,SERPAVI
+Campos del Río,3.12,2024,SERPAVI
+Caravaca de la Cruz,3.66,2024,SERPAVI
+Cartagena,5.42,2024,SERPAVI
+Cehegín,3.52,2024,SERPAVI
+Ceutí,4.25,2024,SERPAVI
+Cieza,3.88,2024,SERPAVI
+Fortuna,3.48,2024,SERPAVI
+Fuente Álamo de Murcia,3.77,2024,SERPAVI
+Jumilla,3.57,2024,SERPAVI
+Librilla,3.56,2024,SERPAVI
+Lorca,4.82,2024,SERPAVI
+Lorquí,4.1,2024,SERPAVI
+Mazarrón,4.93,2024,SERPAVI
+Molina de Segura,5.27,2024,SERPAVI
+Moratalla,3.15,2024,SERPAVI
+Mula,3.53,2024,SERPAVI
+Murcia,6.52,2024,SERPAVI
+Pliego,2.94,2024,SERPAVI
+Puerto Lumbreras,3.86,2024,SERPAVI
+San Javier,5.95,2024,SERPAVI
+San Pedro del Pinatar,5.32,2024,SERPAVI
+Torre-Pacheco,4.68,2024,SERPAVI
+"Torres de Cotillas, Las",4.55,2024,SERPAVI
+Totana,4.06,2024,SERPAVI
+"Unión, La",4.95,2024,SERPAVI
+Villanueva del Río Segura,6.48,2024,SERPAVI
+Yecla,3.54,2024,SERPAVI
+Santomera,4.01,2024,SERPAVI
+"Alcázares, Los",5.43,2024,SERPAVI
+Ablitas,3.87,2024,SERPAVI
+Aibar/Oibar,3.18,2023,SERPAVI
+Altsasu/Alsasua,4.6,2024,SERPAVI
+Allo,3.33,2023,SERPAVI
+Andosilla,3.67,2024,SERPAVI
+Ansoáin/Antsoain,7.54,2024,SERPAVI
+Aoiz/Agoitz,4.66,2024,SERPAVI
+Aranguren,6.82,2024,SERPAVI
+Arbizu,3.99,2024,SERPAVI
+"Arcos, Los",4.19,2024,SERPAVI
+Arguedas,4.12,2024,SERPAVI
+Artajona,4.54,2024,SERPAVI
+Ayegui/Aiegi,4.87,2024,SERPAVI
+Azagra,3.84,2024,SERPAVI
+Basaburua,4.51,2024,SERPAVI
+Baztan,4.93,2024,SERPAVI
+Buñuel,3.63,2024,SERPAVI
+Burlada/Burlata,6.85,2024,SERPAVI
+Cadreita,3.33,2024,SERPAVI
+Caparroso,4.26,2024,SERPAVI
+Carcastillo,3.54,2024,SERPAVI
+Cascante,4.07,2024,SERPAVI
+Castejón,4.35,2024,SERPAVI
+Cintruénigo,4.05,2024,SERPAVI
+Cizur,5.74,2024,SERPAVI
+Corella,4.2,2024,SERPAVI
+Cortes,3.38,2024,SERPAVI
+Etxarri Aranatz,4.72,2024,SERPAVI
+Valle de Egüés/Eguesibar,6.36,2024,SERPAVI
+Noáin (Valle de Elorz)/Noain (Elortzibar),6.79,2024,SERPAVI
+Estella-Lizarra,5.42,2024,SERPAVI
+Esteribar,5.56,2024,SERPAVI
+Ezcabarte,6.77,2024,SERPAVI
+Falces,3.39,2024,SERPAVI
+Fitero,3.81,2024,SERPAVI
+Funes,3.63,2024,SERPAVI
+Fustiñana,4.05,2024,SERPAVI
+Galar,6.0,2024,SERPAVI
+Huarte/Uharte,7.15,2024,SERPAVI
+Uharte Arakil,3.97,2024,SERPAVI
+Isaba/Izaba,5.67,2024,SERPAVI
+Iza/Itza,6.83,2024,SERPAVI
+Lakuntza,4.6,2024,SERPAVI
+Larraga,3.83,2024,SERPAVI
+Leitza,4.72,2024,SERPAVI
+Lerín,3.62,2024,SERPAVI
+Lesaka,4.87,2024,SERPAVI
+Lodosa,4.22,2024,SERPAVI
+Lumbier,4.21,2024,SERPAVI
+Marcilla,3.83,2024,SERPAVI
+Mendavia,3.95,2024,SERPAVI
+Mendigorria,4.84,2024,SERPAVI
+Milagro,4.32,2024,SERPAVI
+Monreal/Elo,4.82,2023,SERPAVI
+Murchante,5.05,2024,SERPAVI
+Murieta,3.67,2024,SERPAVI
+Obanos,4.09,2024,SERPAVI
+Ochagavía/Otsagabia,6.84,2023,SERPAVI
+Olazti/Olazagutía,3.77,2024,SERPAVI
+Olite/Erriberri,4.81,2024,SERPAVI
+Cendea de Olza/Oltza Zendea,5.61,2024,SERPAVI
+Pamplona/Iruña,7.93,2024,SERPAVI
+Peralta/Azkoien,4.65,2024,SERPAVI
+Puente la Reina/Gares,5.17,2024,SERPAVI
+Ribaforada,3.47,2024,SERPAVI
+San Adrián,4.33,2024,SERPAVI
+Sangüesa/Zangoza,4.93,2024,SERPAVI
+Doneztebe/Santesteban,4.68,2024,SERPAVI
+Sesma,3.26,2023,SERPAVI
+Tafalla,4.84,2024,SERPAVI
+Tiebas-Muruarte de Reta,4.42,2022,SERPAVI
+Tudela,6.01,2024,SERPAVI
+Ultzama,4.18,2024,SERPAVI
+Valtierra,3.76,2024,SERPAVI
+Bera,5.18,2024,SERPAVI
+Viana,4.61,2024,SERPAVI
+Villafranca,3.86,2024,SERPAVI
+Villatuerta,4.53,2024,SERPAVI
+Villava/Atarrabia,7.02,2024,SERPAVI
+Valle de Yerri/Deierri,2.76,2024,SERPAVI
+Barañáin/Barañain,7.87,2024,SERPAVI
+Berrioplano/Berriobeiti,7.32,2024,SERPAVI
+Berriozar,6.46,2024,SERPAVI
+Irurtzun,4.97,2024,SERPAVI
+Beriáin,5.9,2024,SERPAVI
+Orkoien,6.27,2024,SERPAVI
+Zizur Mayor/Zizur Nagusia,7.08,2024,SERPAVI
+Lekunberri,4.28,2024,SERPAVI
+Allariz,3.89,2024,SERPAVI
+Amoeiro,2.77,2024,SERPAVI
+Bande,2.43,2024,SERPAVI
+Barbadás,4.74,2024,SERPAVI
+"Barco de Valdeorras, O",3.85,2024,SERPAVI
+Beade,2.88,2024,SERPAVI
+Carballeda de Valdeorras,1.84,2024,SERPAVI
+"Carballiño, O",3.55,2024,SERPAVI
+Cartelle,2.12,2022,SERPAVI
+Castro Caldelas,2.48,2024,SERPAVI
+Celanova,3.14,2024,SERPAVI
+Cenlle,3.11,2024,SERPAVI
+Coles,3.39,2024,SERPAVI
+Cortegada,2.34,2024,SERPAVI
+Entrimo,3.07,2024,SERPAVI
+Xinzo de Limia,3.11,2024,SERPAVI
+"Gudiña, A",3.12,2024,SERPAVI
+Xunqueira de Ambía,1.96,2024,SERPAVI
+Leiro,2.23,2024,SERPAVI
+Lobios,3.09,2024,SERPAVI
+Maceda,2.84,2024,SERPAVI
+Maside,3.07,2024,SERPAVI
+"Merca, A",3.53,2024,SERPAVI
+Nogueira de Ramuín,3.28,2024,SERPAVI
+Ourense,5.07,2024,SERPAVI
+Paderne de Allariz,3.06,2024,SERPAVI
+"Pereiro de Aguiar, O",4.15,2024,SERPAVI
+"Peroxa, A",2.69,2024,SERPAVI
+Petín,2.21,2024,SERPAVI
+Piñor,2.12,2024,SERPAVI
+"Pobra de Trives, A",2.86,2024,SERPAVI
+Ribadavia,3.02,2024,SERPAVI
+Riós,2.86,2024,SERPAVI
+"Rúa, A",2.97,2024,SERPAVI
+Rubiá,3.4,2024,SERPAVI
+San Cibrao das Viñas,4.28,2024,SERPAVI
+San Cristovo de Cea,3.12,2024,SERPAVI
+Sandiás,2.06,2024,SERPAVI
+Taboadela,2.87,2024,SERPAVI
+Toén,3.92,2024,SERPAVI
+Verín,3.4,2024,SERPAVI
+Viana do Bolo,3.15,2024,SERPAVI
+Vilamarín,3.15,2024,SERPAVI
+Vilamartín de Valdeorras,2.64,2024,SERPAVI
+Allande,3.84,2024,SERPAVI
+Aller,4.2,2024,SERPAVI
+Avilés,5.98,2024,SERPAVI
+Belmonte de Miranda,3.72,2021,SERPAVI
+Bimenes,3.13,2024,SERPAVI
+Boal,3.29,2024,SERPAVI
+Cabrales,4.35,2024,SERPAVI
+Cabranes,3.81,2024,SERPAVI
+Candamo,3.7,2024,SERPAVI
+Cangas del Narcea,4.69,2024,SERPAVI
+Cangas de Onís,5.65,2024,SERPAVI
+Carreño,5.54,2024,SERPAVI
+Caso,2.64,2024,SERPAVI
+Castrillón,6.16,2024,SERPAVI
+Castropol,4.11,2024,SERPAVI
+Coaña,5.56,2024,SERPAVI
+Colunga,6.01,2024,SERPAVI
+Corvera de Asturias,4.98,2024,SERPAVI
+Cudillero,4.49,2024,SERPAVI
+"Franco, El",4.11,2024,SERPAVI
+Gijón,7.21,2024,SERPAVI
+Gozón,6.31,2024,SERPAVI
+Grado,4.22,2024,SERPAVI
+Grandas de Salime,3.49,2024,SERPAVI
+Illas,4.22,2024,SERPAVI
+Langreo,4.9,2024,SERPAVI
+Laviana,4.16,2024,SERPAVI
+Lena,4.05,2024,SERPAVI
+Valdés,4.66,2024,SERPAVI
+Llanera,5.56,2024,SERPAVI
+Llanes,6.02,2024,SERPAVI
+Mieres,5.0,2024,SERPAVI
+Morcín,5.04,2024,SERPAVI
+Muros de Nalón,6.56,2024,SERPAVI
+Nava,4.74,2024,SERPAVI
+Navia,5.07,2024,SERPAVI
+Noreña,5.19,2024,SERPAVI
+Onís,3.39,2018,SERPAVI
+Oviedo,7.32,2024,SERPAVI
+Parres,5.0,2024,SERPAVI
+Peñamellera Baja,5.6,2024,SERPAVI
+Piloña,4.28,2024,SERPAVI
+Pravia,4.27,2024,SERPAVI
+Proaza,3.79,2024,SERPAVI
+Quirós,2.07,2024,SERPAVI
+"Regueras, Las",4.29,2024,SERPAVI
+Ribadedeva,6.02,2024,SERPAVI
+Ribadesella,5.8,2024,SERPAVI
+Ribera de Arriba,3.54,2024,SERPAVI
+Riosa,3.17,2024,SERPAVI
+Salas,4.15,2024,SERPAVI
+San Martín del Rey Aurelio,4.15,2024,SERPAVI
+Santo Adriano,3.85,2023,SERPAVI
+Sariego,4.93,2024,SERPAVI
+Siero,6.02,2024,SERPAVI
+Sobrescobio,3.51,2024,SERPAVI
+Somiedo,5.86,2024,SERPAVI
+Soto del Barco,5.93,2024,SERPAVI
+Tapia de Casariego,5.01,2024,SERPAVI
+Teverga,3.58,2024,SERPAVI
+Tineo,3.58,2024,SERPAVI
+Vegadeo,3.78,2024,SERPAVI
+Villaviciosa,5.61,2024,SERPAVI
+Aguilar de Campoo,5.76,2024,SERPAVI
+Alar del Rey,3.79,2024,SERPAVI
+Astudillo,3.21,2024,SERPAVI
+Baltanás,3.02,2024,SERPAVI
+Venta de Baños,4.41,2024,SERPAVI
+Barruelo de Santullán,2.81,2024,SERPAVI
+Carrión de los Condes,3.52,2024,SERPAVI
+Cervera de Pisuerga,4.17,2024,SERPAVI
+Dueñas,4.53,2024,SERPAVI
+Frómista,3.52,2024,SERPAVI
+Fuentes de Valdepero,4.16,2022,SERPAVI
+Grijota,5.5,2024,SERPAVI
+Guardo,4.1,2024,SERPAVI
+Herrera de Pisuerga,3.88,2024,SERPAVI
+Husillos,3.1,2022,SERPAVI
+Magaz de Pisuerga,3.19,2024,SERPAVI
+Palencia,5.76,2024,SERPAVI
+Paredes de Nava,3.85,2024,SERPAVI
+Saldaña,3.73,2024,SERPAVI
+Salinas de Pisuerga,2.63,2024,SERPAVI
+Torquemada,2.52,2024,SERPAVI
+Villada,4.23,2024,SERPAVI
+Villalobón,6.5,2024,SERPAVI
+Villamuriel de Cerrato,4.44,2024,SERPAVI
+Osorno la Mayor,4.67,2024,SERPAVI
+Agaete,6.79,2024,SERPAVI
+Agüimes,7.37,2024,SERPAVI
+Antigua,9.18,2024,SERPAVI
+Arrecife,7.1,2024,SERPAVI
+Arucas,6.33,2024,SERPAVI
+Firgas,4.51,2024,SERPAVI
+Gáldar,6.1,2024,SERPAVI
+Haría,7.68,2024,SERPAVI
+Ingenio,6.22,2024,SERPAVI
+Mogán,13.1,2024,SERPAVI
+Moya,6.67,2024,SERPAVI
+"Oliva, La",8.59,2024,SERPAVI
+Pájara,8.87,2024,SERPAVI
+"Palmas de Gran Canaria, Las",8.1,2024,SERPAVI
+Puerto del Rosario,6.82,2024,SERPAVI
+San Bartolomé,8.57,2024,SERPAVI
+San Bartolomé de Tirajana,8.93,2024,SERPAVI
+"Aldea de San Nicolás, La",5.1,2024,SERPAVI
+Santa Brígida,7.0,2024,SERPAVI
+Santa Lucía de Tirajana,6.77,2024,SERPAVI
+Santa María de Guía de Gran Canaria,6.08,2024,SERPAVI
+Teguise,9.22,2024,SERPAVI
+Tejeda,3.4,2024,SERPAVI
+Telde,7.14,2024,SERPAVI
+Teror,5.71,2024,SERPAVI
+Tías,9.7,2024,SERPAVI
+Tinajo,8.33,2024,SERPAVI
+Tuineje,7.07,2024,SERPAVI
+Valsequillo de Gran Canaria,6.09,2024,SERPAVI
+Valleseco,4.73,2024,SERPAVI
+Vega de San Mateo,5.88,2024,SERPAVI
+Yaiza,9.37,2024,SERPAVI
+Arbo,2.93,2024,SERPAVI
+Barro,4.27,2024,SERPAVI
+Baiona,7.27,2024,SERPAVI
+Bueu,4.93,2024,SERPAVI
+Caldas de Reis,3.95,2024,SERPAVI
+Cambados,4.63,2024,SERPAVI
+Cangas,5.63,2024,SERPAVI
+"Cañiza, A",4.33,2024,SERPAVI
+Catoira,4.01,2024,SERPAVI
+Covelo,4.71,2024,SERPAVI
+Crecente,2.86,2024,SERPAVI
+Cuntis,3.98,2024,SERPAVI
+"Estrada, A",3.59,2024,SERPAVI
+Forcarei,2.29,2024,SERPAVI
+Fornelos de Montes,3.26,2024,SERPAVI
+Agolada,2.43,2024,SERPAVI
+Gondomar,6.67,2024,SERPAVI
+"Grove, O",4.5,2024,SERPAVI
+"Guarda, A",4.43,2024,SERPAVI
+Lalín,3.84,2024,SERPAVI
+"Lama, A",2.27,2024,SERPAVI
+Marín,4.46,2024,SERPAVI
+Meaño,4.53,2024,SERPAVI
+Meis,4.64,2024,SERPAVI
+Moaña,5.0,2024,SERPAVI
+Mondariz,4.76,2024,SERPAVI
+Mondariz-Balneario,6.4,2024,SERPAVI
+Moraña,3.92,2024,SERPAVI
+Mos,5.85,2024,SERPAVI
+"Neves, As",3.99,2024,SERPAVI
+Nigrán,7.03,2024,SERPAVI
+Oia,3.05,2024,SERPAVI
+Pazos de Borbén,3.97,2024,SERPAVI
+Pontevedra,6.32,2024,SERPAVI
+"Porriño, O",6.16,2024,SERPAVI
+Portas,3.62,2024,SERPAVI
+Poio,6.06,2024,SERPAVI
+Ponteareas,4.33,2024,SERPAVI
+Ponte Caldelas,4.54,2024,SERPAVI
+Pontecesures,3.73,2024,SERPAVI
+Redondela,5.46,2024,SERPAVI
+Ribadumia,4.34,2024,SERPAVI
+Rodeiro,2.24,2024,SERPAVI
+"Rosal, O",4.96,2024,SERPAVI
+Salceda de Caselas,4.81,2024,SERPAVI
+Salvaterra de Miño,5.0,2024,SERPAVI
+Sanxenxo,5.68,2024,SERPAVI
+Silleda,3.65,2024,SERPAVI
+Soutomaior,4.94,2024,SERPAVI
+Tomiño,4.56,2024,SERPAVI
+Tui,4.61,2024,SERPAVI
+Valga,3.72,2024,SERPAVI
+Vigo,7.61,2024,SERPAVI
+Vilaboa,2.15,2024,SERPAVI
+Vila de Cruces,2.91,2024,SERPAVI
+Vilagarcía de Arousa,5.1,2024,SERPAVI
+Vilanova de Arousa,4.65,2024,SERPAVI
+"Illa de Arousa, A",5.62,2024,SERPAVI
+Cerdedo-Cotobade,2.9,2024,SERPAVI
+Alba de Tormes,3.19,2024,SERPAVI
+"Alberca, La",3.34,2024,SERPAVI
+Aldeadávila de la Ribera,1.98,2024,SERPAVI
+Aldealengua,5.09,2024,SERPAVI
+Aldearrubia,2.77,2022,SERPAVI
+Aldeatejada,5.01,2024,SERPAVI
+Arapiles,4.01,2024,SERPAVI
+Babilafuente,3.19,2024,SERPAVI
+Béjar,4.18,2024,SERPAVI
+Cabrerizos,4.76,2024,SERPAVI
+Calvarrasa de Abajo,4.67,2024,SERPAVI
+Calzada de Valdunciel,4.3,2024,SERPAVI
+Candelario,4.59,2024,SERPAVI
+Carbajosa de la Sagrada,4.9,2024,SERPAVI
+Carrascal de Barregas,4.07,2024,SERPAVI
+Castellanos de Moriscos,5.33,2024,SERPAVI
+Ciudad Rodrigo,3.33,2024,SERPAVI
+Doñinos de Salamanca,4.17,2024,SERPAVI
+"Fuente de San Esteban, La",3.23,2024,SERPAVI
+Fuentes de Oñoro,2.55,2020,SERPAVI
+Galindo y Perahuy,3.65,2021,SERPAVI
+Guijuelo,4.0,2024,SERPAVI
+Ledesma,3.16,2024,SERPAVI
+Linares de Riofrío,1.67,2016,SERPAVI
+Lumbrales,2.41,2024,SERPAVI
+Miranda de Azán,4.11,2024,SERPAVI
+Monterrubio de Armuña,3.99,2024,SERPAVI
+Moriscos,5.29,2024,SERPAVI
+Mozárbez,4.4,2024,SERPAVI
+Pelabravo,4.66,2024,SERPAVI
+Peñaranda de Bracamonte,3.24,2024,SERPAVI
+Salamanca,6.38,2024,SERPAVI
+San Cristóbal de la Cuesta,4.91,2024,SERPAVI
+Santa Marta de Tormes,5.17,2024,SERPAVI
+"Santos, Los",2.39,2014,SERPAVI
+Terradillos,3.87,2024,SERPAVI
+Villamayor,4.88,2024,SERPAVI
+Villares de la Reina,4.8,2024,SERPAVI
+Villoria,2.37,2021,SERPAVI
+Vitigudino,3.12,2024,SERPAVI
+Adeje,10.0,2024,SERPAVI
+Alajeró,7.82,2024,SERPAVI
+Arafo,5.81,2024,SERPAVI
+Arico,9.03,2024,SERPAVI
+Arona,9.15,2024,SERPAVI
+Barlovento,2.53,2024,SERPAVI
+Breña Alta,6.21,2024,SERPAVI
+Breña Baja,7.78,2024,SERPAVI
+Buenavista del Norte,6.18,2024,SERPAVI
+Candelaria,9.37,2024,SERPAVI
+Fasnia,7.33,2024,SERPAVI
+Frontera,7.07,2024,SERPAVI
+Fuencaliente de la Palma,7.35,2024,SERPAVI
+Garachico,7.41,2024,SERPAVI
+Garafía,3.33,2024,SERPAVI
+Granadilla de Abona,8.47,2024,SERPAVI
+"Guancha, La",6.21,2024,SERPAVI
+Guía de Isora,8.64,2024,SERPAVI
+Güímar,8.08,2024,SERPAVI
+Hermigua,5.48,2024,SERPAVI
+Icod de los Vinos,5.33,2024,SERPAVI
+San Cristóbal de La Laguna,7.31,2024,SERPAVI
+"Llanos de Aridane, Los",6.65,2024,SERPAVI
+"Matanza de Acentejo, La",6.49,2024,SERPAVI
+"Orotava, La",5.95,2024,SERPAVI
+"Paso, El",5.88,2024,SERPAVI
+Puerto de la Cruz,10.21,2024,SERPAVI
+Puntagorda,7.07,2024,SERPAVI
+Puntallana,7.69,2024,SERPAVI
+"Realejos, Los",5.97,2024,SERPAVI
+"Rosario, El",8.82,2024,SERPAVI
+San Andrés y Sauces,4.84,2024,SERPAVI
+San Juan de la Rambla,6.04,2024,SERPAVI
+San Miguel de Abona,8.83,2024,SERPAVI
+San Sebastián de la Gomera,7.36,2024,SERPAVI
+Santa Cruz de la Palma,6.61,2024,SERPAVI
+Santa Cruz de Tenerife,7.8,2024,SERPAVI
+Santa Úrsula,5.9,2024,SERPAVI
+Santiago del Teide,9.11,2024,SERPAVI
+"Sauzal, El",6.58,2024,SERPAVI
+"Silos, Los",5.91,2024,SERPAVI
+Tacoronte,6.91,2024,SERPAVI
+"Tanque, El",4.77,2024,SERPAVI
+Tazacorte,7.05,2024,SERPAVI
+Tegueste,6.11,2024,SERPAVI
+Tijarafe,4.3,2024,SERPAVI
+Valverde,8.27,2024,SERPAVI
+Valle Gran Rey,8.68,2024,SERPAVI
+Vallehermoso,6.0,2024,SERPAVI
+"Victoria de Acentejo, La",6.02,2024,SERPAVI
+Vilaflor,3.13,2024,SERPAVI
+Villa de Mazo,5.23,2024,SERPAVI
+"Pinar de El Hierro, El",8.09,2024,SERPAVI
+Alfoz de Lloredo,6.73,2024,SERPAVI
+Ampuero,4.53,2024,SERPAVI
+Arenas de Iguña,4.34,2024,SERPAVI
+Argoños,5.69,2024,SERPAVI
+Arnuero,5.67,2024,SERPAVI
+"Astillero, El",6.79,2024,SERPAVI
+Bárcena de Cicero,5.59,2024,SERPAVI
+Bareyo,5.95,2024,SERPAVI
+Cabezón de la Sal,5.39,2024,SERPAVI
+Cabezón de Liébana,4.06,2024,SERPAVI
+Camaleño,3.81,2024,SERPAVI
+Camargo,6.78,2024,SERPAVI
+Cartes,6.61,2024,SERPAVI
+Castañeda,6.36,2024,SERPAVI
+Castro-Urdiales,8.2,2024,SERPAVI
+Cillorigo de Liébana,5.97,2024,SERPAVI
+Colindres,5.68,2024,SERPAVI
+Comillas,6.85,2024,SERPAVI
+"Corrales de Buelna, Los",5.39,2024,SERPAVI
+Corvera de Toranzo,4.38,2024,SERPAVI
+Campoo de Enmedio,5.06,2024,SERPAVI
+Entrambasaguas,5.91,2024,SERPAVI
+Escalante,4.55,2024,SERPAVI
+Guriezo,5.08,2024,SERPAVI
+Hazas de Cesto,4.92,2024,SERPAVI
+Hermandad de Campoo de Suso,4.46,2024,SERPAVI
+Laredo,6.67,2024,SERPAVI
+Liendo,3.1,2020,SERPAVI
+Liérganes,6.17,2024,SERPAVI
+Limpias,5.71,2024,SERPAVI
+Marina de Cudeyo,6.72,2024,SERPAVI
+Mazcuerras,3.73,2024,SERPAVI
+Medio Cudeyo,6.18,2024,SERPAVI
+Meruelo,5.33,2024,SERPAVI
+Miengo,7.73,2024,SERPAVI
+Molledo,2.69,2024,SERPAVI
+Noja,6.96,2024,SERPAVI
+Penagos,5.04,2024,SERPAVI
+Piélagos,6.4,2024,SERPAVI
+Polanco,7.21,2024,SERPAVI
+Potes,4.95,2024,SERPAVI
+Puente Viesgo,5.35,2024,SERPAVI
+Ramales de la Victoria,5.0,2024,SERPAVI
+Rasines,3.22,2021,SERPAVI
+Reinosa,5.19,2024,SERPAVI
+Reocín,5.78,2024,SERPAVI
+Ribamontán al Mar,7.74,2024,SERPAVI
+Ribamontán al Monte,6.32,2024,SERPAVI
+Rionansa,4.55,2023,SERPAVI
+Riotuerto,4.79,2024,SERPAVI
+Ruente,3.12,2024,SERPAVI
+Ruiloba,8.82,2024,SERPAVI
+San Felices de Buelna,4.25,2024,SERPAVI
+Santa Cruz de Bezana,7.35,2024,SERPAVI
+Santa María de Cayón,5.7,2024,SERPAVI
+Santander,8.28,2024,SERPAVI
+Santillana del Mar,5.62,2024,SERPAVI
+Santiurde de Toranzo,4.46,2024,SERPAVI
+Santoña,5.8,2024,SERPAVI
+San Vicente de la Barquera,5.55,2024,SERPAVI
+Selaya,4.16,2024,SERPAVI
+Solórzano,6.67,2024,SERPAVI
+Suances,6.9,2024,SERPAVI
+Torrelavega,6.27,2024,SERPAVI
+Udías,6.78,2024,SERPAVI
+Valdáliga,5.48,2024,SERPAVI
+Valdeolea,4.72,2024,SERPAVI
+Valderredible,3.17,2020,SERPAVI
+Val de San Vicente,5.49,2024,SERPAVI
+Villacarriedo,3.67,2024,SERPAVI
+Villaescusa,5.04,2024,SERPAVI
+Villafufre,2.85,2024,SERPAVI
+Voto,5.35,2024,SERPAVI
+Ayllón,3.83,2024,SERPAVI
+Bernuy de Porreros,6.51,2024,SERPAVI
+Boceguillas,3.75,2024,SERPAVI
+Cantalejo,4.0,2024,SERPAVI
+Cantimpalos,5.49,2024,SERPAVI
+Carbonero el Mayor,3.89,2024,SERPAVI
+Coca,5.22,2024,SERPAVI
+Cuéllar,4.38,2024,SERPAVI
+Chañe,3.32,2024,SERPAVI
+Encinillas,4.01,2024,SERPAVI
+"Espinar, El",5.77,2024,SERPAVI
+Espirdo,6.1,2024,SERPAVI
+Fresno de Cantespino,4.59,2022,SERPAVI
+Garcillán,4.13,2024,SERPAVI
+Gomezserracín,2.99,2024,SERPAVI
+Grajera,4.05,2024,SERPAVI
+Hontanares de Eresma,5.68,2024,SERPAVI
+Ituero y Lama,4.82,2024,SERPAVI
+"Lastrilla, La",6.18,2024,SERPAVI
+"Losa, La",4.79,2024,SERPAVI
+Marugán,4.3,2024,SERPAVI
+Matabuena,3.44,2024,SERPAVI
+Mozoncillo,5.94,2024,SERPAVI
+Nava de la Asunción,3.91,2024,SERPAVI
+Navalmanzano,2.34,2024,SERPAVI
+Navas de Oro,2.81,2024,SERPAVI
+Nieva,3.08,2015,SERPAVI
+Otero de Herreros,4.93,2024,SERPAVI
+Palazuelos de Eresma,6.32,2024,SERPAVI
+Pedraza,2.78,2022,SERPAVI
+Prádena,3.7,2024,SERPAVI
+Riaza,4.97,2024,SERPAVI
+Roda de Eresma,4.01,2024,SERPAVI
+Sanchonuño,3.72,2024,SERPAVI
+Real Sitio de San Ildefonso,6.22,2024,SERPAVI
+Segovia,6.86,2024,SERPAVI
+Sepúlveda,3.52,2024,SERPAVI
+Torrecaballeros,6.15,2024,SERPAVI
+Trescasas,4.3,2024,SERPAVI
+Turégano,4.11,2024,SERPAVI
+Valverde del Majano,5.92,2024,SERPAVI
+Villacastín,4.55,2024,SERPAVI
+Ortigosa del Monte,4.31,2024,SERPAVI
+Navas de Riofrío,5.42,2024,SERPAVI
+San Cristóbal de Segovia,5.92,2024,SERPAVI
+Aguadulce,2.57,2024,SERPAVI
+Albaida del Aljarafe,4.21,2024,SERPAVI
+Alcalá de Guadaíra,6.29,2024,SERPAVI
+Alcalá del Río,5.09,2024,SERPAVI
+Alcolea del Río,2.51,2024,SERPAVI
+"Algaba, La",6.06,2024,SERPAVI
+Almadén de la Plata,3.42,2024,SERPAVI
+Almensilla,5.39,2024,SERPAVI
+Arahal,4.75,2024,SERPAVI
+Aznalcázar,6.16,2024,SERPAVI
+Aznalcóllar,2.99,2024,SERPAVI
+Benacazón,4.55,2024,SERPAVI
+Bollullos de la Mitación,5.54,2024,SERPAVI
+Bormujos,8.05,2024,SERPAVI
+Brenes,5.0,2024,SERPAVI
+Burguillos,4.57,2024,SERPAVI
+"Cabezas de San Juan, Las",4.04,2024,SERPAVI
+Camas,7.45,2024,SERPAVI
+"Campana, La",2.34,2024,SERPAVI
+Cantillana,3.57,2024,SERPAVI
+Carmona,5.56,2024,SERPAVI
+Carrión de los Céspedes,3.01,2024,SERPAVI
+Casariche,1.97,2024,SERPAVI
+Castilblanco de los Arroyos,2.89,2024,SERPAVI
+Castilleja de Guzmán,4.96,2024,SERPAVI
+Castilleja de la Cuesta,6.71,2024,SERPAVI
+"Castillo de las Guardas, El",2.74,2024,SERPAVI
+Cazalla de la Sierra,3.64,2024,SERPAVI
+Constantina,3.88,2024,SERPAVI
+Coria del Río,5.94,2024,SERPAVI
+"Coronil, El",2.85,2024,SERPAVI
+"Corrales, Los",1.93,2024,SERPAVI
+Dos Hermanas,7.45,2024,SERPAVI
+Écija,3.89,2024,SERPAVI
+Espartinas,9.67,2024,SERPAVI
+Estepa,3.72,2024,SERPAVI
+Fuentes de Andalucía,2.6,2024,SERPAVI
+Gelves,7.81,2024,SERPAVI
+Gerena,4.57,2024,SERPAVI
+Gines,6.67,2024,SERPAVI
+Guadalcanal,1.8,2024,SERPAVI
+Guillena,5.27,2024,SERPAVI
+Herrera,2.74,2024,SERPAVI
+Huévar del Aljarafe,4.0,2024,SERPAVI
+"Lantejuela, La",2.4,2024,SERPAVI
+Lebrija,4.17,2024,SERPAVI
+Lora del Río,4.24,2024,SERPAVI
+"Luisiana, La",2.27,2024,SERPAVI
+Mairena del Alcor,4.9,2024,SERPAVI
+Mairena del Aljarafe,8.44,2024,SERPAVI
+Marchena,4.5,2024,SERPAVI
+"Molares, Los",3.54,2024,SERPAVI
+Montellano,3.01,2024,SERPAVI
+Morón de la Frontera,4.58,2024,SERPAVI
+Olivares,5.55,2024,SERPAVI
+Osuna,3.99,2024,SERPAVI
+"Palacios y Villafranca, Los",4.79,2024,SERPAVI
+Palomares del Río,6.6,2024,SERPAVI
+Paradas,3.01,2024,SERPAVI
+"Pedroso, El",4.38,2024,SERPAVI
+Peñaflor,2.91,2024,SERPAVI
+Pilas,5.16,2024,SERPAVI
+"Puebla de Cazalla, La",3.59,2024,SERPAVI
+"Puebla de los Infantes, La",2.79,2024,SERPAVI
+"Puebla del Río, La",5.46,2024,SERPAVI
+"Real de la Jara, El",3.07,2024,SERPAVI
+"Rinconada, La",6.25,2024,SERPAVI
+"Roda de Andalucía, La",2.52,2024,SERPAVI
+"Ronquillo, El",4.17,2024,SERPAVI
+"Rubio, El",2.15,2024,SERPAVI
+Salteras,6.55,2024,SERPAVI
+San Juan de Aznalfarache,7.9,2024,SERPAVI
+Sanlúcar la Mayor,6.74,2024,SERPAVI
+Santiponce,6.21,2024,SERPAVI
+"Saucejo, El",2.68,2024,SERPAVI
+Sevilla,9.17,2024,SERPAVI
+Tocina,4.35,2024,SERPAVI
+Tomares,7.64,2024,SERPAVI
+Umbrete,5.85,2024,SERPAVI
+Utrera,5.43,2024,SERPAVI
+Valencina de la Concepción,7.61,2024,SERPAVI
+Villamanrique de la Condesa,5.6,2024,SERPAVI
+Villanueva del Ariscal,4.85,2024,SERPAVI
+Villanueva del Río y Minas,3.4,2024,SERPAVI
+Villaverde del Río,3.38,2024,SERPAVI
+"Viso del Alcor, El",4.94,2024,SERPAVI
+Cañada Rosal,2.77,2024,SERPAVI
+Isla Mayor,6.03,2024,SERPAVI
+"Cuervo de Sevilla, El",4.32,2024,SERPAVI
+Ágreda,3.75,2024,SERPAVI
+Almazán,4.63,2024,SERPAVI
+Arcos de Jalón,4.12,2024,SERPAVI
+Berlanga de Duero,3.07,2024,SERPAVI
+Burgo de Osma-Ciudad de Osma,4.49,2024,SERPAVI
+Covaleda,3.69,2024,SERPAVI
+Garray,6.57,2024,SERPAVI
+Golmayo,7.72,2024,SERPAVI
+Medinaceli,3.89,2024,SERPAVI
+Ólvega,4.25,2024,SERPAVI
+Quintana Redonda,2.54,2011,SERPAVI
+"Rábanos, Los",3.65,2024,SERPAVI
+San Esteban de Gormaz,3.92,2024,SERPAVI
+San Leonardo de Yagüe,3.89,2024,SERPAVI
+San Pedro Manrique,3.12,2018,SERPAVI
+Soria,6.75,2024,SERPAVI
+Vinuesa,4.74,2024,SERPAVI
+Aiguamúrcia,5.71,2024,SERPAVI
+Albinyana,6.59,2024,SERPAVI
+Alcanar,4.94,2024,SERPAVI
+Alcover,5.45,2024,SERPAVI
+Aldover,3.05,2024,SERPAVI
+"Aleixar, L'",4.3,2024,SERPAVI
+Alforja,5.31,2024,SERPAVI
+Almoster,7.08,2024,SERPAVI
+Altafulla,9.53,2024,SERPAVI
+"Ametlla de Mar, L'",5.34,2024,SERPAVI
+Amposta,4.85,2024,SERPAVI
+"Arboç, L'",5.91,2024,SERPAVI
+Ascó,3.47,2024,SERPAVI
+Banyeres del Penedès,5.18,2024,SERPAVI
+Barberà de la Conca,3.4,2024,SERPAVI
+Batea,2.35,2024,SERPAVI
+Bellvei,7.12,2024,SERPAVI
+Benissanet,3.95,2024,SERPAVI
+"Bisbal del Penedès, La",4.75,2024,SERPAVI
+Blancafort,3.66,2024,SERPAVI
+Bonastre,5.62,2024,SERPAVI
+"Borges del Camp, Les",5.07,2024,SERPAVI
+Botarell,5.88,2024,SERPAVI
+Cabra del Camp,5.45,2024,SERPAVI
+Calafell,8.65,2024,SERPAVI
+Cambrils,8.0,2024,SERPAVI
+Castellvell del Camp,5.16,2024,SERPAVI
+"Catllar, El",5.4,2024,SERPAVI
+"Sénia, La",3.19,2024,SERPAVI
+Constantí,5.31,2024,SERPAVI
+Corbera d'Ebre,4.13,2011,SERPAVI
+Cornudella de Montsant,5.25,2024,SERPAVI
+Creixell,7.75,2024,SERPAVI
+Cunit,8.43,2024,SERPAVI
+Xerta,2.86,2024,SERPAVI
+"Espluga de Francolí, L'",5.14,2024,SERPAVI
+Falset,4.94,2024,SERPAVI
+Flix,3.91,2024,SERPAVI
+"Galera, La",1.93,2024,SERPAVI
+Gandesa,3.7,2024,SERPAVI
+Horta de Sant Joan,2.25,2024,SERPAVI
+Llorenç del Penedès,5.54,2024,SERPAVI
+Marçà,3.55,2024,SERPAVI
+Masdenverge,3.59,2024,SERPAVI
+Masllorenç,4.62,2024,SERPAVI
+Maspujols,5.41,2024,SERPAVI
+Montblanc,4.8,2024,SERPAVI
+Montbrió del Camp,6.89,2024,SERPAVI
+Montferri,4.8,2024,SERPAVI
+"Montmell, El",4.6,2024,SERPAVI
+Mont-roig del Camp,7.22,2024,SERPAVI
+Móra d'Ebre,4.51,2024,SERPAVI
+Móra la Nova,3.64,2024,SERPAVI
+"Morell, El",6.25,2024,SERPAVI
+"Nou de Gaià, La",3.34,2021,SERPAVI
+Nulles,5.05,2023,SERPAVI
+"Pallaresos, Els",6.98,2024,SERPAVI
+Perafort,5.36,2024,SERPAVI
+"Perelló, El",3.7,2024,SERPAVI
+Pira,4.02,2021,SERPAVI
+"Pla de Santa Maria, El",5.4,2024,SERPAVI
+"Pobla de Mafumet, La",6.73,2024,SERPAVI
+"Pobla de Montornès, La",6.13,2024,SERPAVI
+"Pont d'Armentera, El",3.36,2023,SERPAVI
+Prades,3.71,2024,SERPAVI
+Pratdip,4.72,2016,SERPAVI
+Puigpelat,6.87,2024,SERPAVI
+Reus,6.44,2024,SERPAVI
+"Riba, La",5.17,2024,SERPAVI
+Riba-roja d'Ebre,3.01,2024,SERPAVI
+"Riera de Gaià, La",5.84,2024,SERPAVI
+Riudecanyes,6.5,2024,SERPAVI
+Riudecols,7.13,2024,SERPAVI
+Riudoms,5.46,2024,SERPAVI
+Roda de Barà,7.3,2024,SERPAVI
+Rodonyà,3.98,2024,SERPAVI
+Roquetes,4.61,2024,SERPAVI
+Salomó,4.25,2024,SERPAVI
+Sant Carles de la Ràpita,5.51,2024,SERPAVI
+Sant Jaume dels Domenys,5.15,2024,SERPAVI
+Santa Bàrbara,4.22,2024,SERPAVI
+Santa Coloma de Queralt,4.62,2024,SERPAVI
+Santa Oliva,5.56,2024,SERPAVI
+Sarral,3.78,2024,SERPAVI
+"Secuita, La",6.25,2024,SERPAVI
+"Selva del Camp, La",5.77,2024,SERPAVI
+Solivella,3.53,2024,SERPAVI
+Tarragona,7.5,2024,SERPAVI
+Tivenys,4.53,2024,SERPAVI
+Tivissa,4.47,2024,SERPAVI
+Torredembarra,7.33,2024,SERPAVI
+Tortosa,5.13,2024,SERPAVI
+Ulldecona,3.78,2024,SERPAVI
+Vallmoll,4.41,2024,SERPAVI
+Valls,5.62,2024,SERPAVI
+Vandellòs i l'Hospitalet de l'Infant,6.7,2024,SERPAVI
+"Vendrell, El",7.0,2024,SERPAVI
+Vespella de Gaià,4.68,2024,SERPAVI
+Vilallonga del Camp,6.32,2024,SERPAVI
+Vilanova d'Escornalbou,7.85,2021,SERPAVI
+Vilaplana,3.33,2019,SERPAVI
+Vila-rodona,4.43,2024,SERPAVI
+Vila-seca,7.05,2024,SERPAVI
+Vilaverd,4.48,2024,SERPAVI
+Vimbodí i Poblet,3.81,2024,SERPAVI
+Vinyols i els Arcs,7.5,2024,SERPAVI
+Deltebre,5.41,2024,SERPAVI
+Sant Jaume d'Enveja,5.44,2024,SERPAVI
+Camarles,5.15,2024,SERPAVI
+"Aldea, L'",4.79,2024,SERPAVI
+Salou,8.22,2024,SERPAVI
+"Ampolla, L'",6.87,2024,SERPAVI
+"Canonja, La",5.68,2024,SERPAVI
+Albalate del Arzobispo,3.39,2024,SERPAVI
+Albarracín,4.82,2024,SERPAVI
+Alcañiz,4.5,2024,SERPAVI
+Alcorisa,3.31,2024,SERPAVI
+Andorra,3.76,2024,SERPAVI
+Ariño,2.57,2024,SERPAVI
+Beceite,4.51,2024,SERPAVI
+Bronchales,5.65,2024,SERPAVI
+Calaceite,2.85,2024,SERPAVI
+Calamocha,4.36,2024,SERPAVI
+Calanda,3.39,2024,SERPAVI
+Cantavieja,3.21,2023,SERPAVI
+Castelserás,1.72,2024,SERPAVI
+Cedrillas,3.17,2023,SERPAVI
+Cella,3.95,2024,SERPAVI
+"Fresneda, La",1.8,2024,SERPAVI
+Híjar,3.63,2024,SERPAVI
+Manzanera,3.47,2024,SERPAVI
+Mas de las Matas,3.45,2024,SERPAVI
+Monreal del Campo,3.06,2024,SERPAVI
+Montalbán,4.14,2020,SERPAVI
+Mora de Rubielos,4.84,2024,SERPAVI
+Muniesa,2.0,2024,SERPAVI
+Olba,2.29,2024,SERPAVI
+"Puebla de Híjar, La",3.27,2024,SERPAVI
+Rubielos de Mora,3.89,2024,SERPAVI
+Samper de Calanda,1.41,2024,SERPAVI
+Santa Eulalia,2.19,2024,SERPAVI
+Sarrión,3.57,2024,SERPAVI
+Teruel,5.82,2024,SERPAVI
+Utrillas,3.69,2024,SERPAVI
+Valdeltormo,2.58,2022,SERPAVI
+Valderrobres,4.07,2024,SERPAVI
+Villastar,4.37,2024,SERPAVI
+Ajofrín,2.92,2024,SERPAVI
+Alameda de la Sagra,5.15,2024,SERPAVI
+Albarreal de Tajo,3.11,2024,SERPAVI
+Alcabón,2.31,2024,SERPAVI
+Alcaudete de la Jara,2.18,2024,SERPAVI
+Almonacid de Toledo,5.62,2024,SERPAVI
+Almorox,4.6,2024,SERPAVI
+Añover de Tajo,4.16,2024,SERPAVI
+Arcicóllar,3.73,2024,SERPAVI
+Argés,4.82,2024,SERPAVI
+Barcience,3.05,2024,SERPAVI
+Bargas,6.9,2024,SERPAVI
+Belvís de la Jara,2.09,2024,SERPAVI
+Borox,6.19,2024,SERPAVI
+Buenaventura,1.45,2023,SERPAVI
+Burguillos de Toledo,6.15,2024,SERPAVI
+Cabañas de la Sagra,4.48,2024,SERPAVI
+Calera y Chozas,3.3,2024,SERPAVI
+Camarena,5.67,2024,SERPAVI
+Camarenilla,3.1,2024,SERPAVI
+Camuñas,2.08,2024,SERPAVI
+Carmena,6.95,2024,SERPAVI
+"Carpio de Tajo, El",2.8,2024,SERPAVI
+Carranque,6.39,2024,SERPAVI
+"Casar de Escalona, El",5.97,2024,SERPAVI
+Casarrubios del Monte,6.22,2024,SERPAVI
+Cazalegas,4.83,2024,SERPAVI
+Cebolla,3.75,2024,SERPAVI
+Cedillo del Condado,6.32,2024,SERPAVI
+Ciruelos,3.97,2024,SERPAVI
+Cobeja,5.74,2024,SERPAVI
+Cobisa,6.72,2024,SERPAVI
+Consuegra,3.68,2024,SERPAVI
+Corral de Almaguer,3.92,2024,SERPAVI
+Cuerva,2.34,2024,SERPAVI
+Chozas de Canales,2.93,2024,SERPAVI
+Dosbarrios,4.2,2024,SERPAVI
+Escalona,3.48,2024,SERPAVI
+Escalonilla,3.77,2024,SERPAVI
+Esquivias,5.28,2024,SERPAVI
+Fuensalida,4.54,2024,SERPAVI
+Gálvez,3.56,2024,SERPAVI
+Gerindote,5.0,2024,SERPAVI
+Guadamur,6.83,2024,SERPAVI
+"Guardia, La",3.55,2024,SERPAVI
+"Herencias, Las",2.22,2024,SERPAVI
+Hormigos,2.61,2024,SERPAVI
+Huerta de Valdecarábanos,2.87,2024,SERPAVI
+"Iglesuela, La",2.68,2024,SERPAVI
+Illescas,6.88,2024,SERPAVI
+Lagartera,1.89,2024,SERPAVI
+Layos,4.7,2024,SERPAVI
+Lillo,2.6,2024,SERPAVI
+Lominchar,5.62,2024,SERPAVI
+Lucillos,4.55,2024,SERPAVI
+Madridejos,3.89,2024,SERPAVI
+Magán,5.71,2024,SERPAVI
+Malpica de Tajo,2.6,2024,SERPAVI
+Maqueda,5.08,2024,SERPAVI
+"Mata, La",2.96,2024,SERPAVI
+Mazarambroz,2.55,2024,SERPAVI
+Mejorada,3.23,2024,SERPAVI
+Menasalbas,2.39,2024,SERPAVI
+Méntrida,5.88,2024,SERPAVI
+Miguel Esteban,3.55,2024,SERPAVI
+Mocejón,5.11,2024,SERPAVI
+Mora,4.27,2024,SERPAVI
+Nambroca,5.15,2024,SERPAVI
+Navahermosa,2.98,2024,SERPAVI
+Navalcán,1.93,2022,SERPAVI
+"Navalmorales, Los",2.08,2024,SERPAVI
+"Navalucillos, Los",2.82,2024,SERPAVI
+Noblejas,5.48,2024,SERPAVI
+Noez,2.78,2024,SERPAVI
+Nombela,2.64,2024,SERPAVI
+Novés,5.31,2024,SERPAVI
+Numancia de la Sagra,6.95,2024,SERPAVI
+Ocaña,6.38,2024,SERPAVI
+Olías del Rey,5.82,2024,SERPAVI
+Ontígola,8.21,2024,SERPAVI
+Orgaz,2.05,2024,SERPAVI
+Oropesa,4.23,2024,SERPAVI
+Otero,3.78,2024,SERPAVI
+Palomeque,4.93,2024,SERPAVI
+Pantoja,5.72,2024,SERPAVI
+Pepino,4.55,2024,SERPAVI
+Polán,3.47,2024,SERPAVI
+Portillo de Toledo,4.72,2024,SERPAVI
+"Puebla de Almoradiel, La",2.07,2024,SERPAVI
+"Puebla de Montalbán, La",3.49,2024,SERPAVI
+"Pueblanueva, La",2.9,2024,SERPAVI
+"Puente del Arzobispo, El",2.33,2024,SERPAVI
+Pulgar,4.39,2024,SERPAVI
+Quintanar de la Orden,3.68,2024,SERPAVI
+Quismondo,3.63,2024,SERPAVI
+"Real de San Vicente, El",2.84,2024,SERPAVI
+Recas,5.63,2024,SERPAVI
+Rielves,2.92,2024,SERPAVI
+San Martín de Montalbán,2.58,2024,SERPAVI
+San Pablo de los Montes,2.1,2024,SERPAVI
+San Román de los Montes,3.61,2024,SERPAVI
+Santa Cruz de la Zarza,3.2,2024,SERPAVI
+Santa Cruz del Retamar,5.38,2024,SERPAVI
+Santa Olalla,4.48,2024,SERPAVI
+Segurilla,3.14,2024,SERPAVI
+Seseña,6.79,2024,SERPAVI
+Sonseca,3.73,2024,SERPAVI
+Talavera de la Reina,5.16,2024,SERPAVI
+Tembleque,3.5,2024,SERPAVI
+"Toboso, El",1.89,2024,SERPAVI
+Toledo,7.33,2024,SERPAVI
+"Torre de Esteban Hambrán, La",4.6,2024,SERPAVI
+Torrijos,4.95,2024,SERPAVI
+Turleque,1.85,2024,SERPAVI
+Ugena,7.74,2024,SERPAVI
+Urda,2.08,2024,SERPAVI
+Valmojado,5.84,2024,SERPAVI
+Velada,2.82,2024,SERPAVI
+"Ventas con Peña Aguilera, Las",1.92,2024,SERPAVI
+"Ventas de Retamosa, Las",5.43,2024,SERPAVI
+Villacañas,3.98,2024,SERPAVI
+"Villa de Don Fadrique, La",2.36,2024,SERPAVI
+Villafranca de los Caballeros,3.81,2024,SERPAVI
+Villaluenga de la Sagra,5.31,2024,SERPAVI
+Villamiel de Toledo,5.88,2024,SERPAVI
+Villaminaya,2.04,2024,SERPAVI
+Villanueva de Alcardete,2.24,2024,SERPAVI
+Villarrubia de Santiago,2.42,2024,SERPAVI
+Villaseca de la Sagra,4.71,2024,SERPAVI
+Villasequilla,4.62,2024,SERPAVI
+Villatobas,5.1,2024,SERPAVI
+"Viso de San Juan, El",6.43,2024,SERPAVI
+"Yébenes, Los",3.84,2024,SERPAVI
+Yeles,8.25,2024,SERPAVI
+Yepes,5.45,2024,SERPAVI
+Yuncler,6.14,2024,SERPAVI
+Yunclillos,4.32,2024,SERPAVI
+Yuncos,6.82,2024,SERPAVI
+Santo Domingo-Caudilla,5.9,2024,SERPAVI
+Ademuz,2.03,2024,SERPAVI
+Ador,5.26,2024,SERPAVI
+Atzeneta d'Albaida,2.91,2024,SERPAVI
+Agullent,3.13,2024,SERPAVI
+Alaquàs,6.15,2024,SERPAVI
+Albaida,3.44,2024,SERPAVI
+Albal,5.67,2024,SERPAVI
+Albalat de la Ribera,3.54,2024,SERPAVI
+Albalat dels Sorells,5.89,2024,SERPAVI
+Albalat dels Tarongers,5.24,2024,SERPAVI
+Alberic,3.54,2024,SERPAVI
+Alborache,3.94,2024,SERPAVI
+Alboraya,8.09,2024,SERPAVI
+Albuixech,5.95,2024,SERPAVI
+Alcàsser,4.8,2024,SERPAVI
+Alcàntera de Xúquer,3.21,2024,SERPAVI
+Alzira,4.64,2024,SERPAVI
+"Alcúdia, l'",4.11,2024,SERPAVI
+"Alcúdia de Crespins, l'",3.39,2024,SERPAVI
+Aldaia,5.95,2024,SERPAVI
+Alfafar,5.82,2024,SERPAVI
+Alfara de la Baronia,2.58,2024,SERPAVI
+Alfara del Patriarca,7.81,2024,SERPAVI
+Alfarp,3.87,2024,SERPAVI
+Alfarrasí,2.88,2024,SERPAVI
+Algar de Palancia,3.43,2024,SERPAVI
+Algemesí,4.0,2024,SERPAVI
+Algimia de Alfara,4.26,2024,SERPAVI
+Alginet,4.47,2024,SERPAVI
+Almàssera,6.17,2024,SERPAVI
+Almoines,5.24,2024,SERPAVI
+Almussafes,4.45,2024,SERPAVI
+"Alqueria de la Comtessa, l'",3.72,2024,SERPAVI
+Anna,2.67,2024,SERPAVI
+Antella,2.7,2024,SERPAVI
+Aielo de Malferit,3.23,2024,SERPAVI
+Ayora,3.18,2024,SERPAVI
+Barx,3.44,2024,SERPAVI
+Bellreguard,4.62,2024,SERPAVI
+Benaguasil,5.0,2024,SERPAVI
+Benavites,5.37,2023,SERPAVI
+Beneixida,3.9,2024,SERPAVI
+Benetússer,6.11,2024,SERPAVI
+Beniarjó,4.42,2024,SERPAVI
+Benifairó de les Valls,4.32,2024,SERPAVI
+Benifairó de la Valldigna,2.85,2024,SERPAVI
+Benifaió,4.64,2024,SERPAVI
+Beniflá,4.18,2022,SERPAVI
+Benigánim,3.06,2024,SERPAVI
+Benimodo,4.17,2024,SERPAVI
+Benimuslem,4.02,2024,SERPAVI
+Beniparrell,5.1,2024,SERPAVI
+Benirredrà,5.39,2024,SERPAVI
+Benisanó,4.52,2024,SERPAVI
+Benissoda,4.52,2023,SERPAVI
+Bétera,6.07,2024,SERPAVI
+Bocairent,3.66,2024,SERPAVI
+Bolbaite,2.66,2024,SERPAVI
+Bonrepòs i Mirambell,6.34,2024,SERPAVI
+Bugarra,2.5,2024,SERPAVI
+Buñol,4.07,2024,SERPAVI
+Burjassot,6.33,2024,SERPAVI
+Calles,3.95,2024,SERPAVI
+Camporrobles,3.16,2024,SERPAVI
+Canals,3.51,2024,SERPAVI
+Canet d'En Berenguer,8.33,2024,SERPAVI
+Carcaixent,4.33,2024,SERPAVI
+Càrcer,3.19,2024,SERPAVI
+Carlet,4.21,2024,SERPAVI
+Casinos,4.38,2024,SERPAVI
+Castelló de Rugat,2.62,2024,SERPAVI
+Catadau,3.83,2024,SERPAVI
+Catarroja,5.71,2024,SERPAVI
+Cerdà,3.53,2022,SERPAVI
+Cofrentes,2.54,2020,SERPAVI
+Corbera,3.45,2024,SERPAVI
+Quart de Poblet,6.15,2024,SERPAVI
+Quartell,4.33,2024,SERPAVI
+Quatretonda,1.72,2024,SERPAVI
+Cullera,5.9,2024,SERPAVI
+Chelva,3.81,2024,SERPAVI
+Chella,2.64,2024,SERPAVI
+Chera,3.51,2024,SERPAVI
+Cheste,4.29,2024,SERPAVI
+Xirivella,6.06,2024,SERPAVI
+Chiva,4.53,2024,SERPAVI
+Chulilla,3.26,2024,SERPAVI
+Daimús,7.06,2024,SERPAVI
+Domeño,4.17,2024,SERPAVI
+"Eliana, l'",7.59,2024,SERPAVI
+Emperador,6.94,2024,SERPAVI
+Enguera,3.55,2024,SERPAVI
+Estivella,4.12,2024,SERPAVI
+Faura,4.43,2024,SERPAVI
+Favara,4.42,2024,SERPAVI
+Fontanars dels Alforins,2.4,2024,SERPAVI
+Fortaleny,3.11,2022,SERPAVI
+Foios,5.96,2024,SERPAVI
+"Font d'En Carròs, la",3.71,2024,SERPAVI
+"Font de la Figuera, la",2.49,2024,SERPAVI
+Gavarda,2.94,2024,SERPAVI
+Gandia,5.22,2024,SERPAVI
+Genovés,3.09,2024,SERPAVI
+Gilet,5.11,2024,SERPAVI
+Godella,6.25,2024,SERPAVI
+Godelleta,3.57,2024,SERPAVI
+Guadassuar,3.6,2024,SERPAVI
+Guardamar de la Safor,7.59,2024,SERPAVI
+Jalance,2.72,2024,SERPAVI
+Xeraco,4.25,2024,SERPAVI
+Xàtiva,4.66,2024,SERPAVI
+Xeresa,4.93,2024,SERPAVI
+Llíria,4.4,2024,SERPAVI
+Loriguilla,8.26,2024,SERPAVI
+Losa del Obispo,3.31,2024,SERPAVI
+Llutxent,2.47,2024,SERPAVI
+Llanera de Ranes,2.62,2024,SERPAVI
+Llaurí,4.03,2024,SERPAVI
+Llombai,3.62,2024,SERPAVI
+"Llosa de Ranes, la",3.19,2024,SERPAVI
+Macastre,3.22,2024,SERPAVI
+Manises,6.4,2024,SERPAVI
+Manuel,3.81,2024,SERPAVI
+Marines,4.61,2024,SERPAVI
+Massalavés,3.64,2024,SERPAVI
+Massalfassar,5.97,2024,SERPAVI
+Massamagrell,5.87,2024,SERPAVI
+Massanassa,5.89,2024,SERPAVI
+Meliana,6.11,2024,SERPAVI
+Miramar,5.48,2024,SERPAVI
+Mislata,6.62,2024,SERPAVI
+Mogente/Moixent,3.01,2024,SERPAVI
+Moncada,6.69,2024,SERPAVI
+Montserrat,4.69,2024,SERPAVI
+Montaverner,3.22,2024,SERPAVI
+Montroy,4.27,2024,SERPAVI
+Museros,6.19,2024,SERPAVI
+Náquera,6.25,2024,SERPAVI
+Navarrés,2.78,2024,SERPAVI
+Novelé/Novetlè,3.92,2021,SERPAVI
+Oliva,4.39,2024,SERPAVI
+Olocau,5.64,2024,SERPAVI
+"Olleria, l'",3.34,2024,SERPAVI
+Ontinyent,4.12,2024,SERPAVI
+Paiporta,6.13,2024,SERPAVI
+Palma de Gandía,4.3,2024,SERPAVI
+Palmera,4.52,2024,SERPAVI
+Paterna,6.62,2024,SERPAVI
+Pedralba,4.02,2024,SERPAVI
+Petrés,4.07,2024,SERPAVI
+Picanya,5.84,2024,SERPAVI
+Picassent,5.31,2024,SERPAVI
+Piles,4.68,2024,SERPAVI
+Polinyà de Xúquer,4.04,2024,SERPAVI
+Potríes,3.75,2024,SERPAVI
+"Pobla de Farnals, la",7.5,2024,SERPAVI
+"Pobla del Duc, la",2.84,2024,SERPAVI
+"Pobla de Vallbona, la",5.88,2024,SERPAVI
+"Pobla Llarga, la",3.71,2024,SERPAVI
+Puig,6.72,2024,SERPAVI
+Puçol,6.43,2024,SERPAVI
+Quesa,1.87,2024,SERPAVI
+Rafelbuñol/Rafelbunyol,6.74,2024,SERPAVI
+Rafelcofer,4.13,2024,SERPAVI
+Rafelguaraf,3.7,2024,SERPAVI
+Real de Gandía,4.33,2024,SERPAVI
+Real,4.35,2024,SERPAVI
+Requena,3.92,2024,SERPAVI
+Riba-roja de Túria,5.49,2024,SERPAVI
+Riola,2.88,2024,SERPAVI
+Rocafort,6.95,2024,SERPAVI
+Rotglà i Corberà,2.88,2024,SERPAVI
+Rótova,3.44,2024,SERPAVI
+Sagunto/Sagunt,5.97,2024,SERPAVI
+Sant Joanet,3.23,2024,SERPAVI
+Sedaví,6.04,2024,SERPAVI
+Senyera,3.39,2024,SERPAVI
+Serra,4.61,2024,SERPAVI
+Siete Aguas,3.89,2024,SERPAVI
+Silla,5.54,2024,SERPAVI
+Simat de la Valldigna,3.33,2024,SERPAVI
+Sinarcas,2.53,2024,SERPAVI
+Sollana,4.2,2024,SERPAVI
+Sot de Chera,4.56,2024,SERPAVI
+Sueca,4.42,2024,SERPAVI
+Tavernes Blanques,5.58,2024,SERPAVI
+Tavernes de la Valldigna,3.7,2024,SERPAVI
+Torrent,6.28,2024,SERPAVI
+Torres Torres,4.04,2024,SERPAVI
+Tous,3.12,2024,SERPAVI
+Tuéjar,3.75,2024,SERPAVI
+Turís,4.27,2024,SERPAVI
+Utiel,3.94,2024,SERPAVI
+Valencia,8.18,2024,SERPAVI
+Vallada,2.75,2024,SERPAVI
+Venta del Moro,3.58,2024,SERPAVI
+Villalonga,4.17,2024,SERPAVI
+Vilamarxant,5.39,2024,SERPAVI
+Villanueva de Castellón,3.26,2024,SERPAVI
+Villar del Arzobispo,3.52,2024,SERPAVI
+Vinalesa,6.08,2024,SERPAVI
+Yátova,3.63,2024,SERPAVI
+San Antonio de Benagéber,6.04,2024,SERPAVI
+Benicull de Xúquer,4.79,2024,SERPAVI
+Alaejos,3.16,2024,SERPAVI
+Aldeamayor de San Martín,4.6,2024,SERPAVI
+Arroyo de la Encomienda,7.14,2024,SERPAVI
+Boecillo,5.66,2024,SERPAVI
+Cabezón de Pisuerga,6.06,2024,SERPAVI
+Cigales,5.81,2024,SERPAVI
+Cistérniga,6.04,2024,SERPAVI
+Fuensaldaña,5.65,2024,SERPAVI
+Íscar,3.94,2024,SERPAVI
+Laguna de Duero,5.79,2024,SERPAVI
+Matapozuelos,3.48,2023,SERPAVI
+Mayorga,3.64,2024,SERPAVI
+Medina del Campo,4.59,2024,SERPAVI
+Medina de Rioseco,4.26,2024,SERPAVI
+Mojados,4.43,2024,SERPAVI
+Mucientes,3.32,2024,SERPAVI
+Nava del Rey,3.63,2024,SERPAVI
+Olmedo,4.59,2024,SERPAVI
+"Pedraja de Portillo, La",3.29,2024,SERPAVI
+Pedrajas de San Esteban,3.65,2024,SERPAVI
+Peñafiel,4.22,2024,SERPAVI
+Portillo,4.0,2024,SERPAVI
+Quintanilla de Onésimo,2.83,2024,SERPAVI
+Renedo de Esgueva,5.17,2024,SERPAVI
+Rueda,3.31,2024,SERPAVI
+Santovenia de Pisuerga,5.7,2024,SERPAVI
+Sardón de Duero,2.81,2024,SERPAVI
+Serrada,3.11,2024,SERPAVI
+Simancas,5.34,2024,SERPAVI
+Tordesillas,4.25,2024,SERPAVI
+Traspinedo,3.26,2024,SERPAVI
+Tudela de Duero,5.5,2024,SERPAVI
+Valdestillas,3.49,2024,SERPAVI
+Valoria la Buena,3.27,2024,SERPAVI
+Valladolid,6.76,2024,SERPAVI
+Viana de Cega,4.02,2024,SERPAVI
+Villalón de Campos,2.98,2024,SERPAVI
+Villanubla,4.82,2024,SERPAVI
+Villanueva de Duero,4.04,2024,SERPAVI
+Zaratán,6.43,2024,SERPAVI
+Abadiño,7.44,2024,SERPAVI
+Abanto y Ciérvana-Abanto Zierbena,8.96,2024,SERPAVI
+Amorebieta-Etxano,8.02,2024,SERPAVI
+Arrigorriaga,8.24,2024,SERPAVI
+Bakio,8.55,2024,SERPAVI
+Barakaldo,10.47,2024,SERPAVI
+Barrika,11.55,2024,SERPAVI
+Basauri,9.65,2024,SERPAVI
+Berango,10.66,2024,SERPAVI
+Bermeo,6.82,2024,SERPAVI
+Berriatua,5.53,2024,SERPAVI
+Berriz,7.42,2024,SERPAVI
+Bilbao,11.51,2024,SERPAVI
+Busturia,5.61,2024,SERPAVI
+Karrantza Harana/Valle de Carranza,4.71,2024,SERPAVI
+Zeanuri,5.66,2024,SERPAVI
+Zeberio,3.18,2024,SERPAVI
+Dima,6.73,2024,SERPAVI
+Durango,8.71,2024,SERPAVI
+Ea,5.39,2024,SERPAVI
+Etxebarri,9.5,2024,SERPAVI
+Etxebarria,5.46,2024,SERPAVI
+Elorrio,6.98,2024,SERPAVI
+Ermua,8.12,2024,SERPAVI
+Galdakao,8.59,2024,SERPAVI
+Gamiz-Fika,4.21,2024,SERPAVI
+Gatika,8.17,2024,SERPAVI
+Gautegiz Arteaga,5.73,2024,SERPAVI
+Gordexola,6.68,2024,SERPAVI
+Gorliz,8.94,2024,SERPAVI
+Getxo,11.34,2024,SERPAVI
+Güeñes,7.95,2024,SERPAVI
+Gernika-Lumo,7.09,2024,SERPAVI
+Larrabetzu,8.64,2024,SERPAVI
+Leioa,10.65,2024,SERPAVI
+Lemoa,7.56,2024,SERPAVI
+Lemoiz,7.71,2024,SERPAVI
+Lekeitio,7.41,2024,SERPAVI
+Mallabia,8.52,2024,SERPAVI
+Mañaria,6.55,2024,SERPAVI
+Markina-Xemein,6.38,2024,SERPAVI
+Ugao-Miraballes,8.14,2024,SERPAVI
+Muxika,2.8,2024,SERPAVI
+Mundaka,7.0,2024,SERPAVI
+Mungia,8.38,2024,SERPAVI
+Muskiz,7.96,2024,SERPAVI
+Otxandio,5.62,2024,SERPAVI
+Ondarroa,7.07,2024,SERPAVI
+Urduña/Orduña,6.25,2024,SERPAVI
+Orozko,5.43,2024,SERPAVI
+Plentzia,9.27,2024,SERPAVI
+Portugalete,10.16,2024,SERPAVI
+Valle de Trápaga-Trapagaran,8.79,2024,SERPAVI
+Lezama,8.11,2024,SERPAVI
+Santurtzi,10.05,2024,SERPAVI
+Ortuella,8.95,2024,SERPAVI
+Sestao,9.75,2024,SERPAVI
+Sopela,10.37,2024,SERPAVI
+Sopuerta,6.63,2024,SERPAVI
+Urduliz,10.19,2024,SERPAVI
+Balmaseda,7.53,2024,SERPAVI
+Atxondo,5.67,2024,SERPAVI
+Bedia,8.75,2024,SERPAVI
+Areatza,6.64,2024,SERPAVI
+Igorre,6.38,2024,SERPAVI
+Zaldibar,6.57,2024,SERPAVI
+Zalla,7.5,2024,SERPAVI
+Zaratamo,8.29,2024,SERPAVI
+Derio,9.07,2024,SERPAVI
+Erandio,10.1,2024,SERPAVI
+Loiu,9.12,2024,SERPAVI
+Sondika,9.18,2024,SERPAVI
+Zamudio,9.07,2024,SERPAVI
+Forua,6.57,2024,SERPAVI
+Iurreta,7.98,2024,SERPAVI
+Alonsotegi,9.04,2024,SERPAVI
+Zierbena,9.21,2024,SERPAVI
+Alcañices,2.94,2024,SERPAVI
+Benavente,3.9,2024,SERPAVI
+Camarzana de Tera,1.52,2020,SERPAVI
+Cobreros,3.53,2024,SERPAVI
+Fermoselle,2.71,2024,SERPAVI
+Fuentesaúco,3.12,2024,SERPAVI
+Galende,5.71,2024,SERPAVI
+Lubián,3.47,2024,SERPAVI
+Monfarracinos,3.76,2024,SERPAVI
+Moraleja del Vino,3.52,2024,SERPAVI
+Morales del Vino,4.17,2024,SERPAVI
+Puebla de Sanabria,4.62,2024,SERPAVI
+Roales,3.77,2024,SERPAVI
+Tábara,3.33,2011,SERPAVI
+Toro,4.18,2024,SERPAVI
+Villalpando,3.11,2024,SERPAVI
+Villaralbo,3.52,2024,SERPAVI
+Zamora,4.91,2024,SERPAVI
+Ainzón,2.68,2024,SERPAVI
+Alagón,5.48,2024,SERPAVI
+Alfajarín,3.85,2024,SERPAVI
+Alfamén,3.04,2024,SERPAVI
+Alhama de Aragón,3.31,2024,SERPAVI
+Almonacid de la Sierra,2.88,2024,SERPAVI
+"Almunia de Doña Godina, La",5.08,2024,SERPAVI
+Alpartir,4.92,2024,SERPAVI
+Ariza,3.45,2018,SERPAVI
+Ateca,4.28,2024,SERPAVI
+Belchite,3.28,2024,SERPAVI
+Boquiñeni,2.87,2024,SERPAVI
+Borja,4.55,2024,SERPAVI
+Botorrita,3.93,2024,SERPAVI
+Brea de Aragón,3.1,2024,SERPAVI
+Bujaraloz,3.21,2024,SERPAVI
+"Burgo de Ebro, El",5.81,2024,SERPAVI
+Cadrete,7.08,2024,SERPAVI
+Calatayud,4.77,2024,SERPAVI
+Calatorao,4.23,2024,SERPAVI
+Cariñena,4.24,2024,SERPAVI
+Caspe,3.7,2024,SERPAVI
+Cuarte de Huerva,7.63,2024,SERPAVI
+Daroca,4.79,2024,SERPAVI
+Ejea de los Caballeros,4.85,2024,SERPAVI
+Épila,5.07,2024,SERPAVI
+Escatrón,3.43,2024,SERPAVI
+Fayón,3.71,2022,SERPAVI
+Figueruelas,3.99,2024,SERPAVI
+"Frasno, El",3.26,2024,SERPAVI
+Fuendejalón,3.08,2024,SERPAVI
+Fuentes de Ebro,4.76,2024,SERPAVI
+Gallur,3.91,2024,SERPAVI
+Gelsa,2.08,2024,SERPAVI
+Grisén,3.53,2024,SERPAVI
+Herrera de los Navarros,3.06,2023,SERPAVI
+Illueca,3.06,2024,SERPAVI
+Jaulín,2.24,2024,SERPAVI
+"Joyosa, La",4.02,2024,SERPAVI
+Lécera,1.73,2024,SERPAVI
+Leciñena,2.49,2024,SERPAVI
+Longares,2.71,2024,SERPAVI
+Luceni,3.12,2024,SERPAVI
+Lumpiaque,4.38,2024,SERPAVI
+Maella,3.67,2024,SERPAVI
+Magallón,3.61,2024,SERPAVI
+Maluenda,2.61,2023,SERPAVI
+Mallén,4.33,2024,SERPAVI
+María de Huerva,6.41,2024,SERPAVI
+Mequinenza,5.61,2024,SERPAVI
+Morata de Jalón,2.48,2024,SERPAVI
+Muel,4.52,2024,SERPAVI
+"Muela, La",6.33,2024,SERPAVI
+Nonaspe,2.46,2024,SERPAVI
+Novallas,2.6,2024,SERPAVI
+Nuez de Ebro,3.1,2024,SERPAVI
+Osera de Ebro,2.97,2024,SERPAVI
+Paracuellos de Jiloca,4.15,2024,SERPAVI
+Pastriz,4.16,2024,SERPAVI
+Pedrola,4.56,2024,SERPAVI
+Pina de Ebro,4.27,2024,SERPAVI
+Pinseque,5.53,2024,SERPAVI
+"Puebla de Alfindén, La",6.59,2024,SERPAVI
+Quinto,3.22,2024,SERPAVI
+Remolinos,3.68,2024,SERPAVI
+Ricla,4.25,2024,SERPAVI
+Sádaba,3.91,2024,SERPAVI
+San Mateo de Gállego,5.34,2024,SERPAVI
+Sástago,2.58,2024,SERPAVI
+Sobradiel,4.55,2024,SERPAVI
+Sos del Rey Católico,3.51,2024,SERPAVI
+Tarazona,4.95,2024,SERPAVI
+Tauste,4.03,2024,SERPAVI
+Terrer,3.14,2022,SERPAVI
+Torres de Berrellén,4.05,2024,SERPAVI
+Utebo,6.63,2024,SERPAVI
+Villafranca de Ebro,4.51,2024,SERPAVI
+Villanueva de Gállego,7.37,2024,SERPAVI
+Zaragoza,7.72,2024,SERPAVI
+Zuera,5.16,2024,SERPAVI
+Villamayor de Gállego,3.48,2024,SERPAVI
+Ceuta,9.45,2024,SERPAVI
+Melilla,9.1,2024,SERPAVI
+prov:Araba/Álava,8.83,2024,SERPAVI
+prov:Albacete,5.37,2024,SERPAVI
+prov:Alicante,6.2,2024,SERPAVI
+prov:Almería,5.94,2024,SERPAVI
+prov:Ávila,5.28,2024,SERPAVI
+prov:Badajoz,5.15,2024,SERPAVI
+"prov:Balears, Illes",9.62,2024,SERPAVI
+prov:Barcelona,10.98,2024,SERPAVI
+prov:Burgos,6.71,2024,SERPAVI
+prov:Cáceres,4.74,2024,SERPAVI
+prov:Cádiz,7.14,2024,SERPAVI
+prov:Castellón/Castelló,5.17,2024,SERPAVI
+prov:Ciudad Real,5.06,2024,SERPAVI
+prov:Córdoba,6.37,2024,SERPAVI
+"prov:Coruña, A",6.0,2024,SERPAVI
+prov:Cuenca,5.27,2024,SERPAVI
+prov:Girona,7.42,2024,SERPAVI
+prov:Granada,6.25,2024,SERPAVI
+prov:Guadalajara,7.13,2024,SERPAVI
+prov:Gipuzkoa,10.47,2024,SERPAVI
+prov:Huelva,6.17,2024,SERPAVI
+prov:Huesca,5.91,2024,SERPAVI
+prov:Jaén,4.52,2024,SERPAVI
+prov:León,5.21,2024,SERPAVI
+prov:Lleida,5.73,2024,SERPAVI
+"prov:Rioja, La",5.91,2024,SERPAVI
+prov:Lugo,4.27,2024,SERPAVI
+prov:Madrid,12.12,2024,SERPAVI
+prov:Málaga,9.04,2024,SERPAVI
+prov:Murcia,5.38,2024,SERPAVI
+prov:Navarra,6.86,2024,SERPAVI
+prov:Ourense,4.61,2024,SERPAVI
+prov:Asturias,6.62,2024,SERPAVI
+prov:Palencia,5.5,2024,SERPAVI
+"prov:Palmas, Las",7.6,2024,SERPAVI
+prov:Pontevedra,6.34,2024,SERPAVI
+prov:Salamanca,5.92,2024,SERPAVI
+prov:Santa Cruz de Tenerife,7.91,2024,SERPAVI
+prov:Cantabria,7.22,2024,SERPAVI
+prov:Segovia,6.25,2024,SERPAVI
+prov:Sevilla,8.36,2024,SERPAVI
+prov:Soria,6.08,2024,SERPAVI
+prov:Tarragona,6.82,2024,SERPAVI
+prov:Teruel,4.95,2024,SERPAVI
+prov:Toledo,6.1,2024,SERPAVI
+prov:Valencia/Valéncia,6.69,2024,SERPAVI
+prov:Valladolid,6.52,2024,SERPAVI
+prov:Bizkaia,10.19,2024,SERPAVI
+prov:Zamora,4.64,2024,SERPAVI
+prov:Zaragoza,7.45,2024,SERPAVI
+prov:Ceuta,9.45,2024,SERPAVI
+prov:Melilla,9.1,2024,SERPAVI
