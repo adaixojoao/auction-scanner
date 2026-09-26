@@ -767,7 +767,7 @@ def score_detail(item: dict, now: datetime | None = None,
     if kind in ("urban_plot", "rural_plot"):
         if (item.get("country") or "PT") != "PT":
             t = {**t, "rural_min_m2": max(t["rural_min_m2"], PLOT_MIN_ABROAD_M2)}
-        if area and area < t["rural_min_m2"]:
+        if kind == "rural_plot" and area and area < t["rural_min_m2"]:     # urban plots keep their own rules
             reasons.append(f"rejected: plot too small ({_ha(area)} < {_ha(t['rural_min_m2'])})")
         guarda = item.get("guarda")
         if guarda:

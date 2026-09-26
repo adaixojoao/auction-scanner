@@ -618,3 +618,10 @@ def test_small_plots_are_not_wanted_and_land_near_guarda_is():
     # A home gets no Guarda bonus.
     home = dict(source="eleiloes", country="PT", title="Moradia T3", tipo="moradia", area_m2=120, price=20000)
     assert score_detail({**home, "guarda": {"km": 5, "approx": False, "text": "g"}})[0] == score_detail(home)[0]
+
+
+def test_a_small_urban_plot_is_not_rejected_for_its_size():
+    from scoring import score_detail
+    _, reasons = score_detail(dict(source="eleiloes", country="PT", title="Lote de terreno para construção",
+                                   tipo="terreno", price=8000, area_m2=600))
+    assert not any("too small" in r and r.startswith("rejected") for r in reasons)
