@@ -41,6 +41,10 @@ DEFAULT_INDICATOR = "0012234"
 RENT_INDICATOR = "0012598"
 # `--rents-fr`: France's "carte des loyers" (Ministère du Logement / ANIL), the
 # predicted rent per m² of a house in every commune, from data.gouv.fr.
+# `--rents-es FILE`: Spain's Sistema Estatal de Referencia del Precio del Alquiler
+# de Vivienda (SERPAVI), the "BD Sistema Estatal Índices de Alquiler de Vivienda"
+# xlsx from mivau.gob.es/vivienda/alquila-bien-es-tu-derecho/serpavi (download it
+# in a browser). Median rent per m² a month from income-tax returns.
 FR_RENTS_DATASET = "https://www.data.gouv.fr/api/1/datasets/?q=carte%20des%20loyers%20par%20commune&page_size=20"
 
 
@@ -166,6 +170,47 @@ def update_rents_fr(requests) -> int:
     return 0
 
 
+def serpavi_rows(header: list, rows, name_col: str, prefix: str = "") -> list[dict]:
+    """One row per place from a SERPAVI sheet: the latest year's median rent per
+    m² of flats (ALQM2_LV_M_VC_yy), else of houses (…_VU_yy)."""
+    cols = {h: i for i, h in enumerate(header) if h}
+    years = sorted({h[-2:] for h in cols if str(h).startswith("ALQM2_LV_M_V")}, reverse=True)
+    out = []
+    for row in rows:
+        name = str(row[cols[name_col]] or "").strip()
+        if not name:
+            continue
+        for yy in years:
+            value = next((row[cols[c]] for c in (f"ALQM2_LV_M_VC_{yy}", f"ALQM2_LV_M_VU_{yy}")
+                          if c in cols and isinstance(row[cols[c]], (int, float)) and row[cols[c]] > 0), None)
+            if value:
+                out.append({"municipality": prefix + name, "eur_m2": round(float(value), 2),
+                            "period": f"20{yy}", "source": "SERPAVI"})
+                break
+    return out
+
+
+def update_rents_es(path: str) -> int:
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True)
+    rows = []
+    for sheet, name_col, prefix in (("Municipios", "NMUN", ""), ("Provincias", "LITPRO", "prov:")):
+        it = wb[sheet].iter_rows(values_only=True)
+        header = list(next(it))
+        rows += serpavi_rows(header, it, name_col, prefix)
+    towns = sum(1 for r in rows if not r["municipality"].startswith("prov:"))
+    print(f"SERPAVI: {towns} municipios, {len(rows) - towns} provinces")
+    if towns < 2000:
+        print("Fewer than 2,000 municipios: probably not the right file. Nothing written.")
+        return 1
+    with open(RENT_FILES["ES"], "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Written to {RENT_FILES['ES']}")
+    return 0
+
+
 def main(argv=None) -> int:
     import requests
 
@@ -174,11 +219,14 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=PT_FILE)
     ap.add_argument("--rents", action="store_true", help="the monthly rents per m², into data/pt_rents.csv")
     ap.add_argument("--rents-fr", action="store_true", help="France's rents per m² per commune, into data/fr_rents.csv")
+    ap.add_argument("--rents-es", metavar="XLSX", help="Spain's SERPAVI workbook → data/es_rents.csv")
     args = ap.parse_args(argv)
     if args.rents:
         return update_rents(requests)
     if args.rents_fr:
         return update_rents_fr(requests)
+    if args.rents_es:
+        return update_rents_es(args.rents_es)
 
     r = requests.get(API, params={"op": "2", "varcd": args.indicator, "lang": "PT"}, timeout=60)
     r.raise_for_status()

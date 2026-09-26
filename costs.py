@@ -165,7 +165,7 @@ def rent(item: dict, cost: float) -> dict | None:
         return None
     import prices
     place = item.get("concelho") or (item.get("district") if country != "PT" else None)
-    found = prices.rent_per_m2(country, place, item.get("district"))
+    found = prices.rent_per_m2(country, place, item.get("district") if place != item.get("district") else None)
     if not found:
         return None
     eur_m2, source = found
@@ -176,7 +176,7 @@ def rent(item: dict, cost: float) -> dict | None:
     return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
             "yield_pct": round(1200 * monthly / cost, 1), "payback_years": round(cost / (12 * monthly), 1),
             "note": f"€{eur_m2:.2f}/m² a month in {place} ({source}), "
-                    f"over {used:.0f} m²; gross, before IMI, insurance and empty months"}
+                    f"over {used:.0f} m²; gross, before property tax, insurance and empty months"}
 
 
 def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) -> dict | None:

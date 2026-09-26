@@ -27,8 +27,11 @@ PARISH_COLUMNS = ("municipality", "parish", "eur_m2", "period", "source")
 # "what would it rent for". Same columns as PT_FILE; eur_m2 is € a month.
 PT_RENT_FILE = os.path.join(HERE, "data", "pt_rents.csv")
 # Other countries, where an official table per municipality can be had
-# (scripts/update_prices.py): France's "carte des loyers" (houses, per commune).
-RENT_FILES = {"FR": os.path.join(HERE, "data", "fr_rents.csv")}
+# (scripts/update_prices.py): France's "carte des loyers" (houses, per commune),
+# Spain's SERPAVI (tax returns, per municipio, with the provinces as "prov:<name>"
+# for villages too small to have a figure).
+RENT_FILES = {"FR": os.path.join(HERE, "data", "fr_rents.csv"),
+              "ES": os.path.join(HERE, "data", "es_rents.csv")}
 
 
 def place_key(name: str) -> str:
@@ -157,7 +160,16 @@ def rent_per_m2(country: str, place: str | None, district: str | None = None) ->
     path = RENT_FILES.get(country)
     if not place or not path:
         return None
-    return pt_table(path).get(place_key(place))
+    table = pt_table(path)
+    found = table.get(place_key(place))
+    if not found and district:
+        # Servihabitat writes provinces run together: "ciudadreal".
+        squeezed = place_key(district).replace(" ", "")
+        found = next((v for k, v in table.items() if k.startswith("prov:") and k.replace(" ", "") ==
+                      "prov:" + squeezed and "|" not in k), None)
+        if found:
+            found = (found[0], found[1] + ", province")
+    return found
 
 
 def local_price(country: str, place: str | None, fallback: dict[str, dict[str, float]],

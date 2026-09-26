@@ -184,3 +184,27 @@ def test_the_carte_des_loyers_csv_is_read():
             '"2";"99999";"Druye";12,1\n"3";"1";"";5\n')
     assert update_prices.parse_fr_rents(text, "2025") == [
         {"municipality": "Druye", "eur_m2": 8.96, "period": "2025", "source": "Carte des loyers"}]
+
+
+def test_a_spanish_village_falls_back_on_its_provinces_rent(tmp_path, monkeypatch):
+    import prices
+    path = tmp_path / "es_rents.csv"
+    path.write_text("municipality,eur_m2,period,source\nTabernas,3.6,2024,SERPAVI\n"
+                    "prov:Ciudad Real,5.06,2024,SERPAVI\n", encoding="utf-8")
+    monkeypatch.setitem(prices.RENT_FILES, "ES", str(path))
+    home = {"title": "Vivienda unifamiliar", "tipo": "Casa", "country": "ES", "source": "servihabitat",
+            "concelho": "Villamayor De Calatrava", "district": "ciudadreal", "area_m2": 75, "price": 9500}
+    rent = costs.estimate(home)["rent"]
+    assert rent["monthly"] == 379 and rent["source"] == "SERPAVI 2024, province"
+    assert costs.estimate({**home, "concelho": "Tabernas", "district": "Almería"})["rent"]["monthly"] == 270
+
+
+def test_serpavi_takes_the_latest_year_flats_then_houses():
+    import sys
+    sys.path.insert(0, "scripts")
+    import update_prices
+    header = ["NMUN", "ALQM2_LV_M_VC_23", "ALQM2_LV_M_VU_23", "ALQM2_LV_M_VC_24", "ALQM2_LV_M_VU_24"]
+    rows = [("Tabernas", 3.1, 2.0, None, 3.6), ("Nada", None, None, None, None), ("Old", 4.0, None, None, None)]
+    assert update_prices.serpavi_rows(header, rows, "NMUN") == [
+        {"municipality": "Tabernas", "eur_m2": 3.6, "period": "2024", "source": "SERPAVI"},
+        {"municipality": "Old", "eur_m2": 4.0, "period": "2023", "source": "SERPAVI"}]
