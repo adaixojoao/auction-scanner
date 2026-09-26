@@ -86,3 +86,17 @@ def test_airports_and_long_distance_stations_add_a_smaller_bonus(tmp_path):
     assert 12 <= better - plain <= 16 and "10 km from the airport (X)" in reasons
     by_the_beach, _ = score_detail({**base, "beach": {"km": 0.5, "approx": False, "text": "b"}})
     assert better - plain < by_the_beach - plain                  # the beach still counts most
+
+
+def test_the_transport_list_leaves_out_airstrips():
+    import sys
+    sys.path.insert(0, "scripts")
+    import update_transport
+    payload = {"elements": [
+        {"type": "way", "center": {"lat": 38.77, "lon": -9.13}, "tags": {"name": "Aeroporto Humberto Delgado"}},
+        {"type": "way", "center": {"lat": 38.72, "lon": -9.35}, "tags": {"name": "Aeródromo Municipal de Cascais"}},
+    ]}
+    assert [r["name"] for r in update_transport.parse("PT", "airport", payload)] == ["Aeroporto Humberto Delgado"]
+    stops = {"elements": [{"type": "node", "lat": 38.7680, "lon": -9.0990, "tags": {"name": "Lisboa Oriente"}},
+                          {"type": "node", "lat": 38.7681, "lon": -9.0992, "tags": {"name": "Lisboa Oriente"}}]}
+    assert len(update_transport.parse("PT", "station", stops)) == 1          # one station, many tracks

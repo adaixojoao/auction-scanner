@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import sys
 import time
 
@@ -29,14 +30,21 @@ from geo import TRANSPORT_FILE  # noqa: E402
 SERVERS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
 COUNTRIES = ("PT", "ES", "FR", "IT", "HR", "GR", "CY", "NL", "BE", "DE")
 COLUMNS = ("country", "kind", "lat", "lon", "name")
+LONG_DISTANCE = ("Alfa Pendular|Intercidades|AVE|Alvia|Avlo|Ouigo|Iryo|Euromed|Larga Distancia|TGV|inOui|"
+                 "Intercit|Frecciarossa|Frecciargento|Frecciabianca|Italo|ICE|Intercity|EuroCity|Eurostar|"
+                 "Railjet|Nightjet|IC ")
+# Airstrips and flying clubs that happen to have an IATA code but no airline.
+SMALL_FIELD = re.compile(r"^(aer[oó]dromo|a[eé]rodrome|flugplatz|segelflug|vliegveld|aviosuperficie|aeroclub)", re.I)
 
 
 def query(country: str, kind: str) -> str:
     area = f'area["ISO3166-1"="{country}"][admin_level=2]->.a;'
     if kind == "airport":
         return f'[out:json][timeout:300];{area}nwr["aeroway"="aerodrome"]["iata"](area.a);out center tags;'
-    return (f'[out:json][timeout:300];{area}'
-            'relation["route"="train"]["service"~"^(long_distance|high_speed|intercity)$"](area.a)->.r;'
+    # Few countries tag the service; the trains' names and networks say it too.
+    return (f'[out:json][timeout:300];{area}relation["route"="train"](area.a)->.all;'
+            '(relation.all["service"~"^(long_distance|high_speed|intercity)$"];'
+            f'relation.all["name"~"{LONG_DISTANCE}",i];relation.all["network"~"{LONG_DISTANCE}",i];)->.r;'
             'node(r.r:"stop");out tags;node(r.r:"stop_exit_only");out tags;node(r.r:"stop_entry_only");out tags;')
 
 
@@ -49,6 +57,8 @@ def parse(country: str, kind: str, payload: dict) -> list[dict]:
         except (KeyError, TypeError, ValueError):
             continue
         name = ((el.get("tags") or {}).get("name") or "").strip()
+        if kind == "airport" and SMALL_FIELD.search(name):
+            continue
         # A station's stop positions (one per track) are one station.
         key = (name, round(lat, 2), round(lon, 2)) if name else (lat, lon)
         if key in seen:
