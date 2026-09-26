@@ -320,12 +320,23 @@ MAX_BEACH_KM = 40
 _CELL = 0.5          # degrees: the grid the beaches are filed under
 
 
-@_functools.lru_cache(maxsize=2)
-def _beach_grid(path: str, mtime: float) -> dict[tuple[int, int], list[tuple[float, float, str]]]:
+TRANSPORT_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "transport.csv")
+# Airports with scheduled flights (an IATA code) and the stations long-distance
+# trains stop at (scripts/update_transport.py): how far to fly or ride away.
+MAX_HUB_KM = {"airport": 120, "station": 40}
+_HUB_WORDS = {"airport": "the airport", "station": "the station"}
+
+
+@_functools.lru_cache(maxsize=8)
+def _grid(path: str, mtime: float, kind: str | None) -> dict[tuple[int, int], list[tuple[float, float, str]]]:
+    """The points of a CSV (lat, lon, name; with a `kind` column, only that kind)
+    filed under a grid of _CELL degrees."""
     grid: dict[tuple[int, int], list[tuple[float, float, str]]] = {}
     try:
         with open(path, encoding="utf-8", newline="") as f:
             for row in _csv.DictReader(f):
+                if kind and row.get("kind") != kind:
+                    continue
                 try:
                     lat, lon = float(row["lat"]), float(row["lon"])
                 except (KeyError, TypeError, ValueError):
@@ -336,44 +347,66 @@ def _beach_grid(path: str, mtime: float) -> dict[tuple[int, int], list[tuple[flo
     return grid
 
 
-def beaches(path: str | None = None) -> dict:
-    path = path or BEACH_FILE
+def _points(path: str, kind: str | None = None) -> dict:
     try:
-        return _beach_grid(path, _os.path.getmtime(path))
+        return _grid(path, _os.path.getmtime(path), kind)
     except OSError:
         return {}
 
 
-def nearest_beach(item: dict, path: str | None = None, towns: dict | None = None) -> dict | None:
-    """{"km", "name", "approx", "text"} for the sea beach nearest the property,
-    None without a position, without the beach file or farther than MAX_BEACH_KM.
-    Without a position of its own the property is placed at its town (`towns`,
-    from town_index): most listings have only that."""
+def beaches(path: str | None = None) -> dict:
+    return _points(path or BEACH_FILE)
+
+
+def _place(item: dict, towns: dict | None) -> dict | None:
+    """The property's own position, else its town's (most listings have only that)."""
     pos = position(item)
     if not pos and towns:
         name = municipality(item)
         town = towns.get(town_key(item.get("country") or "PT", name)) if name else None
         if town:
             pos = {"lat": town["lat"], "lon": town["lon"], "precision": "municipality"}
-    grid = beaches(path)
-    if not pos or not grid:
-        return None
+    return pos
+
+
+def _nearest(pos: dict, grid: dict, max_km: float) -> tuple[float, str] | None:
     lat, lon = pos["lat"], pos["lon"]
     ci, cj = int(lat // _CELL), int(lon // _CELL)
+    reach = int(max_km // 45) + 1            # a cell is at least ~45 km wide here
     best = None
-    for di in (-1, 0, 1):
-        for dj in (-1, 0, 1):
-            for blat, blon, name in grid.get((ci + di, cj + dj), ()):
-                km = distance_km(lat, lon, blat, blon)
+    for di in range(-reach, reach + 1):
+        for dj in range(-reach, reach + 1):
+            for plat, plon, name in grid.get((ci + di, cj + dj), ()):
+                km = distance_km(lat, lon, plat, plon)
                 if best is None or km < best[0]:
                     best = (km, name)
-    if best is None or best[0] > MAX_BEACH_KM:
-        return None
+    return best if best and best[0] <= max_km else None
+
+
+def _found(pos: dict, best: tuple[float, str], what: str) -> dict:
     km, name = best
     approx = pos.get("precision") not in EXACT_ENOUGH
     where = f" ({name})" if name else ""
     return {"km": round(km, 1), "name": name, "approx": approx,
-            "text": f"{'about ' if approx else ''}{km_text(km)} from the beach{where}"}
+            "text": f"{'about ' if approx else ''}{km_text(km)} from {what}{where}"}
+
+
+def nearest_beach(item: dict, path: str | None = None, towns: dict | None = None) -> dict | None:
+    """{"km", "name", "approx", "text"} for the sea beach nearest the property,
+    None without a position, without the beach file or farther than MAX_BEACH_KM.
+    Without a position of its own the property is placed at its town (`towns`,
+    from town_index)."""
+    pos, grid = _place(item, towns), beaches(path)
+    best = _nearest(pos, grid, MAX_BEACH_KM) if pos and grid else None
+    return _found(pos, best, "the beach") if best else None
+
+
+def nearest_hub(item: dict, kind: str, path: str | None = None, towns: dict | None = None) -> dict | None:
+    """The nearest airport ("airport") or long-distance train station ("station"),
+    like nearest_beach."""
+    pos, grid = _place(item, towns), _points(path or TRANSPORT_FILE, kind)
+    best = _nearest(pos, grid, MAX_HUB_KM[kind]) if pos and grid else None
+    return _found(pos, best, _HUB_WORDS[kind]) if best else None
 
 
 def _town_only(pos: dict) -> bool:

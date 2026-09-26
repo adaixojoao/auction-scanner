@@ -698,6 +698,10 @@ TOWN_DISTANCE_POINTS = [(0.3, 15), (1, 13), (3, 8), (6, 3), (10, -2), (20, -14),
 # town-level pin it counts BEACH_APPROX_SHARE of that.
 BEACH_POINTS = [(0.5, 25), (1, 22), (2, 18), (5, 12), (10, 6), (20, 2), (30, 0)]
 BEACH_APPROX_SHARE = 0.6
+# Easy to reach: an airport with scheduled flights and a station on the
+# long-distance trains, smaller bonuses that fade with the distance.
+AIRPORT_POINTS = [(15, 8), (30, 7), (50, 5), (80, 2), (120, 0)]
+STATION_POINTS = [(1, 7), (3, 6), (8, 4), (20, 1), (40, 0)]
 
 # What the owner does not want, as the highest score it can reach. They slide
 # too: a 38 m² home is held down a little less than a 30 m² one.
@@ -943,12 +947,13 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         s += 6
         reasons.append(f"next to water ({water})")
 
-    beach = item.get("beach")
-    if beach:
-        bonus = curve(beach["km"], BEACH_POINTS) * (BEACH_APPROX_SHARE if beach.get("approx") else 1)
-        if bonus >= 1:
-            s += bonus
-            reasons.append(beach["text"])
+    for key, points in (("beach", BEACH_POINTS), ("airport", AIRPORT_POINTS), ("station", STATION_POINTS)):
+        near = item.get(key)
+        if near:
+            bonus = curve(near["km"], points) * (BEACH_APPROX_SHARE if near.get("approx") else 1)
+            if bonus >= 1:
+                s += bonus
+                reasons.append(near["text"])
 
     if has_term(full, ISOLATED):
         s -= 35

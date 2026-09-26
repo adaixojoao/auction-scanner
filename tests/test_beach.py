@@ -65,3 +65,24 @@ def test_without_its_own_position_a_home_is_placed_at_its_town(beach_file):
     near = geo.nearest_beach(item, beach_file, towns=towns)
     assert near["approx"] and near["text"].startswith("about ") and near["km"] < 1
     assert geo.nearest_beach(item, beach_file) is None                   # no town known yet
+
+
+def test_airports_and_long_distance_stations_add_a_smaller_bonus(tmp_path):
+    import geo
+    from scoring import score_detail
+    path = tmp_path / "transport.csv"
+    path.write_text("country,kind,lat,lon,name\nPT,airport,38.7742,-9.1342,Aeroporto de Lisboa\n"
+                    "PT,station,38.7680,-9.0990,Lisboa Oriente\n", encoding="utf-8")
+    home = at(38.7700, -9.1000)
+    assert geo.nearest_hub(home, "airport", str(path))["name"] == "Aeroporto de Lisboa"
+    assert geo.nearest_hub(home, "station", str(path))["km"] < 0.5
+    assert geo.nearest_hub(at(41.15, -8.61), "station", str(path)) is None     # Porto: 270 km away
+    base = {"source": "eleiloes", "country": "PT", "title": "Moradia T3", "tipo": "moradia", "area_m2": 120,
+            "price": 25000}
+    near = {**base, "airport": {"km": 10, "approx": False, "text": "10 km from the airport (X)"},
+            "station": {"km": 1, "approx": False, "text": "1.0 km from the station (Y)"}}
+    plain, _ = score_detail(base)
+    better, reasons = score_detail(near)
+    assert 12 <= better - plain <= 16 and "10 km from the airport (X)" in reasons
+    by_the_beach, _ = score_detail({**base, "beach": {"km": 0.5, "approx": False, "text": "b"}})
+    assert better - plain < by_the_beach - plain                  # the beach still counts most
