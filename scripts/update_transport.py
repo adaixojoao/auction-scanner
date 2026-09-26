@@ -91,7 +91,11 @@ def main(argv=None) -> int:
     rows = list(kept)
     for country in wanted:
         for kind in ("airport", "station"):
-            found = fetch(requests, country, kind)
+            try:
+                found = fetch(requests, country, kind)
+            except RuntimeError as e:
+                print(f"{country}: {kind}s skipped ({e}) — run it again later", flush=True)
+                continue
             print(f"{country}: {len(found)} {kind}s", flush=True)
             rows += found
     rows.sort(key=lambda r: (r["country"], r["kind"], float(r["lat"]), float(r["lon"])))
