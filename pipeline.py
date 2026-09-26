@@ -174,6 +174,8 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     session = make_session()
                     geo.locate_towns(db, session, best)
                     geo.geocode_pending(db, session, best)
+                    import cadastre
+                    cadastre.locate_pending(db, session, best, geo.town_index(db))
                     geo.check_water_pending(db, session, best)
                 except Exception:  # noqa: BLE001 — a map position must never fail the scan
                     LOG.exception("Locating listings failed")

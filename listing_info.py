@@ -378,6 +378,17 @@ def official_records(item: dict) -> dict | None:
 
 def how_to_find(item: dict) -> dict | None:
     """Steps to reach the exact sale when its link opens only a search page."""
+    if item.get("source") == "financas":
+        numero = raw_of(item).get("numero") or str(item.get("external_id") or "")
+        return {"site": "Portal das Finanças",
+                "why": "A sale's page there is addressed by a code that changes every time you sign in, "
+                       "so no stored link can open it.",
+                "steps": [
+                    {"text": "Open the sales list (the link on this listing) and sign in with your NIF.",
+                     "url": "https://vendas.portaldasfinancas.gov.pt/vendasat/lista/vendas"},
+                    {"text": "Press Ctrl+F and search for the sale number, then click Detalhe:", "copy": numero},
+                    {"text": "Bids and sealed offers are made there, with your own account."},
+                ]}
     if item.get("source") != "citius":
         return None
     raw = raw_of(item)

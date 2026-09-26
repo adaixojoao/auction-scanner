@@ -329,7 +329,8 @@ def water_nearby(text: str, item: dict | None = None) -> str | None:
         if found:
             w = found[0]
             name = f"{w['kind']} {w['name']}" if w.get("name") else w.get("kind", "water")
-            return f"{name}, within {check.get('radius_m', 300)} m on the map"
+            where = "about 1 km of the village" if check.get("approx") else f"{check.get('radius_m', 300)} m"
+            return f"{name}, within {where} on the map" + (" (approx.)" if check.get("approx") else "")
     return None
 
 
@@ -972,8 +973,8 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
 
     water = water_nearby(full, item)
     if water:
-        s += 6
-        reasons.append(f"next to water ({water})")
+        s += 3 if water.endswith("(approx.)") else 6
+        reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
 
     for key, points in (("beach", BEACH_POINTS), ("airport", AIRPORT_POINTS), ("station", STATION_POINTS)):
         near = item.get(key)
@@ -1054,8 +1055,8 @@ def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: st
         reasons.append(f"medium rural plot ({_ha(area)})")
     water = water_nearby(full, item)
     if water:
-        s += 18
-        reasons.append(f"next to water ({water})")
+        s += 9 if water.endswith("(approx.)") else 18
+        reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
     if pay:
         per_m2 = pay / area
         s += curve(per_m2 / max_eur, RURAL_EUR_M2_POINTS)
