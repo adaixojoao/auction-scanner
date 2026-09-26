@@ -130,6 +130,21 @@ PLOT_MIN_ABROAD_M2 = 25000
 GUARDA = (40.5373, -7.2676)
 GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]
 
+# The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
+# all year round, no fires, no floods. Heat is the mean daily maximum of the
+# warmest month in 2081-2100 (SSP2-4.5, median of 13 models).
+HEAT_POINTS = [(28, 10), (31, 8), (33, 4), (35, 0), (36, -12), (37, -25)]
+TOO_HOT_C = 35.0          # the owner's limit: above it the listing is capped under the minimum score
+REJECT_HOT_C = 37.0
+TOO_HOT_CAP = 60
+# Days a year above 35 °C by 2071-2100: the owner's rule is at most 7.
+HOT_DAYS_POINTS = [(0, 10), (2, 8), (5, 4), (7, 0), (12, -12), (20, -25)]
+TOO_MANY_HOT_DAYS = 7
+REJECT_HOT_DAYS = 20
+PERMANENT_WATER_POINTS = [(0.2, 15), (0.5, 12), (1.0, 6)]     # km → points (land); homes get half
+# Days a year with FWI > 30 (high fire danger) in 2079-2098, RCP4.5.
+FIRE_DANGER_POINTS = [(10, 3), (30, 0), (60, -8), (90, -15)]
+
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
 # they are hidden unless you shortlist them.
@@ -772,6 +787,9 @@ def score_detail(item: dict, now: datetime | None = None,
         kind = "rural_plot"
         reasons.append("ruin on a farm — valued as land")
 
+    if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
+        s += _climate_points(item["climate"], kind, reasons, caps)
+
     # Land: too small is not wanted at all; near Guarda is wanted most.
     if kind in ("urban_plot", "rural_plot"):
         if (item.get("country") or "PT") != "PT":
@@ -942,6 +960,79 @@ def score_detail(item: dict, now: datetime | None = None,
     if caps:
         s = min(s, *caps)
     return s, reasons
+
+
+def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -> float:
+    """Heat in 2081-2100, permanent water, water stress, fires and floods where
+    the listing is (climate.for_item). From a town-level position the local
+    risks (water, fire, flood) count half; the heat grid is ~4.5 km anyway."""
+    s = 0.0
+    local = 0.5 if c.get("approx") else 1.0
+    heat = c.get("heat") or {}
+    hot = heat.get("ssp245_2081-2100") or heat.get("ssp245_2061-2080")
+    days = c.get("hot_days") or {}
+    future = days.get("rcp45_2071-2100")
+    if future is not None:
+        s += curve(future, HOT_DAYS_POINTS)
+        worst = days.get("rcp85_2071-2100")
+        detail = f"{future:.0f} days a year above 35 °C by 2071-2100" +                  (f", {worst:.0f} worst case" if worst is not None else "") +                  (f"; {days['today']:.0f} today" if days.get("today") is not None else "")
+        if future > REJECT_HOT_DAYS:
+            reasons.append(f"rejected: too hot in 50-70 years ({detail})")
+        elif future > TOO_MANY_HOT_DAYS:
+            caps.append(TOO_HOT_CAP)
+            reasons.append(f"too hot in 50-70 years ({detail})")
+        else:
+            reasons.append(detail)
+    elif hot is not None:
+        s += curve(hot, HEAT_POINTS)
+        worst = heat.get("ssp585_2081-2100")
+        detail = f"{hot:.1f} °C summer max by 2081-2100" + (f", {worst:.1f} °C worst case" if worst else "") + \
+                 (f"; {heat['today']:.1f} °C today" if heat.get("today") else "")
+        if hot > REJECT_HOT_C:
+            reasons.append(f"rejected: too hot in 50-70 years ({detail})")
+        elif hot > TOO_HOT_C:
+            caps.append(TOO_HOT_CAP)
+            reasons.append(f"too hot in 50-70 years ({detail})")
+        else:
+            reasons.append(detail)
+    wet = c.get("water_km")
+    if wet is not None:
+        bonus = curve(wet, PERMANENT_WATER_POINTS) * local * (1 if kind == "rural_plot" else 0.5)
+        if bonus >= 1:
+            s += bonus
+            reasons.append(f"permanent water {wet:.1f} km away{' (approx.)' if c.get('approx') else ''}")
+    stress = (c.get("stress") or {})
+    future = stress.get("stress_2080", stress.get("stress_2050"))
+    if future is not None and (future >= 3 or future == -1):
+        s -= 15 if future in (4, -1) else 10
+        reasons.append("water stress " + ("arid" if future == -1 else "extremely high" if future == 4 else "high")
+                       + " by 2080 (WRI Aqueduct)")
+    elif future is not None and future <= 1:
+        s += 3
+        reasons.append("low water stress by 2080 (WRI Aqueduct)")
+    fire = c.get("fire") or {}
+    if fire.get("burnt_here"):
+        s -= 15 * local
+        reasons.append(f"burnt since 2016 ({', '.join(map(str, fire['years']))}) — EFFIS")
+    elif fire.get("count"):
+        s -= min(15, 5 * len(fire.get("years") or [1])) * local
+        reasons.append(f"fires within {fire.get('km', 2):.0f} km since 2016 ({', '.join(map(str, fire['years']))})")
+    danger = c.get("fire_danger") or {}
+    days = danger.get("high_days_2090")
+    if days is not None:
+        s += curve(days, FIRE_DANGER_POINTS)
+        if days >= 30:
+            now = danger.get("high_days_now")
+            reasons.append(f"{days:.0f} days a year of high fire danger by 2079-2098"
+                           + (f" ({now:.0f} today)" if now is not None else "") + " — Copernicus")
+    flood = c.get("flood_m")
+    if flood and flood > 0 and kind == "home":
+        s -= 12 * local
+        reasons.append(f"in the 100-year flood zone ({flood:.1f} m) — JRC")
+    elif flood and flood > 1 and kind != "home":
+        s -= 4 * local
+        reasons.append(f"floods in a 100-year flood ({flood:.1f} m)")
+    return s
 
 
 def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[str],

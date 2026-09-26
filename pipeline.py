@@ -177,6 +177,8 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     import cadastre
                     cadastre.locate_pending(db, session, best, geo.town_index(db))
                     geo.check_water_pending(db, session, best)
+                    import climate                    # heat by 2090, water, fire, flood: local files
+                    climate.assess_pending(db, best, geo.town_index(db))
                 except Exception:  # noqa: BLE001 — a map position must never fail the scan
                     LOG.exception("Locating listings failed")
                 _set_state(db, current="photo check")

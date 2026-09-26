@@ -25,6 +25,14 @@ def no_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_climate_data(tmp_path, monkeypatch):
+    """The real climate layers (gigabytes on this PC) must not change test results."""
+    import climate
+    monkeypatch.setattr(climate, "data_dir", lambda cfg=None: str(tmp_path / "no-climate-data"))
+    climate._CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
 def isolated_files(tmp_path, monkeypatch):
     """Never touch the real config.json, scan lock or reports folder."""
     import config
