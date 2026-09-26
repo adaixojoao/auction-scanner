@@ -138,7 +138,8 @@ NOT_THE_GOAL_CAP = {"not a home or plot": 35, "needs heavy work": 40, "isolated 
 
 # Rejected outright, whatever else looks good (the owner's rules, Sept 2026).
 _REJECTS = [
-    ("unfinished building", re.compile(r"inacabad[oa]|em tosco|por acabar|obra parada|constru[çc][ãa]o suspensa", re.I)),
+    ("unfinished building", re.compile(r"inacabad[oa]|em tosco|por acabar|obra parada|constru[çc][ãa]o suspensa"
+                                       r"|\bal rustico\b|\b(?:allo )?stato (?:al )?grezzo\b|\bal grezzo\b", re.I)),
     ("not in the land register", re.compile(
         r"n[ãa]o\s+descri(?:t)?o\s+na\s+(?:C\.?R\.?P|conservat)|omiss[oa]\s+(?:na\s+conservat|no\s+registo)", re.I)),
     ("occupied", None),                               # from the occupancy rules below
@@ -462,6 +463,13 @@ def buyer_priorities(targets: dict | None = None) -> str:
 _VILLA_PLACE = re.compile(r"\b(C\.\s?C\.|loc\.|localit[aà]|frazione|fraz\.|comune di|in|a|di)\s+Villa\s+(?=[A-Z])")
 
 
+# The description opening on what the thing is ("A. Piena proprietà di ufficio…")
+# beats a portal category that says home (Astalegale files it under "Abitazione").
+_DESC_OPENS_AS_OTHER = re.compile(
+    r"^\W*(?:[a-z]\W+)?(?:(?:diritto di |la )?(?:piena |intera |ed |e )*proprieta (?:di|su|del|della) "
+    r"(?:un[oa']? ?)?)?(?:ufficio|uffici|negozio|magazzino|capannone|laboratorio|box auto|garage|posto auto)\b")
+
+
 def property_kind(item: dict) -> str | None:
     """"home", "urban_plot", "rural_plot", "other" (shop, garage, storage…) or
     None when the listing does not say. The title and the portal's own type
@@ -498,7 +506,7 @@ def property_kind(item: dict) -> str | None:
             return "rural_plot" if area >= 5000 else "urban_plot"
         return None
 
-    if tipo in NOT_PROPERTY_TYPES:
+    if tipo in NOT_PROPERTY_TYPES or _DESC_OPENS_AS_OTHER.match(normalize(desc)):
         return "other"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):

@@ -625,3 +625,18 @@ def test_a_small_urban_plot_is_not_rejected_for_its_size():
     _, reasons = score_detail(dict(source="eleiloes", country="PT", title="Lote de terreno para construção",
                                    tipo="terreno", price=8000, area_m2=600))
     assert not any("too small" in r and r.startswith("rejected") for r in reasons)
+
+
+def test_italian_shells_and_offices_filed_as_homes():
+    from scoring import property_kind, score_detail
+    office = dict(source="astalegale", country="IT", title="Abitazione di tipo civile · Via Campo di Marte 2 · Perugia",
+                  description="A. Piena proprietà di ufficio in Perugia, Via Campo di Marte 2, al primo piano", price=25000)
+    assert property_kind(office) == "other"
+    assert property_kind({**office, "description": "Appartamento vicino all'ufficio postale"}) == "home"
+    for words in ("appartamento allo stato grezzo", "Complesso residenziale al rustico di 242 mq"):
+        _, reasons = score_detail(dict(source="pvp", country="IT", title="Appartamento", description=words,
+                                       price=12000, area_m2=120))
+        assert "rejected: unfinished building" in reasons, words
+    _, reasons = score_detail(dict(source="pvp", country="IT", title="Casale rustico con terreno", price=12000,
+                                   area_m2=120))
+    assert "rejected: unfinished building" not in reasons
