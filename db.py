@@ -691,7 +691,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["earlier_round"] = rounds.earlier_round(item, cases, now)
         item["case_land"] = rounds.land_in_case(item, cases, now, property_kind)
         item["town_distance"] = geo.distance_to_town(item, towns) if towns else None
-        item["beach"] = geo.nearest_beach(item)
+        item["beach"] = geo.nearest_beach(item, towns=towns)
+        item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
+        item["station"] = geo.nearest_hub(item, "station", towns=towns)
         item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)
