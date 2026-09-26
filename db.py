@@ -651,6 +651,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     offers = latest_offers(db)
     cases = rounds.index(db)       # all listings, whatever `where` picks: rounds span sites and dates
     towns = geo.town_index(db)     # where each municipality's town is, for "X km from town"
+    import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     import outcomes
     closes = outcomes.stats(db)    # what ended sales closed at, for "likely to close around"
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
@@ -695,6 +696,10 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
         item["station"] = geo.nearest_hub(item, "station", towns=towns)
         item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
+        try:
+            item["climate"] = climate.for_item(item, towns) if item.get("source") else None
+        except Exception:  # noqa: BLE001 — a broken layer must never hide the listings
+            item["climate"] = None
         item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)
