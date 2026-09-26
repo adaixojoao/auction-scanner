@@ -362,7 +362,7 @@ def format_reminder(item: dict, label: str, hours: float, why: str = "your short
              f"<b>{_esc((item.get('title') or '?')[:80])}</b>",
              f"💶 {_money(pay)}  ·  ends {_esc((item.get('date_end') or '')[:16].replace('T', ' '))}"]
     if item.get("source") == "financas":
-        lines.append(f"🏛 Bid or offer on the Portal das Finanças with your account"
+        lines.append("🏛 Bid or offer on the Portal das Finanças with your account"
                      + (f" — at least {_money(item['price'])} (the base value)." if item.get("price") else "."))
     elif (item.get("country") or "PT") == "PT" and _is_letter_sale(item) and item.get("price"):
         lines.append(f"✍️ Sealed offer: at least {_money(0.85 * item['price'])} (85%), with a cheque "
