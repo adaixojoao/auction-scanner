@@ -70,6 +70,8 @@ _CONSERVATORIA_TOWN = re.compile(r"Conservat[óo]ria\s+(?:do\s+)?(?:Registo\s+Pr
                                  r"([A-ZÀ-Ú][^,.;:()]{2,40}?)\s+(?:sob|com|n\.?º|$)", re.I)
 _POSTCODE_TOWN = re.compile(r"\b\d{4}\s*-\s*\d{3}\s+([A-ZÀ-Ú][^,.;:()\d]{2,40})")
 _FREGUESIA = re.compile(r"\bfreguesia\s+(?:de|do|da|dos|das)\s+([A-ZÀ-Ú][^,.;:()]{2,50})", re.I)
+# Citius land: "localização : Rojanda, Freixedas, Pinhel" — the places, smallest first.
+_LOCALIZACAO = re.compile(r"\blocaliza[çc][ãa]o\s*:\s*([^.;:()]{2,120})", re.I)
 _NOT_A_PLACE = re.compile(r"^\s*(?:lugar|rua|travessa|largo|avenida|estrada|caminho|sitio|sítio)\b", re.I)
 
 
@@ -103,6 +105,15 @@ def municipality(item: dict) -> str | None:
         for pattern in (_CONCELHO, _CONSERVATORIA_TOWN, _POSTCODE_TOWN):
             for m in pattern.finditer(text):
                 town = _real_municipality(m.group(1), country)
+                if town:
+                    break
+            if town:
+                break
+        for m in ([] if town else _LOCALIZACAO.finditer(text)):
+            for part in reversed(m.group(1).split(",")):
+                words = part.split()                 # "Pinhel ano de inscrição…": the text runs on
+                town = next((t for k in range(1, min(4, len(words)) + 1)
+                             if (t := _real_municipality(" ".join(words[:k]), country))), None)
                 if town:
                     break
             if town:
@@ -399,6 +410,20 @@ def nearest_beach(item: dict, path: str | None = None, towns: dict | None = None
     pos, grid = _place(item, towns), beaches(path)
     best = _nearest(pos, grid, MAX_BEACH_KM) if pos and grid else None
     return _found(pos, best, "the beach") if best else None
+
+
+def distance_to_place(item: dict, lat: float, lon: float, name: str, towns: dict | None = None,
+                      max_km: float = 150) -> dict | None:
+    """{"km", "approx", "text"}: how far the property is from a given place
+    (Guarda, for land), from its own position or its town's."""
+    pos = _place(item, towns)
+    if not pos:
+        return None
+    km = distance_km(pos["lat"], pos["lon"], lat, lon)
+    if km > max_km:
+        return None
+    approx = pos.get("precision") not in EXACT_ENOUGH
+    return {"km": round(km, 1), "approx": approx, "text": f"{'about ' if approx else ''}{km_text(km)} from {name}"}
 
 
 def nearest_hub(item: dict, kind: str, path: str | None = None, towns: dict | None = None) -> dict | None:

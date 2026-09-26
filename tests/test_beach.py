@@ -100,3 +100,18 @@ def test_the_transport_list_leaves_out_airstrips():
     stops = {"elements": [{"type": "node", "lat": 38.7680, "lon": -9.0990, "tags": {"name": "Lisboa Oriente"}},
                           {"type": "node", "lat": 38.7681, "lon": -9.0992, "tags": {"name": "Lisboa Oriente"}}]}
     assert len(update_transport.parse("PT", "station", stops)) == 1          # one station, many tracks
+
+
+def test_distance_to_guarda():
+    import geo
+    from scoring import GUARDA
+    got = geo.distance_to_place(at(40.60, -7.30), *GUARDA, "Guarda")
+    assert 7 < got["km"] < 8 and got["text"].endswith("km from Guarda") and not got["approx"]
+    assert geo.distance_to_place(at(37.0, -8.0), *GUARDA, "Guarda") is None          # Algarve: too far
+
+
+def test_citius_land_names_its_municipality_under_localizacao():
+    import geo
+    item = {"country": "PT", "description": "Prédio rústico localização : Rojanda, Freixedas, Pinhel ano de "
+                                            "inscrição na matriz: 1969 área total: 4,6905 ha"}
+    assert geo.municipality(item) == "Pinhel"

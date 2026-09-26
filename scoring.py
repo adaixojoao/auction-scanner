@@ -58,6 +58,8 @@ OCCUPANCY_PATTERNS = [
     "verhuurd", "verhuurde", "huurder", "huurders",
     "sin posesión", "sin posesion", "sin la posesión",
     "contrato de arrendamento", "contratos de arrendamento", "arrendamento em vigor",
+    # Servihabitat's card: no keys means "sin posesión" in 14 of 15 pages read.
+    "llaves no disponibles",
 ]
 
 VACANT_PATTERNS = [
@@ -122,6 +124,11 @@ TAX_SOURCES = {"financas", "anaf", "aeat"}
 #
 # The two rural limits can be changed on the Settings page (config filters).
 TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
+# Land: nothing under 1 ha in Portugal (rural_min_m2) or 2.5 ha abroad is worth
+# the owner's time (Sept 2026). Plots near Guarda are the ones wanted most.
+PLOT_MIN_ABROAD_M2 = 25000
+GUARDA = (40.5373, -7.2676)
+GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]
 
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
@@ -131,7 +138,8 @@ NOT_THE_GOAL_CAP = {"not a home or plot": 35, "needs heavy work": 40, "isolated 
 
 # Rejected outright, whatever else looks good (the owner's rules, Sept 2026).
 _REJECTS = [
-    ("unfinished building", re.compile(r"inacabad[oa]|em tosco|por acabar|obra parada|constru[çc][ãa]o suspensa", re.I)),
+    ("unfinished building", re.compile(r"inacabad[oa]|em tosco|por acabar|obra parada|constru[çc][ãa]o suspensa"
+                                       r"|\bal rustico\b|\b(?:allo )?stato (?:al )?grezzo\b|\bal grezzo\b", re.I)),
     ("not in the land register", re.compile(
         r"n[ãa]o\s+descri(?:t)?o\s+na\s+(?:C\.?R\.?P|conservat)|omiss[oa]\s+(?:na\s+conservat|no\s+registo)", re.I)),
     ("occupied", None),                               # from the occupancy rules below
@@ -455,6 +463,13 @@ def buyer_priorities(targets: dict | None = None) -> str:
 _VILLA_PLACE = re.compile(r"\b(C\.\s?C\.|loc\.|localit[aà]|frazione|fraz\.|comune di|in|a|di)\s+Villa\s+(?=[A-Z])")
 
 
+# The description opening on what the thing is ("A. Piena proprietà di ufficio…")
+# beats a portal category that says home (Astalegale files it under "Abitazione").
+_DESC_OPENS_AS_OTHER = re.compile(
+    r"^\W*(?:[a-z]\W+)?(?:(?:diritto di |la )?(?:piena |intera |ed |e )*proprieta (?:di|su|del|della) "
+    r"(?:un[oa']? ?)?)?(?:ufficio|uffici|negozio|magazzino|capannone|laboratorio|box auto|garage|posto auto)\b")
+
+
 def property_kind(item: dict) -> str | None:
     """"home", "urban_plot", "rural_plot", "other" (shop, garage, storage…) or
     None when the listing does not say. The title and the portal's own type
@@ -491,7 +506,7 @@ def property_kind(item: dict) -> str | None:
             return "rural_plot" if area >= 5000 else "urban_plot"
         return None
 
-    if tipo in NOT_PROPERTY_TYPES:
+    if tipo in NOT_PROPERTY_TYPES or _DESC_OPENS_AS_OTHER.match(normalize(desc)):
         return "other"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
@@ -755,6 +770,19 @@ def score_detail(item: dict, now: datetime | None = None,
             and has_term(full, RURAL_WORDS, negations=False)):
         kind = "rural_plot"
         reasons.append("ruin on a farm — valued as land")
+
+    # Land: too small is not wanted at all; near Guarda is wanted most.
+    if kind in ("urban_plot", "rural_plot"):
+        if (item.get("country") or "PT") != "PT":
+            t = {**t, "rural_min_m2": max(t["rural_min_m2"], PLOT_MIN_ABROAD_M2)}
+        if kind == "rural_plot" and area and area < t["rural_min_m2"]:     # urban plots keep their own rules
+            reasons.append(f"rejected: plot too small ({_ha(area)} < {_ha(t['rural_min_m2'])})")
+        guarda = item.get("guarda")
+        if guarda:
+            bonus = curve(guarda["km"], GUARDA_POINTS) * (0.8 if guarda.get("approx") else 1)
+            if bonus >= 1:
+                s += bonus
+                reasons.append(guarda["text"])
 
     if kind == "home":
         s += 10
