@@ -74,8 +74,14 @@ def build_heat(data_dir: str, out_dir: str) -> None:
                 continue
             stack, profile = [], None
             for f in files:
-                arr, profile = crop(f)
+                try:
+                    arr, profile = crop(f)
+                except Exception as e:  # noqa: BLE001 — a broken download: skip it, say so
+                    print(f"heat {ssp} {period}: skipped {os.path.basename(f)} ({type(e).__name__}); download it again")
+                    continue
                 stack.append(arr)
+            if not stack:
+                continue
             median = np.nanmedian(np.stack(stack), axis=0).astype("float32")
             out = os.path.join(out_dir, f"heat_{ssp}_{period}.tif")
             with rasterio.open(out, "w", **profile) as dst:
