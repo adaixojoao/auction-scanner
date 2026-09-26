@@ -298,7 +298,7 @@ sources are also listed in the report and the weekly Telegram summary.
 
 | Country | Sources |
 |---|---|
-| PT | e-leilões, Citius, leilosoc, BCP, Whitestar, CGD, Santander, BPI, Imobancos, Centro de Leilões, Bid Leiloeira · *idealista (Selenium, on request)* · not scanned: Portal das Finanças (login only), Novo Banco (portal closed) |
+| PT | e-leilões, Citius, leilosoc, BCP, Whitestar, CGD, Santander, BPI, Imobancos, Centro de Leilões, Bid Leiloeira · *idealista (Selenium, on request)* · Portal das Finanças (with your account: Settings → Accounts) · not scanned: Novo Banco (portal closed) |
 | ES | BOE subastas (includes AEAT tax auctions), Servihabitat (cheapest 20 per province), Haya, SubastasActivas · not scanned: Sareb (bot wall) |
 | FR | licitor, Enchères Publiques |
 | IT | astegiudiziarie, PVP Giustizia (search API), Astalegale (search API) · not scanned: Gobid Real (bot wall) |

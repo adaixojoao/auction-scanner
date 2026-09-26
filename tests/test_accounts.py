@@ -99,3 +99,17 @@ def test_the_settings_page_never_gets_the_password(db, monkeypatch):
     client.post("/api/accounts", json={"site": "financas", "forget": True})
     assert client.get("/api/accounts").get_json()["financas"]["has_password"] is False
     assert client.post("/api/accounts", json={"site": "nowhere", "username": "x"}).status_code == 400
+
+
+FORWARD_FORM = """<html><form name="formCredential" id="forwardParticipantForm" method="post"
+  action="https://vendas.portaldasfinancas.gov.pt/vendasat/lista/vendas"><input type="hidden" name="ssoID" value="s1"/>
+  <input value="SIVI" type="hidden" name="partID"/></form><div id="root-data"></div></html>"""
+
+
+def test_acesso_gov_forwards_with_a_form_that_has_no_visible_submit():
+    """The real answer: a form of hidden inputs to the site, submitted by the page's own script."""
+    s = FlowSession(FORWARD_FORM)
+    accounts.LOGINS["financas"]["login"](s, "123456789", "a-password")
+    forward = [(u, d) for m, u, d in s.calls if m == "POST" and "vendas.portaldasfinancas" in u]
+    assert forward == [("https://vendas.portaldasfinancas.gov.pt/vendasat/lista/vendas",
+                        {"ssoID": "s1", "partID": "SIVI"})]

@@ -223,7 +223,7 @@ def test_bidleiloeira_sales_and_opening_value(db, fake_http):
 # ─── Sources that cannot be scanned say why ─────────────────────────
 
 def test_unavailable_sources_explain_themselves(db):
-    for name, words in [("financas", "acesso.gov.pt"), ("novobanco", "no longer exists"),
+    for name, words in [("novobanco", "no longer exists"),
                         ("aeat", "subastas.boe.es")]:
         result = run_source(db, REGISTRY[name], max_price=100000)
         assert result["status"] == "error" and words in result["message"], (name, result)

@@ -146,18 +146,36 @@ def _tell_owner(cfg: dict, site: str, error: Exception):
         LOG.exception("Could not send the sign-in message")
 
 
+def _hidden_fields(form_html: str) -> dict:
+    """name -> value of a form's hidden inputs, whatever the attribute order."""
+    out = {}
+    for tag in re.findall(r"<input[^>]*>", form_html, re.I):
+        if not re.search(r'type="hidden"', tag, re.I):
+            continue
+        name = re.search(r'name="([^"]*)"', tag)
+        value = re.search(r'value="([^"]*)"', tag)
+        if name:
+            out[unescape(name.group(1))] = unescape(value.group(1)) if value else ""
+    return out
+
+
 def _auto_forms(session, resp, hops: int = 4):
-    """Follow the self-submitting forms single sign-on uses to carry the session
-    back to the site (hidden inputs + document.forms[0].submit())."""
+    """Follow the forms single sign-on uses to carry the session back to the
+    site: hidden inputs posting to another host (acesso.gov.pt's
+    "forwardParticipantForm", a SAML form)."""
     for _ in range(hops):
-        m = re.search(r'<form[^>]*action="([^"]+)"[^>]*>(.*?)</form>', resp.text, re.S | re.I)
-        if not m or "submit()" not in resp.text:
+        here = urlparse(resp.url).hostname
+        for m in re.finditer(r"<form([^>]*)>(.*?)</form>", resp.text, re.S | re.I):
+            action = re.search(r'action="([^"]+)"', m.group(1))
+            if not action:
+                continue
+            target = urljoin(resp.url, unescape(action.group(1)))
+            fields = _hidden_fields(m.group(2))
+            if fields and urlparse(target).hostname not in (here, None):
+                resp = session.post(target, data=fields)
+                break
+        else:
             return resp
-        fields = dict(re.findall(r'<input[^>]*type="hidden"[^>]*name="([^"]+)"[^>]*value="([^"]*)"', m.group(2), re.I))
-        if not fields:
-            return resp
-        action = urljoin(resp.url, unescape(m.group(1)))
-        resp = session.post(action, data={k: unescape(v) for k, v in fields.items()})
     return resp
 
 
@@ -179,7 +197,7 @@ def login_acesso_gov(session, username: str, password: str, *, start: str) -> No
     path = re.search(r"path:\s*`([^`]*)`", page.text)
     if not token or not part:
         raise LoginFailed("the acesso.gov.pt login page has changed")
-    resp = session.post(urljoin(ACESSO, "login"), data={
+    resp = session.post(urljoin(ACESSO, "login"), headers={"Origin": "https://www.acesso.gov.pt", "Referer": page.url}, data={
         "username": username, "password": password, "selectedAuthMethod": "N", "authVersion": "2",
         "_csrf": token.group(1), "partID": part.group(1), "path": path.group(1) if path else "",
     })
