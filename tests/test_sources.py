@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 43
+    assert len(REGISTRY) == 44
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -531,3 +531,33 @@ def test_altamira_gives_price_position_and_link(db, fake_http):
     assert session.calls[0][2]["json"]["filtros"]["precioMaximo"] == 50000
     item = load_listings(db, include_hidden=True)[0]
     assert geo.position(item)["precision"] == "street"
+
+
+IMOVIRTUAL_AD = {"id": 19285780, "title": "Olival com cerca de 200 oliveiras e água de nascente",
+                 "slug": "olival-com-agua-de-nascente-ID1iW6Y", "estate": "TERRAIN", "areaInSquareMeters": 10296,
+                 "totalPrice": {"value": 30000}, "hidePrice": False, "isPrivateOwner": True,
+                 "images": [{"medium": "https://img/1.jpg"}],
+                 "location": {"address": {"street": {"name": "Vassal"}}, "reverseGeocoding": {"locations": [
+                     {"locationLevel": "district", "name": "Vila Real"},
+                     {"locationLevel": "council", "name": "Valpaços"},
+                     {"locationLevel": "parish", "name": "Vassal"}]}}}
+
+
+def _imovirtual_html(ads, pages=1):
+    data = {"props": {"pageProps": {"data": {"searchAds": {"items": ads, "pagination": {"totalPages": pages}}}}}}
+    return f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></html>'
+
+
+def test_imovirtual_reads_the_page_data(db, fake_http, monkeypatch):
+    import sources.pt
+    from sources.pt import IMOVIRTUAL_PLACES, parse_imovirtual, scrape_imovirtual
+    monkeypatch.setattr(sources.pt.time, "sleep", lambda s: None)
+    row = parse_imovirtual(IMOVIRTUAL_AD)
+    assert row["id"] == "imovirtual:19285780" and row["price"] == 30000 and row["area_m2"] == 10296
+    assert row["tipo"] == "terreno" and row["concelho"] == "Valpaços" and row["freguesia"] == "Vassal"
+    assert row["url"] == "https://www.imovirtual.com/pt/anuncio/olival-com-agua-de-nascente-ID1iW6Y"
+    assert parse_imovirtual({**IMOVIRTUAL_AD, "hidePrice": True}) is None
+    session = fake_http(lambda m, url, kw: FakeResponse(_imovirtual_html([IMOVIRTUAL_AD])))
+    assert scrape_imovirtual(db, max_price=50000) == 2 * len(IMOVIRTUAL_PLACES)
+    land = [c for c in session.calls if "/terreno/" in c[1]]
+    assert land and all(c[2]["params"]["areaMin"] == 10000 and c[2]["params"]["priceMax"] == 50000 for c in land)
