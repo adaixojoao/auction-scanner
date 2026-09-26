@@ -730,6 +730,10 @@ def score_detail(item: dict, now: datetime | None = None,
     source  = item.get("source",  "")
     title_n = normalize(title)
     pay     = _pay(item)
+    likely = item.get("predicted_final")
+    if likely and likely["price"] > pay * 1.02:
+        pay = likely["price"]                     # what it will probably take, not the base
+        reasons.append(likely["text"])
     kind    = property_kind(item)
 
     if is_fractional_share(title):

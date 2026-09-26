@@ -11,23 +11,23 @@ def at(y, mo, d, h, mi=0):
 
 
 def test_everything_due_on_first_run():
-    assert due_jobs(at(2026, 9, 28, 9), {}) == ["pt", "eu", "backup", "morning", "report"]  # a Monday
+    assert due_jobs(at(2026, 9, 28, 9), {}) == ["pt", "eu", "backup", "closing", "morning", "report"]  # a Monday
 
 
 def test_intervals_with_slack():
     now = at(2026, 9, 24, 12, 0)
     last = {"pt": now - timedelta(hours=1, minutes=55), "eu": now - timedelta(hours=3),
             "backup": now - timedelta(hours=3), "morning": now - timedelta(hours=1),
-            "report": now - timedelta(days=1)}
+            "report": now - timedelta(days=1), "closing": now - timedelta(minutes=5)}
     assert due_jobs(now, last) == ["pt"]          # 1h55 ≥ 2h − 10 min slack
 
 
 def test_check_times_catch_up_once():
     now = at(2026, 9, 24, 21, 0)                  # slept through 08:00 and 20:00
-    last = {"pt": now, "eu": now, "backup": now, "report": now, "morning": at(2026, 9, 23, 20, 5)}
+    last = {"pt": now, "eu": now, "backup": now, "report": now, "closing": now, "morning": at(2026, 9, 23, 20, 5)}
     assert due_jobs(now, last) == ["morning"]
     last["morning"] = now
-    assert due_jobs(now + timedelta(minutes=30), last) == []
+    assert due_jobs(now + timedelta(minutes=30), last) == ["closing"]     # the closing watch, every tick
 
 
 def test_weekly_report_after_monday_slot():
@@ -41,7 +41,8 @@ def test_weekly_report_after_monday_slot():
 
 
 def test_schedule_can_disable_jobs():
-    off = {"eu_every_hours": 0, "backup_every_hours": 0, "check_times": [], "weekly_report": ""}
+    off = {"eu_every_hours": 0, "backup_every_hours": 0, "check_times": [], "weekly_report": "",
+           "closing_every_minutes": 0}
     assert due_jobs(at(2026, 9, 24, 9), {}, off) == ["pt"]
 
 
