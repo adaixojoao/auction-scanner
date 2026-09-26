@@ -352,14 +352,17 @@ def shortlist_reminders(db, cfg: dict, now=None) -> list[tuple[dict, str, str]]:
     return [d for d in due if d[1] in told]
 
 
-def format_reminder(item: dict, label: str, hours: float) -> str:
+def format_reminder(item: dict, label: str, hours: float, why: str = "your shortlist") -> str:
     import costs
     from common import price_to_pay
     pay = price_to_pay(item)
-    lines = [f"⏰ <b>{_esc(label)} — {hours:.0f}h</b> · your shortlist",
+    lines = [f"⏰ <b>{_esc(label)} — {hours:.0f}h</b> · {_esc(why)}",
              f"<b>{_esc((item.get('title') or '?')[:80])}</b>",
              f"💶 {_money(pay)}  ·  ends {_esc((item.get('date_end') or '')[:16].replace('T', ' '))}"]
-    if (item.get("country") or "PT") == "PT" and _is_letter_sale(item) and item.get("price"):
+    if item.get("source") == "financas":
+        lines.append("🏛 Bid or offer on the Portal das Finanças with your account"
+                     + (f" — at least {_money(item['price'])} (the base value)." if item.get("price") else "."))
+    elif (item.get("country") or "PT") == "PT" and _is_letter_sale(item) and item.get("price"):
         lines.append(f"✍️ Sealed offer: at least {_money(0.85 * item['price'])} (85%), with a cheque "
                      f"visado or bank guarantee of {_money(CAUTION_SHARE * item['price'])} (5%) to the court.")
     est = costs.estimate(item)
@@ -383,6 +386,51 @@ def alert_shortlist_reminders(db, cfg: dict, now=None) -> int:
     if sent:
         mark_alerted(db, REMINDER_CHANNEL, sent)
         LOG.info(f"Telegram: {len(sent)} shortlist reminders")
+    return len(sent)
+
+
+# ─── Last call for the best sales ───────────────────────────────────
+# The morning digest lists what ends within 4 days; a top sale you have not
+# starred (or dismissed) still gets one message of its own in its last 24
+# hours, so a closing time like "29/9 às 10:00" is not missed. Scans run every
+# couple of hours, so it arrives with time to act.
+
+LAST_CALL_CHANNEL = "telegram-lastcall"
+LAST_CALL_HOURS = 24
+
+
+def last_calls(db, cfg: dict, now=None) -> list[dict]:
+    now = now or utcnow()
+    tg = _tg(cfg) or {}
+    floor = tg.get("lastcall_min_score", tg.get("min_score", 75))
+    _, offered = _sent_processes(db)
+    due = []
+    for it in load_listings(db, filters=cfg.get("filters"), now=now):
+        left = days_left(it.get("date_end"), now)
+        if left is None or not (0 < left * 24 <= LAST_CALL_HOURS):
+            continue
+        if it.get("status") in ("shortlisted", "dismissed") or it["id"] in offered:
+            continue
+        if it["category"] != "imoveis" or it["score"] < floor:
+            continue
+        it["hours_left"] = left * 24
+        due.append(it)
+    told = not_yet_alerted(db, LAST_CALL_CHANNEL, [it["id"] for it in due])
+    return sorted((it for it in due if it["id"] in told), key=lambda it: it["hours_left"])
+
+
+def alert_last_calls(db, cfg: dict, now=None) -> int:
+    tg = _tg(cfg)
+    if not tg:
+        return 0
+    sent = []
+    for it in last_calls(db, cfg, now)[:5]:
+        if send_telegram(tg["token"], tg["chat_id"],
+                         format_reminder(it, "last day", it["hours_left"], why=f"score {it['score']:.0f}")):
+            sent.append(it["id"])
+    if sent:
+        mark_alerted(db, LAST_CALL_CHANNEL, sent)
+        LOG.info(f"Telegram: {len(sent)} last-call messages")
     return len(sent)
 
 
