@@ -234,3 +234,23 @@ def test_a_starred_sale_gets_its_own_reminders(db, add, sent):
     assert telegram_alert.alert_shortlist_reminders(db, CFG, now=now + timedelta(days=1, hours=6)) == 1
     assert "last day" in sent[1]
     assert telegram_alert.alert_shortlist_reminders(db, CFG, now=now + timedelta(days=5)) == 0   # ended
+
+
+def test_a_top_sale_gets_a_last_call_in_its_final_day(db, add, sent):
+    """Not starred, but good: one message in the last 24 hours, with how to bid
+    on the Portal das Finanças. Starred and dismissed sales are left alone."""
+    now = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+    add("financas", "0361.2014.526", title="Moradia T3 com terreno", tipo="moradia", area_m2=110,
+        price=7199, date_end="2026-09-29T10:00:00", description="Modalidade: Leilão Eletrónico")
+    add("eleiloes", "far", title="Moradia T3", tipo="moradia", area_m2=110, price=9000,
+        date_end="2026-10-05T10:00:00")
+    add("eleiloes", "starred", title="Moradia T3", tipo="moradia", area_m2=110, price=9000,
+        date_end="2026-09-29T09:00:00")
+    from db import set_listing_status
+    set_listing_status(db, "eleiloes:starred", "shortlisted")
+    assert telegram_alert.alert_last_calls(db, CFG, now=now) == 1
+    assert "last day" in sent[0] and "22h" in sent[0] and "score" in sent[0]
+    assert "Portal das Finanças" in sent[0] and "€7,199" in sent[0]
+    assert "cheque" not in sent[0]                           # the court's 5% rule is not the tax office's
+    assert telegram_alert.alert_last_calls(db, CFG, now=now + timedelta(hours=3)) == 0   # once
+    assert telegram_alert.alert_last_calls(db, {**CFG, "telegram": {"enabled": False}}, now=now) == 0
