@@ -222,9 +222,15 @@ def _spain_parse_detail(html: str) -> dict:
                 title = ht[:120]
 
     am = re.search(r"(\d{1,3}(?:[.\s]\d{3})+,\d{1,2}|\d+,\d{1,2}|\d+)\s*m[²2]", text, re.I)
+    # In a judicial auction the "puja mínima" can be the bidding step (€1,743 on
+    # a €174,300 flat): a bid that low does not buy it (LEC art. 670 asks 70%
+    # of the value, or 50% with the court's approval), so it is no minimum price.
+    floor = parse_price(_spain_field(fields, "Puja mínima", "Puja minima"))
+    if floor and price and floor < 0.2 * price:
+        floor = None
     return {
         "price": price,
-        "min_price": parse_price(_spain_field(fields, "Puja mínima", "Puja minima")),
+        "min_price": floor,
         "date_end": date_end,
         "concelho": concelho.strip() if concelho else None,
         "district": district.strip() if district else None,

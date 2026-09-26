@@ -215,6 +215,11 @@ def test_spain_detail_parser():
     assert d["date_end"] == "2099-09-30T18:00:00+02:00"
     assert d["concelho"] == "Vilamarxant" and d["district"] == "Valencia"
     assert d["area_m2"] == 85 and d["title"].startswith("Vivienda")
+    # A "puja mínima" that is the bidding step, not a price that buys it.
+    step = html.replace("Sin puja mínima", "1.743,00 €").replace("36.163,00", "174.300,00")
+    assert _spain_parse_detail(step)["min_price"] is None
+    real = html.replace("Sin puja mínima", "25.000,00 €")
+    assert _spain_parse_detail(real)["min_price"] == 25000
 
 
 def test_netherlands_and_croatia_mappers():
