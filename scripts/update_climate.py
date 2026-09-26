@@ -39,7 +39,7 @@ sys.path.insert(0, HERE)
 
 import climate  # noqa: E402
 
-EUROPE = (-25.0, 27.0, 45.0, 72.0)      # west, south, east, north
+EUROPE = (-32.0, 27.0, 45.0, 72.0)      # west, south, east, north (the Azores reach -31.3°)
 EFFIS_WFS = "https://maps.effis.emergency.copernicus.eu/effis"
 FIRE_BOXES = {"PT": (-31.5, 32.4, -6.1, 42.2), "ES": (-18.2, 27.6, 4.4, 43.8), "FR": (-5.2, 41.3, 9.6, 51.2),
               "IT": (6.6, 35.4, 18.6, 47.1), "HR": (13.4, 42.3, 19.5, 46.6), "GR": (19.3, 34.8, 29.7, 41.8),
@@ -228,6 +228,38 @@ def build_fire_future(data_dir: str, out_dir: str) -> None:
             print(f"firefuture {what} {experiment} {period}: asking Copernicus …", flush=True)
             cds_retrieve(request, target)
             print(f"firefuture {what} {experiment} {period}: {os.path.getsize(target) / 1e6:.1f} MB", flush=True)
+    build_fire_danger_layer(folder, out_dir)
+
+
+def build_fire_danger_layer(folder: str, out_dir: str) -> None:
+    """The EURO-CORDEX grids (rotated pole, 0.11°), averaged over their years,
+    with each cell's latitude and longitude → layers/fire_danger.npz, keys like
+    "gt30_rcp45_2079_2098" (days a year with FWI > 30, high danger), "gt45_…"
+    (very high) and "jjas_…" (mean FWI June-September)."""
+    import re as _re
+    import numpy as np
+    import xarray as xr
+    nc = os.path.join(folder, "nc")
+    for z in glob.glob(os.path.join(folder, "*.zip")):
+        with zipfile.ZipFile(z) as f:
+            f.extractall(nc)
+    out, grid = {}, None
+    for path in sorted(glob.glob(os.path.join(nc, "*.nc"))):
+        m = _re.search(r"_(historical|rcp45|rcp85)_fwi-(nods-gt-30|nods-gt-45|mean-jjas)_(\d{4})\d{4}_(\d{4})", path)
+        if not m:
+            continue
+        exp, what, y0, y1 = m.groups()
+        short = {"nods-gt-30": "gt30", "nods-gt-45": "gt45", "mean-jjas": "jjas"}[what]
+        key = f"{short}_{exp}_{y0}_{y1}"
+        with xr.open_dataset(path) as ds:
+            var = next(v for v in ds.data_vars if ds[v].ndim == 3)
+            out[key] = ds[var].mean(dim="time").values.astype("float32")
+            if grid is None:
+                grid = (ds["lat"].values.astype("float32"), ds["lon"].values.astype("float32"))
+        print(f"fire danger: {key}")
+    if grid is not None:
+        np.savez_compressed(os.path.join(out_dir, "fire_danger.npz"), lat=grid[0], lon=grid[1], **out)
+        print(f"fire danger: {len(out)} layers → fire_danger.npz")
 
 
 def main(argv=None) -> int:

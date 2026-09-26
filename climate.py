@@ -10,7 +10,8 @@ the climate data folder, config climate.data_dir):
          35 °C in 50-70 years.
 - water: permanent water within 1 km (JRC permanent water bodies) and the
          sub-basin's water stress now and in 2050/2080 (WRI Aqueduct 4.0).
-- fire:  EFFIS burnt areas since 2016 within 2 km.
+- fire:  EFFIS burnt areas since 2016 within 2 km, and the days a year of high
+         fire danger in 2079-2098 (Copernicus fire danger indicators, RCP4.5).
 - flood: water depth of the 100-year river flood at the spot (JRC).
 
 `assess(item)` returns a dict of what is known (missing layers are skipped);
@@ -193,6 +194,39 @@ def water_stress(lat: float, lon: float) -> dict | None:
     return out or None
 
 
+@functools.lru_cache(maxsize=1)
+def _fire_danger():
+    path = os.path.join(_layers(), "fire_danger.npz")
+    if not os.path.exists(path):
+        return None
+    import numpy as np
+    from scipy.spatial import cKDTree
+    data = dict(np.load(path))
+    lat, lon = data.pop("lat"), data.pop("lon")
+    tree = cKDTree(np.column_stack([lat.ravel(), lon.ravel()]))
+    return tree, {k: v.ravel() for k, v in data.items()}
+
+
+def fire_danger(lat: float, lon: float) -> dict | None:
+    """Days a year with high (FWI > 30) and very high (> 45) fire danger, now
+    (1981-2005) and in 2079-2098 (RCP4.5, and RCP8.5 as the worst case):
+    Copernicus / EURO-CORDEX multi-model mean, cells of ~12 km."""
+    found = _fire_danger()
+    if not found:
+        return None
+    tree, layers = found
+    dist, i = tree.query([lat, lon])
+    if dist > 0.2:                                   # outside the EURO-CORDEX grid (or at sea)
+        return None
+    import math
+    pick = lambda key: (round(float(layers[key][i]), 1)  # noqa: E731
+                        if key in layers and not math.isnan(float(layers[key][i])) else None)
+    out = {"high_days_now": pick("gt30_historical_1981_2005"),
+           "high_days_2090": pick("gt30_rcp45_2079_2098"), "very_high_days_2090": pick("gt45_rcp45_2079_2098"),
+           "high_days_2090_worst": pick("gt30_rcp85_2079_2098"), "fwi_summer_2090": pick("jjas_rcp45_2079_2098")}
+    return {k: v for k, v in out.items() if v is not None} or None
+
+
 _CACHE: dict[str, dict] = {}
 
 
@@ -205,7 +239,7 @@ def assess(lat: float, lon: float) -> dict:
     if h:
         out["heat"] = h
     for name, fn in (("flood_m", flood_depth), ("water_km", permanent_water_km), ("fire", fires_near),
-                     ("stress", water_stress)):
+                     ("stress", water_stress), ("fire_danger", fire_danger)):
         try:
             v = fn(lat, lon)
         except Exception:  # noqa: BLE001 — one layer broken must not hide the others

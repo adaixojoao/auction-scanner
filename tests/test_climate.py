@@ -75,3 +75,20 @@ def test_the_layers_are_read_at_the_position(layers):
     assert climate.permanent_water_km(40.1, -7.9) is None
     item = {"country": "PT", "raw_json": '{"lat": 40.495, "lon": -7.40}'}
     assert climate.for_item(item)["approx"] is False
+
+
+def test_future_fire_danger(tmp_path, monkeypatch):
+    monkeypatch.setattr(climate, "data_dir", lambda cfg=None: str(tmp_path))
+    climate._fire_danger.cache_clear()
+    (tmp_path / "layers").mkdir()
+    lat, lon = np.meshgrid(np.array([40.0, 40.1], "float32"), np.array([-7.3, -7.2], "float32"), indexing="ij")
+    np.savez_compressed(tmp_path / "layers" / "fire_danger.npz", lat=lat, lon=lon,
+                        gt30_historical_1981_2005=np.full((2, 2), 27.0, "float32"),
+                        gt30_rcp45_2079_2098=np.array([[47.4, 90], [90, 90]], "float32"))
+    got = climate.fire_danger(40.01, -7.29)
+    assert got == {"high_days_now": 27.0, "high_days_2090": 47.4}
+    assert climate.fire_danger(45.0, 10.0) is None                      # off the grid
+    climate._fire_danger.cache_clear()
+    calm, _ = score_detail(with_climate(PLOT, fire_danger={"high_days_2090": 10}))
+    risky, reasons = score_detail(with_climate(PLOT, fire_danger={"high_days_2090": 90, "high_days_now": 60}))
+    assert calm - risky >= 15 and "90 days a year of high fire danger by 2079-2098 (60 today) — Copernicus" in reasons

@@ -138,6 +138,8 @@ TOO_HOT_C = 35.0          # the owner's limit: above it the listing is capped un
 REJECT_HOT_C = 37.0
 TOO_HOT_CAP = 60
 PERMANENT_WATER_POINTS = [(0.2, 15), (0.5, 12), (1.0, 6)]     # km → points (land); homes get half
+# Days a year with FWI > 30 (high fire danger) in 2079-2098, RCP4.5.
+FIRE_DANGER_POINTS = [(10, 3), (30, 0), (60, -8), (90, -15)]
 
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
@@ -998,6 +1000,14 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     elif fire.get("count"):
         s -= min(15, 5 * len(fire.get("years") or [1])) * local
         reasons.append(f"fires within {fire.get('km', 2):.0f} km since 2016 ({', '.join(map(str, fire['years']))})")
+    danger = c.get("fire_danger") or {}
+    days = danger.get("high_days_2090")
+    if days is not None:
+        s += curve(days, FIRE_DANGER_POINTS)
+        if days >= 30:
+            now = danger.get("high_days_now")
+            reasons.append(f"{days:.0f} days a year of high fire danger by 2079-2098"
+                           + (f" ({now:.0f} today)" if now is not None else "") + " — Copernicus")
     flood = c.get("flood_m")
     if flood and flood > 0 and kind == "home":
         s -= 12 * local
