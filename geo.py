@@ -306,6 +306,69 @@ def distance_to_town(item: dict, towns: dict[str, dict]) -> dict | None:
             "text": f"{'about ' if approx else ''}{km_text(km)} from {town['name']}"}
 
 
+# ─── The beach ──────────────────────────────────────────────────────
+# The sea beaches of each country (data/beaches.csv, from OpenStreetMap by
+# scripts/update_beaches.py), and how far a property is from the nearest one.
+# A town-level pin gives an approximate distance: good enough for "about 3 km".
+
+import csv as _csv
+import functools as _functools
+import os as _os
+
+BEACH_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "beaches.csv")
+MAX_BEACH_KM = 40
+_CELL = 0.5          # degrees: the grid the beaches are filed under
+
+
+@_functools.lru_cache(maxsize=2)
+def _beach_grid(path: str, mtime: float) -> dict[tuple[int, int], list[tuple[float, float, str]]]:
+    grid: dict[tuple[int, int], list[tuple[float, float, str]]] = {}
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            for row in _csv.DictReader(f):
+                try:
+                    lat, lon = float(row["lat"]), float(row["lon"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                grid.setdefault((int(lat // _CELL), int(lon // _CELL)), []).append((lat, lon, row.get("name") or ""))
+    except OSError:
+        return {}
+    return grid
+
+
+def beaches(path: str | None = None) -> dict:
+    path = path or BEACH_FILE
+    try:
+        return _beach_grid(path, _os.path.getmtime(path))
+    except OSError:
+        return {}
+
+
+def nearest_beach(item: dict, path: str | None = None) -> dict | None:
+    """{"km", "name", "approx", "text"} for the sea beach nearest the property,
+    None without a position, without the beach file or farther than MAX_BEACH_KM."""
+    pos = position(item)
+    grid = beaches(path)
+    if not pos or not grid:
+        return None
+    lat, lon = pos["lat"], pos["lon"]
+    ci, cj = int(lat // _CELL), int(lon // _CELL)
+    best = None
+    for di in (-1, 0, 1):
+        for dj in (-1, 0, 1):
+            for blat, blon, name in grid.get((ci + di, cj + dj), ()):
+                km = distance_km(lat, lon, blat, blon)
+                if best is None or km < best[0]:
+                    best = (km, name)
+    if best is None or best[0] > MAX_BEACH_KM:
+        return None
+    km, name = best
+    approx = pos.get("precision") not in EXACT_ENOUGH
+    where = f" ({name})" if name else ""
+    return {"km": round(km, 1), "name": name, "approx": approx,
+            "text": f"{'about ' if approx else ''}{km_text(km)} from the beach{where}"}
+
+
 def _town_only(pos: dict) -> bool:
     """A stored lookup made with the town's name alone ("Salvaterra de Magos"):
     older ones were labelled "parish", which gave a house anywhere in the
