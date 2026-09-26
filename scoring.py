@@ -57,6 +57,7 @@ OCCUPANCY_PATTERNS = [
     "bail en cours", "okupa*",
     "verhuurd", "verhuurde", "huurder", "huurders",
     "sin posesión", "sin posesion", "sin la posesión",
+    "contrato de arrendamento", "contratos de arrendamento", "arrendamento em vigor",
 ]
 
 VACANT_PATTERNS = [

@@ -587,3 +587,10 @@ def test_villa_in_a_place_name_is_not_a_house():
             "description": "terreni per una superficie catastale complessiva di 2.778 mq, in parte a bosco"}
     assert property_kind(land) == "rural_plot"
     assert property_kind({"title": "Villa singola di 171,80 mq con terreno", "description": ""}) == "home"
+
+
+def test_a_lease_contract_means_occupied():
+    _, rented = score(item(title="Moradia", description="Existe um contrato de arrendamento, renda de 222,86 €"))
+    assert "occupied/tenanted" in rented
+    _, free = score(item(title="Moradia", description="Não existe contrato de arrendamento"))
+    assert "occupied/tenanted" not in free

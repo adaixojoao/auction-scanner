@@ -426,3 +426,17 @@ def test_eleiloes_area_field_off_by_100():
     assert fields["area_m2"] == 16950
     fields, _ = eleiloes_detail_fields({"areaTotal": 140.0, "descricao": "Moradia com 120 m2 de área útil"})
     assert fields["area_m2"] == 140                                  # close enough: the field stays
+
+
+def test_eleiloes_observations_join_the_description():
+    """The agente's notes ("muito mau estado de conservação") are what the
+    heavy-work and occupancy checks need to see."""
+    from sources.pt import eleiloes_detail_fields
+    fields, _ = eleiloes_detail_fields({"descricao": "Casa de habitação com oito divisões.",
+                                        "observacoes": "O imóvel encontra-se em muito mau estado de conservação."})
+    assert fields["description"] == ("Casa de habitação com oito divisões. Observações: "
+                                     "O imóvel encontra-se em muito mau estado de conservação.")
+    fields, _ = eleiloes_detail_fields({"descricao": "", "observacoes": "Devoluto."})
+    assert fields["description"] == "Observações: Devoluto."
+    fields, _ = eleiloes_detail_fields({"descricao": "Moradia"})
+    assert fields["description"] == "Moradia"

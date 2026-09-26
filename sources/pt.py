@@ -131,7 +131,7 @@ def _eleiloes_to_listing(item: dict) -> dict:
 # Fields the detail pass adds to raw_json. The next search-page scrape replaces
 # raw_json with the thin list item, so these are carried over (_keep_details).
 # Bumped when the detail pass reads more: sales read by an older pass are read again.
-DETAIL_VERSION = 4
+DETAIL_VERSION = 5
 ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
                         "valor_abertura", "morada", "lat", "lon", "reg_district", "reg_concelho",
                         "reg_freguesia", "registo_predial", "detail_checked")
@@ -187,6 +187,7 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
     Leaves out the executados: the people whose property is sold."""
     place = _registry_place(item)
     description = (item.get("descricao") or "").strip() or None
+    notes = (item.get("observacoes") or "").strip()
     area = to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None
     written = find_area(description)
     # The area field is sometimes off by a factor of 100 ("1 695 000 m²" for a plot
@@ -194,8 +195,10 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
     # description wins.
     if area and written and not (1 / 20 < area / written < 20):
         area = written
+    # The agente's observations say what the land register does not: "em muito
+    # mau estado de conservação", "existe um contrato de arrendamento".
     fields = {
-        "description": description,
+        "description": " ".join(x for x in (description, notes and f"Observações: {notes}") if x) or None,
         "area_m2": area or written,
         "freguesia": place["freguesia"] or item.get("moradaFreguesia") or None,
         "concelho": place["concelho"],
