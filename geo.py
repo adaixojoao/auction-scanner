@@ -454,7 +454,11 @@ def km_text(km: float) -> str:
 OVERPASS = "https://overpass-api.de/api/interpreter"
 WATER_RADIUS_M = 300
 WATER_PER_SCAN = 40
-EXACT_ENOUGH = {"sale", "street"}
+EXACT_ENOUGH = {"sale", "street", "cadastre"}
+# A hamlet or village pin is not the plot, but water within a kilometre of it
+# is still worth knowing (and says "approx.").
+NEAR_ENOUGH = {"village"}
+WATER_APPROX_RADIUS_M = 1000
 _WATER_KIND = {"river": "river", "stream": "stream", "canal": "canal", "reservoir": "reservoir",
                "lake": "lake", "pond": "pond", "water": "water"}
 
@@ -489,14 +493,15 @@ def check_water_pending(db, session, items: list[dict], limit: int = WATER_PER_S
             break
         raw = _raw(item)
         pos = position(item)
-        if "water_check" in raw or not pos or pos.get("precision") not in EXACT_ENOUGH:
+        if "water_check" in raw or not pos or pos.get("precision") not in EXACT_ENOUGH | NEAR_ENOUGH:
             continue
+        radius = WATER_RADIUS_M if pos["precision"] in EXACT_ENOUGH else WATER_APPROX_RADIUS_M
         try:
-            found = water_near(session, pos)
+            found = water_near(session, pos, radius)
         except Exception as e:  # noqa: BLE001 — offline or busy: next scan
             LOG.info(f"Water lookup failed ({type(e).__name__}); trying next scan")
             break
-        raw["water_check"] = {"radius_m": WATER_RADIUS_M, "found": found}
+        raw["water_check"] = {"radius_m": radius, "found": found, "approx": radius != WATER_RADIUS_M}
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
         db.commit()
         done += 1

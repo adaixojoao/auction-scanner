@@ -966,7 +966,7 @@ def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **
                                               "Venda em execução fiscal (Portal das Finanças)") if x),
             tipo="imovel", area_m2=find_area(desc), price=sale["valor_base"], min_price=sale["valor_base"],
             current_bid=sale["ultima"], district=raw.get("distrito"), concelho=raw.get("concelho"),
-            freguesia=raw.get("freguesia"), url=f"{FINANCAS}/vendasat/detalhe?venda={sale['venda']}",
+            freguesia=raw.get("freguesia"), url=accounts.FINANCAS_SALES,   # detalhe?venda=… changes with every sign-in
             image_url=sale["image"], date_end=raw.get("date_end") or sale["date_end"],
             raw_json=raw,
         ))

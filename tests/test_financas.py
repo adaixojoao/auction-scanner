@@ -51,7 +51,8 @@ def test_financas_reads_the_property_sales_within_budget(db, fake_http, monkeypa
     assert row["id"] == "financas:1465.2025.7" and row["price"] == 2507 and row["current_bid"] == 3505
     assert row["concelho"] == "Pinhel" and row["freguesia"] == "Alverca Da Beira" and row["area_m2"] == 120
     assert row["date_end"] == "2099-09-26T10:00:00" and "Modalidade: Leilão" in row["description"]
-    assert row["url"] == "https://vendas.portaldasfinancas.gov.pt/vendasat/detalhe?venda=111"
+    # The sale's own code changes with every sign-in: the link is the list.
+    assert row["url"] == "https://vendas.portaldasfinancas.gov.pt/vendasat/lista/vendas"
     raw = json.loads(row["raw_json"])
     assert raw["fotos"] == ["https://static.portaldasfinancas.gov.pt/app/sigvec_static/at_fisc/2025/"
                             "14652025000007/14652025000007000102.jpg"]          # not another sale's photo
