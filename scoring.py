@@ -252,6 +252,9 @@ HEAVY_WORK = [
     "à réhabiliter", "da ristrutturare", "rudere", "fatiscente", "inagibile",
     "sanierungsbedürftig", "renovierungsbedürftig", "abrissreif", "baufällig", "ruine",
     "opknapper", "bouwvallig", "renovatie nodig",
+    # Abandoned: empty for years, falling apart ("devoluta" alone is only empty).
+    "abandonad*", "ao abandono", "em abandono", "estado de abandono", "votad* ao abandono",
+    "abbandonat*", "in stato di abbandono", "à l'abandon", "verwaarloosd", "verlaten",
 ]
 RUIN_WORDS = HEAVY_WORK   # older name
 SOME_WORK = [
@@ -278,6 +281,10 @@ GOOD_LOCATION = [
     "centro de la ciudad", "céntrico", "céntrica", "casco histórico", "cerca de la playa",
     "centre-ville", "centre ville", "proche commerces", "proche des commerces", "hyper-centre",
     "centro storico", "zona centrale", "vicino al centro",
+    "vicino al mare", "vista mare", "fronte mare", "vicino alla spiaggia",
+    "bord de mer", "vue mer", "proche plage", "proche de la plage", "primera línea de playa",
+    "aan zee", "zeezicht", "strandnah", "meerblick", "meeresnähe",
+    "blizu mora", "pogled na more", "uz more", "blizu plaže",
     "innenstadt", "stadtmitte", "zentrale lage", "zentrumsnah", "centrum",
 ]
 # Water next to a plot. Place names ("Rio Maior", "Albufeira", "Lagoa", "Ribeira
@@ -292,7 +299,13 @@ WATER_RE = re.compile(
     r"atravessad\w* (?:por|pelo|pela)|banhad\w* (?:por|pelo|pela)|limitad\w* (?:por|pelo|pela)|"
     r"(?:com )?acesso (?:a|ao|à)|junto al|orilla (?:de|del)|au bord (?:de|du|de la)|en bordure (?:de|du))\s+"
     + _WATER + r"\b"
-    r"|\b(?:curso de [aá]gua|linha de [aá]gua|plano de [aá]gua|espelho de [aá]gua|frente de rio|frente rio)\b",
+    r"|\b(?:curso de [aá]gua|linha de [aá]gua|plano de [aá]gua|espelho de [aá]gua|frente de rio|frente rio)\b"
+    # Italian, Dutch, German, Croatian: set phrases.
+    r"|\b(?:(?:vicino|accanto|adiacente|affacciat\w|prospiciente|in riva) (?:al|allo|alla|a) "
+    r"(?:fiume|lago|torrente|mare|canale)|fronte (?:lago|mare|fiume)|sulle rive del)\b"
+    r"|\b(?:aan (?:het|de) (?:water|rivier|vaart|plas|meer|zee)|vaarwater|aan het ijsselmeer)\b"
+    r"|\b(?:am (?:see|fluss|bach|ufer|meer)|seeufer|flussufer|wassergrundstück|seegrundstück)\b"
+    r"|\b(?:uz (?:rijeku|more|jezero)|blizu (?:rijeke|mora|jezera)|na obali)\b",
     re.I)
 
 
@@ -680,6 +693,11 @@ CASE_AGE_POINTS = [(6, 0), (10, -3), (15, -6), (20, -8)]
 # Kilometres from the middle of the property's own town (geo.py). Measured, so
 # it beats guessing "good location" from words the description may not contain.
 TOWN_DISTANCE_POINTS = [(0.3, 15), (1, 13), (3, 8), (6, 3), (10, -2), (20, -14), (35, -25)]
+# A home near the sea is what the owner wants most after its condition: a big
+# bonus by the beach, fading out by 30 km (geo.nearest_beach). Measured from a
+# town-level pin it counts BEACH_APPROX_SHARE of that.
+BEACH_POINTS = [(0.5, 25), (1, 22), (2, 18), (5, 12), (10, 6), (20, 2), (30, 0)]
+BEACH_APPROX_SHARE = 0.6
 
 # What the owner does not want, as the highest score it can reach. They slide
 # too: a 38 m² home is held down a little less than a 30 m² one.
@@ -920,6 +938,13 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     if water:
         s += 6
         reasons.append(f"next to water ({water})")
+
+    beach = item.get("beach")
+    if beach:
+        bonus = curve(beach["km"], BEACH_POINTS) * (BEACH_APPROX_SHARE if beach.get("approx") else 1)
+        if bonus >= 1:
+            s += bonus
+            reasons.append(beach["text"])
 
     if has_term(full, ISOLATED):
         s -= 35
