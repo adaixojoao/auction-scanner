@@ -160,6 +160,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         queue_requests(db, cfg)          # offered on Telegram; sent only on your tap
                     except Exception:  # noqa: BLE001
                         LOG.exception("Preparing information requests failed")
+                try:
+                    import outcomes
+                    outcomes.record_results(db)      # ended sales and their last bid
+                except Exception:  # noqa: BLE001
+                    LOG.exception("Recording auction results failed")
                 _set_state(db, current="map positions")
                 try:
                     import geo

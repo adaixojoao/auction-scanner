@@ -651,6 +651,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     offers = latest_offers(db)
     cases = rounds.index(db)       # all listings, whatever `where` picks: rounds span sites and dates
     towns = geo.town_index(db)     # where each municipality's town is, for "X km from town"
+    import outcomes
+    closes = outcomes.stats(db)    # what ended sales closed at, for "likely to close around"
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
 
     items = []
@@ -690,6 +692,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["case_land"] = rounds.land_in_case(item, cases, now, property_kind)
         item["town_distance"] = geo.distance_to_town(item, towns) if towns else None
         item["beach"] = geo.nearest_beach(item)
+        item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)
         sc = max(0.0, min(100.0, rank))

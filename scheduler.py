@@ -51,9 +51,10 @@ DEFAULT_SCHEDULE = {
     "backup_every_hours": 24,
     "check_times": ["08:00", "20:00"],
     "weekly_report": "mon 08:00",
+    "closing_every_minutes": 25,     # every tick (30 min): the e-leilões sales ending now (outcomes.py)
 }
 _WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-JOBS = ("pt", "eu", "backup", "morning", "report")
+JOBS = ("pt", "eu", "backup", "morning", "report", "closing")
 
 
 def setup_logging():
@@ -95,6 +96,11 @@ def due_jobs(now: datetime, last_runs: dict, schedule: dict | None = None) -> li
         last = last_runs.get(job)
         if last is None or now - last >= timedelta(hours=float(every)) - SLACK:
             due.append(job)
+
+    every = sched.get("closing_every_minutes")
+    last = last_runs.get("closing")
+    if every and (last is None or now - last >= timedelta(minutes=float(every))):
+        due.append("closing")
 
     last = last_runs.get("morning")
     for t in sched.get("check_times") or []:
@@ -205,7 +211,19 @@ def run_weekly_report():
         db.close()
 
 
+def run_closing_watch():
+    """The last bids of the e-leilões sales ending now (outcomes.py)."""
+    import outcomes
+    from db import connect
+    db = connect()
+    try:
+        outcomes.watch_closing(db)
+    finally:
+        db.close()
+
+
 JOB_FUNCS = {
+    "closing": run_closing_watch,
     "pt": run_pt_scrape,
     "eu": run_eu_scrape,
     "backup": run_backup,
