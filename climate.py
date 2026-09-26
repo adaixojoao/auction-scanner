@@ -84,6 +84,20 @@ def heat(lat: float, lon: float) -> dict:
     return out
 
 
+HOT_DAYS_PERIODS = ("today", "rcp45_2071-2100", "rcp85_2071-2100")
+
+
+def hot_days(lat: float, lon: float) -> dict:
+    """Days a year above 35 °C (Copernicus climate atlas, EURO-CORDEX 12 km,
+    bias-adjusted ensemble median): today = 1976-2005."""
+    out = {}
+    for period in HOT_DAYS_PERIODS:
+        v = _sample(os.path.join(_layers(), f"hot35_{period}.tif"), lat, lon)
+        if v is not None:
+            out[period] = round(v, 1)
+    return out
+
+
 def flood_depth(lat: float, lon: float) -> float | None:
     v = _sample(os.path.join(data_dir(), "jrc_flood", "Europe_RP100_filled_depth.tif"), lat, lon)
     return round(v, 2) if v is not None and v > 0 else (0.0 if v is not None else None)
@@ -238,6 +252,9 @@ def assess(lat: float, lon: float) -> dict:
     h = heat(lat, lon)
     if h:
         out["heat"] = h
+    d = hot_days(lat, lon)
+    if d:
+        out["hot_days"] = d
     for name, fn in (("flood_m", flood_depth), ("water_km", permanent_water_km), ("fire", fires_near),
                      ("stress", water_stress), ("fire_danger", fire_danger)):
         try:
@@ -278,7 +295,7 @@ def as_json(result: dict | None) -> str:
 # it was read at; load_listings only reads it back. A listing that moved
 # (a better position found later) or a rebuilt layer set is read again.
 
-VERSION = 1
+VERSION = 2
 
 
 def _place_key(pos: dict) -> str:

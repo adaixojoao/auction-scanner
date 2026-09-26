@@ -27,6 +27,19 @@ def test_summers_hotter_than_35_by_2090_are_not_wanted():
     assert any(r.startswith("rejected: too hot") for r in oven_reasons) and oven <= 30
 
 
+def test_more_than_7_days_above_35_by_2090_are_not_wanted():
+    # the day count beats the monthly mean: a place can average 30 °C and still roast
+    mild = {"ssp245_2081-2100": 30.0}
+    cool, reasons = score_detail(with_climate(HOME, heat=mild, hot_days={"today": 1, "rcp45_2071-2100": 4,
+                                                                         "rcp85_2071-2100": 9}))
+    hot, hot_reasons = score_detail(with_climate(HOME, heat=mild, hot_days={"rcp45_2071-2100": 10}))
+    oven, oven_reasons = score_detail(with_climate(HOME, heat=mild, hot_days={"rcp45_2071-2100": 30}))
+    assert cool > hot > oven
+    assert "4 days a year above 35 °C by 2071-2100, 9 worst case; 1 today" in reasons
+    assert hot <= 60 and any(r.startswith("too hot in 50-70 years") for r in hot_reasons)
+    assert any(r.startswith("rejected: too hot") for r in oven_reasons)
+
+
 def test_permanent_water_fire_flood_and_stress():
     base, _ = score_detail(PLOT)
     wet, reasons = score_detail(with_climate(PLOT, water_km=0.3))

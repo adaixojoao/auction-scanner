@@ -268,6 +268,63 @@ def build_fire_danger_layer(folder: str, out_dir: str) -> None:
         print(f"fire danger: {len(out)} layers → fire_danger.npz")
 
 
+HOT_DAYS_FILES = {"today": ("historical", 1976, 2005), "rcp45_2071-2100": ("rcp_4_5", 2071, 2100),
+                  "rcp85_2071-2100": ("rcp_8_5", 2071, 2100)}
+
+
+def hot_days_request(experiment: str) -> dict:
+    """Copernicus climate atlas: monthly days above 35 °C, EURO-CORDEX, bias-adjusted."""
+    return {"origin": "cordex_eur_11", "experiment": experiment, "domain": "euro_cordex",
+            "period": "1970-2005" if experiment == "historical" else "2006-2100",
+            "variable": "monthly_extreme_hot_days", "bias_adjustment": "isimip_method"}
+
+
+def build_hot_days(data_dir: str, out_dir: str) -> None:
+    """Days a year above 35 °C: each model's yearly total averaged over the
+    period, then the median of the models, cropped to Europe."""
+    import zipfile
+    import numpy as np
+    import rasterio
+    import xarray as xr
+    from rasterio.transform import from_origin
+    global CDS_DATASET
+    folder = os.path.join(data_dir, "hot_days")
+    os.makedirs(folder, exist_ok=True)
+    west, south, east, north = EUROPE
+    for name, (experiment, y0, y1) in HOT_DAYS_FILES.items():
+        target = os.path.join(folder, f"{experiment}_isimip_method.zip")
+        if not os.path.exists(target):
+            CDS_DATASET, keep = "multi-origin-c3s-atlas", CDS_DATASET
+            try:
+                cds_retrieve(hot_days_request(experiment), target)
+            finally:
+                CDS_DATASET = keep
+        with zipfile.ZipFile(target) as z:
+            nc = next(n for n in z.namelist() if n.endswith(".nc"))
+            path = os.path.join(folder, "nc", experiment, nc)
+            if not os.path.exists(path):
+                z.extract(nc, os.path.join(folder, "nc", experiment))
+        ds = xr.open_dataset(path, mask_and_scale=True)
+        var = next(v for v in ds.data_vars if v.startswith("tx35"))
+        da = ds[var].sel(time=slice(f"{y0}-01-01", f"{y1}-12-31"), lat=slice(south, north), lon=slice(west, east))
+        per_model = []
+        for m in range(da.sizes["member"]):
+            one = da.isel(member=m).values.astype("float32")
+            one[(one < 0) | (one > 31)] = np.nan
+            if np.isnan(one).all():
+                continue
+            per_model.append(np.nansum(one, axis=0) / (y1 - y0 + 1) * np.where(np.isnan(one).all(axis=0), np.nan, 1))
+        grid = np.nanmedian(np.stack(per_model), axis=0).astype("float32")
+        lats, lons = da.lat.values, da.lon.values
+        res = float(lons[1] - lons[0])
+        with rasterio.open(os.path.join(out_dir, f"hot35_{name}.tif"), "w", driver="GTiff", height=grid.shape[0],
+                           width=grid.shape[1], count=1, dtype="float32", crs="EPSG:4326", nodata=np.nan,
+                           transform=from_origin(lons[0] - res / 2, lats[-1] + res / 2, res, res),
+                           compress="deflate") as dst:
+            dst.write(grid[::-1], 1)
+        print(f"hot35_{name}: {len(per_model)} models")
+
+
 def main(argv=None) -> int:
     parts = (argv if argv is not None else sys.argv[1:]) or ["heat", "fire", "water"]
     data_dir = climate.data_dir()
@@ -279,6 +336,8 @@ def main(argv=None) -> int:
         build_fire(out_dir)
     if "water" in parts:
         build_water(data_dir, out_dir)
+    if "hotdays" in parts:
+        build_hot_days(data_dir, out_dir)
     if "firefuture" in parts:
         build_fire_future(data_dir, out_dir)
     with open(os.path.join(out_dir, "built.json"), "w", encoding="utf-8") as f:

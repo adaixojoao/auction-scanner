@@ -137,6 +137,10 @@ HEAT_POINTS = [(28, 10), (31, 8), (33, 4), (35, 0), (36, -12), (37, -25)]
 TOO_HOT_C = 35.0          # the owner's limit: above it the listing is capped under the minimum score
 REJECT_HOT_C = 37.0
 TOO_HOT_CAP = 60
+# Days a year above 35 °C by 2071-2100: the owner's rule is at most 7.
+HOT_DAYS_POINTS = [(0, 10), (2, 8), (5, 4), (7, 0), (12, -12), (20, -25)]
+TOO_MANY_HOT_DAYS = 7
+REJECT_HOT_DAYS = 20
 PERMANENT_WATER_POINTS = [(0.2, 15), (0.5, 12), (1.0, 6)]     # km → points (land); homes get half
 # Days a year with FWI > 30 (high fire danger) in 2079-2098, RCP4.5.
 FIRE_DANGER_POINTS = [(10, 3), (30, 0), (60, -8), (90, -15)]
@@ -966,7 +970,20 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     local = 0.5 if c.get("approx") else 1.0
     heat = c.get("heat") or {}
     hot = heat.get("ssp245_2081-2100") or heat.get("ssp245_2061-2080")
-    if hot is not None:
+    days = c.get("hot_days") or {}
+    future = days.get("rcp45_2071-2100")
+    if future is not None:
+        s += curve(future, HOT_DAYS_POINTS)
+        worst = days.get("rcp85_2071-2100")
+        detail = f"{future:.0f} days a year above 35 °C by 2071-2100" +                  (f", {worst:.0f} worst case" if worst is not None else "") +                  (f"; {days['today']:.0f} today" if days.get("today") is not None else "")
+        if future > REJECT_HOT_DAYS:
+            reasons.append(f"rejected: too hot in 50-70 years ({detail})")
+        elif future > TOO_MANY_HOT_DAYS:
+            caps.append(TOO_HOT_CAP)
+            reasons.append(f"too hot in 50-70 years ({detail})")
+        else:
+            reasons.append(detail)
+    elif hot is not None:
         s += curve(hot, HEAT_POINTS)
         worst = heat.get("ssp585_2081-2100")
         detail = f"{hot:.1f} °C summer max by 2081-2100" + (f", {worst:.1f} °C worst case" if worst else "") + \
