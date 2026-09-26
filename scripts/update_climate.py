@@ -151,16 +151,23 @@ def build_water(data_dir: str, out_dir: str) -> None:
     out = os.path.join(out_dir, "aqueduct_europe.gpkg")
     for layer in layers:
         gdf = gpd.read_file(gdbs[0], layer=layer, bbox=EUROPE)
-        keep = [c for c in gdf.columns if c == "geometry" or c.lower().startswith(("pfaf", "bws", "bwd", "drr", "iav",
+        keep = [c for c in gdf.columns if c == "geometry" or c.lower().startswith(("pfaf", "bws", "bwd", "drr", "iav", "bau", "opt", "pes",
                                                                                       "sev", "rfr", "w_awr", "name"))]
         gdf[keep].to_file(out, layer=layer, driver="GPKG")
         print(f"water: {layer}: {len(gdf)} sub-basins in Europe")
 
 
 CDS_DATASET = "sis-tourism-fire-danger-indicators"
-FIRE_FUTURE = [  # (experiment, period) — seasonal indicators come in these 20-year blocks
-    ("historical", "1981_2000"), ("rcp4_5", "2041_2060"), ("rcp4_5", "2079_2098"),
+FIRE_FUTURE = [  # (experiment, period): the 20-25 year blocks the dataset offers
+    ("historical", "1981_2005"), ("rcp4_5", "2041_2060"), ("rcp4_5", "2079_2098"),
     ("rcp8_5", "2041_2060"), ("rcp8_5", "2079_2098")]
+# The seasonal FWI is a "seasonal indicator"; the days of (very) high danger are
+# "annual indicators" (checked with the CDS constraints endpoint, Sept 2026).
+FIRE_REQUESTS = {
+    "fwi": {"time_aggregation": "seasonal_indicators", "variable": ["seasonal_fire_weather_index"]},
+    "days": {"time_aggregation": "annual_indicators",
+             "variable": ["number_of_days_with_high_fire_danger", "number_of_days_with_very_high_fire_danger"]},
+}
 
 
 def _cds_credentials() -> tuple[str, str]:
@@ -211,18 +218,16 @@ def build_fire_future(data_dir: str, out_dir: str) -> None:
     folder = os.path.join(data_dir, "copernicus_fire")
     os.makedirs(folder, exist_ok=True)
     for experiment, period in FIRE_FUTURE:
-        target = os.path.join(folder, f"fire_{experiment}_{period}.zip")
-        if os.path.exists(target) and os.path.getsize(target) > 0:
-            print(f"firefuture {experiment} {period}: already downloaded")
-            continue
-        request = {"time_aggregation": "seasonal_indicators",
-                   "product_type": "multi_model_mean_case",
-                   "variable": ["number_of_days_with_high_fire_danger",
-                                "number_of_days_with_very_high_fire_danger", "seasonal_fire_weather_index"],
-                   "experiment": experiment, "period": period, "version": "v2_0"}
-        print(f"firefuture {experiment} {period}: asking Copernicus …", flush=True)
-        cds_retrieve(request, target)
-        print(f"firefuture {experiment} {period}: {os.path.getsize(target) / 1e6:.1f} MB", flush=True)
+        for what, base in FIRE_REQUESTS.items():
+            target = os.path.join(folder, f"fire_{what}_{experiment}_{period}.zip")
+            if os.path.exists(target) and os.path.getsize(target) > 0:
+                print(f"firefuture {what} {experiment} {period}: already downloaded")
+                continue
+            request = {**base, "product_type": "multi_model_mean_case", "experiment": experiment,
+                       "period": period, "version": "v1_0"}   # the multi-model products are v1_0 only
+            print(f"firefuture {what} {experiment} {period}: asking Copernicus …", flush=True)
+            cds_retrieve(request, target)
+            print(f"firefuture {what} {experiment} {period}: {os.path.getsize(target) / 1e6:.1f} MB", flush=True)
 
 
 def main(argv=None) -> int:
