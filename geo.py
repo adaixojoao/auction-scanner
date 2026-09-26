@@ -213,7 +213,7 @@ def street_view_embed_url(pos: dict, key: str) -> str | None:
 # description says something. The distance from the property to the middle of
 # its municipality's town is a fact, and it is the same fact in every country.
 
-TOWNS_PER_SCAN = 20         # new municipalities looked up per scan (1 request/s)
+TOWNS_PER_SCAN = 60         # new municipalities looked up per scan (1 request/s, about a minute)
 MAX_TOWN_KM = 40            # farther than any Portuguese municipality is wide:
                             # the lookup found the wrong town, so say nothing
 TOO_VAGUE = {"municipality"}   # that pin *is* the town: the distance would be 0 by construction
@@ -344,10 +344,17 @@ def beaches(path: str | None = None) -> dict:
         return {}
 
 
-def nearest_beach(item: dict, path: str | None = None) -> dict | None:
+def nearest_beach(item: dict, path: str | None = None, towns: dict | None = None) -> dict | None:
     """{"km", "name", "approx", "text"} for the sea beach nearest the property,
-    None without a position, without the beach file or farther than MAX_BEACH_KM."""
+    None without a position, without the beach file or farther than MAX_BEACH_KM.
+    Without a position of its own the property is placed at its town (`towns`,
+    from town_index): most listings have only that."""
     pos = position(item)
+    if not pos and towns:
+        name = municipality(item)
+        town = towns.get(town_key(item.get("country") or "PT", name)) if name else None
+        if town:
+            pos = {"lat": town["lat"], "lon": town["lon"], "precision": "municipality"}
     grid = beaches(path)
     if not pos or not grid:
         return None

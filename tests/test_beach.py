@@ -56,3 +56,12 @@ def test_water_words_in_other_languages():
     assert water_nearby("Grundstück am See") == "am See"
     assert water_nearby("kuća uz more") == "uz more"
     assert water_nearby("casa em Rio Maior") is None and water_nearby("Via Mare 3") is None
+
+
+def test_without_its_own_position_a_home_is_placed_at_its_town(beach_file):
+    import geo
+    towns = {geo.town_key("PT", "Albufeira"): {"name": "Albufeira", "lat": 37.0890, "lon": -8.2500}}
+    item = {"country": "PT", "concelho": "Albufeira", "raw_json": "{}"}
+    near = geo.nearest_beach(item, beach_file, towns=towns)
+    assert near["approx"] and near["text"].startswith("about ") and near["km"] < 1
+    assert geo.nearest_beach(item, beach_file) is None                   # no town known yet
