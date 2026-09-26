@@ -288,6 +288,39 @@ def test_spain_enrichment_fills_letters_and_scoring(db, add, fake_http):
     assert enrich_spain_details(db, session) == 0 and len(session.calls) == 3   # checked once
 
 
+BOE_LOTS_GENERAL = """<html><body><table>
+<tr><th>Lotes</th><td>3</td></tr>
+<tr><th>Valor subasta</th><td>Ver valor de subasta en cada lote (los lotes se subastan de forma independiente)</td></tr>
+<tr><th>Puja mínima</th><td>Ver puja mínima de cada lote (adjudicación independiente)</td></tr>
+<tr><th>Fecha de conclusión</th><td>14-10-2026 18:00:00 CET</td></tr>
+</table></body></html>"""
+BOE_LOT_1 = """<html><body><h4>Lote 1 FINCA REGISTRAL 19826</h4><table>
+<tr><th>Valor Subasta</th><td>19.687,33 €</td></tr>
+<tr><th>Valor de tasación</th><td>0,00 €</td></tr>
+<tr><th>Puja mínima</th><td>Sin puja mínima</td></tr>
+<tr><th>Descripción</th><td>FINCA 10 DEL PLANO UNO DEL PLANO GENERAL TERRENO DEDICADO A CULTIVO DE SECANO</td></tr>
+<tr><th>Localidad</th><td>SANTA MARIA DE CAYON</td></tr>
+<tr><th>Provincia</th><td>Cantabria</td></tr>
+</table></body></html>"""
+
+
+def test_spain_auction_in_lots_takes_the_first_lots_value():
+    from sources.es import spain_details
+    fields, _ = spain_details({"general": BOE_LOTS_GENERAL, "goods": BOE_LOT_1})
+    assert fields["price"] == 19687.33 and fields.get("min_price") is None
+    assert fields["concelho"] == "SANTA MARIA DE CAYON" and fields["district"] == "Cantabria"
+
+
+def test_spain_details_read_never_checked_sales_first(db, add, fake_http):
+    from sources.es import enrich_spain_details
+    add("spain", "SUB-OLD", "ES", title="Subasta SUB-OLD", tipo="inmueble", date_end="2099-01-01",
+        raw_json=json.dumps({"detail_checked": "2026-09-01"}))
+    add("spain", "SUB-NEW", "ES", title="Subasta SUB-NEW", tipo="inmueble", date_end="2099-06-01")
+    session = fake_http(lambda m, url, kw: FakeResponse("<html></html>"))
+    enrich_spain_details(db, session, limit=1)
+    assert {c[2]["params"]["idSub"] for c in session.calls} == {"SUB-NEW"}
+
+
 LICITOR_ANNONCE = """<html><body>
 <p class="Court">Tribunal Judiciaire de Nîmes (Gard)</p>
 <p>Publiée le 3 septembre 2026</p>

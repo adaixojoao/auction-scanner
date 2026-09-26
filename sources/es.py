@@ -390,15 +390,19 @@ def fetch_catastro(db, session, limit: int = CATASTRO_PER_SCAN) -> int:
     return done
 
 
-def enrich_spain_details(db, session, limit: int = 100):
+def enrich_spain_details(db, session, limit: int = 300):
     """Fetch the BOE detail tabs for Spanish listings not checked yet (or still
     without a price), soonest first: price and dates for the listing, the
-    court's name and e-mail for letters, occupancy for the score."""
+    court's name and e-mail for letters, occupancy for the score.
+
+    Never-checked sales go first: re-reading the same unpriced ones every scan
+    left 3 of 4 open sales without a price (shown as €0)."""
     rows = db.execute("""
         SELECT * FROM listings WHERE source='spain'
           AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
-        ORDER BY date_end IS NULL, date_end LIMIT ?
-    """, (limit,)).fetchall()
+          AND (date_end IS NULL OR date_end >= ?)
+        ORDER BY (raw_json LIKE '%"detail_checked"%'), date_end IS NULL, date_end LIMIT ?
+    """, (datetime.now().strftime("%Y-%m-%d"), limit)).fetchall()
     if not rows:
         return 0
 
