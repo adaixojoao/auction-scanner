@@ -594,3 +594,27 @@ def test_a_lease_contract_means_occupied():
     assert "occupied/tenanted" in rented
     _, free = score(item(title="Moradia", description="Não existe contrato de arrendamento"))
     assert "occupied/tenanted" not in free
+
+
+def test_no_keys_on_servihabitat_means_occupied():
+    _, reasons = score(item(title="Piso en venta en Sevilla", description="72m2 3 hab. 1 baño ! Llaves no disponibles"))
+    assert "occupied/tenanted" in reasons
+
+
+def test_small_plots_are_not_wanted_and_land_near_guarda_is():
+    from scoring import score_detail
+    plot = dict(source="eleiloes", country="PT", title="Prédio rústico", tipo="terreno", price=5000)
+    _, small = score_detail({**plot, "area_m2": 8000})
+    assert any(r.startswith("rejected: plot too small (8 000 m² < 1.0 ha)") for r in small)
+    _, ok = score_detail({**plot, "area_m2": 12000})
+    assert not any("too small" in r for r in ok)
+    _, abroad = score_detail({**plot, "country": "ES", "title": "Finca rústica", "area_m2": 20000})
+    assert any(r.startswith("rejected: plot too small (2.0 ha < 2.5 ha)") for r in abroad)
+    big = {**plot, "area_m2": 40000}
+    far, _ = score_detail({**big, "guarda": {"km": 200, "approx": False, "text": "far"}})
+    near, reasons = score_detail({**big, "guarda": {"km": 8, "approx": False, "text": "8.0 km from Guarda"}})
+    mid, _ = score_detail({**big, "guarda": {"km": 50, "approx": False, "text": "50 km from Guarda"}})
+    assert near - far >= 19 and far < mid < near and "8.0 km from Guarda" in reasons
+    # A home gets no Guarda bonus.
+    home = dict(source="eleiloes", country="PT", title="Moradia T3", tipo="moradia", area_m2=120, price=20000)
+    assert score_detail({**home, "guarda": {"km": 5, "approx": False, "text": "g"}})[0] == score_detail(home)[0]

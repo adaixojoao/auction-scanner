@@ -595,6 +595,7 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
     session = make_session(timeout=30)
     total, full = 0, []
     details_left = [SERVIHABITAT_DETAILS_PER_SCAN]
+    found: list[dict] = []
     for province in SERVIHABITAT_PROVINCES:
         try:
             resp = session.get(f"{SERVIHABITAT}/es/venta/vivienda/{province}", params={"o": 4})
@@ -605,13 +606,16 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
         rows = parse_servihabitat_page(resp.text, province)
         if len(rows) >= 20 and all((r["price"] or 0) <= max_price for r in rows):
             full.append(province)
-        rows = [row for row in rows if row["price"] and row["price"] <= max_price]
-        _servihabitat_details(db, session, rows, details_left)
-        for row in rows:
-            upsert_listing(db, row)
-            total += 1
-        db.commit()
+        found += [row for row in rows if row["price"] and row["price"] <= max_price]
         time.sleep(0.5)
+    # The detail pages, cheapest first: read province by province, the budget ran
+    # out before the last provinces (Sevilla) and their "sin posesión" went unseen.
+    found.sort(key=lambda row: row["price"])
+    _servihabitat_details(db, session, found, details_left)
+    for row in found:
+        upsert_listing(db, row)
+        total += 1
+    db.commit()
     if full:
         LOG.info(f"Servihabitat: more within budget than one page in {', '.join(full)}")
     LOG.info(f"Servihabitat: {total} listings")

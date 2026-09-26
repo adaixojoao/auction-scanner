@@ -637,7 +637,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """
     import geo
     import rounds
-    from scoring import categorize, property_kind, score_detail  # scoring imports common, not db
+    from scoring import GUARDA, categorize, property_kind, score_detail  # scoring imports common, not db
 
     now = now or utcnow()
     sql = "SELECT * FROM listings"
@@ -694,6 +694,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["beach"] = geo.nearest_beach(item, towns=towns)
         item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
         item["station"] = geo.nearest_hub(item, "station", towns=towns)
+        item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
         item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)

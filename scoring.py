@@ -58,6 +58,8 @@ OCCUPANCY_PATTERNS = [
     "verhuurd", "verhuurde", "huurder", "huurders",
     "sin posesión", "sin posesion", "sin la posesión",
     "contrato de arrendamento", "contratos de arrendamento", "arrendamento em vigor",
+    # Servihabitat's card: no keys means "sin posesión" in 14 of 15 pages read.
+    "llaves no disponibles",
 ]
 
 VACANT_PATTERNS = [
@@ -122,6 +124,11 @@ TAX_SOURCES = {"financas", "anaf", "aeat"}
 #
 # The two rural limits can be changed on the Settings page (config filters).
 TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
+# Land: nothing under 1 ha in Portugal (rural_min_m2) or 2.5 ha abroad is worth
+# the owner's time (Sept 2026). Plots near Guarda are the ones wanted most.
+PLOT_MIN_ABROAD_M2 = 25000
+GUARDA = (40.5373, -7.2676)
+GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]
 
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
@@ -755,6 +762,19 @@ def score_detail(item: dict, now: datetime | None = None,
             and has_term(full, RURAL_WORDS, negations=False)):
         kind = "rural_plot"
         reasons.append("ruin on a farm — valued as land")
+
+    # Land: too small is not wanted at all; near Guarda is wanted most.
+    if kind in ("urban_plot", "rural_plot"):
+        if (item.get("country") or "PT") != "PT":
+            t = {**t, "rural_min_m2": max(t["rural_min_m2"], PLOT_MIN_ABROAD_M2)}
+        if area and area < t["rural_min_m2"]:
+            reasons.append(f"rejected: plot too small ({_ha(area)} < {_ha(t['rural_min_m2'])})")
+        guarda = item.get("guarda")
+        if guarda:
+            bonus = curve(guarda["km"], GUARDA_POINTS) * (0.8 if guarda.get("approx") else 1)
+            if bonus >= 1:
+                s += bonus
+                reasons.append(guarda["text"])
 
     if kind == "home":
         s += 10

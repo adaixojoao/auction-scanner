@@ -401,6 +401,20 @@ def nearest_beach(item: dict, path: str | None = None, towns: dict | None = None
     return _found(pos, best, "the beach") if best else None
 
 
+def distance_to_place(item: dict, lat: float, lon: float, name: str, towns: dict | None = None,
+                      max_km: float = 150) -> dict | None:
+    """{"km", "approx", "text"}: how far the property is from a given place
+    (Guarda, for land), from its own position or its town's."""
+    pos = _place(item, towns)
+    if not pos:
+        return None
+    km = distance_km(pos["lat"], pos["lon"], lat, lon)
+    if km > max_km:
+        return None
+    approx = pos.get("precision") not in EXACT_ENOUGH
+    return {"km": round(km, 1), "approx": approx, "text": f"{'about ' if approx else ''}{km_text(km)} from {name}"}
+
+
 def nearest_hub(item: dict, kind: str, path: str | None = None, towns: dict | None = None) -> dict | None:
     """The nearest airport ("airport") or long-distance train station ("station"),
     like nearest_beach."""
