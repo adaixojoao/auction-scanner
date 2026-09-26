@@ -306,6 +306,7 @@ def api_listing_detail():
         "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
         "description": (it.get("description") or "")[:4000],
         "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [],
+        "excellent": it.get("excellent"),
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),
         "how_to_find": listing_info.how_to_find(it),

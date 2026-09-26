@@ -638,7 +638,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """
     import geo
     import rounds
-    from scoring import GUARDA, categorize, property_kind, score_detail  # scoring imports common, not db
+    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail  # scoring imports common, not db
 
     now = now or utcnow()
     sql = "SELECT * FROM listings"
@@ -654,6 +654,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     towns = geo.town_index(db)     # where each municipality's town is, for "X km from town"
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     import outcomes
+    climate_on = climate.available()
     closes = outcomes.stats(db)    # what ended sales closed at, for "likely to close around"
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
 
@@ -698,13 +699,15 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["station"] = geo.nearest_hub(item, "station", towns=towns)
         item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
         item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
+        item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
         item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)
-        sc = max(0.0, min(100.0, rank))
+        sc = display_score(rank)
         item["score"] = sc
         item["rank"] = rank          # unclamped: orders listings that all reach 100
         item["reasons"] = reasons
+        item["excellent"] = excellent(item, sc, reasons)
         item["category"] = categorize(item)
         item["kind"] = property_kind(item) if item["category"] == "imoveis" else None
 

@@ -533,6 +533,22 @@ SERVIHABITAT_PROVINCES = (
 )
 
 
+_ARTICLE = re.compile(r"^(?:el|la|los|las|l'|els|les|o|a|os|as)$", re.I)
+
+
+def servihabitat_town(title: str) -> str | None:
+    """The town in "Casa en venta en C. Larga, 26, Campo De Peñaranda, El, Salamanca":
+    the part before the province, with a trailing article put back in front
+    ("El Campo De Peñaranda"); alone, "El" found a beach in Tarragona."""
+    parts = [p.strip() for p in title.split(",")]
+    if len(parts) < 3:
+        return None
+    town = parts[-2]
+    if _ARTICLE.match(town) and len(parts) >= 4:
+        town = f"{town} {parts[-3]}"
+    return town or None
+
+
 def parse_servihabitat_page(html: str, province: str) -> list[dict]:
     rows = []
     for a in BeautifulSoup(html, "html.parser").select("a.features[href]"):
@@ -548,11 +564,11 @@ def parse_servihabitat_page(html: str, province: str) -> list[dict]:
         title = (title_m.group(1) if title_m else text)[:200]
         item = a.find_parent("div", class_="product-item")                  # the card: photos and details
         img = item.select_one("img.img-car") if item else None
-        town = re.search(r",\s*([^,]+),\s*[^,]+$", title)
+        town = servihabitat_town(title)
         rows.append(make_listing(
             "servihabitat", m.group(1), "ES", title=title, description=text[:500], tipo="vivienda",
             area_m2=find_area(text), price=price, min_price=price, district=province,
-            concelho=town.group(1).strip() if town else None, url=href, base_url=SERVIHABITAT,
+            concelho=town, url=href, base_url=SERVIHABITAT,
             image_url=(img.get("data-src") or img.get("src")) if img else None,
         ))
     return rows

@@ -10,6 +10,7 @@ Occupancy/usufruct terms also ignore negated mentions ("não arrendado").
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime
 
@@ -128,7 +129,8 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 # the owner's time (Sept 2026). Plots near Guarda are the ones wanted most.
 PLOT_MIN_ABROAD_M2 = 25000
 GUARDA = (40.5373, -7.2676)
-GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]
+GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer scored (2026-09-26)
+UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
 # all year round, no fires, no floods. Heat is the mean daily maximum of the
@@ -673,7 +675,68 @@ def score(item: dict, now: datetime | None = None,
     with the reasons. `targets` are the config filters (rural_min_m2,
     rural_max_eur_m2); missing values use TARGET_DEFAULTS."""
     raw, reasons = score_detail(item, now, targets)
-    return max(0.0, min(100.0, raw)), reasons
+    return display_score(raw), reasons
+
+
+SOFT_TOP_FROM = 80.0     # up to here the score is the raw points
+SOFT_TOP_SPAN = 40.0     # above it the points count less and less: 100 is never quite reached
+
+
+def display_score(raw: float) -> float:
+    """The 0–100 score shown. Many listings pass 100 raw points; clamping them
+    all to 100 hid which was best, so the top is squeezed instead
+    (raw 100 → 88, 120 → 93, 160 → 97)."""
+    if raw <= SOFT_TOP_FROM:
+        return round(max(0.0, raw), 1)
+    room = 100.0 - SOFT_TOP_FROM
+    return round(SOFT_TOP_FROM + room * (1 - math.exp(-(raw - SOFT_TOP_FROM) / SOFT_TOP_SPAN)), 1)
+
+
+# ─── Excellent ───────────────────────────────────────────────────────
+# The owner looks for THE property, not a list of good ones: "excellent"
+# means every wish is met and checked, nothing taken on trust.
+EXCELLENT_MAX_PAY = 30000
+EXCELLENT_MAX_HOT_DAYS = 7
+EXCELLENT_MILD_SUMMER_C = 28.0   # warmest month's mean daily max, where the day count is missing
+EXCELLENT_WATER_KM = 1.0
+EXCELLENT_AIRPORT_KM = 80        # about an hour by road
+EXCELLENT_STATION_KM = 30
+
+
+def excellent(item: dict, score: float, reasons: list[str]) -> list[str] | None:
+    """What makes it excellent, or None when a wish is missing or unchecked."""
+    if score < 70 or any(r.startswith("rejected") for r in reasons):
+        return None
+    kind = property_kind(item)
+    if kind not in ("home", "rural_plot"):
+        return None
+    c = item.get("climate") or {}
+    days = (c.get("hot_days") or {}).get("rcp45_2071-2100")
+    summer = (c.get("heat") or {}).get("ssp245_2081-2100")
+    if days is None and summer is not None and summer <= EXCELLENT_MILD_SUMMER_C:
+        days = 0             # outside the European day-count grid (Azores): a mild summer is enough
+    if days is None or days > EXCELLENT_MAX_HOT_DAYS:
+        return None
+    pay = _pay(item)
+    likely = item.get("predicted_final")
+    if likely and likely["price"] > pay:
+        pay = likely["price"]
+    if not pay or pay > EXCELLENT_MAX_PAY:
+        return None
+    wet = c.get("water_km")
+    water = (wet is not None and wet <= EXCELLENT_WATER_KM) or any(r.startswith("next to water") for r in reasons)
+    if not water:
+        return None
+    airport, station = item.get("airport") or {}, item.get("station") or {}
+    access = (airport.get("km") or 999) <= EXCELLENT_AIRPORT_KM or (station.get("km") or 999) <= EXCELLENT_STATION_KM
+    if not access:
+        return None
+    if kind == "home" and any(r.startswith(("needs heavy work", "ruin", "abandoned", "degraded", "size unknown"))
+                              for r in reasons):
+        return None
+    if kind == "rural_plot" and not (item.get("area_m2") or find_area(item.get("title") or "")):
+        return None
+    return [f"{days:.0f} days above 35 °C by 2090", "water", "access", f"€{pay:,.0f}"]
 
 
 def curve(x: float, points: list[tuple[float, float]]) -> float:
@@ -789,19 +852,21 @@ def score_detail(item: dict, now: datetime | None = None,
 
     if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
         s += _climate_points(item["climate"], kind, reasons, caps)
+    elif kind in ("home", "urban_plot", "rural_plot") and item.get("unlocated"):
+        # Without a position the heat, water and fire checks cannot run: 8 of
+        # the top 15 were there only because nothing could be held against them.
+        caps.append(UNCHECKED_CAP)
+        reasons.append("location unknown — climate not checked")
 
-    # Land: too small is not wanted at all; near Guarda is wanted most.
+    # Land: too small is not wanted at all.
     if kind in ("urban_plot", "rural_plot"):
         if (item.get("country") or "PT") != "PT":
             t = {**t, "rural_min_m2": max(t["rural_min_m2"], PLOT_MIN_ABROAD_M2)}
         if kind == "rural_plot" and area and area < t["rural_min_m2"]:     # urban plots keep their own rules
             reasons.append(f"rejected: plot too small ({_ha(area)} < {_ha(t['rural_min_m2'])})")
-        guarda = item.get("guarda")
-        if guarda:
-            bonus = curve(guarda["km"], GUARDA_POINTS) * (0.8 if guarda.get("approx") else 1)
-            if bonus >= 1:
-                s += bonus
-                reasons.append(guarda["text"])
+        if kind == "rural_plot" and not area:
+            caps.append(UNCHECKED_CAP)
+            reasons.append("size unknown — confirm the area before it can rank")
 
     if kind == "home":
         s += 10
