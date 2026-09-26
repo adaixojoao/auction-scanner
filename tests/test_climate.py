@@ -92,3 +92,18 @@ def test_future_fire_danger(tmp_path, monkeypatch):
     calm, _ = score_detail(with_climate(PLOT, fire_danger={"high_days_2090": 10}))
     risky, reasons = score_detail(with_climate(PLOT, fire_danger={"high_days_2090": 90, "high_days_now": 60}))
     assert calm - risky >= 15 and "90 days a year of high fire danger by 2079-2098 (60 today) — Copernicus" in reasons
+
+
+def test_the_scan_stores_the_climate_and_the_list_only_reads_it(layers, db, add):
+    import json
+
+    from db import load_listings
+    add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
+        raw_json=json.dumps({"lat": 40.495, "lon": -7.405}))
+    items = [dict(r) for r in db.execute("SELECT * FROM listings")]
+    assert climate.assess_pending(db, items, {}) == 1
+    items = [dict(r) for r in db.execute("SELECT * FROM listings")]
+    assert climate.assess_pending(db, items, {}) == 0                  # up to date: not read again
+    listed = load_listings(db, filters={}, apply_min_score=False)[0]
+    assert listed["climate"]["heat"] == {"ssp245_2081-2100": 33.3}
+    assert any("33.3 °C summer max by 2081-2100" in r for r in listed["reasons"])

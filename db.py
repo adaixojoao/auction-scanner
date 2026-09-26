@@ -285,7 +285,8 @@ def _is_cut_copy(new: str | None, old: str | None) -> bool:
 
 # What the app found out itself (geo.py, photos.py, links.py): a source's fresh
 # raw data does not know it, so it is carried over.
-LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "eleiloes_id", "water_check", "cadastre_checked")
+LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "eleiloes_id", "water_check", "cadastre_checked",
+                    "climate")
 
 
 def _keep_learned(new: str | None, old: str | None) -> str | None:
@@ -696,10 +697,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
         item["station"] = geo.nearest_hub(item, "station", towns=towns)
         item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
-        try:
-            item["climate"] = climate.for_item(item, towns) if item.get("source") else None
-        except Exception:  # noqa: BLE001 — a broken layer must never hide the listings
-            item["climate"] = None
+        item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
         item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)

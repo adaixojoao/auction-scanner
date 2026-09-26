@@ -270,3 +270,58 @@ def for_item(item: dict, towns: dict | None = None) -> dict | None:
 
 def as_json(result: dict | None) -> str:
     return json.dumps(result or {}, ensure_ascii=False)
+
+
+# ─── Stored per listing ─────────────────────────────────────────────
+# Reading the layers takes ~0.1 s a place: fine once, far too slow for every
+# page load. The scan stores the result in raw["climate"] with the position
+# it was read at; load_listings only reads it back. A listing that moved
+# (a better position found later) or a rebuilt layer set is read again.
+
+VERSION = 1
+
+
+def _place_key(pos: dict) -> str:
+    return f"{pos['lat']:.3f},{pos['lon']:.3f}"
+
+
+def _layers_stamp() -> str:
+    try:
+        with open(os.path.join(_layers(), "built.json"), encoding="utf-8") as f:
+            return json.load(f).get("built", "")
+    except (OSError, ValueError):
+        return ""
+
+
+def stored(item: dict) -> dict | None:
+    """The climate stored for a listing by the scan, if any."""
+    import geo
+    return (geo._raw(item).get("climate") or {}).get("result")
+
+
+def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000) -> int:
+    """Read the climate layers for the listings whose stored result is missing
+    or out of date (moved, or the layers were rebuilt)."""
+    if not available():
+        return 0
+    import geo
+    stamp, done = _layers_stamp(), 0
+    for item in items:
+        if done >= limit:
+            break
+        pos = geo._place(item, towns)
+        if not pos:
+            continue
+        raw = geo._raw(item)
+        kept = raw.get("climate") or {}
+        if kept.get("at") == _place_key(pos) and kept.get("v") == VERSION and kept.get("layers") == stamp:
+            continue
+        result = assess(pos["lat"], pos["lon"]) or {}
+        result = {**result, "approx": pos.get("precision") not in geo.EXACT_ENOUGH} if result else None
+        raw["climate"] = {"at": _place_key(pos), "v": VERSION, "layers": stamp, "result": result}
+        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        done += 1
+        if done % 200 == 0:
+            db.commit()
+    db.commit()
+    return done
