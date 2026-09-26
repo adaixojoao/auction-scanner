@@ -27,7 +27,8 @@ sys.path.insert(0, HERE)
 
 from geo import TRANSPORT_FILE  # noqa: E402
 
-SERVERS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+SERVERS = ("https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass-api.de/api/interpreter",
+           "https://overpass.kumi.systems/api/interpreter")
 COUNTRIES = ("PT", "ES", "FR", "IT", "HR", "GR", "CY", "NL", "BE", "DE")
 COLUMNS = ("country", "kind", "lat", "lon", "name")
 LONG_DISTANCE = ("Alfa Pendular|Intercidades|AVE|Alvia|Avlo|Ouigo|Iryo|Euromed|Larga Distancia|TGV|inOui|"
@@ -37,13 +38,23 @@ LONG_DISTANCE = ("Alfa Pendular|Intercidades|AVE|Alvia|Avlo|Ouigo|Iryo|Euromed|L
 SMALL_FIELD = re.compile(r"^(aer[oó]dromo|a[eé]rodrome|flugplatz|segelflug|vliegveld|aviosuperficie|aeroclub)", re.I)
 
 
+# Rough boxes (south, west, north, east): train routes are looked up by box, which
+# the servers answer in seconds where "inside the country's border" times out.
+BOXES = {"PT": (36.9, -9.6, 42.2, -6.1), "ES": (35.9, -9.4, 43.8, 4.4), "FR": (41.3, -5.2, 51.2, 9.6),
+         "IT": (35.4, 6.6, 47.1, 18.6), "HR": (42.3, 13.4, 46.6, 19.5), "GR": (34.8, 19.3, 41.8, 29.7),
+         "CY": (34.5, 32.2, 35.8, 34.7), "NL": (50.7, 3.3, 53.6, 7.3), "BE": (49.5, 2.5, 51.5, 6.4),
+         "DE": (47.2, 5.8, 55.1, 15.1)}
+SERVICES = "long_distance|high_speed|intercity|national|international"
+
+
 def query(country: str, kind: str) -> str:
-    area = f'area["ISO3166-1"="{country}"][admin_level=2]->.a;'
     if kind == "airport":
-        return f'[out:json][timeout:300];{area}nwr["aeroway"="aerodrome"]["iata"](area.a);out center tags;'
-    # Few countries tag the service; the trains' names and networks say it too.
-    return (f'[out:json][timeout:300];{area}relation["route"="train"](area.a)->.all;'
-            '(relation.all["service"~"^(long_distance|high_speed|intercity)$"];'
+        return (f'[out:json][timeout:300];area["ISO3166-1"="{country}"][admin_level=2]->.a;'
+                'nwr["aeroway"="aerodrome"]["iata"](area.a);out center tags;')
+    s, w, n, e = BOXES[country]
+    # Few countries tag every service; the trains' names and networks say it too.
+    return (f'[out:json][timeout:300];relation["route"="train"]({s},{w},{n},{e})->.all;'
+            f'(relation.all["service"~"^({SERVICES})$"];'
             f'relation.all["name"~"{LONG_DISTANCE}",i];relation.all["network"~"{LONG_DISTANCE}",i];)->.r;'
             'node(r.r:"stop");out tags;node(r.r:"stop_exit_only");out tags;node(r.r:"stop_entry_only");out tags;')
 

@@ -22,7 +22,8 @@ sys.path.insert(0, HERE)
 
 from geo import BEACH_FILE  # noqa: E402
 
-SERVERS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+SERVERS = ("https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass-api.de/api/interpreter",
+           "https://overpass.kumi.systems/api/interpreter")
 COUNTRIES = ("PT", "ES", "FR", "IT", "HR", "GR", "CY", "NL", "BE", "DE")
 COLUMNS = ("country", "lat", "lon", "name")
 
