@@ -16,6 +16,12 @@ Parts:
          countries, from the EFFIS web feature service → layers/burnt_areas.gpkg.
 - water: WRI Aqueduct 4.0 sub-basins (baseline and 2050/2080 water stress,
          drought risk) cropped to Europe → layers/aqueduct_europe.gpkg.
+- firefuture: Copernicus "Fire danger indicators for Europe 1970-2098"
+         (EURO-CORDEX, multi-model mean): days a year with high and very high
+         fire danger and the seasonal FWI, 2041-2060 and 2079-2098, RCP4.5 and
+         RCP8.5, plus 1981-2000. Needs the owner's free Copernicus account: the
+         token in %USERPROFILE%\\.cdsapirc ("url: …" and "key: …" lines) and the
+         dataset's licence accepted on its page. The token is only sent to CDS.
 The JRC flood depth (100-year) and permanent water rasters are read as they
 are downloaded (jrc_flood/).
 """
@@ -151,6 +157,74 @@ def build_water(data_dir: str, out_dir: str) -> None:
         print(f"water: {layer}: {len(gdf)} sub-basins in Europe")
 
 
+CDS_DATASET = "sis-tourism-fire-danger-indicators"
+FIRE_FUTURE = [  # (experiment, period) — seasonal indicators come in these 20-year blocks
+    ("historical", "1981_2000"), ("rcp4_5", "2041_2060"), ("rcp4_5", "2079_2098"),
+    ("rcp8_5", "2041_2060"), ("rcp8_5", "2079_2098")]
+
+
+def _cds_credentials() -> tuple[str, str]:
+    path = os.path.join(os.path.expanduser("~"), ".cdsapirc")
+    url = key = None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            name, _, value = line.partition(":")
+            if name.strip() == "url":
+                url = value.strip()
+            elif name.strip() == "key":
+                key = value.strip()
+    if not url or not key:
+        raise SystemExit(f"{path} needs a 'url:' and a 'key:' line")
+    return url.rstrip("/"), key
+
+
+def cds_retrieve(request: dict, target: str) -> None:
+    """Ask the Copernicus Climate Data Store for one request and save the result."""
+    import requests
+    url, key = _cds_credentials()
+    headers = {"PRIVATE-TOKEN": key}
+    r = requests.post(f"{url}/retrieve/v1/processes/{CDS_DATASET}/execution", json={"inputs": request},
+                      headers=headers, timeout=120)
+    if r.status_code in (401, 403):
+        raise SystemExit(f"Copernicus refused the request ({r.status_code}): check the token in .cdsapirc and "
+                         f"that the licence is accepted on the dataset page. {r.text[:200]}")
+    r.raise_for_status()
+    job = r.json()["jobID"]
+    while True:
+        status = requests.get(f"{url}/retrieve/v1/jobs/{job}", headers=headers, timeout=60).json().get("status")
+        if status == "successful":
+            break
+        if status in ("failed", "rejected", "dismissed"):
+            detail = requests.get(f"{url}/retrieve/v1/jobs/{job}/results", headers=headers, timeout=60).text
+            raise RuntimeError(f"CDS job {status}: {detail[:300]}")
+        time.sleep(15)
+    href = requests.get(f"{url}/retrieve/v1/jobs/{job}/results", headers=headers,
+                        timeout=60).json()["asset"]["value"]["href"]
+    with requests.get(href, stream=True, timeout=600) as dl:
+        dl.raise_for_status()
+        with open(target, "wb") as f:
+            for chunk in dl.iter_content(1 << 20):
+                f.write(chunk)
+
+
+def build_fire_future(data_dir: str, out_dir: str) -> None:
+    folder = os.path.join(data_dir, "copernicus_fire")
+    os.makedirs(folder, exist_ok=True)
+    for experiment, period in FIRE_FUTURE:
+        target = os.path.join(folder, f"fire_{experiment}_{period}.zip")
+        if os.path.exists(target) and os.path.getsize(target) > 0:
+            print(f"firefuture {experiment} {period}: already downloaded")
+            continue
+        request = {"time_aggregation": "seasonal_indicators",
+                   "product_type": "multi_model_mean_case",
+                   "variable": ["number_of_days_with_high_fire_danger",
+                                "number_of_days_with_very_high_fire_danger", "seasonal_fire_weather_index"],
+                   "experiment": experiment, "period": period, "version": "v2_0"}
+        print(f"firefuture {experiment} {period}: asking Copernicus …", flush=True)
+        cds_retrieve(request, target)
+        print(f"firefuture {experiment} {period}: {os.path.getsize(target) / 1e6:.1f} MB", flush=True)
+
+
 def main(argv=None) -> int:
     parts = (argv if argv is not None else sys.argv[1:]) or ["heat", "fire", "water"]
     data_dir = climate.data_dir()
@@ -162,6 +236,8 @@ def main(argv=None) -> int:
         build_fire(out_dir)
     if "water" in parts:
         build_water(data_dir, out_dir)
+    if "firefuture" in parts:
+        build_fire_future(data_dir, out_dir)
     with open(os.path.join(out_dir, "built.json"), "w", encoding="utf-8") as f:
         json.dump({"parts": parts, "built": time.strftime("%Y-%m-%d %H:%M")}, f)
     return 0
