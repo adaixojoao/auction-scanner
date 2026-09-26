@@ -8,7 +8,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_area, find_price, make_listing, make_session, parse_date_dmy,
+from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number)
 from db import upsert_listing
 from sources import SourceUnavailable, register
@@ -743,4 +743,73 @@ def scrape_aliseda(db, max_price: float = 50000, **_):
                 break
             time.sleep(0.4)
     LOG.info(f"Aliseda: {total} listings")
+    return total
+
+
+# ─── Altamira (bank and fund repossessions, doValue) ────────────────
+# The site's own results service: price, map position and the owner, 100 a
+# page. Homes (tipología 1) and land (9) within budget, all Spain.
+ALTAMIRA_API = "https://www.altamirainmuebles.com/nodejs/getResultados"
+ALTAMIRA_SITE = "https://www.altamirainmuebles.com"
+ALTAMIRA_TYPES = {1: "vivienda", 9: "terreno"}
+ALTAMIRA_PAGE = 100
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", normalize(text or "")).strip("-")
+
+
+def parse_altamira(card: dict, tipo: str) -> dict | None:
+    price = card.get("precio")
+    if not card.get("referencia") or not price or card.get("preciovisible") == 0:
+        return None
+    kind = card.get("tipologia") or ("Suelo" if tipo == "terreno" else "Vivienda")
+    town = card.get("poblacion") or card.get("poblacionurl")
+    raw = {"sociedad": card.get("sociedadpropietaria"), "riesgo_ocupacion": card.get("riesgoocupacion")}
+    if card.get("latitud") and card.get("longitud"):
+        raw["geo"] = {"lat": float(card["latitud"]), "lon": float(card["longitud"]), "precision": "street"}
+    if card.get("riesgoocupacion"):
+        raw["occupation"] = "occupied"
+    url = (f"{ALTAMIRA_SITE}/venta-de-{_slug(kind)}/{_slug(card.get('provinciaurl'))}/{_slug(card.get('poblacionurl'))}"
+           f"/segunda-mano/{card['referencia']}/{card.get('cinmueble')}/1")
+    street = card.get("calle") or ""
+    return make_listing(
+        "altamira", card["referencia"], "ES", title=f"{kind} en {town}" + (f", {street}" if street else ""),
+        description=" · ".join(str(x) for x in (kind, street, card.get("cp"), town, card.get("provinciaurl"),
+                                                f"{card['numhab']} habs" if card.get("numhab") else None) if x),
+        tipo=tipo, area_m2=card.get("superficie") or None, price=float(price), min_price=float(price),
+        district=card.get("provinciaurl"), concelho=town, url=url,
+        raw_json=json.dumps(raw, ensure_ascii=False),
+    )
+
+
+@register("altamira", "ES")
+def scrape_altamira(db, max_price: float = 50000, **_):
+    """altamira — bank and fund repossessions (homes and land) with map positions."""
+    session = make_session(timeout=30)
+    total = 0
+    for code, tipo in ALTAMIRA_TYPES.items():
+        page, seen = 1, 0
+        while True:
+            body = {"buscador": {"idGestion": 1, "idTipologia": code, "idProvincia": None, "idPoblacion": None},
+                    "filtros": {"precioMaximo": int(max_price), "order": 1, "pagina": page,
+                                "limite": str(ALTAMIRA_PAGE), "cntxParamSubastasActivo": "1",
+                                "cntxParamSubastasSarebActivo": "1", "cntxParamSubastasCodSocsAAM": "1,2,7",
+                                "modoVisualizacion": "L"}, "user": None}
+            resp = session.post(ALTAMIRA_API, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+            cards = data.get("minifichas") or []
+            for card in cards:
+                row = parse_altamira(card, tipo)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            seen += len(cards)
+            if not cards or seen >= int(data.get("totalResultados") or 0) or page >= 50:
+                break
+            page += 1
+            time.sleep(0.4)
+    LOG.info(f"Altamira: {total} listings")
     return total

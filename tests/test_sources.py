@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 42
+    assert len(REGISTRY) == 43
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -506,4 +506,28 @@ def test_aliseda_gives_price_position_and_possession(db, fake_http):
     assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
     assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000"}
     item = next(i for i in load_listings(db, include_hidden=True))
+    assert geo.position(item)["precision"] == "street"
+
+
+ALTAMIRA_CARD = {"referencia": "01402631", "cinmueble": 157785, "precio": 30000, "preciovisible": -1,
+                 "latitud": 43.52, "longitud": -5.66, "provinciaurl": "Asturias", "poblacionurl": "Gijon",
+                 "poblacion": "Gijon", "calle": "POLLA, 12", "cp": "33900", "numhab": 3, "superficie": 85,
+                 "tipologia": "Chalet", "riesgoocupacion": None, "sociedadpropietaria": "SUBASTAS ATLAS"}
+
+
+def test_altamira_gives_price_position_and_link(db, fake_http):
+    import geo
+    from db import load_listings
+    from sources.es import parse_altamira, scrape_altamira
+    row = parse_altamira(ALTAMIRA_CARD, "vivienda")
+    assert row["id"] == "altamira:01402631" and row["price"] == 30000 and row["area_m2"] == 85
+    assert row["url"] == "https://www.altamirainmuebles.com/venta-de-chalet/asturias/gijon/segunda-mano/01402631/157785/1"
+    assert json.loads(row["raw_json"])["geo"]["lat"] == 43.52
+    risky = parse_altamira({**ALTAMIRA_CARD, "riesgoocupacion": "ALTO"}, "vivienda")
+    assert json.loads(risky["raw_json"])["occupation"] == "occupied"
+    session = fake_http(lambda m, url, kw: FakeResponse(json_data={"totalResultados": "1",
+                                                                    "minifichas": [ALTAMIRA_CARD]}))
+    assert scrape_altamira(db, max_price=50000) == 2               # homes and land (same fake card)
+    assert session.calls[0][2]["json"]["filtros"]["precioMaximo"] == 50000
+    item = load_listings(db, include_hidden=True)[0]
     assert geo.position(item)["precision"] == "street"
