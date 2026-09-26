@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 40
+    assert len(REGISTRY) == 42
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -22,7 +22,8 @@ def test_registry_is_complete():
                         "veilingbiljet"}                  # the same lots as openbareverkoop.nl
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"BE", "CY", "GR", "RO"}
+    # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"BE", "CY", "GR", "RO"} | {"EU"}
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name
@@ -478,3 +479,31 @@ def test_eleiloes_observations_join_the_description():
     assert fields["description"] == "Observações: Devoluto."
     fields, _ = eleiloes_detail_fields({"descricao": "Moradia"})
     assert fields["description"] == "Moradia"
+
+
+ALISEDA_ITEM = {
+    "id": "ant00038780217", "ConstructedArea": 54, "SuperficieTotal": 54, "SupParcela": 0, "posesion": "LIBRE",
+    "RefCatastral": "B00301100TN69G0001XA", "provinciaUrl": "asturias", "Imagen": "https://img/a.jpg",
+    "Description": "Vivienda ubicada en Ribera de Arriba, Asturias. 54 m² construidos, 2 habitaciones.",
+    "address": {"Ciudad": "RIBERA DE ARRIBA", "TipoVia": "lugar", "StreetName": "LA MORTERA", "StreetNumber": "11",
+                "Latitude": 43.298261614, "Longitude": -5.933324171},
+    "operacion": {"Precio": 28300, "PrecioAnterior": 30995}, "imagenes": [{"Uri": "https://img/1.jpg"}],
+}
+
+
+def test_aliseda_gives_price_position_and_possession(db, fake_http):
+    from db import load_listings
+    import geo
+    from sources.es import parse_aliseda, scrape_aliseda
+    row = parse_aliseda(ALISEDA_ITEM, "vivienda")
+    assert row["id"] == "aliseda:ant00038780217" and row["price"] == 28300 and row["area_m2"] == 54
+    assert row["concelho"] == "Ribera De Arriba" and row["district"] == "Asturias"
+    raw = json.loads(row["raw_json"])
+    assert raw["occupation"] == "vacant" and raw["geo"]["lat"] == 43.298261614
+    taken = parse_aliseda({**ALISEDA_ITEM, "posesion": "OCUPADO"}, "vivienda")
+    assert json.loads(taken["raw_json"])["occupation"] == "occupied"
+    session = fake_http(lambda m, url, kw: FakeResponse(json_data={"data": [ALISEDA_ITEM], "last_page": 1}))
+    assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
+    assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000"}
+    item = next(i for i in load_listings(db, include_hidden=True))
+    assert geo.position(item)["precision"] == "street"

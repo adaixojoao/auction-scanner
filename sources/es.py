@@ -680,3 +680,67 @@ def scrape_subastasactivas(db, max_price: float = 100000, **_):
         ))
         total += 1
     return total
+
+
+# ─── Aliseda (Santander's repossessions) ────────────────────────────
+# The site's own search API: price, the map position, the full text and who
+# holds it, 12 a page. Homes (tipo 10) and land (tipo 8) within budget, all Spain.
+ALISEDA_API = "https://laravel.alisedainmobiliaria.com/api/v2/new-search"
+ALISEDA_SITE = "https://www.alisedainmobiliaria.com"
+ALISEDA_TYPES = {10: "vivienda", 8: "terreno"}
+ALISEDA_MAX_PAGES = 80
+
+
+def parse_aliseda(item: dict, tipo: str) -> dict | None:
+    op = item.get("operacion") or {}
+    addr = item.get("address") or {}
+    price = op.get("Precio")
+    if not item.get("id") or not price:
+        return None
+    town = (addr.get("Ciudad") or "").title() or None
+    street = " ".join(str(x) for x in (addr.get("TipoVia"), addr.get("StreetName"), addr.get("StreetNumber")) if x)
+    area = item.get("SupParcela") or item.get("SuperficieTotal") if tipo == "terreno" else \
+        item.get("ConstructedArea") or item.get("SuperficieTotal")
+    raw = {"posesion": item.get("posesion"), "referencia_catastral": item.get("RefCatastral") or None,
+           "precio_anterior": op.get("PrecioAnterior")}
+    if addr.get("Latitude") and addr.get("Longitude"):
+        raw["geo"] = {"lat": float(addr["Latitude"]), "lon": float(addr["Longitude"]), "precision": "street"}
+    posesion = (item.get("posesion") or "").upper()
+    if posesion.startswith("LIBRE"):
+        raw["occupation"] = "vacant"
+    elif "OCUPA" in posesion or "SIN POSES" in posesion or "ARREND" in posesion:
+        raw["occupation"] = "occupied"
+    title = f"{'Terreno' if tipo == 'terreno' else 'Vivienda'} en {town or ''}" + (f", {street}" if street else "")
+    images = item.get("imagenes") or []
+    return make_listing(
+        "aliseda", item["id"], "ES", title=title[:200],
+        description=(item.get("Description") or "")[:3000] or None, tipo=tipo,
+        area_m2=area or None, price=float(price), min_price=float(price),
+        district=(item.get("provinciaUrl") or "").replace("-", " ").title() or None, concelho=town,
+        url=f"{ALISEDA_SITE}/inmueble/{item['id']}",
+        image_url=images[0].get("Uri") if images else item.get("Imagen"),
+        raw_json=json.dumps(raw, ensure_ascii=False),
+    )
+
+
+@register("aliseda", "ES")
+def scrape_aliseda(db, max_price: float = 50000, **_):
+    """aliseda — Santander's repossessed homes and land, with map positions."""
+    session = make_session(timeout=30)
+    total = 0
+    for code, tipo in ALISEDA_TYPES.items():
+        for page in range(1, ALISEDA_MAX_PAGES + 1):
+            resp = session.get(ALISEDA_API, params={"tipo": code, "precio": f"0-{int(max_price)}", "page": page})
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("data") or []:
+                row = parse_aliseda(item, tipo)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            if page >= (data.get("last_page") or 1):
+                break
+            time.sleep(0.4)
+    LOG.info(f"Aliseda: {total} listings")
+    return total
