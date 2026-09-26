@@ -121,6 +121,51 @@ def _ms_date(value) -> str | None:
     return datetime.fromtimestamp(int(m.group(0)) / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
+# ─── What Dutch auctions really sold for ─────────────────────────────
+# Dutch notarial auctions give no starting price, so the best guide to what a
+# house will go for is what the ones nearby went for. openbareverkoop.nl keeps a
+# year of results: the last bid ("afslag") of each lot. Kept in the kv table as
+# NL_RESULTS_KEY and shown on a Dutch listing's page (listing_info.past_results).
+
+NL_RESULTS_KEY = "nl_results"
+NL_RESULTS_DAYS = 365
+_SOLD = ("Gegund", "Gesloten", "Veiling")      # "Niet Gegund": the seller refused the bid
+
+
+def parse_nl_results(data: dict, now: datetime | None = None) -> list[dict]:
+    """The lots of openbareverkoop's results view that have a final bid."""
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for zitting in data.get("results", []):
+        for regio in zitting.get("objectenPerRegio", []):
+            for obj in regio.get("objects", []):
+                price = parse_price(obj.get("afslag") or "")
+                date = _ms_date(obj.get("zittingdatum"))
+                if not price or obj.get("status") not in _SOLD or not date or date > now.strftime("%Y-%m-%dT%H:%M:%S"):
+                    continue
+                name = obj.get("kavelNaam") or ""
+                out.append({"name": name, "town": name.rpartition(",")[2].strip().title() or None,
+                            "type": obj.get("woningtype") or "", "price": price, "date": date[:10],
+                            "lat": obj.get("lat"), "lon": obj.get("lng"), "status": obj.get("status"),
+                            "url": safe_url("https://www.openbareverkoop.nl" + obj["url"]) if obj.get("url") else None})
+    return out
+
+
+def fetch_nl_results(db, session, now: datetime | None = None) -> int:
+    from datetime import timedelta
+    from db import set_kv
+    now = now or datetime.now(timezone.utc)
+    resp = session.post("https://www.openbareverkoop.nl/kavels/searchresults", data={
+        "text": "", "view": "resultaten", "periode": "vantot", "woningtype": "",
+        "Van": (now - timedelta(days=NL_RESULTS_DAYS)).strftime("%d-%m-%Y"), "TotEnMet": now.strftime("%d-%m-%Y")})
+    resp.raise_for_status()
+    results = parse_nl_results(resp.json(), now)
+    if results:
+        set_kv(db, NL_RESULTS_KEY, json.dumps(results, ensure_ascii=False))
+    LOG.info(f"openbareverkoop.nl: {len(results)} auction results of the last year")
+    return len(results)
+
+
 def netherlands_listing(obj: dict, base: str = "https://www.openbareverkoop.nl") -> dict | None:
     eid = str(obj.get("id", "") or "")
     if not eid:
@@ -171,6 +216,10 @@ def scrape_netherlands(db, max_price: float = 50000, **_):
     for row in rows:
         upsert_listing(db, row)
     db.commit()
+    try:
+        fetch_nl_results(db, session)
+    except Exception as e:  # noqa: BLE001: the sales still count without the results
+        LOG.warning(f"openbareverkoop.nl results failed ({type(e).__name__})")
     return len(rows)
 
 

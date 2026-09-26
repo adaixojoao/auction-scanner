@@ -297,6 +297,7 @@ def api_listing_detail():
             return jsonify({"error": "no such listing"}), 404
         it = found[0]
         related = listing_info.related(db, it)
+        results = listing_info.past_results(db, it)
         lots = listing_info.same_case_lots(db, it)
     finally:
         db.close()
@@ -305,7 +306,7 @@ def api_listing_detail():
         "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
         "description": (it.get("description") or "")[:4000],
         "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [],
-        "facts": listing_info.facts(it), "related": related, "same_case": lots,
+        "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),

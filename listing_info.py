@@ -125,6 +125,43 @@ def _coords(item: dict, raw: dict):
     return (lat, lon) if lat and lon and -90 <= lat <= 90 and -180 <= lon <= 180 else None
 
 
+def past_results(db, item: dict, km: float = 25, wide_km: float = 50) -> dict | None:
+    """What auctions near a Dutch listing sold for in the last year (the final
+    bid on openbareverkoop.nl): {"km", "count", "median", "low", "high", "lots"}.
+    Looks 25 km around, then 50; None outside the Netherlands or without a position."""
+    import json as _json
+    from statistics import median
+
+    import geo
+    from db import get_kv
+    from sources.nl import NL_RESULTS_KEY
+    if (item.get("country") or "").upper() != "NL":
+        return None
+    here = _coords(item, raw_of(item))
+    if not here:
+        return None
+    try:
+        results = _json.loads(get_kv(db, NL_RESULTS_KEY) or "[]")
+    except ValueError:
+        return None
+    near = []
+    for r in results:
+        try:
+            d = geo.distance_km(here[0], here[1], float(r["lat"]), float(r["lon"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        if d <= wide_km:
+            near.append({**r, "km": round(d, 1)})
+    for radius in (km, wide_km):
+        found = sorted((r for r in near if r["km"] <= radius), key=lambda r: r["km"])
+        if found:
+            prices = [r["price"] for r in found]
+            return {"km": radius, "count": len(found), "median": median(prices), "low": min(prices),
+                    "high": max(prices),
+                    "lots": [{k: r.get(k) for k in ("name", "type", "price", "date", "km", "url")} for r in found[:5]]}
+    return None
+
+
 def street_view(item: dict, google_key: str = "") -> dict | None:
     """Street View and the satellite view where the listing is (geo.py)."""
     import geo

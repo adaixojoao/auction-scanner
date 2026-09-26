@@ -208,6 +208,11 @@ function detailsHtml(d) {
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${costsHtml(d.costs)}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
+      ${d.past_results ? `<div class="d-lots"><b>What auctions within ${d.past_results.km} km sold for</b>
+        <span class="small muted">(last year, final bid: ${d.past_results.count} lots, median ${AS.money(d.past_results.median)},
+        ${AS.money(d.past_results.low)}\u2013${AS.money(d.past_results.high)})</span><ul>${
+        d.past_results.lots.map(l => `<li>${AS.money(l.price)} · ${AS.esc(l.date)} · ${l.km} km — ${
+          l.url ? AS.link(l.url, l.name) : AS.esc(l.name)}${l.type ? ` <span class="small muted">(${AS.esc(l.type)})</span>` : ""}</li>`).join("")}</ul></div>` : ""}
       ${(d.same_case || []).length ? `<div class="d-lots"><b>Also sold in this case</b> <span class="small muted">(buying together can make sense: a house and the plot next to it)</span><ul>${
         d.same_case.map(l => `<li>${AS.money(l.price)}${l.area ? ` · ${Math.round(l.area).toLocaleString("de-DE")} m²` : ""} — ${AS.esc(l.title)}</li>`).join("")}</ul></div>` : ""}
       ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
