@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 45
+    assert len(REGISTRY) == 46
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -595,3 +595,27 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     assert scrape_fotocasa(db, max_price=50000) == 4 * len(FOTOCASA_PROVINCES)
     land = [c for c in session.calls if "/terrenos/" in c[1]]
     assert all(c[2]["params"] == {"maxPrice": 50000, "minSurface": 10000} for c in land)
+
+
+BIENICI_AD = {"id": "ag1-2", "propertyType": "house", "price": 42000, "city": "Huelgoat", "postalCode": "29690",
+              "departmentCode": "29", "surfaceArea": 90, "landSurfaceArea": 1500, "title": "Longère",
+              "description": "Longère en pierre au bord de la rivière.", "isInTourismResidence": False,
+              "blurInfo": {"type": "exact", "position": {"lat": 48.36, "lon": -3.74}},
+              "photos": [{"url": "https://file.bienici.com/photo/1.jpg"}]}
+
+
+def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
+    import sources.fr
+    from sources.fr import parse_bienici, scrape_bienici
+    monkeypatch.setattr(sources.fr.time, "sleep", lambda s: None)
+    row = parse_bienici(BIENICI_AD)
+    assert row["id"] == "bienici:ag1-2" and row["price"] == 42000 and row["area_m2"] == 90
+    assert row["url"] == "https://www.bienici.com/annonce/ag1-2" and "terrain 1500 m²" in row["description"]
+    assert json.loads(row["raw_json"])["geo"] == {"lat": 48.36, "lon": -3.74, "precision": "street"}
+    assert parse_bienici({**BIENICI_AD, "isInTourismResidence": True}) is None
+    land = parse_bienici({**BIENICI_AD, "propertyType": "terrain", "landSurfaceArea": 20000})
+    assert land["tipo"] == "terrain" and land["area_m2"] == 20000
+    session = fake_http(lambda m, url, kw: FakeResponse(json_data={"total": 1, "realEstateAds": [BIENICI_AD]}))
+    assert scrape_bienici(db, max_price=50000) == 2
+    sent = [json.loads(c[2]["params"]["filters"]) for c in session.calls]
+    assert sent[1]["propertyType"] == ["terrain"] and sent[1]["minArea"] == 10000 and sent[0]["maxPrice"] == 50000

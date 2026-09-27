@@ -197,3 +197,69 @@ ENCHERES_PUBLIQUES = CardSite(
 def scrape_encheres_publiques(db, max_price: float = 100000, **_):
     """encheres-publiques.com — French judicial property auctions."""
     return scrape_cards(db, ENCHERES_PUBLIQUES, max_price)
+
+
+# ─── Bien'ici: a big French portal with an open search service ─────
+# Not auctions: agents' asking prices. Houses within budget across France and
+# land from 1 ha, 100 a page, with the text and the map position. Residences
+# de tourisme (leaseback flats sold as "houses") are skipped: not a home.
+BIENICI = "https://www.bienici.com"
+BIENICI_SEARCHES = (("house", None), ("terrain", 10000))
+BIENICI_PAGE = 100
+BIENICI_MAX_PAGES = 60
+
+
+def parse_bienici(ad: dict) -> dict | None:
+    price = ad.get("price")
+    if isinstance(price, list):
+        price = min(price) if price else None
+    if not ad.get("id") or not price or ad.get("isInTourismResidence"):
+        return None
+    land = ad.get("propertyType") == "terrain"
+    blur = ad.get("blurInfo") or {}
+    pos = blur.get("position") or {}
+    raw: dict = {"land_m2": ad.get("landSurfaceArea")}
+    if pos.get("lat") and pos.get("lon"):
+        raw["geo"] = {"lat": float(pos["lat"]), "lon": float(pos["lon"]),
+                      "precision": "street" if blur.get("type") == "exact" else "village"}
+    photos = ad.get("photos") or []
+    town = ad.get("city")
+    kind = "Terrain" if land else "Maison"
+    extra = f" · terrain {ad['landSurfaceArea']:.0f} m²" if ad.get("landSurfaceArea") and not land else ""
+    return make_listing(
+        "bienici", ad["id"], "FR", title=f"{kind} à {town}" + (f" ({ad.get('postalCode')})" if ad.get("postalCode") else ""),
+        description=((ad.get("title") or "") + " · " + (ad.get("description") or "") + extra)[:3000].strip(" ·"),
+        tipo="terrain" if land else "maison",
+        area_m2=(ad.get("landSurfaceArea") or ad.get("surfaceArea")) if land else ad.get("surfaceArea"),
+        price=float(price), min_price=float(price), district=ad.get("departmentCode"), concelho=town,
+        url=f"{BIENICI}/annonce/{ad['id']}", image_url=photos[0].get("url") if photos else None,
+        raw_json=json.dumps(raw, ensure_ascii=False),
+    )
+
+
+@register("bienici", "FR")
+def scrape_bienici(db, max_price: float = 50000, **_):
+    """bienici — houses and land (1 ha+) from agents across France, with map positions."""
+    session = make_session(timeout=30)
+    total = 0
+    for kind, min_area in BIENICI_SEARCHES:
+        for page in range(BIENICI_MAX_PAGES):
+            filters = {"size": BIENICI_PAGE, "from": page * BIENICI_PAGE, "filterType": "buy",
+                       "propertyType": [kind], "maxPrice": int(max_price), "onTheMarket": [True]}
+            if min_area:
+                filters["minArea"] = min_area
+            resp = session.get(f"{BIENICI}/realEstateAds.json", params={"filters": json.dumps(filters)})
+            resp.raise_for_status()
+            data = resp.json()
+            ads = data.get("realEstateAds") or []
+            for ad in ads:
+                row = parse_bienici(ad)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            if not ads or (page + 1) * BIENICI_PAGE >= int(data.get("total") or 0):
+                break
+            time.sleep(0.5)
+    LOG.info(f"Bien'ici: {total} listings")
+    return total
