@@ -364,6 +364,9 @@ def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: st
     db.commit()
 
 
+RELISTING_SOURCES = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira"}
+
+
 def mark_duplicates(db: sqlite3.Connection) -> int:
     """Flag cross-source near-duplicates (same country + concelho, price within
     €500, area within 5 m²). The most complete row stays visible; the others get
@@ -390,8 +393,14 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
             if keeper["id"] in dup_of:
                 continue
             for other in group[i + 1:]:
-                if other["id"] in dup_of or other["source"] == keeper["source"]:
+                if other["id"] in dup_of:
                     continue
+                if other["source"] == keeper["source"]:
+                    # Portals re-post the same house under a new id: the same price
+                    # and size there is the same house. Courts sell twin lots.
+                    if not (keeper["source"] in RELISTING_SOURCES and other["price"] == keeper["price"]
+                            and other["area_m2"] == keeper["area_m2"]):
+                        continue
                 if (abs(other["price"] - keeper["price"]) < 500
                         and abs(other["area_m2"] - keeper["area_m2"]) < 5):
                     dup_of[other["id"]] = keeper["id"]

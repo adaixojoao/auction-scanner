@@ -131,6 +131,16 @@ def test_duplicates_are_flagged_not_deleted(db, add):
     assert mark_duplicates(db) == 1
 
 
+def test_a_portal_relisting_is_a_duplicate_but_court_twin_lots_are_not(db, add):
+    add("fotocasa", "1", "ES", title="Vivienda en Ferrol", price=19000, area_m2=87, concelho="Ferrol")
+    add("fotocasa", "2", "ES", title="Vivienda en Ferrol", price=19000, area_m2=87, concelho="Ferrol")
+    add("citius", "x", title="Fracção A", price=19000, area_m2=87, concelho="Guarda")
+    add("citius", "y", title="Fracção B", price=19000, area_m2=87, concelho="Guarda")
+    assert mark_duplicates(db) == 1
+    flagged = db.execute("SELECT id FROM listings WHERE duplicate_of IS NOT NULL").fetchone()[0]
+    assert flagged.startswith("fotocasa:")
+
+
 def test_source_health_states(db):
     record_scrape(db, "good", count=5, status="ok")
     record_scrape(db, "was_good", count=3, status="ok", timestamp="2026-01-01T00:00:00+00:00")
