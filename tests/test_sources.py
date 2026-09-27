@@ -613,9 +613,11 @@ def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
     assert row["url"] == "https://www.bienici.com/annonce/ag1-2" and "terrain 1500 m²" in row["description"]
     assert json.loads(row["raw_json"])["geo"] == {"lat": 48.36, "lon": -3.74, "precision": "street"}
     assert parse_bienici({**BIENICI_AD, "isInTourismResidence": True}) is None
+    assert parse_bienici({**BIENICI_AD, "price": [None, 38000]})["price"] == 38000
     land = parse_bienici({**BIENICI_AD, "propertyType": "terrain", "landSurfaceArea": 20000})
     assert land["tipo"] == "terrain" and land["area_m2"] == 20000
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"total": 1, "realEstateAds": [BIENICI_AD]}))
-    assert scrape_bienici(db, max_price=50000) == 2
+    assert scrape_bienici(db, max_price=50000) == 4          # houses in 3 price bands, then land
     sent = [json.loads(c[2]["params"]["filters"]) for c in session.calls]
-    assert sent[1]["propertyType"] == ["terrain"] and sent[1]["minArea"] == 10000 and sent[0]["maxPrice"] == 50000
+    assert [(f["minPrice"], f["maxPrice"]) for f in sent[:3]] == [(0, 25000), (25000, 37500), (37500, 50000)]
+    assert sent[3]["propertyType"] == ["terrain"] and sent[3]["minArea"] == 10000

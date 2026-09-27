@@ -212,7 +212,7 @@ BIENICI_MAX_PAGES = 60
 def parse_bienici(ad: dict) -> dict | None:
     price = ad.get("price")
     if isinstance(price, list):
-        price = min(price) if price else None
+        price = min((p for p in price if isinstance(p, (int, float))), default=None)   # a range of lots
     if not ad.get("id") or not price or ad.get("isInTourismResidence"):
         return None
     land = ad.get("propertyType") == "terrain"
@@ -242,24 +242,31 @@ def scrape_bienici(db, max_price: float = 50000, **_):
     """bienici — houses and land (1 ha+) from agents across France, with map positions."""
     session = make_session(timeout=30)
     total = 0
+    # The service stops at 2,400 results a search: houses are asked in price bands.
+    bands = [(0, max_price / 2), (max_price / 2, max_price * 0.75), (max_price * 0.75, max_price)]
     for kind, min_area in BIENICI_SEARCHES:
-        for page in range(BIENICI_MAX_PAGES):
-            filters = {"size": BIENICI_PAGE, "from": page * BIENICI_PAGE, "filterType": "buy",
-                       "propertyType": [kind], "maxPrice": int(max_price), "onTheMarket": [True]}
-            if min_area:
-                filters["minArea"] = min_area
-            resp = session.get(f"{BIENICI}/realEstateAds.json", params={"filters": json.dumps(filters)})
-            resp.raise_for_status()
-            data = resp.json()
-            ads = data.get("realEstateAds") or []
-            for ad in ads:
-                row = parse_bienici(ad)
-                if row and row["price"] <= max_price:
-                    upsert_listing(db, row)
-                    total += 1
-            db.commit()
-            if not ads or (page + 1) * BIENICI_PAGE >= int(data.get("total") or 0):
-                break
-            time.sleep(0.5)
+        for low, high in bands if kind == "house" else [(0, max_price)]:
+            for page in range(BIENICI_MAX_PAGES):
+                filters = {"size": BIENICI_PAGE, "from": page * BIENICI_PAGE, "filterType": "buy",
+                           "propertyType": [kind], "minPrice": int(low), "maxPrice": int(high),
+                           "onTheMarket": [True]}
+                if min_area:
+                    filters["minArea"] = min_area
+                resp = session.get(f"{BIENICI}/realEstateAds.json", params={"filters": json.dumps(filters)})
+                if resp.status_code == 400 and page:
+                    LOG.info(f"Bien'ici {kind} {low:.0f}-{high:.0f}: stopped at {page * BIENICI_PAGE}")
+                    break
+                resp.raise_for_status()
+                data = resp.json()
+                ads = data.get("realEstateAds") or []
+                for ad in ads:
+                    row = parse_bienici(ad)
+                    if row and row["price"] <= max_price:
+                        upsert_listing(db, row)
+                        total += 1
+                db.commit()
+                if not ads or (page + 1) * BIENICI_PAGE >= int(data.get("total") or 0):
+                    break
+                time.sleep(0.5)
     LOG.info(f"Bien'ici: {total} listings")
     return total
