@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 44
+    assert len(REGISTRY) == 45
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -561,3 +561,37 @@ def test_imovirtual_reads_the_page_data(db, fake_http, monkeypatch):
     assert scrape_imovirtual(db, max_price=50000) == 2 * len(IMOVIRTUAL_PLACES)
     land = [c for c in session.calls if "/terreno/" in c[1]]
     assert land and all(c[2]["params"]["areaMin"] == 10000 and c[2]["params"]["priceMax"] == 50000 for c in land)
+
+
+FOTOCASA_AD = {"id": 187909805, "rawPrice": 45000, "accuracy": False, "isOccupied": False,
+               "buildingSubtype": "House_Chalet", "location": "ALTO DE URBIES, Zona Rural",
+               "description": "Casa en una parcela de 200 m², 80 m² construidos, junto al río.",
+               "address": {"municipality": "Mieres (Asturias)", "province": "Asturias"},
+               "coordinates": {"latitude": 43.2146, "longitude": -5.6698},
+               "features": [{"key": "surface", "value": 87}, {"key": "rooms", "value": 2}],
+               "detail": {"es-ES": "/es/comprar/vivienda/mieres-(asturias)/parking-amueblado/187909805/d"},
+               "multimedia": [{"type": "image", "src": "https://static.fotocasa.es/a.jpg"}]}
+
+
+def _fotocasa_html(ads, count):
+    props = {"counters": {"realEstates": count}, "initialSearch": {"result": {"realEstates": ads}}}
+    return f'<html><script id="__initial_props__" type="application/json">{json.dumps(props)}</script></html>'
+
+
+def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
+    import sources.es
+    from sources.es import FOTOCASA_PROVINCES, parse_fotocasa, scrape_fotocasa
+    monkeypatch.setattr(sources.es.time, "sleep", lambda s: None)
+    row = parse_fotocasa(FOTOCASA_AD, "vivienda")
+    assert row["id"] == "fotocasa:187909805" and row["price"] == 45000 and row["area_m2"] == 87
+    assert row["concelho"] == "Mieres" and row["title"].startswith("Casa en Mieres")
+    assert row["image_url"] == "https://static.fotocasa.es/a.jpg"
+    assert json.loads(row["raw_json"])["geo"]["precision"] == "village"
+    taken = parse_fotocasa({**FOTOCASA_AD, "isOccupied": True}, "vivienda")
+    assert json.loads(taken["raw_json"])["occupation"] == "occupied"
+    # two pages of one ad each, then done
+    pages = {1: _fotocasa_html([FOTOCASA_AD], 2), 2: _fotocasa_html([{**FOTOCASA_AD, "id": 2}], 2)}
+    session = fake_http(lambda m, url, kw: FakeResponse(pages[2 if url.endswith("/l/2") else 1]))
+    assert scrape_fotocasa(db, max_price=50000) == 4 * len(FOTOCASA_PROVINCES)
+    land = [c for c in session.calls if "/terrenos/" in c[1]]
+    assert all(c[2]["params"] == {"maxPrice": 50000, "minSurface": 10000} for c in land)

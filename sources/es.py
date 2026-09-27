@@ -813,3 +813,90 @@ def scrape_altamira(db, max_price: float = 50000, **_):
             time.sleep(0.4)
     LOG.info(f"Altamira: {total} listings")
     return total
+
+
+# ─── Fotocasa: Spain's big private portal ───────────────────────────
+# Not auctions: owners' and agents' asking prices, in the green north where
+# summers stay mild (Galicia, Asturias, Cantabria, the Basque Country, León,
+# Navarra). The results page carries its data as JSON, 30 a page, with the
+# text, the map position and whether it is occupied.
+FOTOCASA = "https://www.fotocasa.es"
+FOTOCASA_PROVINCES = ("a-coruna", "lugo", "pontevedra", "asturias", "cantabria", "bizkaia", "gipuzkoa",
+                      "leon", "navarra")
+FOTOCASA_SEARCHES = (("viviendas", None), ("terrenos", 10000))     # homes; land from 1 ha
+FOTOCASA_MAX_PAGES = 25
+
+
+def fotocasa_page(html: str) -> tuple[list[dict], int]:
+    """(ads, total ads) from a results page."""
+    m = re.search(r'<script[^>]*id="__initial_props__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return [], 0
+    props = json.loads(m.group(1))
+    result = (props.get("initialSearch") or {}).get("result") or {}
+    return result.get("realEstates") or [], int((props.get("counters") or {}).get("realEstates") or 0)
+
+
+def parse_fotocasa(ad: dict, tipo: str) -> dict | None:
+    price = ad.get("rawPrice")
+    if not ad.get("id") or not price:
+        return None
+    addr = ad.get("address") or {}
+    feats = {f.get("key"): f.get("value") for f in ad.get("features") or []}
+    town = re.sub(r"\s*\(.*?\)\s*$", "", addr.get("municipality") or addr.get("city") or "") or None
+    raw: dict = {"occupation": "occupied"} if ad.get("isOccupied") or ad.get("isRentedWithTenants") else {}
+    if ad.get("isBareOwnership"):
+        raw["nuda_propiedad"] = True
+    coords = ad.get("coordinates") or {}
+    if coords.get("latitude") and coords.get("longitude"):
+        raw["geo"] = {"lat": float(coords["latitude"]), "lon": float(coords["longitude"]),
+                      "precision": "street" if ad.get("accuracy") else "village"}
+    detail = (ad.get("detail") or {}).get("es-ES")
+    images = [m.get("src") for m in ad.get("multimedia") or [] if m.get("src")]
+    kind = "Terreno" if tipo == "terreno" else "Casa" if "House" in (ad.get("buildingSubtype") or "") else "Vivienda"
+    location = ad.get("location") or ""
+    return make_listing(
+        "fotocasa", ad["id"], "ES", title=f"{kind} en {town or addr.get('province') or ''}"
+                                          + (f", {location}" if location else ""),
+        description=(ad.get("description") or "")[:3000] or None, tipo=tipo,
+        area_m2=feats.get("surface") or None, price=float(price), min_price=float(price),
+        district=addr.get("province"), concelho=town, url=f"{FOTOCASA}{detail}" if detail else None,
+        image_url=images[0] if images else None, raw_json=json.dumps(raw, ensure_ascii=False) if raw else None,
+    )
+
+
+@register("fotocasa", "ES")
+def scrape_fotocasa(db, max_price: float = 50000, **_):
+    """fotocasa — private homes and land (1 ha+) in the green north of Spain."""
+    session = make_session(timeout=30)
+    total = 0
+    for province in FOTOCASA_PROVINCES:
+        for kind, min_surface in FOTOCASA_SEARCHES:
+            params = {"maxPrice": int(max_price)}
+            if min_surface:
+                params["minSurface"] = min_surface
+            seen = 0
+            for page in range(1, FOTOCASA_MAX_PAGES + 1):
+                path = f"{FOTOCASA}/es/comprar/{kind}/{province}-provincia/todas-las-zonas/l" + \
+                       (f"/{page}" if page > 1 else "")
+                try:
+                    resp = session.get(path, params=params)
+                    resp.raise_for_status()
+                except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
+                    if total == 0 and province == FOTOCASA_PROVINCES[0]:
+                        raise
+                    LOG.info(f"Fotocasa {province} {kind} p{page}: {type(e).__name__}")
+                    break
+                ads, count = fotocasa_page(resp.text)
+                for ad in ads:
+                    row = parse_fotocasa(ad, "terreno" if kind == "terrenos" else "vivienda")
+                    if row and row["price"] <= max_price:
+                        upsert_listing(db, row)
+                        total += 1
+                db.commit()
+                seen += len(ads)
+                if not ads or seen >= count:
+                    break
+                time.sleep(0.8)
+    LOG.info(f"Fotocasa: {total} listings")
+    return total
