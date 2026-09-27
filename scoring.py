@@ -306,6 +306,8 @@ HEAVY_WORK = [
     "obras profundas", "reabilitação total", "reabilitação integral", "inabitável", "sem telhado",
     "telhado caído", "muito degradad*", "mau estado", "para demolir", "demolição",
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
+    "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
+    "reforma integra", "para rehabilitación", "requiere rehabilitación", "a restaurar",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
     "à réhabiliter", "da ristrutturare", "rudere", "fatiscente", "inagibile",
     "sanierungsbedürftig", "renovierungsbedürftig", "abrissreif", "baufällig", "ruine",
@@ -319,7 +321,8 @@ SOME_WORK = [
     "necessita de obras", "precisa de obras", "necessitar de obras", "carece de obras",
     "obras de conservação", "degradad*", "necesita reforma", "necesita reformas",
     "para remodelar", "a remodelar", "para renovar", "a renovar", "para restaurar",
-    "para actualizar", "travaux à prévoir", "à rafraîchir", "a rafraichir", "da rimodernare",
+    "para actualizar", "requiere reforma", "requiere reformas", "recomendable reforma", "necesita rehabilitación",
+    "necesita rehabilitacion", "para finalizar", "por finalizar", "travaux à prévoir", "à rafraîchir", "a rafraichir", "da rimodernare",
     "modernisierungsbedürftig", "renovierungsbedarf",
 ]
 GOOD_CONDITION = [
@@ -770,9 +773,10 @@ def excellent(item: dict, score: float, reasons: list[str]) -> list[str] | None:
     access = (airport.get("km") or 999) <= EXCELLENT_AIRPORT_KM or (station.get("km") or 999) <= EXCELLENT_STATION_KM
     if not access:
         return None
-    if kind == "home" and any(r.startswith(("needs heavy work", "ruin", "abandoned", "degraded", "size unknown"))
-                              for r in reasons):
-        return None
+    if kind == "home" and (condition(item) in ("heavy", "some")
+                           or any(r.startswith(("needs heavy work", "ruin", "abandoned", "degraded", "size unknown"))
+                                  for r in reasons)):
+        return None             # the owner wants it pristine: any work admitted is not excellent
     if kind == "rural_plot" and not (item.get("area_m2") or find_area(item.get("title") or "")):
         return None
     return [f"{days:.0f} days above 35 °C by 2090", "water", "access", f"€{pay:,.0f}"]

@@ -72,3 +72,15 @@ def test_azores_mild_summer_counts_where_the_day_grid_ends():
             "airport": {"km": 25, "text": "25 km from the airport"}}
     s, reasons = score_detail(item)
     assert excellent(item, display_score(s), reasons)
+
+
+def test_a_home_that_needs_work_is_not_excellent():
+    item = {**HOME, "climate": MILD, "airport": {"km": 40, "text": "40 km from the airport"}}
+    for words in ("Casa de piedra a rehabilitar íntegramente.", "Recomendable reforma.",
+                  "Necesita rehabilitación interior."):
+        worked = {**item, "description": words}
+        s, reasons = score_detail(worked)
+        assert excellent(worked, display_score(s), reasons) is None, words
+    done = {**item, "description": "Casa rehabilitada, lista para entrar a vivir."}
+    s, reasons = score_detail(done)
+    assert excellent(done, display_score(s), reasons)
