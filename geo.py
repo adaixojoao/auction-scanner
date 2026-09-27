@@ -14,6 +14,7 @@ property, not the building.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import urllib.parse
@@ -384,9 +385,20 @@ def _grid(path: str, mtime: float, kind: str | None) -> dict[tuple[int, int], li
     return grid
 
 
+_MTIMES: dict[str, tuple[float, float]] = {}      # path → (checked at, file time)
+
+
 def _points(path: str, kind: str | None = None) -> dict:
+    # The file's date is looked at once a minute, not for every listing
+    # (72,000 checks took 3 s of an 18,000-listing load).
+    import time as _time
+    now = _time.monotonic()
+    checked = _MTIMES.get(path)
     try:
-        return _grid(path, _os.path.getmtime(path), kind)
+        if not checked or now - checked[0] > 60:
+            checked = (now, _os.path.getmtime(path))
+            _MTIMES[path] = checked
+        return _grid(path, checked[1], kind)
     except OSError:
         return {}
 
@@ -406,18 +418,35 @@ def _place(item: dict, towns: dict | None) -> dict | None:
     return pos
 
 
+_NEAREST: dict[tuple, tuple[float, str] | None] = {}
+
+
 def _nearest(pos: dict, grid: dict, max_km: float) -> tuple[float, str] | None:
+    # Many listings share a position (their town's): each is searched once.
+    # The search compares a flat-earth distance (exact enough to rank points a
+    # few km apart) and measures only the winner on the sphere.
+    key = (round(pos["lat"], 4), round(pos["lon"], 4), id(grid), max_km)
+    if key in _NEAREST:
+        return _NEAREST[key]
     lat, lon = pos["lat"], pos["lon"]
     ci, cj = int(lat // _CELL), int(lon // _CELL)
     reach = int(max_km // 45) + 1            # a cell is at least ~45 km wide here
-    best = None
+    shrink = math.cos(math.radians(lat)) ** 2
+    best, best_d2 = None, None
     for di in range(-reach, reach + 1):
         for dj in range(-reach, reach + 1):
             for plat, plon, name in grid.get((ci + di, cj + dj), ()):
-                km = distance_km(lat, lon, plat, plon)
-                if best is None or km < best[0]:
-                    best = (km, name)
-    return best if best and best[0] <= max_km else None
+                d2 = (plat - lat) ** 2 + (plon - lon) ** 2 * shrink
+                if best_d2 is None or d2 < best_d2:
+                    best, best_d2 = (plat, plon, name), d2
+    found = None
+    if best:
+        km = distance_km(lat, lon, best[0], best[1])
+        found = (km, best[2]) if km <= max_km else None
+    if len(_NEAREST) > 200000:
+        _NEAREST.clear()
+    _NEAREST[key] = found
+    return found
 
 
 def _found(pos: dict, best: tuple[float, str], what: str) -> dict:

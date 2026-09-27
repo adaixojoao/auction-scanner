@@ -9,6 +9,7 @@ Occupancy/usufruct terms also ignore negated mentions ("não arrendado").
 """
 from __future__ import annotations
 
+import functools
 import json
 import math
 import re
@@ -98,6 +99,7 @@ _TIMESHARE_RE = re.compile(
     re.I)
 
 
+@functools.lru_cache(maxsize=100_000)
 def is_timeshare(text: str) -> bool:
     return bool(has_term(text, TIMESHARE_PATTERNS, negations=False) or _TIMESHARE_RE.search(text or ""))
 
@@ -203,6 +205,11 @@ _HOUSE_WORDS_NOT_TYPOLOGY = [w for w in DWELLING_WORDS if not re.fullmatch(r"t\d
 
 
 def _first_at(text: str, terms) -> int | None:
+    return _first_at_cached(text or "", tuple(terms))
+
+
+@functools.lru_cache(maxsize=200_000)
+def _first_at_cached(text: str, terms: tuple) -> int | None:
     norm = normalize(text)
     hits = [m.start() for t in terms for m in [term_regex(t).search(norm)] if m]
     return min(hits) if hits else None
@@ -334,12 +341,18 @@ WATER_RE = re.compile(
     re.I)
 
 
+@functools.lru_cache(maxsize=100_000)
+def _water_words(text: str) -> str | None:
+    m = WATER_RE.search(text)
+    return m.group(0).strip() if m else None
+
+
 def water_nearby(text: str, item: dict | None = None) -> str | None:
     """The words that put a plot next to water, else what the map found
     within a few hundred metres of its exact position (geo.py), or None."""
-    m = WATER_RE.search(text or "")
-    if m:
-        return m.group(0).strip()
+    words = _water_words(text or "")
+    if words:
+        return words
     if item and '"water_check"' in (item.get("raw_json") or ""):
         check = _raw(item).get("water_check") or {}
         found = check.get("found") or []
@@ -807,6 +820,13 @@ FAR_FROM_TOWN_CAP = [(12, 200), (20, 60), (30, 45), (40, 40)]  # by km from town
                                                                # far from everything is isolated
 
 
+@functools.lru_cache(maxsize=100_000)
+def _rejects_in(text: str) -> tuple:
+    """The _REJECTS labels whose pattern is in the text (cached: the list is
+    scored again on every page view, over the same texts)."""
+    return tuple(label for label, pattern in _REJECTS if pattern is not None and pattern.search(text))
+
+
 def score_detail(item: dict, now: datetime | None = None,
                  targets: dict | None = None) -> tuple[float, list[str]]:
     """The score before it is clamped to 0–100: several listings can reach 100,
@@ -1009,9 +1029,7 @@ def score_detail(item: dict, now: datetime | None = None,
         s -= 20
         reasons.append("suspiciously cheap — likely tiny/worthless")
 
-    for label, pattern in _REJECTS:
-        if pattern is None or not pattern.search(full):
-            continue
+    for label in _rejects_in(full):
         if label.startswith("land only") and kind == "home":
             reasons.append("sold together with another lot (its price is not shown)")
             continue
