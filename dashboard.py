@@ -148,7 +148,8 @@ def sources_page():
 
 @app.route("/settings")
 def settings_page():
-    return _page("settings.html", "settings", "Settings")
+    from scoring import WEIGHTS
+    return _page("settings.html", "settings", "Settings", weights=list(WEIGHTS.items()))
 
 
 # Old addresses from before the pages were unified.
@@ -862,7 +863,7 @@ EDITABLE = {
     "max_price": None,
     "max_listings": None,
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
-                "rural_max_eur_m2"),
+                "rural_max_eur_m2", "weights"),
     "proponente": PROPONENTE_KEYS,
     "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours"),
     "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score", "source_alerts",
@@ -909,6 +910,12 @@ def api_settings_save():
         vals = {k: v for k, v in data[section].items() if k in keys and v is not None}
         if vals:
             changes[section] = vals
+    weights = (changes.get("filters") or {}).get("weights")
+    if weights is not None:
+        from scoring import WEIGHTS
+        if not isinstance(weights, dict) or any(k not in WEIGHTS or not isinstance(v, (int, float))
+                                                or not 0 <= v <= 2 for k, v in weights.items()):
+            return jsonify({"error": "weights: known names, each 0 to 2"}), 400
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):
         return jsonify({"error": "unknown country code"}), 400

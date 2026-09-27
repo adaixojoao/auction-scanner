@@ -19,6 +19,19 @@
   </div>
 </div>
 
+<div class="card" id="weights">
+  <h2>How much each thing counts</h2>
+  <p class="small muted" style="margin-bottom:10px">100% is the normal weight; 0% ignores it, 200% doubles it. Only bonuses and penalties move: the rules (too hot by 2090, occupied, plot too small…) stay rules. Saved with the other settings; the list re-scores at once.</p>
+  <div class="weights">
+    {% for key, label in weights %}
+    <label class="weight"><span>{{ label }}</span>
+      <input type="range" id="w_{{ key }}" min="0" max="200" step="10" value="100" oninput="$('wv_{{ key }}').textContent = this.value + '%'">
+      <b id="wv_{{ key }}">100%</b></label>
+    {% endfor %}
+  </div>
+  <button class="btn" style="margin-top:10px" onclick="resetWeights()">Back to 100% for all</button>
+</div>
+
 <div class="card">
   <h2>Budget &amp; what to show</h2>
   <div class="form-grid">
@@ -194,12 +207,16 @@ async function loadAccounts() {
   });
 }
 
+const WEIGHT_KEYS = {{ weights | map(attribute=0) | list | tojson }};
+function resetWeights() { WEIGHT_KEYS.forEach(k => { $("w_" + k).value = 100; $("wv_" + k).textContent = "100%"; }); }
+
 async function load() {
   loadAccounts();
   const c = await (await fetch("/api/settings")).json();
   const f = c.filters || {}, p = c.proponente || {}, s = c.schedule || {}, t = c.telegram || {}, e = c.notifications || {};
   setv("max_price", c.max_price); setv("max_listings", c.max_listings ?? 100); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
   setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
+  WEIGHT_KEYS.forEach(k => { const v = Math.round(100 * ((f.weights || {})[k] ?? 1)); $("w_" + k).value = v; $("wv_" + k).textContent = v + "%"; });
   document.querySelectorAll("input[name=country]").forEach(cb => cb.checked = (f.countries || []).includes(cb.value));
   setv("exclude_keywords", (f.exclude_keywords || []).join("\n"));
   ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
@@ -310,6 +327,7 @@ async function save() {
     filters: {
       min_score: num("min_score") || 0, min_area_m2: num("min_area_m2") || 0,
       rural_min_m2: num("rural_min_m2"), rural_max_eur_m2: num("rural_max_eur_m2"),
+      weights: Object.fromEntries(WEIGHT_KEYS.map(k => [k, Number($("w_" + k).value) / 100])),
       countries: [...document.querySelectorAll("input[name=country]:checked")].map(cb => cb.value),
       exclude_keywords: $("exclude_keywords").value.split("\n").map(s => s.trim()).filter(Boolean),
     },

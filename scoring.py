@@ -9,6 +9,7 @@ Occupancy/usufruct terms also ignore negated mentions ("não arrendado").
 """
 from __future__ import annotations
 
+import contextvars
 import functools
 import json
 import math
@@ -132,6 +133,31 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 PLOT_MIN_ABROAD_M2 = 25000
 GUARDA = (40.5373, -7.2676)
 GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer scored (2026-09-26)
+# ─── Weights (Settings → "How much each thing counts") ───────────────
+# The owner's own dial for each part of the score, 0 (ignore) to 2 (double).
+# Only the bonuses and penalties move: the rules (too hot, occupied, too
+# small…) stay rules whatever the weights.
+WEIGHTS = {
+    "heat": "Summer heat by 2090",
+    "water": "Water nearby",
+    "beach": "Beach",
+    "transport": "Airport and train station",
+    "risks": "Fire and flood risk",
+    "price": "Low price",
+    "sale": "How it is sold (sealed bids, forced sales, deadline)",
+}
+_WEIGHTS: contextvars.ContextVar[dict] = contextvars.ContextVar("weights", default={})
+
+
+def w(name: str) -> float:
+    """The owner's weight for one part of the score (1 unless changed)."""
+    v = _WEIGHTS.get().get(name)
+    try:
+        return max(0.0, min(2.0, float(v))) if v is not None else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+
+
 UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
@@ -831,6 +857,14 @@ def score_detail(item: dict, now: datetime | None = None,
                  targets: dict | None = None) -> tuple[float, list[str]]:
     """The score before it is clamped to 0–100: several listings can reach 100,
     and this still says which of them is best (used for sorting)."""
+    token = _WEIGHTS.set((targets or {}).get("weights") or {})
+    try:
+        return _score_detail(item, now, targets)
+    finally:
+        _WEIGHTS.reset(token)
+
+
+def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     s = 50.0
     reasons: list[str] = []
     caps: list[float] = []
@@ -951,7 +985,7 @@ def score_detail(item: dict, now: datetime | None = None,
 
     if bid and price and price > 0:
         ratio = bid / price
-        s += curve(ratio, BID_RATIO_POINTS)
+        s += curve(ratio, BID_RATIO_POINTS) * w("price")
         if ratio < 0.30:
             reasons.append(f"bid only {ratio:.0%} of VB — extreme discount")
         elif ratio < 0.50:
@@ -977,7 +1011,7 @@ def score_detail(item: dict, now: datetime | None = None,
     # so a bonus for the absolute price counts half: a small cheap plot must not
     # beat a big one.
     if pay >= 300:
-        points = curve(pay, PRICE_POINTS)
+        points = curve(pay, PRICE_POINTS) * w("price")
         s += points * (0.5 if kind == "rural_plot" and points > 0 else 1.0)
         if pay <= 5000:
             reasons.append(f"very cheap: €{pay:,.0f}")
@@ -992,11 +1026,11 @@ def score_detail(item: dict, now: datetime | None = None,
     # Sealed bids are a great chance: you set the price and few people bid.
     sealed = has_term(full, SEALED_BID_PATTERNS, negations=False)
     if sealed:
-        s += 20
+        s += 20 * w("sale")
         reasons.append("sealed-bid (carta fechada)")
 
     if source in FORCED_SOURCES:
-        s += 6
+        s += 6 * w("sale")
         reasons.append("forced sale (must sell)")
     if source in TAX_SOURCES:
         s += 4
@@ -1006,7 +1040,7 @@ def score_detail(item: dict, now: datetime | None = None,
     min_p = item.get("min_price") or 0
     if not pay and (sealed or source in FORCED_SOURCES
                     or has_term(full, OFFER_SALE_PATTERNS, negations=False)):
-        s += 18
+        s += 18 * w("sale")
         reasons.append("no price — you set your offer")
     elif min_p and price and price > 1000 and min_p < price and curve(min_p, LOW_MIN_BID_POINTS) > 0:
         s += curve(min_p, LOW_MIN_BID_POINTS)
@@ -1019,7 +1053,7 @@ def score_detail(item: dict, now: datetime | None = None,
     # raised on them, so most sources never got this bonus.
     left = days_left(item.get("date_end"), now or utcnow())
     if left is not None and left > 0:
-        s += curve(left, DAYS_LEFT_POINTS)
+        s += curve(left, DAYS_LEFT_POINTS) * w("sale")
         if left <= 3:
             reasons.append(f"{left * 24:.0f}h left — urgent" if left < 1 else f"{left:.0f}d left — urgent")
         elif left <= 7:
@@ -1056,7 +1090,7 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     days = c.get("hot_days") or {}
     future = days.get("rcp45_2071-2100")
     if future is not None:
-        s += curve(future, HOT_DAYS_POINTS)
+        s += curve(future, HOT_DAYS_POINTS) * w("heat")
         worst = days.get("rcp85_2071-2100")
         detail = f"{future:.0f} days a year above 35 °C by 2071-2100" +                  (f", {worst:.0f} worst case" if worst is not None else "") +                  (f"; {days['today']:.0f} today" if days.get("today") is not None else "")
         if future > REJECT_HOT_DAYS:
@@ -1067,7 +1101,7 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
         else:
             reasons.append(detail)
     elif hot is not None:
-        s += curve(hot, HEAT_POINTS)
+        s += curve(hot, HEAT_POINTS) * w("heat")
         worst = heat.get("ssp585_2081-2100")
         detail = f"{hot:.1f} °C summer max by 2081-2100" + (f", {worst:.1f} °C worst case" if worst else "") + \
                  (f"; {heat['today']:.1f} °C today" if heat.get("today") else "")
@@ -1080,14 +1114,14 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
             reasons.append(detail)
     wet = c.get("water_km")
     if wet is not None:
-        bonus = curve(wet, PERMANENT_WATER_POINTS) * local * (1 if kind == "rural_plot" else 0.5)
+        bonus = curve(wet, PERMANENT_WATER_POINTS) * local * (1 if kind == "rural_plot" else 0.5) * w("water")
         if bonus >= 1:
             s += bonus
             reasons.append(f"permanent water {wet:.1f} km away{' (approx.)' if c.get('approx') else ''}")
     stress = (c.get("stress") or {})
     future = stress.get("stress_2080", stress.get("stress_2050"))
     if future is not None and (future >= 3 or future == -1):
-        s -= 15 if future in (4, -1) else 10
+        s -= (15 if future in (4, -1) else 10) * w("water")
         reasons.append("water stress " + ("arid" if future == -1 else "extremely high" if future == 4 else "high")
                        + " by 2080 (WRI Aqueduct)")
     elif future is not None and future <= 1:
@@ -1095,22 +1129,22 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
         reasons.append("low water stress by 2080 (WRI Aqueduct)")
     fire = c.get("fire") or {}
     if fire.get("burnt_here"):
-        s -= 15 * local
+        s -= 15 * local * w("risks")
         reasons.append(f"burnt since 2016 ({', '.join(map(str, fire['years']))}) — EFFIS")
     elif fire.get("count"):
-        s -= min(15, 5 * len(fire.get("years") or [1])) * local
+        s -= min(15, 5 * len(fire.get("years") or [1])) * local * w("risks")
         reasons.append(f"fires within {fire.get('km', 2):.0f} km since 2016 ({', '.join(map(str, fire['years']))})")
     danger = c.get("fire_danger") or {}
     days = danger.get("high_days_2090")
     if days is not None:
-        s += curve(days, FIRE_DANGER_POINTS)
+        s += curve(days, FIRE_DANGER_POINTS) * w("risks")
         if days >= 30:
             now = danger.get("high_days_now")
             reasons.append(f"{days:.0f} days a year of high fire danger by 2079-2098"
                            + (f" ({now:.0f} today)" if now is not None else "") + " — Copernicus")
     flood = c.get("flood_m")
     if flood and flood > 0 and kind == "home":
-        s -= 12 * local
+        s -= 12 * local * w("risks")
         reasons.append(f"in the 100-year flood zone ({flood:.1f} m) — JRC")
     elif flood and flood > 1 and kind != "home":
         s -= 4 * local
@@ -1147,13 +1181,14 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
 
     water = water_nearby(full, item)
     if water:
-        s += 3 if water.endswith("(approx.)") else 6
+        s += (3 if water.endswith("(approx.)") else 6) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
 
     for key, points in (("beach", BEACH_POINTS), ("airport", AIRPORT_POINTS), ("station", STATION_POINTS)):
         near = item.get(key)
         if near:
-            bonus = curve(near["km"], points) * (BEACH_APPROX_SHARE if near.get("approx") else 1)
+            weight = w("beach" if key == "beach" else "transport")
+            bonus = curve(near["km"], points) * (BEACH_APPROX_SHARE if near.get("approx") else 1) * weight
             if bonus >= 1:
                 s += bonus
                 reasons.append(near["text"])
@@ -1229,11 +1264,11 @@ def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: st
         reasons.append(f"medium rural plot ({_ha(area)})")
     water = water_nearby(full, item)
     if water:
-        s += 9 if water.endswith("(approx.)") else 18
+        s += (9 if water.endswith("(approx.)") else 18) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
     if pay:
         per_m2 = pay / area
-        s += curve(per_m2 / max_eur, RURAL_EUR_M2_POINTS)
+        s += curve(per_m2 / max_eur, RURAL_EUR_M2_POINTS) * w("price")
         if per_m2 <= max_eur / 2:
             reasons.append(f"very cheap land (€{per_m2:.2f}/m²)")
         elif per_m2 <= max_eur:
