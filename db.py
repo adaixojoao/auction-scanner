@@ -31,7 +31,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -248,8 +248,30 @@ def _migrate_v8(db: sqlite3.Connection):
     """)
 
 
+def _migrate_v9(db: sqlite3.Connection):
+    """Positions you verified or cleared (geo.verify_location), with what you
+    entered; and, on each offer, how exact the location was when it was sent
+    and the reason you gave for sending anyway (the Offers location check)."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS location_checks (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id TEXT NOT NULL,
+            action     TEXT NOT NULL,      -- verified | cleared
+            method     TEXT,               -- coordinates | address | cadastre
+            input      TEXT,               -- what you pasted
+            lat        REAL,
+            lon        REAL,
+            precision  TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_location_checks ON location_checks(listing_id, created_at);
+    """)
+    _add_column(db, "carta_log", "location_level", "TEXT")
+    _add_column(db, "carta_log", "location_override", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
-               6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8}
+               6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9}
 
 
 def init_db(db: sqlite3.Connection):
@@ -286,7 +308,7 @@ def _is_cut_copy(new: str | None, old: str | None) -> bool:
 # What the app found out itself (geo.py, photos.py, links.py): a source's fresh
 # raw data does not know it, so it is carried over.
 LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "eleiloes_id", "water_check", "cadastre_checked",
-                    "climate")
+                    "climate", "verified_geo")
 
 
 def _keep_learned(new: str | None, old: str | None) -> str | None:

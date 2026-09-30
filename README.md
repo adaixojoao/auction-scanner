@@ -416,6 +416,16 @@ survey, an insurance assessment, or legal or environmental due diligence. The
 optional bid guardrail (Settings → Climate) lowers an AI-suggested bid for a
 caution or poor grade at an exact position; it never changes an amount you type.
 
+Every listing's ⓘ panel says how exact its **location** is: exact (the sale's
+coordinates, the cadastre, or a position you verified), street, village or
+parish, municipality, or unknown. It also says what the checks are good for at
+that level. **Verify location** takes coordinates (or a Google Maps link), an
+address (looked up on OpenStreetMap) or, in Spain, a cadastral reference. Your
+position comes first, the scanner's own is kept beside it, and each change is
+logged. On Offers, an offer for a listing placed only at its town warns you;
+with Settings → Location check set to "ask my reason", it is sent or logged
+only with a reason, which is kept with the offer.
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access

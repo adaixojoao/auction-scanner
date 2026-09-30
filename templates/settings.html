@@ -122,6 +122,13 @@
   <label class="check"><input type="checkbox" id="climate_guardrail"> Lower AI-suggested bids where the climate grade is caution or poor</label>
 </div>
 
+<div class="card" id="location">
+  <h2>Location check</h2>
+  <p class="small muted" style="margin-bottom:10px">Most sales place a property only at its town. Then the climate, flood, water and distance checks describe the town, not the property. Verify a position in the listing's ⓘ panel (coordinates, an address, or a Spanish cadastral reference). For an offer on a listing placed only at its municipality or not at all, the Offers page can warn you, or also ask your reason before the offer is sent or logged. The reason is kept with the offer. Information requests are never held back.</p>
+  <div class="form-grid"><div class="field"><label>Offers without a known location</label>
+    <select id="location_gate"><option value="warn">Warn me</option><option value="block">Warn and ask my reason before sending</option><option value="off">Say nothing</option></select></div></div>
+</div>
+
 <div class="card" id="requests">
   <h2>Information requests</h2>
   <p class="small muted" style="margin-bottom:10px">After a scan, for strong sales where the agente, court or lawyer's e-mail is known, the app prepares the information request (is the sale still on, deadline, deposit, charges, occupancy, visits) and offers it on Telegram with <b>Send</b>, <b>Show letter</b> and <b>Skip</b>. Nothing is sent until you tap Send; sent requests appear under Offers → Sent. Needs Telegram, the e-mail account and your name and e-mail above.</p>
@@ -238,6 +245,7 @@ async function load() {
   setv("ai_ollama_model", ai.ollama_model || "qwen2.5vl:3b");
   $("ai_photo_check").checked = ai.photo_check !== false;
   $("climate_guardrail").checked = !!(c.climate || {}).bid_guardrail;
+  setv("location_gate", (c.location || {}).gate || "warn");
   const ar = c.auto_requests || {};
   $("ar_enabled").checked = ar.enabled !== false;
   setv("ar_min_score", ar.min_score ?? 75);
@@ -354,6 +362,7 @@ async function save() {
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},
     report: {desktop_copy: $("desktop_copy").checked},
     climate: {bid_guardrail: $("climate_guardrail").checked},
+    location: {gate: $("location_gate").value},
     updates: {auto: $("upd_auto").checked},
     backup: backupSettings(),
   };

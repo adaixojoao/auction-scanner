@@ -61,13 +61,35 @@ const CHECKLIST = {
 };
 
 async function load() {
-  data = await (await fetch("/api/offers")).json();
+  const {location_gate_mode, ...lists} = await (await fetch("/api/offers")).json();
+  data = lists; gateMode = location_gate_mode || "warn";
   for (const k of Object.keys(data)) $("n-" + k).textContent = data[k].length ? `(${data[k].length})` : "";
   renderList();
   if (sel && !current()) { sel = null; }
   renderDetail();
 }
 function current() { return data[tab].find(x => x.key === sel); }
+
+// Settings → Location: an offer for a listing placed only at its town (or not
+// at all) warns, and with "block" asks why before it is sent or logged.
+let gateMode = "warn";
+function locationReason(c, isOffer) {
+  if (!isOffer || !c.location_gate || gateMode !== "block") return "";
+  const r = prompt(`${c.location_check.label}: the property's own position is not known. Why send this offer anyway? (kept with the offer)`);
+  if (r === null) return null;
+  if (r.trim().length < 5) { AS.toast("Give a short reason (at least 5 characters)", "bad"); return null; }
+  return r.trim();
+}
+function locationNotice(c) {
+  const l = c.location_check || {};
+  const badge = `<span class="badge l-${AS.esc(l.level)}" title="${AS.esc(l.source || "")}">${AS.esc(l.label || "")}</span>`;
+  const warn = c.location_gate && gateMode !== "off" && !c.offer
+    ? `<div class="notice warn">⚠ ${AS.esc(l.label)}: ${AS.esc(l.reliable)} Check where the property is before a binding offer: Listings → ⓘ → Verify location.${gateMode === "block" ? " Sending an offer will ask for your reason." : ""}</div>`
+    : "";
+  const kept = c.offer && c.offer.location_override
+    ? `<p class="small muted">Sent with the location at ${AS.esc(c.offer.location_level || "?")} level. Your reason: ${AS.esc(c.offer.location_override)}</p>` : "";
+  return {badge, warn, kept};
+}
 function typeOf(c, key) { return c.letter_types.find(t => t.key === key) || null; }
 
 // Days since a letter went out while still unanswered, when it is time to chase it (else 0).
@@ -115,7 +137,7 @@ function draft(c) {
 function renderDetail() {
   const c = current();
   if (!c) { $("detail").innerHTML = '<div class="card empty">← Pick a property</div>'; return; }
-  const d = draft(c), t = typeOf(c, d.type), done = !!c.offer;
+  const d = draft(c), t = typeOf(c, d.type), done = !!c.offer, loc = locationNotice(c);
   const facts = [["Location", c.location], ["Area", c.area_m2 ? Math.round(c.area_m2) + " m²" : "–"],
     [PRICE_LABEL[c.country] || "Price", c.price ? AS.money(c.price) : "–"], ["Current bid", c.current_bid ? AS.money(c.current_bid) : "none"],
     [c.channel === "lawyer" || c.channel === "hearing" ? "Hearing" : "Ends", c.date_end ? c.date_end.slice(0, 16).replace("T", " ") : "–"], ["Case", c.processo || "–"]];
@@ -139,7 +161,7 @@ function renderDetail() {
         <div class="row" style="gap:6px">
           <span class="badge b-muted">${AS.esc(c.sale)}</span>
           <span class="badge b-muted">${AS.esc(c.categoria)}</span>${AS.scoreBadge(c.score, c.rank)}
-          ${c.status === "shortlisted" ? '<span class="badge b-short">★ shortlisted</span>' : ""}
+          ${c.status === "shortlisted" ? '<span class="badge b-short">★ shortlisted</span>' : ""}${loc.badge}
         </div>
       </div>
       <div style="text-align:right">${c.url ? AS.link(c.url, "Open listing ↗") : ""}
@@ -152,6 +174,7 @@ function renderDetail() {
        ${k.email ? ` · <a href="mailto:${AS.esc(k.email)}">${AS.esc(k.email)}</a>` : ""}</p>` : ""}
     ${c.visit ? `<p class="small" style="margin-top:6px"><b>Visits:</b> ${AS.esc(c.visit)}</p>` : ""}
     <div class="tags" style="margin-top:10px">${(c.reasons || []).map(r => `<span class="tag">${AS.esc(r)}</span>`).join("")}</div>
+    ${loc.warn}${loc.kept}
     ${AS.climateHtml(c.climate)}
     <div class="notice info">${AS.esc(c.guidance)}</div>
     <div style="margin-top:12px"><button class="btn" id="ai-btn" onclick="analyze()">AI check</button><div id="ai"></div></div>
@@ -331,22 +354,30 @@ function showSent(logId, msg) {
 }
 async function markSent() {
   const c = current(), d = draft(c);
-  const r = await AS.api("/api/offers/sent", {method: "POST", body: {...letterBody(c), to: d.to, method: $("method").value}});
+  const reason = locationReason(c, (typeOf(c, d.type) || {}).is_offer);
+  if (reason === null) return;
+  const r = await AS.api("/api/offers/sent", {method: "POST", body: {...letterBody(c), to: d.to, method: $("method").value,
+                                                                  location_override: reason}});
   showSent(r.log_id, "Logged as sent — it is now under Sent");
 }
 async function sendEmail() {
   const c = current(), d = draft(c), btn = $("send-btn");
   if (!d.to) { AS.toast("Fill in who to send it to", "bad"); $("to").focus(); return; }
+  const reason = locationReason(c, (typeOf(c, d.type) || {}).is_offer);
+  if (reason === null) return;
   if (!confirm(`Send this letter with its PDF to ${d.to}?`)) return;
   btn.disabled = true; btn.textContent = "Sending…";
   try {
-    const r = await AS.api("/api/offers/email", {method: "POST", body: {...letterBody(c), to: d.to}});
+    const r = await AS.api("/api/offers/email", {method: "POST", body: {...letterBody(c), to: d.to, location_override: reason}});
     showSent(r.log_id, `Sent to ${r.to} — it is now under Sent`);
   } catch (e) { btn.disabled = false; btn.textContent = "Send by e-mail with PDF"; }
 }
 async function logOnline() {
   const c = current(), d = draft(c);
-  const r = await AS.api("/api/offers/sent", {method: "POST", body: {id: c.id, bid: d.online, method: "online"}});
+  const reason = locationReason(c, true);
+  if (reason === null) return;
+  const r = await AS.api("/api/offers/sent", {method: "POST", body: {id: c.id, bid: d.online, method: "online",
+                                                                  location_override: reason}});
   showSent(r.log_id, "Bid logged — it is now under Sent");
 }
 async function reject() {

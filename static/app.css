@@ -152,6 +152,12 @@ table.list tr.dim td { opacity: .45; }
 .notice { padding: 9px 12px; border-radius: 7px; font-size: 12px; margin-top: 10px; }
 .notice.bad { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.4); color: #fca5a5; }
 .notice.info { background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.35); color: #bfdbfe; }
+.notice.warn { background: rgba(234,179,8,.1); border: 1px solid rgba(234,179,8,.4); color: #fde68a; }
+.l-exact { background: rgba(34,197,94,.18); color: var(--green); }
+.l-street, .l-area { background: rgba(234,179,8,.18); color: var(--yellow); }
+.l-municipality, .l-unknown { background: rgba(239,68,68,.15); color: var(--red); }
+.loc-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.loc-form input { flex: 1; min-width: 220px; }
 .tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .tag { background: rgba(34,197,94,.1); color: #86efac; font-size: 11px; padding: 2px 7px; border-radius: 4px; }
 

@@ -52,9 +52,18 @@ def _num(v):
 
 
 def position(item: dict) -> dict | None:
-    """{"lat", "lon", "precision"} or None: the sale's own coordinates first,
-    else a stored OpenStreetMap lookup."""
+    """{"lat", "lon", "precision"} or None: a position you verified first
+    (verify_location), then the sale's own coordinates, else a stored
+    OpenStreetMap or cadastre lookup."""
     raw = _raw(item)
+    mine = raw.get("verified_geo")
+    if isinstance(mine, dict) and mine.get("lat") is not None and mine.get("lon") is not None:
+        return mine
+    return source_position(raw, item)
+
+
+def source_position(raw: dict, item: dict) -> dict | None:
+    """The position the scanner found by itself, without yours."""
     for lat_key, lon_key in (("lat", "lon"), ("prop_latitude", "prop_longitude"), ("lat", "lng"),
                              ("coordenadasLAT", "coordenadasLON")):
         lat, lon = _num(raw.get(lat_key)), _num(raw.get(lon_key))
@@ -70,7 +79,7 @@ def stale_lookup(item: dict, geo: dict) -> bool:
     """A stored lookup made with another municipality than the listing has now
     (the town was read wrong then, "El" for "El Campo De Peñaranda"): its pin
     is not trusted and the listing is looked up again."""
-    if geo.get("precision") in ("cadastre", "sale"):
+    if geo.get("precision") in ("cadastre", "sale", "verified"):
         return False
     town, query = municipality(item), geo.get("query")
     return bool(town and query and normalize(town) not in normalize(query))
@@ -509,7 +518,7 @@ def km_text(km: float) -> str:
 OVERPASS = "https://overpass-api.de/api/interpreter"
 WATER_RADIUS_M = 300
 WATER_PER_SCAN = 40
-EXACT_ENOUGH = {"sale", "street", "cadastre"}
+EXACT_ENOUGH = {"sale", "street", "cadastre", "verified"}
 # A hamlet or village pin is not the plot, but water within a kilometre of it
 # is still worth knowing (and says "approx.").
 NEAR_ENOUGH = {"village"}
@@ -564,3 +573,158 @@ def check_water_pending(db, session, items: list[dict], limit: int = WATER_PER_S
     if done:
         LOG.info(f"OpenStreetMap: water checked for {done} listings")
     return done
+
+
+# ─── How far to trust the position, and a position you verify ───────
+# Every check above follows position(). A position you verify (coordinates,
+# an address, a Spanish cadastral reference) comes first; the scanner's own
+# stays in raw_json beside it, and every change is kept in location_checks.
+
+LEVEL_OF = {"verified": "exact", "sale": "exact", "cadastre": "exact", "street": "street",
+            "village": "area", "parish": "area", "municipality": "municipality"}
+CONFIDENCE = {
+    "exact": ("Exact location",
+              "Street View, the satellite view, water next to it, flood and fire at the spot and the "
+              "distance to town are about this property."),
+    "street": ("Street-level estimate",
+               "The street, not the building: Street View and distances are close; flood and water at "
+               "the spot may be a neighbour's."),
+    "area": ("Village or parish estimate",
+             "Somewhere in the village or parish: distances are \"about\"; heat, water stress and fire "
+             "danger hold for the area, flood and fires at the spot do not."),
+    "municipality": ("Municipality estimate",
+                     "Only the town is known: heat and water stress hold for the area; flood, fires, "
+                     "water nearby and the distance to town say nothing about this property."),
+    "unknown": ("Location unknown", "No position and no municipality: no map, climate or distance checks."),
+}
+# The least exact first: a verification that would make the position less exact asks first.
+PRECISION_RANK = ["municipality", "parish", "village", "street", "cadastre", "sale", "verified"]
+VERIFY_METHODS = ("coordinates", "address", "cadastre")
+_COORDS = re.compile(r"(-?\d{1,2}\.\d+)\s*[,; ]\s*(-?\d{1,3}\.\d+)")
+
+
+def _provenance(pos: dict | None, item: dict) -> str:
+    if not pos:
+        town = municipality(item)
+        return (f"only the municipality is known ({town}): the checks use its town centre" if town
+                else "the listing names no municipality")
+    day = (pos.get("at") or "")[:10]
+    if pos.get("method") == "coordinates":
+        return f"coordinates you entered on {day}"
+    if pos.get("method") == "address":
+        return f"the address you entered (\u201c{pos.get('input', '')}\u201d), found on OpenStreetMap on {day}"
+    if pos.get("method") == "cadastre":
+        return f"the cadastral reference you entered ({pos.get('input', '')}) on {day}"
+    if pos.get("precision") == "sale":
+        return "coordinates given by the sale"
+    if pos.get("precision") == "cadastre":
+        return f"the land cadastre ({pos.get('query', '')})"
+    return f"OpenStreetMap, looked up as \u201c{pos.get('query', '')}\u201d"
+
+
+def location_confidence(item: dict) -> dict:
+    """{"level": exact / street / area / municipality / unknown, "label",
+    "reliable" (what the checks are good for at that level), "source" (where
+    the position came from), "scanner" (the scanner's own, when yours replaced it)}."""
+    pos = position(item)
+    level = (LEVEL_OF.get(pos.get("precision"), "area") if pos
+             else "municipality" if municipality(item) else "unknown")
+    label, reliable = CONFIDENCE[level]
+    out = {"level": level, "label": label, "reliable": reliable, "precision": (pos or {}).get("precision"),
+           "source": _provenance(pos, item), "verified": bool(pos and pos.get("method")), "scanner": None}
+    if out["verified"]:
+        raw = _raw(item)
+        own = source_position(raw, item)
+        out["scanner"] = ({"lat": own["lat"], "lon": own["lon"], "source": _provenance(own, item)}
+                          if own else None)
+    return out
+
+
+def parse_coordinates(text: str) -> tuple[float, float] | None:
+    """"38.7223, -9.1393", or a Google Maps link with "@38.7223,-9.1393" in it."""
+    m = _COORDS.search(text or "")
+    if not m:
+        return None
+    lat, lon = float(m.group(1)), float(m.group(2))
+    return (lat, lon) if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat or lon) else None
+
+
+def lookup_address(session, text: str, country: str | None) -> dict | None:
+    """An address you typed, on OpenStreetMap: {"lat", "lon", "precision"} or None."""
+    params = {"format": "jsonv2", "limit": 1, "q": text}
+    code = COUNTRY_CODES.get((country or "PT").upper())
+    if code:
+        params["countrycodes"] = code
+    resp = session.get(NOMINATIM, params=params, headers={"User-Agent": USER_AGENT}, timeout=20)
+    time.sleep(1.1)                          # Nominatim: at most one request a second
+    resp.raise_for_status()
+    hits = resp.json()
+    if not hits:
+        return None
+    return {"lat": float(hits[0]["lat"]), "lon": float(hits[0]["lon"]),
+            "precision": _PLACE_OF.get(hits[0].get("addresstype"), "parish")}
+
+
+def verify_doubts(item: dict, pos: dict, towns: dict | None) -> list[str]:
+    """Why a new position might be wrong: less exact than the one it replaces,
+    or farther from the listing's town than any municipality is wide."""
+    doubts = []
+    now = position(item)
+    rank = {p: i for i, p in enumerate(PRECISION_RANK)}
+    if now and rank.get(pos["precision"], 0) < rank.get(now.get("precision"), 0):
+        doubts.append(f"It is less exact ({pos['precision']}) than the position the listing has now "
+                      f"({now.get('precision')}).")
+    name = municipality(item)
+    town = (towns or {}).get(town_key(item.get("country") or "PT", name)) if name else None
+    if town:
+        km = distance_km(pos["lat"], pos["lon"], town["lat"], town["lon"])
+        if km > MAX_TOWN_KM:
+            doubts.append(f"It is {km:.0f} km from {town['name']}, the listing's town.")
+    return doubts
+
+
+def _save_raw(db, item: dict, raw: dict) -> None:
+    item["raw_json"] = json.dumps(raw, ensure_ascii=False)
+    db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (item["raw_json"], item["id"]))
+
+
+def _log_check(db, item: dict, action: str, pos: dict | None, method: str | None, text: str | None) -> None:
+    from common import utcnow_iso
+    db.execute("INSERT INTO location_checks (listing_id, action, method, input, lat, lon, precision, created_at) "
+               "VALUES (?,?,?,?,?,?,?,?)",
+               (item["id"], action, method, text, (pos or {}).get("lat"), (pos or {}).get("lon"),
+                (pos or {}).get("precision"), utcnow_iso()))
+
+
+def verify_location(db, item: dict, pos: dict, method: str, text: str) -> dict:
+    """Keep `pos` as the listing's position, from now on and across rescrapes
+    (db.LEARNED_RAW_KEYS), and log it. The scanner's own position is kept."""
+    from common import utcnow_iso
+    raw = _raw(item)
+    mine = {"lat": round(pos["lat"], 6), "lon": round(pos["lon"], 6), "precision": pos["precision"],
+            "method": method, "input": (text or "").strip()[:200], "at": utcnow_iso()}
+    raw["verified_geo"] = mine
+    raw.pop("water_check", None)             # ask the map about water again, at the new spot
+    _save_raw(db, item, raw)
+    _log_check(db, item, "verified", mine, method, mine["input"])
+    db.commit()
+    return mine
+
+
+def clear_location(db, item: dict) -> bool:
+    """Go back to the scanner's own position; the history keeps what you had set."""
+    raw = _raw(item)
+    old = raw.pop("verified_geo", None)
+    if not old:
+        return False
+    raw.pop("water_check", None)
+    _save_raw(db, item, raw)
+    _log_check(db, item, "cleared", old, old.get("method"), old.get("input"))
+    db.commit()
+    return True
+
+
+def location_history(db, listing_id: str) -> list[dict]:
+    rows = db.execute("SELECT action, method, input, lat, lon, precision, created_at FROM location_checks "
+                      "WHERE listing_id = ? ORDER BY created_at DESC, id DESC", (listing_id,)).fetchall()
+    return [dict(r) for r in rows]

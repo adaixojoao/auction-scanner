@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file
 
+import geo
 from common import COUNTRY_NAMES, FLAGS, make_session, price_to_pay, safe_url
 from locks import lock_holder
 from db import connect, hidden_category, load_listings, set_listing_status, source_health
@@ -322,6 +323,7 @@ def api_listing_detail():
         related = listing_info.related(db, it)
         results = listing_info.past_results(db, it)
         lots = listing_info.same_case_lots(db, it)
+        history = geo.location_history(db, it["id"])
     finally:
         db.close()
     return jsonify({
@@ -333,10 +335,89 @@ def api_listing_detail():
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),
         "climate": listing_info.climate_panel(it),
+        "location": {**geo.location_confidence(it), "history": history, "country": it.get("country") or "PT"},
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
     })
+
+@app.route("/api/listing/location", methods=["POST"])
+def api_listing_location():
+    """Verify a listing's position: coordinates, an address (OpenStreetMap) or a
+    Spanish cadastral reference (the Catastro). Asks first ({"confirm"}) when
+    the new position looks wrong; resend with "confirm": true to keep it."""
+    import cadastre
+    import climate
+    data = request.get_json(silent=True) or {}
+    method, text = data.get("method"), str(data.get("value") or "").strip()[:300]
+    if method not in geo.VERIFY_METHODS or not text:
+        return jsonify({"error": "method (coordinates / address / cadastre) and value required"}), 400
+    db = get_db()
+    try:
+        found = load_listings(db, include_hidden=True, where="id = ?", params=(str(data.get("id") or ""),))
+        if not found:
+            return jsonify({"error": "no such listing"}), 404
+        item = found[0]
+        if method == "coordinates":
+            ll = geo.parse_coordinates(text)
+            if not ll:
+                return jsonify({"error": "Paste the latitude and longitude, e.g. 38.7223, -9.1393, "
+                                         "or a Google Maps link with @latitude,longitude in it."}), 400
+            pos = {"lat": ll[0], "lon": ll[1], "precision": "verified"}
+        elif method == "cadastre":
+            if (item.get("country") or "PT") != "ES":
+                return jsonify({"error": "Only Spanish cadastral references can be looked up here (the "
+                                         "Catastro). Paste the coordinates from a map instead."}), 400
+            rc = cadastre.reference_given(text)
+            if not rc:
+                return jsonify({"error": "That is not a Spanish cadastral reference "
+                                         "(14 characters, e.g. 3589701UK6938N)."}), 400
+            try:
+                hit = cadastre.catastro_position(make_session(), rc)
+            except Exception as e:  # noqa: BLE001 — say so rather than fail
+                return jsonify({"error": f"The Catastro did not answer ({type(e).__name__}). Try again later."}), 502
+            if not hit:
+                return jsonify({"error": "The Catastro does not know that reference."}), 400
+            pos, text = {"lat": hit["lat"], "lon": hit["lon"], "precision": "verified"}, rc
+        else:
+            try:
+                pos = geo.lookup_address(make_session(), text, item.get("country"))
+            except Exception as e:  # noqa: BLE001
+                return jsonify({"error": f"OpenStreetMap did not answer ({type(e).__name__}). Try again later."}), 502
+            if not pos:
+                return jsonify({"error": "OpenStreetMap did not find that address. Try fewer words "
+                                         "(street, village, town), or paste coordinates."}), 400
+        towns = geo.town_index(db)
+        doubts = geo.verify_doubts(item, pos, towns)
+        if doubts and not data.get("confirm"):
+            return jsonify({"confirm": " ".join(doubts) + " Keep it anyway?"})
+        geo.verify_location(db, item, pos, method, text)
+        if climate.available():
+            climate.assess_pending(db, [item], towns, limit=1)      # the local layers: no network
+    finally:
+        db.close()
+    return jsonify({"ok": True, "location": geo.location_confidence(item)})
+
+
+@app.route("/api/listing/location/clear", methods=["POST"])
+def api_listing_location_clear():
+    """Go back to the scanner's own position (the history keeps yours)."""
+    import climate
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    try:
+        found = load_listings(db, include_hidden=True, where="id = ?", params=(str(data.get("id") or ""),))
+        if not found:
+            return jsonify({"error": "no such listing"}), 404
+        item = found[0]
+        if not geo.clear_location(db, item):
+            return jsonify({"error": "this listing has no position of yours"}), 400
+        if climate.available():
+            climate.assess_pending(db, [item], geo.town_index(db), limit=1)
+    finally:
+        db.close()
+    return jsonify({"ok": True, "location": geo.location_confidence(item)})
+
 
 @app.route("/api/listings/status", methods=["POST"])
 def api_listing_status():
@@ -512,6 +593,8 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
         "rank": it.get("rank", it["score"]),
         "reasons": it["reasons"],
         "climate": listing_info.climate_panel(it),
+        "location_check": geo.location_confidence(it),
+        "location_gate": location_gate_applies(it),     # with /api/offers' location_gate_mode
         "status": it.get("status"),
         "bid": (first_offer or {}).get("suggested", ""),   # online-only sales: nothing to suggest
         "contact": _contact(it, raw),
@@ -521,7 +604,9 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
                    "letter_type": offer.get("letter_type"), "is_offer": bool(offer.get("is_offer", 1)),
                    "method": offer.get("method"), "sent_to": offer.get("sent_to") or "",
                    "letter_text": offer.get("letter_text") or "",        # exactly what was sent
-                   "letter_subject": offer.get("letter_subject") or ""}
+                   "letter_subject": offer.get("letter_subject") or "",
+                   "location_level": offer.get("location_level"),
+                   "location_override": offer.get("location_override") or ""}
                   if offer else None),
     }
 
@@ -575,7 +660,8 @@ def api_offers():
 
     rejected = [_offer_view(it, it["id"]) for it in items
                 if it["status"] == "dismissed" and it["category"] == "imoveis"]
-    return jsonify({"review": review[:150], "sent": sent, "closed": closed, "rejected": rejected[:150]})
+    return jsonify({"review": review[:150], "sent": sent, "closed": closed, "rejected": rejected[:150],
+                    "location_gate_mode": location_gate_mode()})
 
 
 def _listing(listing_id: str) -> dict | None:
@@ -697,13 +783,44 @@ def api_offer_log_pdf(log_id):
 
 
 def _log_sent(item: dict, *, letter=None, bid: str = "", method: str, sent_to: str = "",
-              notes: str = "") -> int:
+              notes: str = "", location_override: str | None = None) -> int:
     from outbox import log_sent
     db = get_db()
     try:
-        return log_sent(db, item, letter=letter, bid=bid, method=method, sent_to=sent_to, notes=notes)
+        return log_sent(db, item, letter=letter, bid=bid, method=method, sent_to=sent_to, notes=notes,
+                        location_override=location_override)
     finally:
         db.close()
+
+
+# ─── Offers: the location check (Settings → Location) ───────────────
+# "warn" shows a warning on an offer for a listing placed only at its town or
+# not at all; "block" also asks for your reason before the offer is sent or
+# logged. Information requests are never checked: they are how you find out.
+LOCATION_GATE_LEVELS = ("municipality", "unknown")
+LOCATION_GATE_MODES = ("off", "warn", "block")
+MIN_OVERRIDE_REASON = 5
+
+
+def location_gate_mode() -> str:
+    mode = (_config().get("location") or {}).get("gate")
+    return mode if mode in LOCATION_GATE_MODES else "warn"
+
+
+def location_gate_applies(item: dict) -> bool:
+    return geo.location_confidence(item)["level"] in LOCATION_GATE_LEVELS
+
+
+def _location_gate(item: dict, is_offer: bool, data: dict):
+    """(error response or None, the reason to record)."""
+    reason = str(data.get("location_override") or "").strip()[:500] or None
+    if not is_offer or location_gate_mode() != "block" or not location_gate_applies(item):
+        return None, reason if is_offer else None
+    if not reason or len(reason) < MIN_OVERRIDE_REASON:
+        label = geo.location_confidence(item)["label"]
+        return (jsonify({"error": f"{label}: say why you are sending this offer anyway "
+                                  "(Settings → Location asks for a reason).", "location_gate": True}), 409), None
+    return None, reason
 
 
 @app.route("/api/offers/sent", methods=["POST"])
@@ -722,9 +839,12 @@ def api_offer_sent():
             return jsonify({"error": "no such listing"}), 404
         if not letter:
             return jsonify({"error": f"no letter of type {ltype!r} for this listing"}), 400
+    blocked, reason = _location_gate(item, letter.is_offer if letter else True, data)
+    if blocked:
+        return blocked
     method = data.get("method") or ("online" if item.get("source") == "eleiloes" else "email")
     log_id = _log_sent(item, letter=letter, bid=bid, method=method,
-                       sent_to=data.get("to", ""), notes=data.get("notes", ""))
+                       sent_to=data.get("to", ""), notes=data.get("notes", ""), location_override=reason)
     return jsonify({"ok": True, "log_id": log_id})
 
 
@@ -738,10 +858,14 @@ def api_offer_email():
         return jsonify({"error": "no such listing"}), 404
     if not letter:
         return jsonify({"error": "no such letter for this listing"}), 400
+    blocked, reason = _location_gate(item, letter.is_offer, data)
+    if blocked:
+        return blocked
     to = (data.get("to") or letter.to_email or "").strip()
     db = get_db()
     try:
-        error, log_id = email_letter(db, _config(), item, letter, to=to, bid=data.get("bid", ""))
+        error, log_id = email_letter(db, _config(), item, letter, to=to, bid=data.get("bid", ""),
+                                     location_override=reason)
     finally:
         db.close()
     if error:
@@ -934,6 +1058,7 @@ EDITABLE = {
     "ai": ("provider", "ollama_url", "ollama_model", "anthropic_key", "photo_check", "photos_per_scan"),
     "backup": ("folder", "keep"),
     "climate": ("bid_guardrail",),
+    "location": ("gate",),
 }
 
 
@@ -976,6 +1101,8 @@ def api_settings_save():
             return jsonify({"error": "weights: known names, each 0 to 2"}), 400
     if not isinstance((changes.get("climate") or {}).get("bid_guardrail", False), bool):
         return jsonify({"error": "climate.bid_guardrail must be true or false"}), 400
+    if (changes.get("location") or {}).get("gate", "warn") not in LOCATION_GATE_MODES:
+        return jsonify({"error": "location.gate must be off, warn or block"}), 400
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):
         return jsonify({"error": "unknown country code"}), 400

@@ -168,11 +168,13 @@ def street_view(item: dict, google_key: str = "") -> dict | None:
     pos = geo.position(item)
     if not pos:
         return None
-    note = {"sale": "position from the sale", "street": "the street, from OpenStreetMap",
+    note = {"verified": "the position you verified", "cadastre": "the land cadastre",
+            "sale": "position from the sale", "street": "the street, from OpenStreetMap",
             "village": "approximate: the village (Street View shows a nearby street)",
             "parish": "approximate: the parish centre", "municipality": "approximate: the town centre"}
     return {"url": geo.street_view_url(pos), "satellite": geo.satellite_url(pos),
-            "embed": geo.street_view_embed_url(pos, google_key) if pos.get("precision") in ("sale", "street") else None,
+            "embed": (geo.street_view_embed_url(pos, google_key)
+                      if pos.get("precision") in ("sale", "street", "verified", "cadastre") else None),
             "precision": note.get(pos.get("precision"), pos.get("precision")),
             "lat": pos["lat"], "lon": pos["lon"]}
 
@@ -184,7 +186,7 @@ def climate_panel(item: dict) -> dict:
     import geo
     from scoring import climate_score
     found = item.get("climate") or climate.stored(item)
-    out = climate_score(found, item.get("kind"))
+    out = {**climate_score(found, item.get("kind")), "location": geo.location_confidence(item)["label"]}
     if found:
         return out
     if not climate._libraries():

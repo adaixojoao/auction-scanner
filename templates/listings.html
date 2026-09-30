@@ -186,6 +186,61 @@ function costsHtml(c) {
     <p class="small muted">${AS.esc(c.note)}</p>${rent}</div>`;
 }
 
+// How exact the position is (geo.location_confidence), and a form to verify it.
+function locationHtml(d) {
+  const l = d.location;
+  if (!l) return "";
+  const id = AS.esc(d.id);
+  const methods = [["coordinates", "Coordinates"], ["address", "Address"]]
+    .concat(l.country === "ES" ? [["cadastre", "Cadastral reference"]] : []);
+  const ll = (lat, lon) => lat != null ? `${Number(lat).toFixed(5)}, ${Number(lon).toFixed(5)}` : "";
+  const history = (l.history || []).map(h => `<li>${AS.esc((h.created_at || "").slice(0, 16).replace("T", " "))} ·
+      ${h.action === "verified" ? "set from" : "cleared:"} ${AS.esc(h.method || "")} “${AS.esc(h.input || "")}” ${AS.esc(ll(h.lat, h.lon))}</li>`).join("");
+  return `<div class="guide location">
+    <b>Location</b> <span class="badge l-${AS.esc(l.level)}">${AS.esc(l.label)}</span>
+    <span class="small muted">from ${AS.esc(l.source)}</span>
+    <p class="small">${AS.esc(l.reliable)}</p>
+    ${l.scanner ? `<p class="small muted">The scanner's own position is kept: ${AS.esc(ll(l.scanner.lat, l.scanner.lon))} (${AS.esc(l.scanner.source)}).</p>` : ""}
+    <div class="loc-form">
+      <select class="loc-method">${methods.map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
+      <input class="loc-value" type="text" placeholder="38.7223, -9.1393 · a Google Maps link · Rua…, village, town">
+      <button class="btn btn-sm btn-primary" data-id="${id}" onclick="verifyLocation(this)">Verify location</button>
+      ${l.verified ? `<button class="btn btn-sm" data-id="${id}" onclick="clearLocation(this)">Use the scanner's position</button>` : ""}
+    </div>
+    ${history ? `<details class="small" style="margin-top:6px"><summary>History</summary><ul>${history}</ul></details>` : ""}
+  </div>`;
+}
+
+async function refreshDetails(el) {
+  const tr = el.closest("tr.details-row");
+  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id));
+  tr.innerHTML = `<td colspan="9">${detailsHtml(d)}</td>`;
+}
+
+async function verifyLocation(btn) {
+  const box = btn.closest(".location");
+  const body = {id: btn.dataset.id, method: box.querySelector(".loc-method").value,
+                value: box.querySelector(".loc-value").value.trim()};
+  if (!body.value) { AS.toast("Paste coordinates, an address or a reference first", "bad"); return; }
+  btn.disabled = true;
+  try {
+    let r = await AS.api("/api/listing/location", {method: "POST", body});
+    if (r.confirm) {
+      if (!confirm(r.confirm)) return;
+      r = await AS.api("/api/listing/location", {method: "POST", body: {...body, confirm: true}});
+    }
+    AS.toast(`Location saved: ${r.location.label}`);
+    await refreshDetails(btn);
+  } catch (e) { /* the toast said why */ } finally { btn.disabled = false; }
+}
+
+async function clearLocation(btn) {
+  if (!confirm("Go back to the position the scanner found? Yours stays in the history.")) return;
+  await AS.api("/api/listing/location/clear", {method: "POST", body: {id: btn.dataset.id}});
+  AS.toast("Back to the scanner's position");
+  await refreshDetails(btn);
+}
+
 function detailsHtml(d) {
   const facts = d.facts.map(f => `<div class="fact"><span class="k">${AS.esc(f.label)}</span><span class="v">${factValue(f)}</span></div>`).join("");
   const links = [d.url && d.source !== "citius" ? AS.link(d.url, "Open the listing ↗") : "",
@@ -215,6 +270,7 @@ function detailsHtml(d) {
     ${d.image ? `<img class="d-img" src="${AS.esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
     <div class="d-main">
       ${guide}
+      ${locationHtml(d)}
       ${streetView}
       ${official}
       ${links ? `<p class="d-links">${links}</p>` : ""}

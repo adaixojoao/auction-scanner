@@ -125,6 +125,12 @@ DEFAULTS = {
         "bid_guardrail": False,   # lower AI-suggested bids for a caution/poor climate grade
     },
 
+    "location": {
+        # Offers for a listing placed only at its town (or not at all):
+        # "off", "warn" (a warning), "block" (also asks your reason before sending).
+        "gate": "warn",
+    },
+
     # CourtBid via Apify (python scraper.py --source courtbid)
     "apify_token": "",
 
