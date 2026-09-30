@@ -267,8 +267,17 @@ def assess(lat: float, lon: float) -> dict:
     return out
 
 
+@functools.lru_cache(maxsize=1)
+def _libraries() -> bool:
+    """requirements-climate.txt is optional: without it the scan must not fail."""
+    import importlib.util
+    return all(importlib.util.find_spec(name) is not None for name in ("numpy", "rasterio"))
+
+
 def available() -> bool:
-    return os.path.isdir(_layers()) or os.path.isdir(os.path.join(data_dir(), "jrc_flood"))
+    if not (os.path.isdir(_layers()) or os.path.isdir(os.path.join(data_dir(), "jrc_flood"))):
+        return False
+    return _libraries()
 
 
 def for_item(item: dict, towns: dict | None = None) -> dict | None:
