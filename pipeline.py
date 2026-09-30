@@ -173,7 +173,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                                   key=lambda it: -it.get("rank", it["score"]))
                     session = make_session()
                     geo.locate_towns(db, session, best)
-                    geo.geocode_pending(db, session, best)
+                    geo.geocode_pending(db, session, best, towns=geo.town_index(db))
                     import cadastre
                     cadastre.locate_pending(db, session, best, geo.town_index(db))
                     geo.check_water_pending(db, session, best)

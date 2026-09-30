@@ -372,12 +372,17 @@ def normalize(text) -> str:
     return _normalize(str(text))
 
 
-@functools.lru_cache(maxsize=16384)
+_COMBINING = re.compile("[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]")
+
+
+@functools.lru_cache(maxsize=65536)
 def _normalize(text: str) -> str:
     # The scorer asks for the same listing text dozens of times per listing
     # (one call per term list): cached, the list of 2,700 listings loads ~2x faster.
+    if text.isascii():
+        return text.lower()
     decomposed = unicodedata.normalize("NFKD", text).replace("⁄", "/")  # ½ → 1/2
-    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).lower()
+    return _COMBINING.sub("", decomposed).lower()
 
 
 @functools.lru_cache(maxsize=4096)
@@ -434,9 +439,19 @@ def find_terms(text, terms, *, negations: bool = True) -> list[str]:
     words, by a negation — "não se encontra ocupado", "sem inquilino", "livre
     de ocupantes" — does not count.
     """
+    if not text:
+        return []
+    return list(_find_terms(str(text), tuple(terms), negations))
+
+
+@functools.lru_cache(maxsize=400_000)
+def _find_terms(text: str, terms: tuple, negations: bool) -> tuple:
+    # Cached: the list is scored again on every page view, over the same texts.
+    # With 18,000 listings and their long agent descriptions, searching term
+    # by term every time took most of a 40 s load.
     norm = normalize(text)
     if not norm:
-        return []
+        return ()
     found = []
     for term in terms:
         if _needle(term) not in norm:           # cheap: most terms are not in most texts
@@ -446,7 +461,7 @@ def find_terms(text, terms, *, negations: bool = True) -> list[str]:
                 continue
             found.append(term)
             break
-    return found
+    return tuple(found)
 
 
 def has_term(text, terms, *, negations: bool = True) -> bool:

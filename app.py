@@ -154,6 +154,21 @@ def open_window(url: str):
     webbrowser.open(url)
 
 
+def warm_up():
+    """Score the list once in the background at start: the first page view then
+    finds every text check cached (cold, 18,000 listings took ~40 s)."""
+    try:
+        import db
+        conn = db.connect()
+        try:
+            db.load_listings(conn, apply_min_score=False)
+        finally:
+            conn.close()
+        LOG.info("List warmed up")
+    except Exception as e:  # noqa: BLE001 — only a speed-up
+        LOG.info(f"Warm-up skipped ({type(e).__name__}: {e})")
+
+
 def auto_scan_loop(stop: threading.Event):
     """While the app is open, run whatever the timetable says is due."""
     import scheduler
@@ -296,6 +311,7 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
     stop = threading.Event()
     threading.Thread(target=auto_scan_loop, args=(stop,), name="timetable", daemon=True).start()
     threading.Thread(target=telegram_loop, args=(stop,), name="telegram", daemon=True).start()
+    threading.Thread(target=warm_up, name="warm-up", daemon=True).start()
 
     started = time.monotonic()
     try:

@@ -15,10 +15,11 @@ const AS = (() => {
   }
   // The unclamped score (rank) when given: several listings reach 100, and the
   // points above it say which of them is better.
-  function scoreBadge(sc, rank) {
-    const s = Math.round(rank != null && rank > (sc || 0) ? rank : (sc || 0));
-    const tip = s > 100 ? ` title="Above 100: beats the goal by more"` : "";
-    return `<span class="score ${s >= 70 ? "s-high" : s >= 50 ? "s-mid" : "s-low"}"${tip}>${s}</span>`;
+  function scoreBadge(sc, rank, excellent) {
+    // The score is squeezed near the top (never quite 100); rank only orders the list.
+    const s = Math.round(sc || 0);
+    const star = excellent ? ` <span class="excellent" title="Excellent: ${esc(excellent.join(" · "))}">★ Excellent</span>` : "";
+    return `<span class="score ${s >= 70 ? "s-high" : s >= 50 ? "s-mid" : "s-low"}">${s}</span>${star}`;
   }
   function flag(code) { return FLAGS[code] ? `<span title="${esc(code)}">${FLAGS[code]}</span>` : esc(code || ""); }
   function link(url, text) {

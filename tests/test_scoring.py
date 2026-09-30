@@ -72,7 +72,7 @@ def test_no_price_on_an_offer_sale_is_a_chance():
                                     description="Venda por negociação particular"))
     assert "no price — you set your offer" in r_sealed and "sealed-bid (carta fechada)" in r_sealed
     assert "no price — you set your offer" in r_private
-    assert sealed == 100 and private >= 80
+    assert sealed >= 85 and private >= 80
     # an online listing whose price we simply did not read gets no such bonus
     _, r_online = score(item(title="Moradia", source="leilosoc"))
     assert "no price — you set your offer" not in r_online
@@ -125,8 +125,9 @@ def test_urgency_works_with_naive_dates():
 
 
 def test_price_drop_bonus():
-    base, _ = score(item(title="Moradia", price=20000))
-    dropped, reasons = score(item(title="Moradia", price=20000, price_drop_pct=30))
+    from scoring import score_detail
+    base, _ = score_detail(item(title="Moradia", price=20000))
+    dropped, reasons = score_detail(item(title="Moradia", price=20000, price_drop_pct=30))
     assert dropped == base + 10 and any("price cut" in r for r in reasons)
 
 
@@ -271,7 +272,7 @@ def test_listings_that_all_reach_100_are_still_ordered():
     court = dict(source="citius", description="venda por propostas em carta fechada, em bom estado")
     better = item(title="Moradia", concelho="Guarda", price=4000, area_m2=90, **court)
     good = item(title="Moradia", concelho="Guarda", price=25000, area_m2=90, **court)
-    assert score(better)[0] == score(good)[0] == 100
+    assert 100 > score(better)[0] > score(good)[0] >= 85       # the top is squeezed, not clamped
     assert score_detail(better)[0] > score_detail(good)[0] > 100
 
 
@@ -601,7 +602,7 @@ def test_no_keys_on_servihabitat_means_occupied():
     assert "occupied/tenanted" in reasons
 
 
-def test_small_plots_are_not_wanted_and_land_near_guarda_is():
+def test_small_plots_are_not_wanted_and_guarda_no_longer_counts():
     from scoring import score_detail
     plot = dict(source="eleiloes", country="PT", title="Prédio rústico", tipo="terreno", price=5000)
     _, small = score_detail({**plot, "area_m2": 8000})
@@ -611,11 +612,10 @@ def test_small_plots_are_not_wanted_and_land_near_guarda_is():
     _, abroad = score_detail({**plot, "country": "ES", "title": "Finca rústica", "area_m2": 20000})
     assert any(r.startswith("rejected: plot too small (2.0 ha < 2.5 ha)") for r in abroad)
     big = {**plot, "area_m2": 40000}
+    # The owner already has a flat in Guarda (2026-09-26): being near it is worth nothing now.
     far, _ = score_detail({**big, "guarda": {"km": 200, "approx": False, "text": "far"}})
     near, reasons = score_detail({**big, "guarda": {"km": 8, "approx": False, "text": "8.0 km from Guarda"}})
-    mid, _ = score_detail({**big, "guarda": {"km": 50, "approx": False, "text": "50 km from Guarda"}})
-    assert near - far >= 19 and far < mid < near and "8.0 km from Guarda" in reasons
-    # A home gets no Guarda bonus.
+    assert near == far and "8.0 km from Guarda" not in reasons
     home = dict(source="eleiloes", country="PT", title="Moradia T3", tipo="moradia", area_m2=120, price=20000)
     assert score_detail({**home, "guarda": {"km": 5, "approx": False, "text": "g"}})[0] == score_detail(home)[0]
 

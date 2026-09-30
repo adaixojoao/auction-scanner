@@ -449,7 +449,7 @@ def test_listings_above_100_show_their_real_points(client, add):
         concelho="Lisboa", tipo="Moradia")
     items = client.get("/api/listings").get_json()["items"]
     assert [it["id"] for it in items] == ["eleiloes:cheap", "eleiloes:dear"]
-    assert all(it["score"] == 100 for it in items)
+    assert 100 > items[0]["score"] > items[1]["score"] >= 85      # squeezed, not clamped
     assert items[0]["rank"] > items[1]["rank"] > 100
     detail = client.get("/api/listing?id=eleiloes:cheap").get_json()
     assert detail["rank"] == items[0]["rank"]
