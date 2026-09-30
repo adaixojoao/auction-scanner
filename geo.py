@@ -14,11 +14,12 @@ property, not the building.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import urllib.parse
 
-from common import LOG
+from common import LOG, normalize
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "auction-scanner (+https://github.com/adaixojoao/auction-scanner)"
@@ -60,9 +61,19 @@ def position(item: dict) -> dict | None:
         if lat and lon and -90 <= lat <= 90 and -180 <= lon <= 180:
             return {"lat": lat, "lon": lon, "precision": "sale"}
     geo = raw.get("geo")
-    if isinstance(geo, dict) and geo.get("lat") and geo.get("lon"):
+    if isinstance(geo, dict) and geo.get("lat") and geo.get("lon") and not stale_lookup(item, geo):
         return geo
     return None
+
+
+def stale_lookup(item: dict, geo: dict) -> bool:
+    """A stored lookup made with another municipality than the listing has now
+    (the town was read wrong then, "El" for "El Campo De Peñaranda"): its pin
+    is not trusted and the listing is looked up again."""
+    if geo.get("precision") in ("cadastre", "sale"):
+        return False
+    town, query = municipality(item), geo.get("query")
+    return bool(town and query and normalize(town) not in normalize(query))
 
 
 _CONCELHO = re.compile(r"\bconcelho\s+(?:de|do|da)\s+([A-ZÀ-Ú][^,.;:()]{2,40})", re.I)
@@ -155,8 +166,23 @@ def queries(item: dict) -> list[str]:
     return out
 
 
-def geocode(session, item: dict) -> dict | None:
-    """Look the listing up on OpenStreetMap; the first query that finds it wins."""
+def in_its_town(hit: dict, item: dict, towns: dict | None) -> bool:
+    """A street hit must be in the listing's own municipality: "C. Larga, El"
+    found the Platja Llarga 600 km away. Near the town's pin, or the town's
+    name in the hit's address, is enough."""
+    town = municipality(item)
+    if not town:
+        return False
+    pin = (towns or {}).get(town_key(item.get("country") or "PT", town))
+    if pin:
+        return distance_km(float(hit["lat"]), float(hit["lon"]), pin["lat"], pin["lon"]) <= MAX_TOWN_KM
+    name = hit.get("display_name")
+    return not name or normalize(town) in normalize(name)     # no address to check: take it
+
+
+def geocode(session, item: dict, towns: dict | None = None) -> dict | None:
+    """Look the listing up on OpenStreetMap; the first query that finds it,
+    in the listing's own municipality, wins."""
     country = COUNTRY_CODES.get(item.get("country") or "PT")
     for q in queries(item):
         params = {"format": "jsonv2", "limit": 1, "q": q}
@@ -166,7 +192,7 @@ def geocode(session, item: dict) -> dict | None:
         time.sleep(1.1)                          # Nominatim: at most one request a second
         resp.raise_for_status()
         hits = resp.json()
-        if hits:
+        if hits and ("," not in q or in_its_town(hits[0], item, towns)):
             hit = hits[0]
             # Found by the town's name alone: that is the town's pin, not the house.
             precision = "municipality" if "," not in q else _PLACE_OF.get(hit.get("addresstype"), "parish")
@@ -174,17 +200,18 @@ def geocode(session, item: dict) -> dict | None:
     return None
 
 
-def geocode_pending(db, session, items: list[dict], limit: int = GEOCODE_PER_SCAN) -> int:
+def geocode_pending(db, session, items: list[dict], limit: int = GEOCODE_PER_SCAN,
+                    towns: dict | None = None) -> int:
     """Look up the listings (best first) that have no position yet, once each."""
     done = 0
     for item in items:
         if done >= limit:
             break
         raw = _raw(item)
-        if position(item) or raw.get("geo_checked"):
+        if position(item) or (raw.get("geo_checked") and not (raw.get("geo") and stale_lookup(item, raw["geo"]))):
             continue
         try:
-            geo = geocode(session, item)
+            geo = geocode(session, item, towns)
         except Exception as e:  # noqa: BLE001 — offline or refused: try next scan
             LOG.info(f"OpenStreetMap lookup failed ({type(e).__name__}); trying next scan")
             break
@@ -358,9 +385,20 @@ def _grid(path: str, mtime: float, kind: str | None) -> dict[tuple[int, int], li
     return grid
 
 
+_MTIMES: dict[str, tuple[float, float]] = {}      # path → (checked at, file time)
+
+
 def _points(path: str, kind: str | None = None) -> dict:
+    # The file's date is looked at once a minute, not for every listing
+    # (72,000 checks took 3 s of an 18,000-listing load).
+    import time as _time
+    now = _time.monotonic()
+    checked = _MTIMES.get(path)
     try:
-        return _grid(path, _os.path.getmtime(path), kind)
+        if not checked or now - checked[0] > 60:
+            checked = (now, _os.path.getmtime(path))
+            _MTIMES[path] = checked
+        return _grid(path, checked[1], kind)
     except OSError:
         return {}
 
@@ -380,18 +418,35 @@ def _place(item: dict, towns: dict | None) -> dict | None:
     return pos
 
 
+_NEAREST: dict[tuple, tuple[float, str] | None] = {}
+
+
 def _nearest(pos: dict, grid: dict, max_km: float) -> tuple[float, str] | None:
+    # Many listings share a position (their town's): each is searched once.
+    # The search compares a flat-earth distance (exact enough to rank points a
+    # few km apart) and measures only the winner on the sphere.
+    key = (round(pos["lat"], 4), round(pos["lon"], 4), id(grid), max_km)
+    if key in _NEAREST:
+        return _NEAREST[key]
     lat, lon = pos["lat"], pos["lon"]
     ci, cj = int(lat // _CELL), int(lon // _CELL)
     reach = int(max_km // 45) + 1            # a cell is at least ~45 km wide here
-    best = None
+    shrink = math.cos(math.radians(lat)) ** 2
+    best, best_d2 = None, None
     for di in range(-reach, reach + 1):
         for dj in range(-reach, reach + 1):
             for plat, plon, name in grid.get((ci + di, cj + dj), ()):
-                km = distance_km(lat, lon, plat, plon)
-                if best is None or km < best[0]:
-                    best = (km, name)
-    return best if best and best[0] <= max_km else None
+                d2 = (plat - lat) ** 2 + (plon - lon) ** 2 * shrink
+                if best_d2 is None or d2 < best_d2:
+                    best, best_d2 = (plat, plon, name), d2
+    found = None
+    if best:
+        km = distance_km(lat, lon, best[0], best[1])
+        found = (km, best[2]) if km <= max_km else None
+    if len(_NEAREST) > 200000:
+        _NEAREST.clear()
+    _NEAREST[key] = found
+    return found
 
 
 def _found(pos: dict, best: tuple[float, str], what: str) -> dict:

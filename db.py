@@ -364,6 +364,9 @@ def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: st
     db.commit()
 
 
+RELISTING_SOURCES = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira"}
+
+
 def mark_duplicates(db: sqlite3.Connection) -> int:
     """Flag cross-source near-duplicates (same country + concelho, price within
     €500, area within 5 m²). The most complete row stays visible; the others get
@@ -390,8 +393,14 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
             if keeper["id"] in dup_of:
                 continue
             for other in group[i + 1:]:
-                if other["id"] in dup_of or other["source"] == keeper["source"]:
+                if other["id"] in dup_of:
                     continue
+                if other["source"] == keeper["source"]:
+                    # Portals re-post the same house under a new id: the same price
+                    # and size there is the same house. Courts sell twin lots.
+                    if not (keeper["source"] in RELISTING_SOURCES and other["price"] == keeper["price"]
+                            and other["area_m2"] == keeper["area_m2"]):
+                        continue
                 if (abs(other["price"] - keeper["price"]) < 500
                         and abs(other["area_m2"] - keeper["area_m2"]) < 5):
                     dup_of[other["id"]] = keeper["id"]
@@ -638,7 +647,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """
     import geo
     import rounds
-    from scoring import GUARDA, categorize, property_kind, score_detail  # scoring imports common, not db
+    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail  # scoring imports common, not db
 
     now = now or utcnow()
     sql = "SELECT * FROM listings"
@@ -654,6 +663,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     towns = geo.town_index(db)     # where each municipality's town is, for "X km from town"
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     import outcomes
+    climate_on = climate.available()
     closes = outcomes.stats(db)    # what ended sales closed at, for "likely to close around"
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
 
@@ -698,13 +708,15 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["station"] = geo.nearest_hub(item, "station", towns=towns)
         item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
         item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
+        item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
         item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
         rank, reasons = score_detail(item, now=now, targets=filters)
-        sc = max(0.0, min(100.0, rank))
+        sc = display_score(rank)
         item["score"] = sc
         item["rank"] = rank          # unclamped: orders listings that all reach 100
         item["reasons"] = reasons
+        item["excellent"] = excellent(item, sc, reasons)
         item["category"] = categorize(item)
         item["kind"] = property_kind(item) if item["category"] == "imoveis" else None
 

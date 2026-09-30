@@ -8,7 +8,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_area, find_price, make_listing, make_session, parse_date_dmy,
+from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number)
 from db import upsert_listing
 from sources import SourceUnavailable, register
@@ -390,15 +390,19 @@ def fetch_catastro(db, session, limit: int = CATASTRO_PER_SCAN) -> int:
     return done
 
 
-def enrich_spain_details(db, session, limit: int = 100):
+def enrich_spain_details(db, session, limit: int = 300):
     """Fetch the BOE detail tabs for Spanish listings not checked yet (or still
     without a price), soonest first: price and dates for the listing, the
-    court's name and e-mail for letters, occupancy for the score."""
+    court's name and e-mail for letters, occupancy for the score.
+
+    Never-checked sales go first: re-reading the same unpriced ones every scan
+    left 3 of 4 open sales without a price (shown as €0)."""
     rows = db.execute("""
         SELECT * FROM listings WHERE source='spain'
           AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
-        ORDER BY date_end IS NULL, date_end LIMIT ?
-    """, (limit,)).fetchall()
+          AND (date_end IS NULL OR date_end >= ?)
+        ORDER BY (raw_json LIKE '%"detail_checked"%'), date_end IS NULL, date_end LIMIT ?
+    """, (datetime.now().strftime("%Y-%m-%d"), limit)).fetchall()
     if not rows:
         return 0
 
@@ -533,6 +537,22 @@ SERVIHABITAT_PROVINCES = (
 )
 
 
+_ARTICLE = re.compile(r"^(?:el|la|los|las|l'|els|les|o|a|os|as)$", re.I)
+
+
+def servihabitat_town(title: str) -> str | None:
+    """The town in "Casa en venta en C. Larga, 26, Campo De Peñaranda, El, Salamanca":
+    the part before the province, with a trailing article put back in front
+    ("El Campo De Peñaranda"); alone, "El" found a beach in Tarragona."""
+    parts = [p.strip() for p in title.split(",")]
+    if len(parts) < 3:
+        return None
+    town = parts[-2]
+    if _ARTICLE.match(town) and len(parts) >= 4:
+        town = f"{town} {parts[-3]}"
+    return town or None
+
+
 def parse_servihabitat_page(html: str, province: str) -> list[dict]:
     rows = []
     for a in BeautifulSoup(html, "html.parser").select("a.features[href]"):
@@ -548,11 +568,11 @@ def parse_servihabitat_page(html: str, province: str) -> list[dict]:
         title = (title_m.group(1) if title_m else text)[:200]
         item = a.find_parent("div", class_="product-item")                  # the card: photos and details
         img = item.select_one("img.img-car") if item else None
-        town = re.search(r",\s*([^,]+),\s*[^,]+$", title)
+        town = servihabitat_town(title)
         rows.append(make_listing(
             "servihabitat", m.group(1), "ES", title=title, description=text[:500], tipo="vivienda",
             area_m2=find_area(text), price=price, min_price=price, district=province,
-            concelho=town.group(1).strip() if town else None, url=href, base_url=SERVIHABITAT,
+            concelho=town, url=href, base_url=SERVIHABITAT,
             image_url=(img.get("data-src") or img.get("src")) if img else None,
         ))
     return rows
@@ -659,4 +679,224 @@ def scrape_subastasactivas(db, max_price: float = 100000, **_):
             tipo="inmueble", price=price, url=url, date_end=parse_date_dmy(text),
         ))
         total += 1
+    return total
+
+
+# ─── Aliseda (Santander's repossessions) ────────────────────────────
+# The site's own search API: price, the map position, the full text and who
+# holds it, 12 a page. Homes (tipo 10) and land (tipo 8) within budget, all Spain.
+ALISEDA_API = "https://laravel.alisedainmobiliaria.com/api/v2/new-search"
+ALISEDA_SITE = "https://www.alisedainmobiliaria.com"
+ALISEDA_TYPES = {10: "vivienda", 8: "terreno"}
+ALISEDA_MAX_PAGES = 80
+
+
+def parse_aliseda(item: dict, tipo: str) -> dict | None:
+    op = item.get("operacion") or {}
+    addr = item.get("address") or {}
+    price = op.get("Precio")
+    if not item.get("id") or not price:
+        return None
+    town = (addr.get("Ciudad") or "").title() or None
+    street = " ".join(str(x) for x in (addr.get("TipoVia"), addr.get("StreetName"), addr.get("StreetNumber")) if x)
+    area = item.get("SupParcela") or item.get("SuperficieTotal") if tipo == "terreno" else \
+        item.get("ConstructedArea") or item.get("SuperficieTotal")
+    raw = {"posesion": item.get("posesion"), "referencia_catastral": item.get("RefCatastral") or None,
+           "precio_anterior": op.get("PrecioAnterior")}
+    if addr.get("Latitude") and addr.get("Longitude"):
+        raw["geo"] = {"lat": float(addr["Latitude"]), "lon": float(addr["Longitude"]), "precision": "street"}
+    posesion = (item.get("posesion") or "").upper()
+    if posesion.startswith("LIBRE"):
+        raw["occupation"] = "vacant"
+    elif "OCUPA" in posesion or "SIN POSES" in posesion or "ARREND" in posesion:
+        raw["occupation"] = "occupied"
+    title = f"{'Terreno' if tipo == 'terreno' else 'Vivienda'} en {town or ''}" + (f", {street}" if street else "")
+    images = item.get("imagenes") or []
+    return make_listing(
+        "aliseda", item["id"], "ES", title=title[:200],
+        description=(item.get("Description") or "")[:3000] or None, tipo=tipo,
+        area_m2=area or None, price=float(price), min_price=float(price),
+        district=(item.get("provinciaUrl") or "").replace("-", " ").title() or None, concelho=town,
+        url=f"{ALISEDA_SITE}/inmueble/{item['id']}",
+        image_url=images[0].get("Uri") if images else item.get("Imagen"),
+        raw_json=json.dumps(raw, ensure_ascii=False),
+    )
+
+
+@register("aliseda", "ES")
+def scrape_aliseda(db, max_price: float = 50000, **_):
+    """aliseda — Santander's repossessed homes and land, with map positions."""
+    session = make_session(timeout=30)
+    total = 0
+    for code, tipo in ALISEDA_TYPES.items():
+        for page in range(1, ALISEDA_MAX_PAGES + 1):
+            resp = session.get(ALISEDA_API, params={"tipo": code, "precio": f"0-{int(max_price)}", "page": page})
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("data") or []:
+                row = parse_aliseda(item, tipo)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            if page >= (data.get("last_page") or 1):
+                break
+            time.sleep(0.4)
+    LOG.info(f"Aliseda: {total} listings")
+    return total
+
+
+# ─── Altamira (bank and fund repossessions, doValue) ────────────────
+# The site's own results service: price, map position and the owner, 100 a
+# page. Homes (tipología 1) and land (9) within budget, all Spain.
+ALTAMIRA_API = "https://www.altamirainmuebles.com/nodejs/getResultados"
+ALTAMIRA_SITE = "https://www.altamirainmuebles.com"
+ALTAMIRA_TYPES = {1: "vivienda", 9: "terreno"}
+ALTAMIRA_PAGE = 100
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", normalize(text or "")).strip("-")
+
+
+def parse_altamira(card: dict, tipo: str) -> dict | None:
+    price = card.get("precio")
+    if not card.get("referencia") or not price or card.get("preciovisible") == 0:
+        return None
+    kind = card.get("tipologia") or ("Suelo" if tipo == "terreno" else "Vivienda")
+    town = card.get("poblacion") or card.get("poblacionurl")
+    raw = {"sociedad": card.get("sociedadpropietaria"), "riesgo_ocupacion": card.get("riesgoocupacion")}
+    if card.get("latitud") and card.get("longitud"):
+        raw["geo"] = {"lat": float(card["latitud"]), "lon": float(card["longitud"]), "precision": "street"}
+    if card.get("riesgoocupacion"):
+        raw["occupation"] = "occupied"
+    url = (f"{ALTAMIRA_SITE}/venta-de-{_slug(kind)}/{_slug(card.get('provinciaurl'))}/{_slug(card.get('poblacionurl'))}"
+           f"/segunda-mano/{card['referencia']}/{card.get('cinmueble')}/1")
+    street = card.get("calle") or ""
+    return make_listing(
+        "altamira", card["referencia"], "ES", title=f"{kind} en {town}" + (f", {street}" if street else ""),
+        description=" · ".join(str(x) for x in (kind, street, card.get("cp"), town, card.get("provinciaurl"),
+                                                f"{card['numhab']} habs" if card.get("numhab") else None) if x),
+        tipo=tipo, area_m2=card.get("superficie") or None, price=float(price), min_price=float(price),
+        district=card.get("provinciaurl"), concelho=town, url=url,
+        raw_json=json.dumps(raw, ensure_ascii=False),
+    )
+
+
+@register("altamira", "ES")
+def scrape_altamira(db, max_price: float = 50000, **_):
+    """altamira — bank and fund repossessions (homes and land) with map positions."""
+    session = make_session(timeout=30)
+    total = 0
+    for code, tipo in ALTAMIRA_TYPES.items():
+        page, seen = 1, 0
+        while True:
+            body = {"buscador": {"idGestion": 1, "idTipologia": code, "idProvincia": None, "idPoblacion": None},
+                    "filtros": {"precioMaximo": int(max_price), "order": 1, "pagina": page,
+                                "limite": str(ALTAMIRA_PAGE), "cntxParamSubastasActivo": "1",
+                                "cntxParamSubastasSarebActivo": "1", "cntxParamSubastasCodSocsAAM": "1,2,7",
+                                "modoVisualizacion": "L"}, "user": None}
+            resp = session.post(ALTAMIRA_API, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+            cards = data.get("minifichas") or []
+            for card in cards:
+                row = parse_altamira(card, tipo)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            seen += len(cards)
+            if not cards or seen >= int(data.get("totalResultados") or 0) or page >= 50:
+                break
+            page += 1
+            time.sleep(0.4)
+    LOG.info(f"Altamira: {total} listings")
+    return total
+
+
+# ─── Fotocasa: Spain's big private portal ───────────────────────────
+# Not auctions: owners' and agents' asking prices, in the green north where
+# summers stay mild (Galicia, Asturias, Cantabria, the Basque Country, León,
+# Navarra). The results page carries its data as JSON, 30 a page, with the
+# text, the map position and whether it is occupied.
+FOTOCASA = "https://www.fotocasa.es"
+FOTOCASA_PROVINCES = ("a-coruna", "lugo", "pontevedra", "asturias", "cantabria", "bizkaia", "gipuzkoa",
+                      "leon", "navarra")
+FOTOCASA_SEARCHES = (("viviendas", None), ("terrenos", 10000))     # homes; land from 1 ha
+FOTOCASA_MAX_PAGES = 25
+
+
+def fotocasa_page(html: str) -> tuple[list[dict], int]:
+    """(ads, total ads) from a results page."""
+    m = re.search(r'<script[^>]*id="__initial_props__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return [], 0
+    props = json.loads(m.group(1))
+    result = (props.get("initialSearch") or {}).get("result") or {}
+    return result.get("realEstates") or [], int((props.get("counters") or {}).get("realEstates") or 0)
+
+
+def parse_fotocasa(ad: dict, tipo: str) -> dict | None:
+    price = ad.get("rawPrice")
+    if not ad.get("id") or not price:
+        return None
+    addr = ad.get("address") or {}
+    feats = {f.get("key"): f.get("value") for f in ad.get("features") or []}
+    town = re.sub(r"\s*\(.*?\)\s*$", "", addr.get("municipality") or addr.get("city") or "") or None
+    raw: dict = {"occupation": "occupied"} if ad.get("isOccupied") or ad.get("isRentedWithTenants") else {}
+    if ad.get("isBareOwnership"):
+        raw["nuda_propiedad"] = True
+    coords = ad.get("coordinates") or {}
+    if coords.get("latitude") and coords.get("longitude"):
+        raw["geo"] = {"lat": float(coords["latitude"]), "lon": float(coords["longitude"]),
+                      "precision": "street" if ad.get("accuracy") else "village"}
+    detail = (ad.get("detail") or {}).get("es-ES")
+    images = [m.get("src") for m in ad.get("multimedia") or [] if m.get("src")]
+    kind = "Terreno" if tipo == "terreno" else "Casa" if "House" in (ad.get("buildingSubtype") or "") else "Vivienda"
+    location = ad.get("location") or ""
+    return make_listing(
+        "fotocasa", ad["id"], "ES", title=f"{kind} en {town or addr.get('province') or ''}"
+                                          + (f", {location}" if location else ""),
+        description=(ad.get("description") or "")[:3000] or None, tipo=tipo,
+        area_m2=feats.get("surface") or None, price=float(price), min_price=float(price),
+        district=addr.get("province"), concelho=town, url=f"{FOTOCASA}{detail}" if detail else None,
+        image_url=images[0] if images else None, raw_json=json.dumps(raw, ensure_ascii=False) if raw else None,
+    )
+
+
+@register("fotocasa", "ES")
+def scrape_fotocasa(db, max_price: float = 50000, **_):
+    """fotocasa — private homes and land (1 ha+) in the green north of Spain."""
+    session = make_session(timeout=30)
+    total = 0
+    for province in FOTOCASA_PROVINCES:
+        for kind, min_surface in FOTOCASA_SEARCHES:
+            params = {"maxPrice": int(max_price)}
+            if min_surface:
+                params["minSurface"] = min_surface
+            seen = 0
+            for page in range(1, FOTOCASA_MAX_PAGES + 1):
+                path = f"{FOTOCASA}/es/comprar/{kind}/{province}-provincia/todas-las-zonas/l" + \
+                       (f"/{page}" if page > 1 else "")
+                try:
+                    resp = session.get(path, params=params)
+                    resp.raise_for_status()
+                except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
+                    if total == 0 and province == FOTOCASA_PROVINCES[0]:
+                        raise
+                    LOG.info(f"Fotocasa {province} {kind} p{page}: {type(e).__name__}")
+                    break
+                ads, count = fotocasa_page(resp.text)
+                for ad in ads:
+                    row = parse_fotocasa(ad, "terreno" if kind == "terrenos" else "vivienda")
+                    if row and row["price"] <= max_price:
+                        upsert_listing(db, row)
+                        total += 1
+                db.commit()
+                seen += len(ads)
+                if not ads or seen >= count:
+                    break
+                time.sleep(0.8)
+    LOG.info(f"Fotocasa: {total} listings")
     return total

@@ -1571,3 +1571,84 @@ def scrape_bidleiloeira(db, max_price: float = 100000, **_):
             total += 1
         db.commit()
     return total
+
+
+# ─── Imovirtual: Portugal's big private portal (OLX group) ──────────
+# Not auctions: owners' and agents' asking prices, for the places with mild
+# summers ahead (the north, the Azores, Madeira), where courts sell little.
+# The results page carries its data as JSON (__NEXT_DATA__), 36 a page.
+IMOVIRTUAL = "https://www.imovirtual.com"
+IMOVIRTUAL_PLACES = ("viana-do-castelo", "braga", "vila-real", "porto", "aveiro", "viseu",
+                     "ilha-de-sao-miguel", "ilha-terceira", "ilha-do-pico", "ilha-do-faial", "ilha-de-sao-jorge",
+                     "ilha-de-santa-maria", "ilha-graciosa", "ilha-das-flores", "ilha-da-madeira")
+IMOVIRTUAL_SEARCHES = (("moradia", None), ("terreno", 10000))      # homes; land from 1 ha
+IMOVIRTUAL_MAX_PAGES = 15
+
+
+def imovirtual_page(html: str) -> tuple[list[dict], int]:
+    """(ads, total pages) from a results page."""
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return [], 0
+    data = json.loads(m.group(1))["props"]["pageProps"].get("data") or {}
+    ads = (data.get("searchAds") or {})
+    return ads.get("items") or [], ((ads.get("pagination") or {}).get("totalPages") or 0)
+
+
+def parse_imovirtual(ad: dict) -> dict | None:
+    price = ((ad.get("totalPrice") or {}).get("value"))
+    if not ad.get("id") or not price or ad.get("hidePrice"):
+        return None
+    places = {loc.get("locationLevel"): loc.get("name")
+              for loc in (((ad.get("location") or {}).get("reverseGeocoding") or {}).get("locations") or [])}
+    street = ((((ad.get("location") or {}).get("address") or {}).get("street")) or {}).get("name")
+    land = ad.get("estate") == "TERRAIN"
+    area = ad.get("areaInSquareMeters") if land else (ad.get("areaInSquareMeters") or None)
+    plot = ad.get("terrainAreaInSquareMeters")
+    images = ad.get("images") or []
+    title = re.sub(r"\s+", " ", ad.get("title") or "").strip()
+    return make_listing(
+        "imovirtual", ad["id"], "PT", title=title[:200],
+        description=" · ".join(x for x in (title, street, places.get("parish"), places.get("council"),
+                                           f"terreno {plot:.0f} m²" if plot and not land else None,
+                                           "particular" if ad.get("isPrivateOwner") else None) if x),
+        tipo="terreno" if land else "moradia", area_m2=area or None, price=float(price), min_price=float(price),
+        district=places.get("district"), concelho=places.get("council"), freguesia=places.get("parish"),
+        url=f"{IMOVIRTUAL}/pt/anuncio/{ad.get('slug')}" if ad.get("slug") else None,
+        image_url=images[0].get("medium") if images else None,
+        raw_json=json.dumps({"land_m2": plot, "private_owner": bool(ad.get("isPrivateOwner"))}, ensure_ascii=False),
+    )
+
+
+@register("imovirtual", "PT")
+def scrape_imovirtual(db, max_price: float = 50000, **_):
+    """imovirtual — private homes and land (1 ha+) in the north, the Azores and Madeira."""
+    session = make_session(timeout=30)
+    total = 0
+    for place in IMOVIRTUAL_PLACES:
+        for estate, min_area in IMOVIRTUAL_SEARCHES:
+            params = {"priceMax": int(max_price)}
+            if min_area:
+                params["areaMin"] = min_area
+            for page in range(1, IMOVIRTUAL_MAX_PAGES + 1):
+                try:
+                    resp = session.get(f"{IMOVIRTUAL}/pt/resultados/comprar/{estate}/{place}",
+                                       params={**params, "page": page})
+                    resp.raise_for_status()
+                except Exception as e:  # noqa: BLE001 — one place failing is not the source failing
+                    if total == 0 and place == IMOVIRTUAL_PLACES[0]:
+                        raise
+                    LOG.info(f"Imovirtual {place} {estate} p{page}: {type(e).__name__}")
+                    break
+                ads, pages = imovirtual_page(resp.text)
+                for ad in ads:
+                    row = parse_imovirtual(ad)
+                    if row and row["price"] <= max_price:
+                        upsert_listing(db, row)
+                        total += 1
+                db.commit()
+                if page >= pages:
+                    break
+                time.sleep(0.6)
+    LOG.info(f"Imovirtual: {total} listings")
+    return total

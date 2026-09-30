@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 40
+    assert len(REGISTRY) == 46
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -22,7 +22,8 @@ def test_registry_is_complete():
                         "veilingbiljet"}                  # the same lots as openbareverkoop.nl
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"BE", "CY", "GR", "RO"}
+    # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"BE", "CY", "GR", "RO"} | {"EU"}
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name
@@ -288,6 +289,39 @@ def test_spain_enrichment_fills_letters_and_scoring(db, add, fake_http):
     assert enrich_spain_details(db, session) == 0 and len(session.calls) == 3   # checked once
 
 
+BOE_LOTS_GENERAL = """<html><body><table>
+<tr><th>Lotes</th><td>3</td></tr>
+<tr><th>Valor subasta</th><td>Ver valor de subasta en cada lote (los lotes se subastan de forma independiente)</td></tr>
+<tr><th>Puja mínima</th><td>Ver puja mínima de cada lote (adjudicación independiente)</td></tr>
+<tr><th>Fecha de conclusión</th><td>14-10-2026 18:00:00 CET</td></tr>
+</table></body></html>"""
+BOE_LOT_1 = """<html><body><h4>Lote 1 FINCA REGISTRAL 19826</h4><table>
+<tr><th>Valor Subasta</th><td>19.687,33 €</td></tr>
+<tr><th>Valor de tasación</th><td>0,00 €</td></tr>
+<tr><th>Puja mínima</th><td>Sin puja mínima</td></tr>
+<tr><th>Descripción</th><td>FINCA 10 DEL PLANO UNO DEL PLANO GENERAL TERRENO DEDICADO A CULTIVO DE SECANO</td></tr>
+<tr><th>Localidad</th><td>SANTA MARIA DE CAYON</td></tr>
+<tr><th>Provincia</th><td>Cantabria</td></tr>
+</table></body></html>"""
+
+
+def test_spain_auction_in_lots_takes_the_first_lots_value():
+    from sources.es import spain_details
+    fields, _ = spain_details({"general": BOE_LOTS_GENERAL, "goods": BOE_LOT_1})
+    assert fields["price"] == 19687.33 and fields.get("min_price") is None
+    assert fields["concelho"] == "SANTA MARIA DE CAYON" and fields["district"] == "Cantabria"
+
+
+def test_spain_details_read_never_checked_sales_first(db, add, fake_http):
+    from sources.es import enrich_spain_details
+    add("spain", "SUB-OLD", "ES", title="Subasta SUB-OLD", tipo="inmueble", date_end="2099-01-01",
+        raw_json=json.dumps({"detail_checked": "2026-09-01"}))
+    add("spain", "SUB-NEW", "ES", title="Subasta SUB-NEW", tipo="inmueble", date_end="2099-06-01")
+    session = fake_http(lambda m, url, kw: FakeResponse("<html></html>"))
+    enrich_spain_details(db, session, limit=1)
+    assert {c[2]["params"]["idSub"] for c in session.calls} == {"SUB-NEW"}
+
+
 LICITOR_ANNONCE = """<html><body>
 <p class="Court">Tribunal Judiciaire de Nîmes (Gard)</p>
 <p>Publiée le 3 septembre 2026</p>
@@ -473,3 +507,145 @@ def test_eleiloes_observations_join_the_description():
     assert fields["description"] == "Observações: Devoluto."
     fields, _ = eleiloes_detail_fields({"descricao": "Moradia"})
     assert fields["description"] == "Moradia"
+
+
+ALISEDA_ITEM = {
+    "id": "ant00038780217", "ConstructedArea": 54, "SuperficieTotal": 54, "SupParcela": 0, "posesion": "LIBRE",
+    "RefCatastral": "B00301100TN69G0001XA", "provinciaUrl": "asturias", "Imagen": "https://img/a.jpg",
+    "Description": "Vivienda ubicada en Ribera de Arriba, Asturias. 54 m² construidos, 2 habitaciones.",
+    "address": {"Ciudad": "RIBERA DE ARRIBA", "TipoVia": "lugar", "StreetName": "LA MORTERA", "StreetNumber": "11",
+                "Latitude": 43.298261614, "Longitude": -5.933324171},
+    "operacion": {"Precio": 28300, "PrecioAnterior": 30995}, "imagenes": [{"Uri": "https://img/1.jpg"}],
+}
+
+
+def test_aliseda_gives_price_position_and_possession(db, fake_http):
+    from db import load_listings
+    import geo
+    from sources.es import parse_aliseda, scrape_aliseda
+    row = parse_aliseda(ALISEDA_ITEM, "vivienda")
+    assert row["id"] == "aliseda:ant00038780217" and row["price"] == 28300 and row["area_m2"] == 54
+    assert row["concelho"] == "Ribera De Arriba" and row["district"] == "Asturias"
+    raw = json.loads(row["raw_json"])
+    assert raw["occupation"] == "vacant" and raw["geo"]["lat"] == 43.298261614
+    taken = parse_aliseda({**ALISEDA_ITEM, "posesion": "OCUPADO"}, "vivienda")
+    assert json.loads(taken["raw_json"])["occupation"] == "occupied"
+    session = fake_http(lambda m, url, kw: FakeResponse(json_data={"data": [ALISEDA_ITEM], "last_page": 1}))
+    assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
+    assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000"}
+    item = next(i for i in load_listings(db, include_hidden=True))
+    assert geo.position(item)["precision"] == "street"
+
+
+ALTAMIRA_CARD = {"referencia": "01402631", "cinmueble": 157785, "precio": 30000, "preciovisible": -1,
+                 "latitud": 43.52, "longitud": -5.66, "provinciaurl": "Asturias", "poblacionurl": "Gijon",
+                 "poblacion": "Gijon", "calle": "POLLA, 12", "cp": "33900", "numhab": 3, "superficie": 85,
+                 "tipologia": "Chalet", "riesgoocupacion": None, "sociedadpropietaria": "SUBASTAS ATLAS"}
+
+
+def test_altamira_gives_price_position_and_link(db, fake_http):
+    import geo
+    from db import load_listings
+    from sources.es import parse_altamira, scrape_altamira
+    row = parse_altamira(ALTAMIRA_CARD, "vivienda")
+    assert row["id"] == "altamira:01402631" and row["price"] == 30000 and row["area_m2"] == 85
+    assert row["url"] == "https://www.altamirainmuebles.com/venta-de-chalet/asturias/gijon/segunda-mano/01402631/157785/1"
+    assert json.loads(row["raw_json"])["geo"]["lat"] == 43.52
+    risky = parse_altamira({**ALTAMIRA_CARD, "riesgoocupacion": "ALTO"}, "vivienda")
+    assert json.loads(risky["raw_json"])["occupation"] == "occupied"
+    session = fake_http(lambda m, url, kw: FakeResponse(json_data={"totalResultados": "1",
+                                                                    "minifichas": [ALTAMIRA_CARD]}))
+    assert scrape_altamira(db, max_price=50000) == 2               # homes and land (same fake card)
+    assert session.calls[0][2]["json"]["filtros"]["precioMaximo"] == 50000
+    item = load_listings(db, include_hidden=True)[0]
+    assert geo.position(item)["precision"] == "street"
+
+
+IMOVIRTUAL_AD = {"id": 19285780, "title": "Olival com cerca de 200 oliveiras e água de nascente",
+                 "slug": "olival-com-agua-de-nascente-ID1iW6Y", "estate": "TERRAIN", "areaInSquareMeters": 10296,
+                 "totalPrice": {"value": 30000}, "hidePrice": False, "isPrivateOwner": True,
+                 "images": [{"medium": "https://img/1.jpg"}],
+                 "location": {"address": {"street": {"name": "Vassal"}}, "reverseGeocoding": {"locations": [
+                     {"locationLevel": "district", "name": "Vila Real"},
+                     {"locationLevel": "council", "name": "Valpaços"},
+                     {"locationLevel": "parish", "name": "Vassal"}]}}}
+
+
+def _imovirtual_html(ads, pages=1):
+    data = {"props": {"pageProps": {"data": {"searchAds": {"items": ads, "pagination": {"totalPages": pages}}}}}}
+    return f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></html>'
+
+
+def test_imovirtual_reads_the_page_data(db, fake_http, monkeypatch):
+    import sources.pt
+    from sources.pt import IMOVIRTUAL_PLACES, parse_imovirtual, scrape_imovirtual
+    monkeypatch.setattr(sources.pt.time, "sleep", lambda s: None)
+    row = parse_imovirtual(IMOVIRTUAL_AD)
+    assert row["id"] == "imovirtual:19285780" and row["price"] == 30000 and row["area_m2"] == 10296
+    assert row["tipo"] == "terreno" and row["concelho"] == "Valpaços" and row["freguesia"] == "Vassal"
+    assert row["url"] == "https://www.imovirtual.com/pt/anuncio/olival-com-agua-de-nascente-ID1iW6Y"
+    assert parse_imovirtual({**IMOVIRTUAL_AD, "hidePrice": True}) is None
+    session = fake_http(lambda m, url, kw: FakeResponse(_imovirtual_html([IMOVIRTUAL_AD])))
+    assert scrape_imovirtual(db, max_price=50000) == 2 * len(IMOVIRTUAL_PLACES)
+    land = [c for c in session.calls if "/terreno/" in c[1]]
+    assert land and all(c[2]["params"]["areaMin"] == 10000 and c[2]["params"]["priceMax"] == 50000 for c in land)
+
+
+FOTOCASA_AD = {"id": 187909805, "rawPrice": 45000, "accuracy": False, "isOccupied": False,
+               "buildingSubtype": "House_Chalet", "location": "ALTO DE URBIES, Zona Rural",
+               "description": "Casa en una parcela de 200 m², 80 m² construidos, junto al río.",
+               "address": {"municipality": "Mieres (Asturias)", "province": "Asturias"},
+               "coordinates": {"latitude": 43.2146, "longitude": -5.6698},
+               "features": [{"key": "surface", "value": 87}, {"key": "rooms", "value": 2}],
+               "detail": {"es-ES": "/es/comprar/vivienda/mieres-(asturias)/parking-amueblado/187909805/d"},
+               "multimedia": [{"type": "image", "src": "https://static.fotocasa.es/a.jpg"}]}
+
+
+def _fotocasa_html(ads, count):
+    props = {"counters": {"realEstates": count}, "initialSearch": {"result": {"realEstates": ads}}}
+    return f'<html><script id="__initial_props__" type="application/json">{json.dumps(props)}</script></html>'
+
+
+def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
+    import sources.es
+    from sources.es import FOTOCASA_PROVINCES, parse_fotocasa, scrape_fotocasa
+    monkeypatch.setattr(sources.es.time, "sleep", lambda s: None)
+    row = parse_fotocasa(FOTOCASA_AD, "vivienda")
+    assert row["id"] == "fotocasa:187909805" and row["price"] == 45000 and row["area_m2"] == 87
+    assert row["concelho"] == "Mieres" and row["title"].startswith("Casa en Mieres")
+    assert row["image_url"] == "https://static.fotocasa.es/a.jpg"
+    assert json.loads(row["raw_json"])["geo"]["precision"] == "village"
+    taken = parse_fotocasa({**FOTOCASA_AD, "isOccupied": True}, "vivienda")
+    assert json.loads(taken["raw_json"])["occupation"] == "occupied"
+    # two pages of one ad each, then done
+    pages = {1: _fotocasa_html([FOTOCASA_AD], 2), 2: _fotocasa_html([{**FOTOCASA_AD, "id": 2}], 2)}
+    session = fake_http(lambda m, url, kw: FakeResponse(pages[2 if url.endswith("/l/2") else 1]))
+    assert scrape_fotocasa(db, max_price=50000) == 4 * len(FOTOCASA_PROVINCES)
+    land = [c for c in session.calls if "/terrenos/" in c[1]]
+    assert all(c[2]["params"] == {"maxPrice": 50000, "minSurface": 10000} for c in land)
+
+
+BIENICI_AD = {"id": "ag1-2", "propertyType": "house", "price": 42000, "city": "Huelgoat", "postalCode": "29690",
+              "departmentCode": "29", "surfaceArea": 90, "landSurfaceArea": 1500, "title": "Longère",
+              "description": "Longère en pierre au bord de la rivière.", "isInTourismResidence": False,
+              "blurInfo": {"type": "exact", "position": {"lat": 48.36, "lon": -3.74}},
+              "photos": [{"url": "https://file.bienici.com/photo/1.jpg"}]}
+
+
+def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
+    import sources.fr
+    from sources.fr import parse_bienici, scrape_bienici
+    monkeypatch.setattr(sources.fr.time, "sleep", lambda s: None)
+    row = parse_bienici(BIENICI_AD)
+    assert row["id"] == "bienici:ag1-2" and row["price"] == 42000 and row["area_m2"] == 90
+    assert row["url"] == "https://www.bienici.com/annonce/ag1-2" and "terrain 1500 m²" in row["description"]
+    assert json.loads(row["raw_json"])["geo"] == {"lat": 48.36, "lon": -3.74, "precision": "street"}
+    assert parse_bienici({**BIENICI_AD, "isInTourismResidence": True}) is None
+    assert parse_bienici({**BIENICI_AD, "price": [None, 38000]})["price"] == 38000
+    land = parse_bienici({**BIENICI_AD, "propertyType": "terrain", "landSurfaceArea": 20000})
+    assert land["tipo"] == "terrain" and land["area_m2"] == 20000
+    session = fake_http(lambda m, url, kw: FakeResponse(json_data={"total": 1, "realEstateAds": [BIENICI_AD]}))
+    assert scrape_bienici(db, max_price=50000) == 4          # houses in 3 price bands, then land
+    sent = [json.loads(c[2]["params"]["filters"]) for c in session.calls]
+    assert [(f["minPrice"], f["maxPrice"]) for f in sent[:3]] == [(0, 25000), (25000, 37500), (37500, 50000)]
+    assert sent[3]["propertyType"] == ["terrain"] and sent[3]["minArea"] == 10000

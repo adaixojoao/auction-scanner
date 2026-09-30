@@ -9,7 +9,10 @@ Occupancy/usufruct terms also ignore negated mentions ("não arrendado").
 """
 from __future__ import annotations
 
+import contextvars
+import functools
 import json
+import math
 import re
 from datetime import datetime
 
@@ -97,6 +100,7 @@ _TIMESHARE_RE = re.compile(
     re.I)
 
 
+@functools.lru_cache(maxsize=100_000)
 def is_timeshare(text: str) -> bool:
     return bool(has_term(text, TIMESHARE_PATTERNS, negations=False) or _TIMESHARE_RE.search(text or ""))
 
@@ -128,7 +132,33 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 # the owner's time (Sept 2026). Plots near Guarda are the ones wanted most.
 PLOT_MIN_ABROAD_M2 = 25000
 GUARDA = (40.5373, -7.2676)
-GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]
+GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer scored (2026-09-26)
+# ─── Weights (Settings → "How much each thing counts") ───────────────
+# The owner's own dial for each part of the score, 0 (ignore) to 2 (double).
+# Only the bonuses and penalties move: the rules (too hot, occupied, too
+# small…) stay rules whatever the weights.
+WEIGHTS = {
+    "heat": "Summer heat by 2090",
+    "water": "Water nearby",
+    "beach": "Beach",
+    "transport": "Airport and train station",
+    "risks": "Fire and flood risk",
+    "price": "Low price",
+    "sale": "How it is sold (sealed bids, forced sales, deadline)",
+}
+_WEIGHTS: contextvars.ContextVar[dict] = contextvars.ContextVar("weights", default={})
+
+
+def w(name: str) -> float:
+    """The owner's weight for one part of the score (1 unless changed)."""
+    v = _WEIGHTS.get().get(name)
+    try:
+        return max(0.0, min(2.0, float(v))) if v is not None else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+
+
+UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
 # all year round, no fires, no floods. Heat is the mean daily maximum of the
@@ -201,6 +231,11 @@ _HOUSE_WORDS_NOT_TYPOLOGY = [w for w in DWELLING_WORDS if not re.fullmatch(r"t\d
 
 
 def _first_at(text: str, terms) -> int | None:
+    return _first_at_cached(text or "", tuple(terms))
+
+
+@functools.lru_cache(maxsize=200_000)
+def _first_at_cached(text: str, terms: tuple) -> int | None:
     norm = normalize(text)
     hits = [m.start() for t in terms for m in [term_regex(t).search(norm)] if m]
     return min(hits) if hits else None
@@ -271,6 +306,8 @@ HEAVY_WORK = [
     "obras profundas", "reabilitação total", "reabilitação integral", "inabitável", "sem telhado",
     "telhado caído", "muito degradad*", "mau estado", "para demolir", "demolição",
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
+    "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
+    "reforma integra", "para rehabilitación", "requiere rehabilitación", "a restaurar",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
     "à réhabiliter", "da ristrutturare", "rudere", "fatiscente", "inagibile",
     "sanierungsbedürftig", "renovierungsbedürftig", "abrissreif", "baufällig", "ruine",
@@ -284,7 +321,8 @@ SOME_WORK = [
     "necessita de obras", "precisa de obras", "necessitar de obras", "carece de obras",
     "obras de conservação", "degradad*", "necesita reforma", "necesita reformas",
     "para remodelar", "a remodelar", "para renovar", "a renovar", "para restaurar",
-    "para actualizar", "travaux à prévoir", "à rafraîchir", "a rafraichir", "da rimodernare",
+    "para actualizar", "requiere reforma", "requiere reformas", "recomendable reforma", "necesita rehabilitación",
+    "necesita rehabilitacion", "para finalizar", "por finalizar", "travaux à prévoir", "à rafraîchir", "a rafraichir", "da rimodernare",
     "modernisierungsbedürftig", "renovierungsbedarf",
 ]
 GOOD_CONDITION = [
@@ -332,12 +370,18 @@ WATER_RE = re.compile(
     re.I)
 
 
+@functools.lru_cache(maxsize=100_000)
+def _water_words(text: str) -> str | None:
+    m = WATER_RE.search(text)
+    return m.group(0).strip() if m else None
+
+
 def water_nearby(text: str, item: dict | None = None) -> str | None:
     """The words that put a plot next to water, else what the map found
     within a few hundred metres of its exact position (geo.py), or None."""
-    m = WATER_RE.search(text or "")
-    if m:
-        return m.group(0).strip()
+    words = _water_words(text or "")
+    if words:
+        return words
     if item and '"water_check"' in (item.get("raw_json") or ""):
         check = _raw(item).get("water_check") or {}
         found = check.get("found") or []
@@ -673,7 +717,69 @@ def score(item: dict, now: datetime | None = None,
     with the reasons. `targets` are the config filters (rural_min_m2,
     rural_max_eur_m2); missing values use TARGET_DEFAULTS."""
     raw, reasons = score_detail(item, now, targets)
-    return max(0.0, min(100.0, raw)), reasons
+    return display_score(raw), reasons
+
+
+SOFT_TOP_FROM = 80.0     # up to here the score is the raw points
+SOFT_TOP_SPAN = 40.0     # above it the points count less and less: 100 is never quite reached
+
+
+def display_score(raw: float) -> float:
+    """The 0–100 score shown. Many listings pass 100 raw points; clamping them
+    all to 100 hid which was best, so the top is squeezed instead
+    (raw 100 → 88, 120 → 93, 160 → 97)."""
+    if raw <= SOFT_TOP_FROM:
+        return round(max(0.0, raw), 1)
+    room = 100.0 - SOFT_TOP_FROM
+    return round(SOFT_TOP_FROM + room * (1 - math.exp(-(raw - SOFT_TOP_FROM) / SOFT_TOP_SPAN)), 1)
+
+
+# ─── Excellent ───────────────────────────────────────────────────────
+# The owner looks for THE property, not a list of good ones: "excellent"
+# means every wish is met and checked, nothing taken on trust.
+EXCELLENT_MAX_PAY = 30000
+EXCELLENT_MAX_HOT_DAYS = 7
+EXCELLENT_MILD_SUMMER_C = 28.0   # warmest month's mean daily max, where the day count is missing
+EXCELLENT_WATER_KM = 1.0
+EXCELLENT_AIRPORT_KM = 80        # about an hour by road
+EXCELLENT_STATION_KM = 30
+
+
+def excellent(item: dict, score: float, reasons: list[str]) -> list[str] | None:
+    """What makes it excellent, or None when a wish is missing or unchecked."""
+    if score < 70 or any(r.startswith("rejected") for r in reasons):
+        return None
+    kind = property_kind(item)
+    if kind not in ("home", "rural_plot"):
+        return None
+    c = item.get("climate") or {}
+    days = (c.get("hot_days") or {}).get("rcp45_2071-2100")
+    summer = (c.get("heat") or {}).get("ssp245_2081-2100")
+    if days is None and summer is not None and summer <= EXCELLENT_MILD_SUMMER_C:
+        days = 0             # outside the European day-count grid (Azores): a mild summer is enough
+    if days is None or days > EXCELLENT_MAX_HOT_DAYS:
+        return None
+    pay = _pay(item)
+    likely = item.get("predicted_final")
+    if likely and likely["price"] > pay:
+        pay = likely["price"]
+    if not pay or pay > EXCELLENT_MAX_PAY:
+        return None
+    wet = c.get("water_km")
+    water = (wet is not None and wet <= EXCELLENT_WATER_KM) or any(r.startswith("next to water") for r in reasons)
+    if not water:
+        return None
+    airport, station = item.get("airport") or {}, item.get("station") or {}
+    access = (airport.get("km") or 999) <= EXCELLENT_AIRPORT_KM or (station.get("km") or 999) <= EXCELLENT_STATION_KM
+    if not access:
+        return None
+    if kind == "home" and (condition(item) in ("heavy", "some")
+                           or any(r.startswith(("needs heavy work", "ruin", "abandoned", "degraded", "size unknown"))
+                                  for r in reasons)):
+        return None             # the owner wants it pristine: any work admitted is not excellent
+    if kind == "rural_plot" and not (item.get("area_m2") or find_area(item.get("title") or "")):
+        return None
+    return [f"{days:.0f} days above 35 °C by 2090", "water", "access", f"€{pay:,.0f}"]
 
 
 def curve(x: float, points: list[tuple[float, float]]) -> float:
@@ -744,10 +850,25 @@ FAR_FROM_TOWN_CAP = [(12, 200), (20, 60), (30, 45), (40, 40)]  # by km from town
                                                                # far from everything is isolated
 
 
+@functools.lru_cache(maxsize=100_000)
+def _rejects_in(text: str) -> tuple:
+    """The _REJECTS labels whose pattern is in the text (cached: the list is
+    scored again on every page view, over the same texts)."""
+    return tuple(label for label, pattern in _REJECTS if pattern is not None and pattern.search(text))
+
+
 def score_detail(item: dict, now: datetime | None = None,
                  targets: dict | None = None) -> tuple[float, list[str]]:
     """The score before it is clamped to 0–100: several listings can reach 100,
     and this still says which of them is best (used for sorting)."""
+    token = _WEIGHTS.set((targets or {}).get("weights") or {})
+    try:
+        return _score_detail(item, now, targets)
+    finally:
+        _WEIGHTS.reset(token)
+
+
+def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     s = 50.0
     reasons: list[str] = []
     caps: list[float] = []
@@ -789,19 +910,21 @@ def score_detail(item: dict, now: datetime | None = None,
 
     if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
         s += _climate_points(item["climate"], kind, reasons, caps)
+    elif kind in ("home", "urban_plot", "rural_plot") and item.get("unlocated"):
+        # Without a position the heat, water and fire checks cannot run: 8 of
+        # the top 15 were there only because nothing could be held against them.
+        caps.append(UNCHECKED_CAP)
+        reasons.append("location unknown — climate not checked")
 
-    # Land: too small is not wanted at all; near Guarda is wanted most.
+    # Land: too small is not wanted at all.
     if kind in ("urban_plot", "rural_plot"):
         if (item.get("country") or "PT") != "PT":
             t = {**t, "rural_min_m2": max(t["rural_min_m2"], PLOT_MIN_ABROAD_M2)}
         if kind == "rural_plot" and area and area < t["rural_min_m2"]:     # urban plots keep their own rules
             reasons.append(f"rejected: plot too small ({_ha(area)} < {_ha(t['rural_min_m2'])})")
-        guarda = item.get("guarda")
-        if guarda:
-            bonus = curve(guarda["km"], GUARDA_POINTS) * (0.8 if guarda.get("approx") else 1)
-            if bonus >= 1:
-                s += bonus
-                reasons.append(guarda["text"])
+        if kind == "rural_plot" and not area:
+            caps.append(UNCHECKED_CAP)
+            reasons.append("size unknown — confirm the area before it can rank")
 
     if kind == "home":
         s += 10
@@ -866,7 +989,7 @@ def score_detail(item: dict, now: datetime | None = None,
 
     if bid and price and price > 0:
         ratio = bid / price
-        s += curve(ratio, BID_RATIO_POINTS)
+        s += curve(ratio, BID_RATIO_POINTS) * w("price")
         if ratio < 0.30:
             reasons.append(f"bid only {ratio:.0%} of VB — extreme discount")
         elif ratio < 0.50:
@@ -892,7 +1015,7 @@ def score_detail(item: dict, now: datetime | None = None,
     # so a bonus for the absolute price counts half: a small cheap plot must not
     # beat a big one.
     if pay >= 300:
-        points = curve(pay, PRICE_POINTS)
+        points = curve(pay, PRICE_POINTS) * w("price")
         s += points * (0.5 if kind == "rural_plot" and points > 0 else 1.0)
         if pay <= 5000:
             reasons.append(f"very cheap: €{pay:,.0f}")
@@ -907,11 +1030,11 @@ def score_detail(item: dict, now: datetime | None = None,
     # Sealed bids are a great chance: you set the price and few people bid.
     sealed = has_term(full, SEALED_BID_PATTERNS, negations=False)
     if sealed:
-        s += 20
+        s += 20 * w("sale")
         reasons.append("sealed-bid (carta fechada)")
 
     if source in FORCED_SOURCES:
-        s += 6
+        s += 6 * w("sale")
         reasons.append("forced sale (must sell)")
     if source in TAX_SOURCES:
         s += 4
@@ -921,7 +1044,7 @@ def score_detail(item: dict, now: datetime | None = None,
     min_p = item.get("min_price") or 0
     if not pay and (sealed or source in FORCED_SOURCES
                     or has_term(full, OFFER_SALE_PATTERNS, negations=False)):
-        s += 18
+        s += 18 * w("sale")
         reasons.append("no price — you set your offer")
     elif min_p and price and price > 1000 and min_p < price and curve(min_p, LOW_MIN_BID_POINTS) > 0:
         s += curve(min_p, LOW_MIN_BID_POINTS)
@@ -934,7 +1057,7 @@ def score_detail(item: dict, now: datetime | None = None,
     # raised on them, so most sources never got this bonus.
     left = days_left(item.get("date_end"), now or utcnow())
     if left is not None and left > 0:
-        s += curve(left, DAYS_LEFT_POINTS)
+        s += curve(left, DAYS_LEFT_POINTS) * w("sale")
         if left <= 3:
             reasons.append(f"{left * 24:.0f}h left — urgent" if left < 1 else f"{left:.0f}d left — urgent")
         elif left <= 7:
@@ -944,9 +1067,7 @@ def score_detail(item: dict, now: datetime | None = None,
         s -= 20
         reasons.append("suspiciously cheap — likely tiny/worthless")
 
-    for label, pattern in _REJECTS:
-        if pattern is None or not pattern.search(full):
-            continue
+    for label in _rejects_in(full):
         if label.startswith("land only") and kind == "home":
             reasons.append("sold together with another lot (its price is not shown)")
             continue
@@ -973,7 +1094,7 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     days = c.get("hot_days") or {}
     future = days.get("rcp45_2071-2100")
     if future is not None:
-        s += curve(future, HOT_DAYS_POINTS)
+        s += curve(future, HOT_DAYS_POINTS) * w("heat")
         worst = days.get("rcp85_2071-2100")
         detail = f"{future:.0f} days a year above 35 °C by 2071-2100" +                  (f", {worst:.0f} worst case" if worst is not None else "") +                  (f"; {days['today']:.0f} today" if days.get("today") is not None else "")
         if future > REJECT_HOT_DAYS:
@@ -984,7 +1105,7 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
         else:
             reasons.append(detail)
     elif hot is not None:
-        s += curve(hot, HEAT_POINTS)
+        s += curve(hot, HEAT_POINTS) * w("heat")
         worst = heat.get("ssp585_2081-2100")
         detail = f"{hot:.1f} °C summer max by 2081-2100" + (f", {worst:.1f} °C worst case" if worst else "") + \
                  (f"; {heat['today']:.1f} °C today" if heat.get("today") else "")
@@ -997,14 +1118,14 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
             reasons.append(detail)
     wet = c.get("water_km")
     if wet is not None:
-        bonus = curve(wet, PERMANENT_WATER_POINTS) * local * (1 if kind == "rural_plot" else 0.5)
+        bonus = curve(wet, PERMANENT_WATER_POINTS) * local * (1 if kind == "rural_plot" else 0.5) * w("water")
         if bonus >= 1:
             s += bonus
             reasons.append(f"permanent water {wet:.1f} km away{' (approx.)' if c.get('approx') else ''}")
     stress = (c.get("stress") or {})
     future = stress.get("stress_2080", stress.get("stress_2050"))
     if future is not None and (future >= 3 or future == -1):
-        s -= 15 if future in (4, -1) else 10
+        s -= (15 if future in (4, -1) else 10) * w("water")
         reasons.append("water stress " + ("arid" if future == -1 else "extremely high" if future == 4 else "high")
                        + " by 2080 (WRI Aqueduct)")
     elif future is not None and future <= 1:
@@ -1012,22 +1133,22 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
         reasons.append("low water stress by 2080 (WRI Aqueduct)")
     fire = c.get("fire") or {}
     if fire.get("burnt_here"):
-        s -= 15 * local
+        s -= 15 * local * w("risks")
         reasons.append(f"burnt since 2016 ({', '.join(map(str, fire['years']))}) — EFFIS")
     elif fire.get("count"):
-        s -= min(15, 5 * len(fire.get("years") or [1])) * local
+        s -= min(15, 5 * len(fire.get("years") or [1])) * local * w("risks")
         reasons.append(f"fires within {fire.get('km', 2):.0f} km since 2016 ({', '.join(map(str, fire['years']))})")
     danger = c.get("fire_danger") or {}
     days = danger.get("high_days_2090")
     if days is not None:
-        s += curve(days, FIRE_DANGER_POINTS)
+        s += curve(days, FIRE_DANGER_POINTS) * w("risks")
         if days >= 30:
             now = danger.get("high_days_now")
             reasons.append(f"{days:.0f} days a year of high fire danger by 2079-2098"
                            + (f" ({now:.0f} today)" if now is not None else "") + " — Copernicus")
     flood = c.get("flood_m")
     if flood and flood > 0 and kind == "home":
-        s -= 12 * local
+        s -= 12 * local * w("risks")
         reasons.append(f"in the 100-year flood zone ({flood:.1f} m) — JRC")
     elif flood and flood > 1 and kind != "home":
         s -= 4 * local
@@ -1064,13 +1185,14 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
 
     water = water_nearby(full, item)
     if water:
-        s += 3 if water.endswith("(approx.)") else 6
+        s += (3 if water.endswith("(approx.)") else 6) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
 
     for key, points in (("beach", BEACH_POINTS), ("airport", AIRPORT_POINTS), ("station", STATION_POINTS)):
         near = item.get(key)
         if near:
-            bonus = curve(near["km"], points) * (BEACH_APPROX_SHARE if near.get("approx") else 1)
+            weight = w("beach" if key == "beach" else "transport")
+            bonus = curve(near["km"], points) * (BEACH_APPROX_SHARE if near.get("approx") else 1) * weight
             if bonus >= 1:
                 s += bonus
                 reasons.append(near["text"])
@@ -1146,11 +1268,11 @@ def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: st
         reasons.append(f"medium rural plot ({_ha(area)})")
     water = water_nearby(full, item)
     if water:
-        s += 9 if water.endswith("(approx.)") else 18
+        s += (9 if water.endswith("(approx.)") else 18) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
     if pay:
         per_m2 = pay / area
-        s += curve(per_m2 / max_eur, RURAL_EUR_M2_POINTS)
+        s += curve(per_m2 / max_eur, RURAL_EUR_M2_POINTS) * w("price")
         if per_m2 <= max_eur / 2:
             reasons.append(f"very cheap land (€{per_m2:.2f}/m²)")
         elif per_m2 <= max_eur:
