@@ -50,6 +50,22 @@ function current() { return data[tab].find(x => x.key === sel); }
 // Settings → Location: an offer for a listing placed only at its town (or not
 // at all) warns, and with "block" asks why before it is sent or logged.
 let gateMode = "warn";
+function parseEur(s) {
+  const n = Number(String(s || "").replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function bidCompare(c, bidText) {
+  const b = c.bid_cap;
+  if (!b || b.absolute_max_bid == null || !bidText) return null;
+  const bid = parseEur(bidText);
+  if (!bid) return null;
+  const abs = b.absolute_max_bid, rec = b.recommended_bid || 0;
+  if (bid > abs) return {level: "above_max", text: `Your bid is ${AS.money(bid - abs)} above the absolute maximum.`};
+  if (rec && bid > rec) return {level: "above_rec", text: `Your bid is ${AS.money(bid - rec)} above the recommended bid.`};
+  if (rec && bid < rec) return {level: "below_rec", text: `Your bid is ${AS.money(rec - bid)} below the recommended bid.`};
+  if (rec && bid === rec) return {level: "at_rec", text: "Your bid matches the recommended bid."};
+  return null;
+}
 // One question for what holds an offer back (the location check, blocking
 // checklist items): {} when nothing does, null when you cancelled.
 function overrideReason(c, isOffer) {
@@ -72,7 +88,9 @@ function locationNotice(c) {
   const o = c.offer;
   const kept = (o && o.location_override
     ? `<p class="small muted">Sent with the location at ${AS.esc(o.location_level || "?")} level. Your reason: ${AS.esc(o.location_override)}</p>` : "")
-    + (o && o.checklist_summary ? `<p class="small muted">Checklist when it was sent: ${AS.esc(o.checklist_summary)}</p>` : "");
+    + (o && o.checklist_summary ? `<p class="small muted">Checklist when it was sent: ${AS.esc(o.checklist_summary)}</p>` : "")
+    + (o && o.bid_cap_absolute != null
+      ? `<p class="small muted">Calculator when it was sent: recommended ${AS.money(o.bid_cap_recommended)} · absolute max ${AS.money(o.bid_cap_absolute)}${o.bid_cap_note ? `. ${AS.esc(o.bid_cap_note)}` : ""}</p>` : "");
   return {badge, warn, kept};
 }
 function typeOf(c, key) { return c.letter_types.find(t => t.key === key) || null; }
@@ -161,6 +179,7 @@ function renderDetail() {
     <div class="tags" style="margin-top:10px">${(c.reasons || []).map(r => `<span class="tag">${AS.esc(r)}</span>`).join("")}</div>
     ${loc.warn}${loc.kept}
     ${AS.climateHtml(c.climate)}
+    ${AS.bidCapHtml(c.bid_cap, {done, compare: bidCompare(c, d.bid || d.online)})}
     <div class="notice info">${AS.esc(c.guidance)}</div>
     <div style="margin-top:12px"><button class="btn" id="ai-btn" onclick="analyze()">AI check</button><div id="ai"></div></div>
   </div>

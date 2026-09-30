@@ -275,6 +275,7 @@ function detailsHtml(d) {
       ${official}
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${costsHtml(d.costs)}
+      ${AS.bidCapHtml(d.bid_cap)}
       ${AS.climateHtml(d.climate)}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${d.past_results ? `<div class="d-lots"><b>What auctions within ${d.past_results.km} km sold for</b>

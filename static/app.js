@@ -36,6 +36,37 @@ const AS = (() => {
     return `<div class="climate">${head}${body}
       <p class="small faint">A planning risk indicator from public climate maps, not a survey, an insurance assessment or due diligence.</p></div>`;
   }
+  // The Maximum bid waterfall (bidcap.calculate_bid_cap), same on Listings and Offers.
+  function bidCapHtml(b, opts) {
+    if (!b) return "";
+    opts = opts || {};
+    const eur = v => (v == null || v === "") ? "—" : money(v);
+    const rows = (b.waterfall || []).map(r => `<div class="fact${r.total ? " cost-total" : ""}">
+        <span class="k">${esc(r.label)}</span>
+        <span class="v">${eur(r.amount)}${r.note ? ` <span class="small muted">${esc(r.note)}</span>` : ""}</span></div>`).join("");
+    const head = b.recommended_bid != null
+      ? `recommended ${eur(b.recommended_bid)} · absolute max ${eur(b.absolute_max_bid)}`
+      : "no figure yet";
+    const compare = opts.compare
+      ? `<p class="small ${opts.compare.level === "above_max" ? "bad" : opts.compare.level === "above_rec" ? "warn" : "ok"}">${esc(opts.compare.text)}</p>`
+      : "";
+    const use = !opts.done && b.recommended_bid
+      ? `<button class="btn btn-sm" style="margin-top:6px" data-bid="${esc((Math.round(b.recommended_bid)).toLocaleString("de-DE") + ",00")}" onclick="typeof setBid === 'function' && setBid(this.dataset.bid)">Use recommended bid</button>`
+      : "";
+    const kept = opts.kept
+      ? `<p class="small muted">Calculator when it was sent: recommended ${eur(opts.kept.recommended)} · absolute max ${eur(opts.kept.absolute)}${opts.kept.note ? `. ${esc(opts.kept.note)}` : ""}</p>`
+      : "";
+    const reasons = (b.reasons || []).map(r => `<li>${esc(r)}</li>`).join("");
+    const unknowns = (b.unknowns || []).length
+      ? `<p class="small muted">Missing or approximate: ${esc(b.unknowns.join("; "))}.</p>` : "";
+    return `<div class="guide bid-cap">
+      <b>Maximum bid</b> <span class="small muted">${esc(head)} · confidence ${esc(b.market_value_confidence || "unknown")}</span>
+      ${rows ? `<div class="facts">${rows}</div>` : ""}
+      ${compare}${kept}
+      ${reasons ? `<ul class="small" style="margin:6px 0 0 18px">${reasons}</ul>` : ""}
+      ${unknowns}${use}
+      <p class="small muted">${esc(b.note || "")}</p></div>`;
+  }
   function flag(code) { return FLAGS[code] ? `<span title="${esc(code)}">${FLAGS[code]}</span>` : esc(code || ""); }
   function link(url, text) {
     return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text);
@@ -150,5 +181,5 @@ const AS = (() => {
     announceUpdate();
   });
 
-  return {esc, money, scoreBadge, climateBadge, climateHtml, flag, link, ago, toast, api, startScan, pollScan};
+  return {esc, money, scoreBadge, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, pollScan};
 })();

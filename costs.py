@@ -152,6 +152,24 @@ def _other_lines(value: float, country: str) -> list[dict]:
 RENT_MAX_M2 = 200            # a bigger house does not rent for proportionally more
 
 
+# The fee lines are one figure; the bid calculator plans on this much more at
+# the high end (a VPT above the price in Portugal, a dearer region elsewhere).
+FEES_HIGH_FACTOR = 1.25
+
+
+def fee_lines(item: dict, value: float, *, own_home: bool = False) -> list[dict]:
+    """The taxes and fees of buying `item` for `value`."""
+    country = (item.get("country") or "PT").upper()
+    if country != "PT":
+        return _other_lines(value, country)
+    kind = item.get("kind") or property_kind(item)
+    return _pt_lines(value, kind, (item.get("source") or "") in JUDICIAL_SOURCES, own_home)
+
+
+def fees(item: dict, value: float, *, own_home: bool = False) -> float:
+    return sum(line["amount"] for line in fee_lines(item, value, own_home=own_home))
+
+
 def rent(item: dict, cost: float) -> dict | None:
     """What a home would rent for, from the rent per m² in its municipality
     (Portugal: INE's median of new leases; France: the carte des loyers), and
@@ -191,8 +209,6 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     if value <= 0 or (item.get("category") or categorize(item)) != "imoveis":
         return None
     country = (item.get("country") or "PT").upper()
-    kind = item.get("kind") or property_kind(item)
-    judicial = (item.get("source") or "") in JUDICIAL_SOURCES
     if bid:
         basis = "your bid"
     elif item.get("current_bid") and item["current_bid"] >= (item.get("min_price") or 0):
@@ -204,16 +220,16 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     else:
         basis = "the base value"
 
-    lines = _pt_lines(value, kind, judicial, own_home) if country == "PT" else _other_lines(value, country)
-    fees = sum(line["amount"] for line in lines)
+    lines = fee_lines(item, value, own_home=own_home)
+    fee_total = sum(line["amount"] for line in lines)
     work = renovation(item)
-    out = {"base": value, "basis": basis, "lines": lines, "fees": fees, "total": value + fees,
+    out = {"base": value, "basis": basis, "lines": lines, "fees": fee_total, "total": value + fee_total,
            "renovation": work, "all_in": None,
            "note": ("Estimate. Portuguese IMT is charged on the higher of the price and the taxable "
                     "value (VPT), which the listing does not give." if country == "PT"
                     else "Estimate: one typical rate per country; regional rates differ.")}
     if work:
-        out["all_in"] = {"low": value + fees + work["low"], "high": value + fees + work["high"]}
+        out["all_in"] = {"low": value + fee_total + work["low"], "high": value + fee_total + work["high"]}
     cost = (out["all_in"]["low"] + out["all_in"]["high"]) / 2 if work else out["total"]
     out["rent"] = rent(item, cost)
     return out
