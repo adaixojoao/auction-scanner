@@ -199,6 +199,23 @@ def api_meta():
     return jsonify({"sources": sources, "types": types})
 
 
+def _climate_of(item: dict) -> dict:
+    from scoring import climate_score
+    return climate_score(item.get("climate"), item.get("kind"))
+
+
+def _climate_matches(item: dict, grade: str, exact_only: bool) -> bool:
+    from scoring import GRADE_ORDER
+    c = _climate_of(item)
+    if exact_only and c["confidence"] != "exact":
+        return False
+    if not grade:
+        return True
+    if grade in ("poor", "unknown"):
+        return c["grade"] == grade
+    return c["grade"] in GRADE_ORDER and GRADE_ORDER.index(c["grade"]) >= GRADE_ORDER.index(grade)
+
+
 @app.route("/api/listings")
 def api_listings():
     args = request.args
@@ -212,6 +229,8 @@ def api_listings():
     kind = args.get("kind", "")          # home / urban_plot / rural_plot / other
     properties_only = args.get("properties", "0") == "1"
     show_hidden = args.get("show_hidden", "0") == "1"
+    climate_grade = args.get("climate", "")   # excellent / good / caution: at least; poor / unknown: exactly
+    climate_exact = args.get("climate_exact", "0") == "1"
     sort = args.get("sort", "score")
     direction = args.get("dir", "desc")
     page = max(1, _num(args.get("page"), 1, int))
@@ -240,6 +259,8 @@ def api_listings():
         loaded = [it for it in loaded
                   if it["score"] >= min_score and (not properties_only or it["category"] == "imoveis")
                   and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
+        if climate_grade or climate_exact:
+            loaded = [it for it in loaded if _climate_matches(it, climate_grade, climate_exact)]
         hidden_counts = Counter(hidden_category(it["hidden_reason"]) for it in loaded
                                 if it["hidden_reason"])
         if show_hidden:
@@ -253,7 +274,8 @@ def api_listings():
         items = sorted(items, key=SORT_KEYS["score"], reverse=True)[:cap]
         items.sort(key=SORT_KEYS.get(sort, SORT_KEYS["score"]), reverse=(direction == "desc"))
         total = len(items)
-        page_items = [_public(it) for it in items[(page - 1) * per_page:page * per_page]]
+        page_items = [{**_public(it), "climate_grade": _climate_of(it)["grade"]}
+                      for it in items[(page - 1) * per_page:page * per_page]]
         visible = [it for it in loaded if not it["hidden_reason"]]
         health = source_health(db, _registry())
         last_scrape = db.execute("SELECT MAX(timestamp) FROM scrape_log").fetchone()[0]
@@ -310,6 +332,7 @@ def api_listing_detail():
         "excellent": it.get("excellent"),
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),
+        "climate": listing_info.climate_panel(it),
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
@@ -455,6 +478,7 @@ def _format_amount(value) -> str:
 
 
 def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
+    import listing_info
     from letters import bid_card, channel, classify_property, guidance, letter_types_for, place_of
     raw = _raw(it)
     area = it.get("area_m2") or 0
@@ -487,6 +511,7 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
         "score": it["score"],
         "rank": it.get("rank", it["score"]),
         "reasons": it["reasons"],
+        "climate": listing_info.climate_panel(it),
         "status": it.get("status"),
         "bid": (first_offer or {}).get("suggested", ""),   # online-only sales: nothing to suggest
         "contact": _contact(it, raw),
@@ -781,7 +806,39 @@ def api_analyze_property():
     filters = _config().get("filters") or {}
     data = {**data, "targets": {k: filters.get(k) for k in ("rural_min_m2", "rural_max_eur_m2")}}
     result = analyze_property(data)
+    if "verdict" in result and (_config().get("climate") or {}).get("bid_guardrail") and data.get("id"):
+        db = get_db()
+        try:
+            found = load_listings(db, include_hidden=True, where="id = ?", params=(str(data["id"]),))
+        finally:
+            db.close()
+        if found:
+            apply_climate_guardrail(result, _climate_of(found[0]))
     return jsonify(result), (502 if "verdict" not in result else 200)
+
+
+def apply_climate_guardrail(result: dict, climate: dict) -> dict:
+    """Settings → Climate: lower the AI's suggested and maximum bid by the
+    climate grade's multiplier, at an exact position only. Amounts the user
+    types are never touched; the original figures are kept beside."""
+    from letters import parse_bid
+    grade, m = climate.get("grade", "unknown"), climate.get("bid_multiplier", 1.0)
+    if climate.get("confidence") != "exact":
+        note = {"applied": False, "grade": grade,
+                "text": "Climate guardrail not applied: the position or the climate data is not exact."}
+    elif m >= 1:
+        note = {"applied": False, "grade": grade, "text": f"Climate {grade}: no reduction."}
+    else:
+        was = {}
+        for key in ("recommended_bid", "max_bid"):
+            value = parse_bid(str(result.get(key) or ""))
+            if value:
+                was[key] = result[key]
+                result[key] = _format_amount(round(value * m))
+        note = {"applied": bool(was), "grade": grade, "multiplier": m, "was": was,
+                "text": f"Climate {grade}: suggested bid and maximum lowered to {m:.0%} (Settings → Climate)."}
+    result["climate_guardrail"] = note
+    return result
 
 
 @app.route("/api/carta-log", methods=["GET"])
@@ -876,6 +933,7 @@ EDITABLE = {
     "maps": ("google_key",),
     "ai": ("provider", "ollama_url", "ollama_model", "anthropic_key", "photo_check", "photos_per_scan"),
     "backup": ("folder", "keep"),
+    "climate": ("bid_guardrail",),
 }
 
 
@@ -916,6 +974,8 @@ def api_settings_save():
         if not isinstance(weights, dict) or any(k not in WEIGHTS or not isinstance(v, (int, float))
                                                 or not 0 <= v <= 2 for k, v in weights.items()):
             return jsonify({"error": "weights: known names, each 0 to 2"}), 400
+    if not isinstance((changes.get("climate") or {}).get("bid_guardrail", False), bool):
+        return jsonify({"error": "climate.bid_guardrail must be true or false"}), 400
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):
         return jsonify({"error": "unknown country code"}), 400

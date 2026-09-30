@@ -152,6 +152,7 @@ function renderDetail() {
        ${k.email ? ` · <a href="mailto:${AS.esc(k.email)}">${AS.esc(k.email)}</a>` : ""}</p>` : ""}
     ${c.visit ? `<p class="small" style="margin-top:6px"><b>Visits:</b> ${AS.esc(c.visit)}</p>` : ""}
     <div class="tags" style="margin-top:10px">${(c.reasons || []).map(r => `<span class="tag">${AS.esc(r)}</span>`).join("")}</div>
+    ${AS.climateHtml(c.climate)}
     <div class="notice info">${AS.esc(c.guidance)}</div>
     <div style="margin-top:12px"><button class="btn" id="ai-btn" onclick="analyze()">AI check</button><div id="ai"></div></div>
   </div>
@@ -370,6 +371,7 @@ async function analyze() {
   try {
     const d = await AS.api("/api/analyze-property", {method: "POST", body: {...c, bid: draft(c).bid || draft(c).online}});
     const col = d.verdict === "BUY" ? "ok" : d.verdict === "SKIP" ? "bad" : "warn";
+    const guard = d.climate_guardrail;
     const list = (title, xs, cls) => xs && xs.length ? `<div><div class="small ${cls}" style="font-weight:700">${title}</div>${xs.map(x => `<div class="small">– ${AS.esc(x)}</div>`).join("")}</div>` : "";
     out.innerHTML = `<div class="card" style="margin-top:10px;background:var(--card-2)">
       <div class="row"><b class="${col}" style="font-size:15px">${AS.esc(d.verdict)}</b><span class="small muted">confidence ${AS.esc(d.confidence)}/10</span></div>
@@ -382,6 +384,8 @@ async function analyze() {
         <div class="cell"><div class="k">Suggested bid / max</div><div class="v">EUR ${AS.esc(d.recommended_bid)} / ${AS.esc(d.max_bid)}</div></div>
       </div>
       <p class="small muted" style="margin-top:8px">${AS.esc(d.bid_reason)} ${d.visit_first ? "· Visit before bidding." : ""}</p>
+      ${guard ? `<p class="small ${guard.applied ? "warn" : "muted"}">${AS.esc(guard.text)}${guard.applied && guard.was.recommended_bid
+        ? ` The AI suggested EUR ${AS.esc(guard.was.recommended_bid)} / ${AS.esc(guard.was.max_bid || "–")}.` : ""}</p>` : ""}
       ${list("Next steps", d.next_steps, "")}
       ${current().offer ? "" : `<button class="btn btn-sm" style="margin-top:8px" data-bid="${AS.esc(d.recommended_bid)}" onclick="setBid(this.dataset.bid)">Use suggested bid</button>`}
     </div>`;

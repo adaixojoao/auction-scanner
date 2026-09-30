@@ -21,6 +21,21 @@ const AS = (() => {
     const star = excellent ? ` <span class="excellent" title="Excellent: ${esc(excellent.join(" · "))}">★ Excellent</span>` : "";
     return `<span class="score ${s >= 70 ? "s-high" : s >= 50 ? "s-mid" : "s-low"}">${s}</span>${star}`;
   }
+  // The Climate panel (scoring.climate_score via listing_info.climate_panel),
+  // the same on Listings and Offers.
+  function climateBadge(grade) {
+    return grade && grade !== "unknown" ? `<span class="badge c-${esc(grade)}" title="Climate grade">climate ${esc(grade)}</span>` : "";
+  }
+  function climateHtml(c) {
+    if (!c) return "";
+    const head = `<b>Climate</b> <span class="badge c-${esc(c.grade)}">${esc(c.grade)}</span>`
+      + (c.score != null ? ` <span class="small muted">${c.score}/100 · ${c.confidence === "exact" ? "exact position" : "approximate position"}</span>` : "");
+    const body = c.grade === "unknown"
+      ? `<p class="small muted">${esc(c.missing || "No climate data for this place.")}</p>`
+      : `<ul>${(c.reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul>`;
+    return `<div class="climate">${head}${body}
+      <p class="small faint">A planning risk indicator from public climate maps, not a survey, an insurance assessment or due diligence.</p></div>`;
+  }
   function flag(code) { return FLAGS[code] ? `<span title="${esc(code)}">${FLAGS[code]}</span>` : esc(code || ""); }
   function link(url, text) {
     return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text);
@@ -135,5 +150,5 @@ const AS = (() => {
     announceUpdate();
   });
 
-  return {esc, money, scoreBadge, flag, link, ago, toast, api, startScan, pollScan};
+  return {esc, money, scoreBadge, climateBadge, climateHtml, flag, link, ago, toast, api, startScan, pollScan};
 })();

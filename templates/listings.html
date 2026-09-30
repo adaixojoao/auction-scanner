@@ -37,10 +37,20 @@
       <option value="shortlisted">Shortlisted</option>
       <option value="hidden">Hidden (why?)</option>
     </select></div>
+  <div class="field"><label>Climate</label>
+    <select id="f-climate">
+      <option value="">Any</option>
+      <option value="excellent">Excellent</option>
+      <option value="good">Good or better</option>
+      <option value="caution">Caution or better</option>
+      <option value="poor">Poor only</option>
+      <option value="unknown">No climate data</option>
+    </select></div>
   <div class="field"><label>Max price</label><input type="number" id="f-maxprice" value="{{ max_price }}" step="5000"></div>
   <div class="field"><label>Min score</label><input type="number" id="f-minscore" value="0" step="5" min="0" max="100"></div>
   <div class="field wide"><label>Search</label><input type="text" id="f-search" placeholder="title, place, description…"></div>
   <label class="check"><input type="checkbox" id="f-properties" checked> Property only</label>
+  <label class="check" title="Only listings whose climate was read at their own position, not their town's"><input type="checkbox" id="f-climate-exact"> Exact climate data only</label>
   <button class="btn btn-primary" onclick="page=1; load()">Apply</button>
 </div>
 
@@ -75,6 +85,7 @@ async function load() {
     max_price: $("f-maxprice").value, min_score: $("f-minscore").value,
     search: $("f-search").value, properties: $("f-properties").checked ? 1 : 0,
     show_hidden: status === "hidden" ? 1 : 0, status: status === "shortlisted" ? "shortlisted" : "",
+    climate: $("f-climate").value, climate_exact: $("f-climate-exact").checked ? 1 : 0,
     sort, dir, page, per_page: PER_PAGE,
   });
   const data = await (await fetch("/api/listings?" + params)).json();
@@ -109,6 +120,7 @@ function renderRows(items, hiddenView) {
     const loc = [it.concelho, it.district].filter(Boolean).join(", ");
     const badges = (it.kind ? `<span class="badge b-muted">${AS.esc(KIND_LABEL[it.kind])}</span>` : "")
       + (it.is_recent ? '<span class="badge b-new">NEW</span>' : "")
+      + AS.climateBadge(it.climate_grade)
       + (it.price_drop_pct ? `<span class="badge b-drop">↓${Math.round(it.price_drop_pct)}%</span>` : "")
       + (it.offer_outcome ? `<span class="badge b-offer">offer ${AS.esc(it.offer_outcome)}</span>` : "")
       + (it.hidden_reason ? `<span class="badge b-hidden" title="${AS.esc(it.hidden_reason)}">${AS.esc(it.hidden_category)}</span>` : "");
@@ -207,6 +219,7 @@ function detailsHtml(d) {
       ${official}
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${costsHtml(d.costs)}
+      ${AS.climateHtml(d.climate)}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${d.past_results ? `<div class="d-lots"><b>What auctions within ${d.past_results.km} km sold for</b>
         <span class="small muted">(last year, final bid: ${d.past_results.count} lots, median ${AS.money(d.past_results.median)},
@@ -253,7 +266,7 @@ document.querySelectorAll("th.sortable").forEach(th => th.addEventListener("clic
   load();
 }));
 $("f-search").addEventListener("keydown", e => { if (e.key === "Enter") { page = 1; load(); } });
-["f-country", "f-kind", "f-source", "f-status", "f-properties"].forEach(id => $(id).addEventListener("change", () => { page = 1; load(); }));
+["f-country", "f-kind", "f-source", "f-status", "f-properties", "f-climate", "f-climate-exact"].forEach(id => $(id).addEventListener("change", () => { page = 1; load(); }));
 document.addEventListener("scan-finished", load);
 
 fetch("/api/meta").then(r => r.json()).then(d => d.sources.forEach(s => {

@@ -120,6 +120,11 @@ DEFAULTS = {
         "desktop_copy": True,     # also write Auction-Report.docx/.pdf to the Desktop
     },
 
+    "climate": {
+        # data_dir: where the climate layers are (default Desktop/auction-climate-data).
+        "bid_guardrail": False,   # lower AI-suggested bids for a caution/poor climate grade
+    },
+
     # CourtBid via Apify (python scraper.py --source courtbid)
     "apify_token": "",
 
