@@ -1,0 +1,12 @@
+# What climate.py reads the climate layers with. Optional: without these, or
+# without the climate data folder, listings are scored without the climate.
+# Kept out of requirements.txt so the updater does not reinstall a heavy geo
+# stack on every PC. Building the layers (scripts/update_climate.py) also
+# needs pandas, xarray, netCDF4 and cdsapi.
+numpy>=2.0
+rasterio>=1.4
+geopandas>=1.0
+fiona>=1.10
+shapely>=2.0
+pyproj>=3.6
+scipy>=1.13
