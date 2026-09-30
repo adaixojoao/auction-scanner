@@ -540,25 +540,77 @@ def scrape_bcp(db, max_price: float = 50000, **_):
 CITIUS_URL = "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx"
 
 
+# "S. João" and "R. das Flores" use a period that is not the end of the phrase.
+# A private-use mark stands in for that period while the name is cut out.
+_ABBR_DOT = re.compile(r"\b([A-Za-zÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç]{1,3})\.(?=\s)")
+_PLACE_DOT = "\ue000"
+# A street is not a municipality. The old fallback stored "R" (from "R. …") and
+# "L" (from "L. …") as the concelho, and the map then treated that as a town.
+_STREET_START = re.compile(
+    r"^(?:rua|avenida|travessa|largo|estrada|canada|caminho|beco|pra[cç]a|"
+    r"urbaniza[cç][aã]o|alameda|cal[cç]ada|rotunda|loteamento|lugar|"
+    r"r|av|tv|lg|en|l)\b",
+    re.I)
+
+
+def _place_name(text: str) -> str | None:
+    """A place cut out of a description, or None when it is too short to be one."""
+    name = text.replace(_PLACE_DOT, ".").strip(" .,;")
+    letters = re.sub(r"[^0-9A-Za-zÀ-ÿ]", "", name)
+    if len(letters) < 3:
+        return None
+    return name
+
+
+def _plausible_place(name: str | None) -> bool:
+    """True when `name` can be kept as a district, concelho or freguesia."""
+    if not name or _STREET_START.match(name):
+        return False
+    return _place_name(name) == name.strip()
+
+
 def _citius_extract_location(desc: str) -> tuple[str | None, str | None, str | None]:
-    """Return (district, concelho, freguesia) parsed from a Citius description."""
+    """Return (district, concelho, freguesia) parsed from a Citius description.
+
+    Abbreviation periods stay in the name ("S. João da Pesqueira"). A street
+    after "sito na …" is not stored as the concelho: distances and local prices
+    treat that field as the municipality.
+    """
     if not desc:
         return None, None, None
-    freguesia = concelho = district = None
-    fm = re.search(r"freguesia(?:\s+de)?\s+([^,.;]+)", desc, re.I)
-    if fm:
-        freguesia = fm.group(1).strip()
-    cm = re.search(r"concelho(?:\s+de)?\s+([^,.;]+)", desc, re.I)
-    if cm:
-        concelho = cm.group(1).strip()
-    dm = re.search(r"distrito(?:\s+de)?\s+([^,.;]+)", desc, re.I)
-    if dm:
-        district = dm.group(1).strip()
+    text = _ABBR_DOT.sub(lambda m: m.group(1) + _PLACE_DOT, desc)
+
+    def after(label: str) -> str | None:
+        m = re.search(label + r"(?:\s+de)?\s+([^,.;]+)", text, re.I)
+        return _place_name(m.group(1)) if m else None
+
+    freguesia = after("freguesia")
+    concelho = after("concelho")
+    district = after("distrito")
     if not concelho:
-        sm = re.search(r"sito\s+(?:em|na|no)\s+([^,.;]+)", desc, re.I)
+        sm = re.search(r"sito\s+(?:em|na|no)\s+([^,.;]+)", text, re.I)
         if sm:
-            concelho = sm.group(1).strip()
+            guessed = _place_name(sm.group(1))
+            if guessed and _plausible_place(guessed):
+                concelho = guessed
     return district, concelho, freguesia
+
+
+def _clear_implausible_place(db, row: dict) -> None:
+    """Drop a stored place the text no longer supports.
+
+    Updates keep the old value when the new one is missing, so a concelho of
+    "R" or "Rua …" from an earlier parse would otherwise stay forever.
+    """
+    listing_id = row.get("id")
+    if not listing_id:
+        return
+    for field in ("district", "concelho", "freguesia"):
+        if row.get(field):
+            continue
+        current = db.execute(f"SELECT {field} FROM listings WHERE id = ?", (listing_id,)).fetchone()
+        if current and current[0] and not _plausible_place(current[0]):
+            db.execute(f"UPDATE listings SET {field} = NULL WHERE id = ?", (listing_id,))
 
 
 def _citius_form_state(session) -> dict:
@@ -753,6 +805,7 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
             if m and m.group(1).strip() and not raw.get(key):
                 raw[key] = re.sub(r"<[^>]+>", "", m.group(1)).strip()[:120]
         sets = {}
+        district = concelho = freguesia = None
         if full:
             raw["descricao_completa"] = full[:3000]
             district, concelho, freguesia = _citius_extract_location(full)
@@ -765,6 +818,9 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
         sets["raw_json"] = json.dumps(raw, ensure_ascii=False)
         db.execute(f"UPDATE listings SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?",
                    (*sets.values(), listing_id))
+        if full:
+            _clear_implausible_place(db, {
+                "id": listing_id, "district": district, "concelho": concelho, "freguesia": freguesia})
         done += 1
         time.sleep(0.2)
     db.commit()
@@ -845,7 +901,9 @@ def scrape_citius(db, max_price: float = 50000, **_):
                 if f["price"] and f["price"] > max_price:
                     continue
 
-                upsert_listing(db, citius_listing(_keep_citius_details(db, f"citius:{eid}", f), eid))
+                row = citius_listing(_keep_citius_details(db, f"citius:{eid}", f), eid)
+                upsert_listing(db, row)
+                _clear_implausible_place(db, row)
                 trib_count += 1
 
         if trib_count:

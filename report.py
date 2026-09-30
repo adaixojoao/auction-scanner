@@ -37,6 +37,16 @@ def _money(v) -> str:
     return f"€{v:,.0f}" if v else "?"
 
 
+def _shown_score(item) -> int:
+    """The number the listings page shows: the unclamped rank when a sale
+    scores past 100, so two top picks are not both just "100"."""
+    score = item.get("score") or 0
+    rank = item.get("rank")
+    if rank is not None and rank > score:
+        score = rank
+    return int(round(score))
+
+
 def md_cell(text, limit: int | None = None) -> str:
     """Make text safe inside a Markdown table cell / link label."""
     s = " ".join(str(text or "").split())
@@ -46,7 +56,7 @@ def md_cell(text, limit: int | None = None) -> str:
              .replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def _md_link(item, limit=50) -> str:
+def _md_link(item, limit=160) -> str:
     title = md_cell(item.get("title") or "?", limit)
     return f"[{title}]({item['url']})" if item.get("url") else title
 
@@ -57,7 +67,9 @@ def select(items, max_price: float, max_bid: float):
     unknown_imoveis = []
     for item in items:
         price, bid = item.get("price"), item.get("current_bid") or 0
-        if price is None:
+        # 0 is not a price. It used to sit in the ranked table as "?", so the
+        # top of the report was unpriced court sales.
+        if not price:
             if item["category"] == "imoveis":
                 unknown_imoveis.append(item)
             continue
@@ -79,9 +91,9 @@ def _table(lines, rows, *, with_country=False):
         country = f"{it.get('country')} | " if with_country else ""
         drop = f" ↓{it['price_drop_pct']:.0f}%" if it.get("price_drop_pct") else ""
         lines.append(
-            f"| {i} | {it['score']:.0f} | {country}{_md_link(it)} | {_money(it['price'])}{drop} | "
-            f"{_money(it['current_bid']) if it.get('current_bid') else '-'} | {md_cell(_loc(it), 40)} | "
-            f"{(it.get('date_end') or '-')[:10]} | {md_cell(', '.join(it['reasons']), 70)} |"
+            f"| {i} | {_shown_score(it)} | {country}{_md_link(it)} | {_money(it['price'])}{drop} | "
+            f"{_money(it['current_bid']) if it.get('current_bid') else '-'} | {md_cell(_loc(it), 60)} | "
+            f"{(it.get('date_end') or '-')[:10]} | {md_cell(', '.join(it['reasons']), 160)} |"
         )
     lines.append("")
 
@@ -155,7 +167,7 @@ def build_markdown(items, hidden_counts: Counter, health, max_price, max_bid, no
                 lines.append("| # | Score | Title | Location | Ends |")
                 lines.append("|---|---|---|---|---|")
                 for i, it in enumerate(u_items[:15], 1):
-                    lines.append(f"| {i} | {it['score']:.0f} | {_md_link(it)} | {md_cell(_loc(it), 40)} | "
+                    lines.append(f"| {i} | {_shown_score(it)} | {_md_link(it)} | {md_cell(_loc(it), 60)} | "
                                  f"{(it.get('date_end') or '-')[:10]} |")
                 lines.append("")
 
