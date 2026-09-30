@@ -29,7 +29,7 @@ const AS = (() => {
   function climateHtml(c) {
     if (!c) return "";
     const head = `<b>Climate</b> <span class="badge c-${esc(c.grade)}">${esc(c.grade)}</span>`
-      + (c.score != null ? ` <span class="small muted">${c.score}/100 · ${c.confidence === "exact" ? "exact position" : "approximate position"}</span>` : "");
+      + (c.score != null ? ` <span class="small muted">${c.score}/100 · ${esc(c.location || (c.confidence === "exact" ? "exact position" : "approximate position"))}</span>` : "");
     const body = c.grade === "unknown"
       ? `<p class="small muted">${esc(c.missing || "No climate data for this place.")}</p>`
       : `<ul>${(c.reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul>`;

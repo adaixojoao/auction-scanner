@@ -44,6 +44,15 @@ def referencia_catastral(text: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
+_RC_ALONE = re.compile(r"(?i)^\s*(\d{7}[A-Z]{2}\d{4}[A-Z]|\d{5}[A-Z]\d{8})[A-Z0-9]{0,6}\s*$")
+
+
+def reference_given(text: str) -> str | None:
+    """A Spanish cadastral reference pasted on its own, or written in a text."""
+    m = _RC_ALONE.match(text or "")
+    return m.group(1).upper() if m else referencia_catastral(text)
+
+
 def catastro_position(session, rc: str) -> dict | None:
     resp = session.get(CATASTRO, params={"RefCat": rc, "SRS": "EPSG:4326"}, headers=BROWSER, timeout=30)
     resp.raise_for_status()
