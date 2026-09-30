@@ -172,8 +172,14 @@ HOT_DAYS_POINTS = [(0, 10), (2, 8), (5, 4), (7, 0), (12, -12), (20, -25)]
 TOO_MANY_HOT_DAYS = 7
 REJECT_HOT_DAYS = 20
 PERMANENT_WATER_POINTS = [(0.2, 15), (0.5, 12), (1.0, 6)]     # km → points (land); homes get half
+# Water is a benefit only where it does not flood: under the JRC 100-year flood
+# (any depth above this at the position) nearby water earns no bonus.
+FLOOD_NO_WATER_BONUS_M = 0.0
 # Days a year with FWI > 30 (high fire danger) in 2079-2098, RCP4.5.
 FIRE_DANGER_POINTS = [(10, 3), (30, 0), (60, -8), (90, -15)]
+HIGH_FIRE_DAYS = 30
+VERY_HIGH_FIRE_DAYS = 60
+DEEP_FLOOD_M = 1.0
 
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
@@ -514,7 +520,8 @@ def buyer_priorities(targets: dict | None = None) -> str:
         "or plots; homes needing heavy work (ruins, full rebuilds) unless they come with a big "
         "farm plot that carries the value; expensive homes; isolated or bad locations; timeshares "
         "(a few weeks a year); shops, "
-        "garages, storage and offices."
+        "garages, storage and offices. Water is only a plus where the land does not flood; "
+        "a home in a flood zone is a risk."
     )
 
 
@@ -767,7 +774,7 @@ def excellent(item: dict, score: float, reasons: list[str]) -> list[str] | None:
         return None
     wet = c.get("water_km")
     water = (wet is not None and wet <= EXCELLENT_WATER_KM) or any(r.startswith("next to water") for r in reasons)
-    if not water:
+    if not water or floods(c):
         return None
     airport, station = item.get("airport") or {}, item.get("station") or {}
     access = (airport.get("km") or 999) <= EXCELLENT_AIRPORT_KM or (station.get("km") or 999) <= EXCELLENT_STATION_KM
@@ -1119,7 +1126,9 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     wet = c.get("water_km")
     if wet is not None:
         bonus = curve(wet, PERMANENT_WATER_POINTS) * local * (1 if kind == "rural_plot" else 0.5) * w("water")
-        if bonus >= 1:
+        if bonus >= 1 and floods(c):
+            reasons.append(f"permanent water {wet:.1f} km away, but it floods ({floods(c):.1f} m) — no water bonus")
+        elif bonus >= 1:
             s += bonus
             reasons.append(f"permanent water {wet:.1f} km away{' (approx.)' if c.get('approx') else ''}")
     stress = (c.get("stress") or {})
@@ -1156,6 +1165,106 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     return s
 
 
+def floods(c: dict | None) -> float | None:
+    """The 100-year flood depth at the position when it is enough to cancel a
+    water bonus, else None."""
+    flood = (c or {}).get("flood_m")
+    return flood if flood and flood > FLOOD_NO_WATER_BONUS_M else None
+
+
+# ─── Climate resilience: a grade of its own, beside the score ─────────
+# 50 is a place the layers say nothing good or bad about; each point of
+# _climate_points moves it CLIMATE_SCALE.
+CLIMATE_BASE = 50
+CLIMATE_SCALE = 1.75
+CLIMATE_GRADES = [(75, "excellent"), (55, "good"), (35, "caution")]   # at least this; below is "poor"
+GRADE_ORDER = ["poor", "caution", "good", "excellent"]
+# What the optional bid guardrail (Settings) multiplies an AI-suggested bid by.
+# Only applied to exact positions.
+CLIMATE_BID_MULTIPLIER = {"excellent": 1.0, "good": 1.0, "caution": 0.85, "poor": 0.6, "unknown": 1.0}
+# Hazards read at the position itself (a few hundred metres): from a town-level
+# pin they may belong to the next valley, so they never make the grade "poor".
+_LOCAL_SEVERE = {"deep_flood", "burnt_here", "repeated_burns", "home_in_flood_zone"}
+# Hazards read from grids of several km: as true for a town pin as for an exact one.
+_REGIONAL_SEVERE = {"extreme_heat", "severe_water_stress", "very_high_fire_danger"}
+_CAUTION = {"too_hot", "flood_zone", "high_water_stress", "high_fire_danger", "fires_nearby",
+            "water_but_floods"}
+
+
+def _climate_flags(c: dict, kind: str | None) -> list[str]:
+    flags = []
+    days = (c.get("hot_days") or {}).get("rcp45_2071-2100")
+    heat = c.get("heat") or {}
+    hot = heat.get("ssp245_2081-2100") or heat.get("ssp245_2061-2080")
+    if days is not None:
+        flags += ["extreme_heat"] if days > REJECT_HOT_DAYS else ["too_hot"] if days > TOO_MANY_HOT_DAYS else []
+    elif hot is not None:
+        flags += ["extreme_heat"] if hot > REJECT_HOT_C else ["too_hot"] if hot > TOO_HOT_C else []
+    flood = floods(c)
+    if flood:
+        flags.append("flood_zone")
+        if flood > DEEP_FLOOD_M:
+            flags.append("deep_flood")
+        if kind == "home":
+            flags.append("home_in_flood_zone")
+    wet = c.get("water_km")
+    if wet is not None and wet <= PERMANENT_WATER_POINTS[-1][0]:
+        flags.append("water_but_floods" if flood else "permanent_water")
+    stress = c.get("stress") or {}
+    future = stress.get("stress_2080", stress.get("stress_2050"))
+    if future in (4, -1):
+        flags.append("severe_water_stress")
+    elif future == 3:
+        flags.append("high_water_stress")
+    fire = c.get("fire") or {}
+    if fire.get("burnt_here"):
+        flags.append("burnt_here")
+        if len(set(fire.get("years") or [])) >= 2:
+            flags.append("repeated_burns")
+    elif fire.get("count"):
+        flags.append("fires_nearby")
+    danger = (c.get("fire_danger") or {}).get("high_days_2090")
+    if danger is not None and danger >= VERY_HIGH_FIRE_DAYS:
+        flags.append("very_high_fire_danger")
+    elif danger is not None and danger >= HIGH_FIRE_DAYS:
+        flags.append("high_fire_danger")
+    return flags
+
+
+def climate_score(c: dict | None, kind: str | None = None) -> dict:
+    """How well the place should hold up to heat, water, fire and floods, from
+    the climate layers (climate.for_item). A planning indicator, not a survey:
+    the same curves as the listing score, but at the normal weights, so the
+    grade does not move with the Settings sliders."""
+    if not c:
+        return {"score": None, "grade": "unknown", "reasons": [], "flags": [],
+                "bid_multiplier": CLIMATE_BID_MULTIPLIER["unknown"], "confidence": "unknown"}
+    kind = kind or "home"
+    reasons: list[str] = []
+    points = _climate_points(c, kind, reasons, [])
+    flags = _climate_flags(c, kind)
+    exact = not c.get("approx")
+    score = max(0.0, min(100.0, CLIMATE_BASE + CLIMATE_SCALE * points))
+    grade = next((g for floor, g in CLIMATE_GRADES if score >= floor), "poor")
+
+    def at_most(limit: str) -> None:
+        nonlocal grade
+        if GRADE_ORDER.index(grade) > GRADE_ORDER.index(limit):
+            grade = limit
+
+    if _REGIONAL_SEVERE & set(flags) or (exact and _LOCAL_SEVERE & set(flags)):
+        at_most("poor")
+    elif _CAUTION & set(flags) or _LOCAL_SEVERE & set(flags):
+        at_most("caution")
+    if not exact:
+        at_most("good")
+        reasons.append("position approximate (town or parish): local risks count half and "
+                       "cannot make the grade poor")
+    return {"score": round(score), "grade": grade, "reasons": reasons, "flags": flags,
+            "bid_multiplier": CLIMATE_BID_MULTIPLIER[grade] if exact else 1.0,
+            "confidence": "exact" if exact else "approximate"}
+
+
 def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[str],
                  caps: list[float]) -> float:
     """A home should be in a good place, in good condition, big enough, well
@@ -1184,7 +1293,9 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         reasons.append(f"land in the same case (€{lot['price']:,.0f}{size})")
 
     water = water_nearby(full, item)
-    if water:
+    if water and floods(item.get("climate")):
+        reasons.append(f"water nearby ({water}), but it floods — no water bonus")
+    elif water:
         s += (3 if water.endswith("(approx.)") else 6) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
 
@@ -1267,7 +1378,9 @@ def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: st
     else:
         reasons.append(f"medium rural plot ({_ha(area)})")
     water = water_nearby(full, item)
-    if water:
+    if water and floods(item.get("climate")):
+        reasons.append(f"water nearby ({water}), but it floods — no water bonus")
+    elif water:
         s += (9 if water.endswith("(approx.)") else 18) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
     if pay:

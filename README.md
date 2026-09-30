@@ -407,6 +407,15 @@ scheduler.py    timetable             telegram_alert.py, notifications.py
 libraries the climate check reads its maps with. The app runs without them;
 it then scores listings without the climate.
 
+The **Climate** panel (listing details and Offers) grades a place excellent /
+good / caution / poor from those maps: heat by 2071-2100, the 100-year flood,
+permanent water (a benefit only where it does not flood), water stress, past
+fires and fire danger. From a town or parish position it says "approximate"
+and never grades poor on local risks. It is a planning risk indicator, not a
+survey, an insurance assessment, or legal or environmental due diligence. The
+optional bid guardrail (Settings → Climate) lowers an AI-suggested bid for a
+caution or poor grade at an exact position; it never changes an amount you type.
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access

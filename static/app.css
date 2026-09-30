@@ -94,6 +94,12 @@ label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-
 .b-short { background: rgba(234,179,8,.18); color: var(--yellow); }
 .b-offer { background: rgba(168,85,247,.18); color: #c084fc; }
 .b-muted { background: var(--card-2); color: var(--muted); border: 1px solid var(--border); }
+.c-excellent, .c-good { background: rgba(34,197,94,.18); color: var(--green); }
+.c-caution { background: rgba(234,179,8,.18); color: var(--yellow); }
+.c-poor { background: rgba(239,68,68,.15); color: var(--red); }
+.c-unknown { background: var(--card-2); color: var(--muted); border: 1px solid var(--border); }
+.climate { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 10px 0 8px; font-size: 13px; }
+.climate ul { margin: 6px 0 0 18px; }
 .score { display: inline-block; min-width: 34px; text-align: center; padding: 2px 7px; border-radius: 5px; font-weight: 700; }
 .s-high { background: rgba(34,197,94,.18); color: var(--green); }
 .excellent { margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: .8em; font-weight: 600; background: rgba(234,179,8,.2); color: #b45309; white-space: nowrap; }

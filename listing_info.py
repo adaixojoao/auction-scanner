@@ -177,6 +177,31 @@ def street_view(item: dict, google_key: str = "") -> dict | None:
             "lat": pos["lat"], "lon": pos["lon"]}
 
 
+def climate_panel(item: dict) -> dict:
+    """scoring.climate_score for the listing, and when there is none, what
+    would give one."""
+    import climate
+    import geo
+    from scoring import climate_score
+    found = item.get("climate") or climate.stored(item)
+    out = climate_score(found, item.get("kind"))
+    if found:
+        return out
+    if not climate._libraries():
+        missing = "The climate libraries are not installed: pip install -r requirements-climate.txt."
+    elif not climate.available():
+        missing = ("The climate layers are not on this PC: download the data to "
+                   "Desktop/auction-climate-data and run scripts/update_climate.py.")
+    elif not geo.position(item):
+        missing = ("No map position yet: the scan places a listing once it knows at least its "
+                   "municipality.")
+    elif "climate" in raw_of(item):
+        missing = "Outside the climate maps' coverage."
+    else:
+        missing = "Not read yet: the next scan reads the climate layers for it."
+    return {**out, "missing": missing}
+
+
 def map_url(item: dict) -> str | None:
     raw = raw_of(item)
     where = _coords(item, raw)
