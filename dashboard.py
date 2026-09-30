@@ -38,6 +38,7 @@ app.config["LAST_HEARTBEAT"] = None   # read by app.py to close with the window
 NAV = [
     ("listings", "Listings", "/"),
     ("offers", "Offers", "/offers"),
+    ("outcomes", "Outcomes", "/outcomes"),
     ("map", "Map", "/map"),
     ("sources", "Sources", "/sources"),
     ("settings", "Settings", "/settings"),
@@ -135,6 +136,11 @@ def offers_page():
     return _page("offers.html", "offers", "Offers", follow_up_days=FOLLOW_UP_DAYS,
                  proponente_ok=all(p.get(k) for k in ("nome", "nif", "morada")),
                  smtp_ok=all(smtp.get(k) for k in ("smtp_host", "smtp_user", "smtp_password")))
+
+
+@app.route("/outcomes")
+def outcomes_page():
+    return _page("outcomes.html", "outcomes", "Outcomes")
 
 
 @app.route("/map")
@@ -636,7 +642,15 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
                    "checklist_summary": offer.get("checklist_summary") or "",
                    "bid_cap_recommended": offer.get("bid_cap_recommended"),
                    "bid_cap_absolute": offer.get("bid_cap_absolute"),
-                   "bid_cap_note": offer.get("bid_cap_note") or ""}
+                   "bid_cap_note": offer.get("bid_cap_note") or "",
+                   "winning_bid": offer.get("winning_bid"),
+                   "all_in_cost": offer.get("all_in_cost"),
+                   "lost_reason": offer.get("lost_reason") or "",
+                   "diligence_blocker": offer.get("diligence_blocker"),
+                   "occupancy_found": offer.get("occupancy_found") or "",
+                   "title_found": offer.get("title_found") or "",
+                   "access_found": offer.get("access_found") or "",
+                   "condition_after": offer.get("condition_after") or ""}
                   if offer else None),
     }
 
@@ -1130,29 +1144,69 @@ def add_carta_log():
 OUTCOMES = ("pending", "won", "lost", "cancelled", "expired", "answered")
 
 
+@app.route("/api/analytics")
+def api_analytics():
+    """How your offers did (analytics.py). Local only; no personal fields."""
+    import analytics
+    db = get_db()
+    try:
+        return jsonify(analytics.summary(db))
+    finally:
+        db.close()
+
+
+@app.route("/api/analytics.csv")
+def api_analytics_csv():
+    import analytics
+    db = get_db()
+    try:
+        body = analytics.export_csv(db)
+    finally:
+        db.close()
+    return Response(body, mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": "attachment; filename=outcomes.csv"})
+
+
 @app.route("/api/carta-log/<int:log_id>", methods=["PATCH"])
 def update_carta_log(log_id):
+    import analytics
     data = request.get_json(silent=True) or {}
-    if data.get("outcome") not in OUTCOMES:
-        return jsonify({"error": f"outcome must be one of {', '.join(OUTCOMES)}"}), 400
     db = get_db()
     try:
         row = db.execute("SELECT * FROM carta_log WHERE id=?", (log_id,)).fetchone()
         if row is None:
             return jsonify({"error": "not found"}), 404
-        db.execute("UPDATE carta_log SET outcome=?, notes=? WHERE id=?",
-                   (data["outcome"], data.get("notes", row["notes"] or ""), log_id))
-        db.commit()
+        was = row["outcome"]
+        if "outcome" in data:
+            if data["outcome"] not in OUTCOMES:
+                return jsonify({"error": f"outcome must be one of {', '.join(OUTCOMES)}"}), 400
+            db.execute("UPDATE carta_log SET outcome=?, notes=? WHERE id=?",
+                       (data["outcome"], data.get("notes", row["notes"] or ""), log_id))
+            db.commit()
+            row = db.execute("SELECT * FROM carta_log WHERE id=?", (log_id,)).fetchone()
+        detail_keys = ("winning_bid", "all_in_cost", "lost_reason", "diligence_blocker",
+                       "occupancy_found", "title_found", "access_found", "condition_after")
+        if any(k in data for k in detail_keys):
+            try:
+                row = analytics.update_detail(db, log_id, data)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
     finally:
         db.close()
 
-    if data["outcome"] == "won" and row["outcome"] != "won":
+    if data.get("outcome") == "won" and was != "won":
         tg = _config().get("telegram", {})
         if tg.get("enabled"):
             from telegram_alert import alert_carta_won
             alert_carta_won(tg.get("token", ""), tg.get("chat_id", ""),
                             row["processo"] or row["listing_id"] or "?", row["bid_amount"] or 0, "won")
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "offer": {
+        "log_id": row["id"], "outcome": row["outcome"],
+        "winning_bid": row["winning_bid"], "all_in_cost": row["all_in_cost"],
+        "lost_reason": row["lost_reason"] or "", "diligence_blocker": row["diligence_blocker"],
+        "occupancy_found": row["occupancy_found"] or "", "title_found": row["title_found"] or "",
+        "access_found": row["access_found"] or "", "condition_after": row["condition_after"] or "",
+    }})
 
 
 PROPONENTE_KEYS = ("nome", "nif", "morada", "email", "telefone", "localidade")

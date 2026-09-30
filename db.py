@@ -31,7 +31,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -310,9 +310,26 @@ def _migrate_v11(db: sqlite3.Connection):
     _add_column(db, "carta_log", "bid_cap_note", "TEXT")
 
 
+def _migrate_v12(db: sqlite3.Connection):
+    """Optional detail on how an offer ended (analytics.py): winning bid, all-in
+    cost, why it was lost, diligence blocker, and what you found on occupancy,
+    title, access and condition after the fact."""
+    for col, decl in (
+            ("winning_bid", "REAL"),
+            ("all_in_cost", "REAL"),
+            ("lost_reason", "TEXT"),
+            ("diligence_blocker", "INTEGER"),
+            ("occupancy_found", "TEXT"),
+            ("title_found", "TEXT"),
+            ("access_found", "TEXT"),
+            ("condition_after", "TEXT"),
+    ):
+        _add_column(db, "carta_log", col, decl)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
-               11: _migrate_v11}
+               11: _migrate_v11, 12: _migrate_v12}
 
 
 def init_db(db: sqlite3.Connection):

@@ -16,7 +16,7 @@ def client(db, monkeypatch):
 
 
 def test_every_page_renders_with_the_shared_layout(client):
-    for path in ("/", "/offers", "/map", "/sources", "/settings"):
+    for path in ("/", "/offers", "/outcomes", "/map", "/sources", "/settings"):
         r = client.get(path)
         assert r.status_code == 200, path
         html = r.get_data(as_text=True)
