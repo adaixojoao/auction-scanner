@@ -107,6 +107,17 @@ def test_future_fire_danger(tmp_path, monkeypatch):
     assert calm - risky >= 15 and "90 days a year of high fire danger by 2079-2098 (60 today) — Copernicus" in reasons
 
 
+def test_no_climate_libraries_means_no_climate_not_a_failed_scan(layers, db, add, monkeypatch):
+    import json
+    monkeypatch.setattr(climate, "_libraries", lambda: False)
+    add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
+        raw_json=json.dumps({"lat": 40.495, "lon": -7.405}))
+    items = [dict(r) for r in db.execute("SELECT * FROM listings")]
+    assert not climate.available()
+    assert climate.assess_pending(db, items, {}) == 0
+    assert climate.for_item(items[0]) is None
+
+
 def test_the_scan_stores_the_climate_and_the_list_only_reads_it(layers, db, add):
     import json
 

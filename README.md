@@ -403,6 +403,10 @@ geo.py          map positions, towns  listing_info.py  the ⓘ panel
 scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 
+`requirements-dev.txt` includes `requirements-climate.txt`, the optional
+libraries the climate check reads its maps with. The app runs without them;
+it then scores listings without the climate.
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access
