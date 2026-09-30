@@ -1202,13 +1202,21 @@ IMOVEL_TITLE_WORDS = [
 
 
 def categorize(item: dict) -> str:
+    """imoveis / ouro_joias / outros.
+
+    A house on Rua do Ouro, or in Ervedosa do Douro, is a house. Gold words
+    count when the title is not a property; the portal's own type wins when it
+    says the lot is a vehicle, furniture or equipment.
+    """
     title = item.get("title") or ""
     tipo = normalize(item.get("tipo"))
-
-    if has_term(title, GOLD_KW, negations=False):
-        return "ouro_joias"
-    if has_term(title, VEHICLE_KW, negations=False) or tipo in NOT_PROPERTY_TYPES:
+    if tipo in NOT_PROPERTY_TYPES:
         return "outros"
-    if tipo in IMOVEL_TYPES or has_term(title, IMOVEL_TITLE_WORDS, negations=False):
+    property_sale = tipo in IMOVEL_TYPES or has_term(title, IMOVEL_TITLE_WORDS, negations=False)
+    if has_term(title, GOLD_KW, negations=False) and not property_sale:
+        return "ouro_joias"
+    if has_term(title, VEHICLE_KW, negations=False) and not property_sale:
+        return "outros"
+    if property_sale:
         return "imoveis"
     return "outros"

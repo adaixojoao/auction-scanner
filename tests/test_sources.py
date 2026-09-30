@@ -389,6 +389,34 @@ def test_citius_reads_every_page_and_the_full_details(db, fake_http):
     assert kept["geo"]["lat"] == 41.1 and "quatro andares" in kept["descricao_completa"]
 
 
+def test_citius_place_keeps_abbreviations_and_drops_streets(db):
+    from common import make_listing
+    from db import upsert_listing
+    from sources.pt import _citius_extract_location, _clear_implausible_place
+
+    assert _citius_extract_location(
+        "Prédio urbano, freguesia de S. João, concelho de S. João da Pesqueira, distrito de Viseu"
+    ) == ("Viseu", "S. João da Pesqueira", "S. João")
+    assert _citius_extract_location(
+        "Prédio urbano sito na R. das Flores, freguesia de Longa, concelho de Tabuaço"
+    )[1] == "Tabuaço"
+    # "R." / "L." used to become the municipality, and a street address with them.
+    assert _citius_extract_location("Prédio sito na R. das Flores, lugar de Bonvisinho")[1] is None
+    assert _citius_extract_location("Prédio sito em L. de Cima, com 200 m2")[1] is None
+    assert _citius_extract_location("Prédio sito na Rua do Canto das Naves, lugar de Bonvisinho")[1] is None
+    assert _citius_extract_location("Prédio sito em Póvoa de Santarém, com casa de habitação")[1] == "Póvoa de Santarém"
+
+    upsert_listing(db, make_listing("citius", "bad", title="Prédio sito na R. das Flores", concelho="R"))
+    upsert_listing(db, make_listing("citius", "street", title="Prédio", concelho="Rua do Canto das Naves"))
+    upsert_listing(db, make_listing("citius", "good", title="Prédio", concelho="Moura"))
+    for eid in ("bad", "street", "good"):
+        _clear_implausible_place(db, {"id": f"citius:{eid}", "concelho": None})
+    places = dict(db.execute("SELECT id, concelho FROM listings WHERE source='citius'"))
+    assert places["citius:bad"] is None
+    assert places["citius:street"] is None
+    assert places["citius:good"] == "Moura"
+
+
 def test_a_cut_copy_of_a_text_does_not_replace_the_full_one(db):
     """Search pages shorten texts ("… Vila Franca do Cam.... Modalidade: …");
     the full text a detail page gave stays."""

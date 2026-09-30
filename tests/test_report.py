@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from db import record_scrape
-from report import generate_report, md_cell
+from report import _shown_score, generate_report, md_cell
 
 
 def test_report_covers_every_country_and_escapes_tables(db, add, tmp_path):
@@ -12,6 +12,7 @@ def test_report_covers_every_country_and_escapes_tables(db, add, tmp_path):
     add("zvg", "2", "DE", title="Einfamilienhaus Wohnhaus", tipo="imovel", price=40000)
     add("greece", "3", "GR", title="Apartment", tipo="imovel", price=30000)
     add("citius", "4", "PT", title="Prédio urbano em Moura", price=None)
+    add("citius", "6", "PT", title="Prédio sem valor publicado", price=0)
     add("eleiloes", "5", "PT", title="Anel em ouro", price=500)
     record_scrape(db, "bpi", count=0, status="error", message="HTTPError: 404")
 
@@ -23,10 +24,19 @@ def test_report_covers_every_country_and_escapes_tables(db, add, tmp_path):
     assert "## Top picks" in md and "## Ending within 7 days — 1" in md
     assert "Moradia \\| com quintal (T3)" in md
     assert "Price unknown" in md and "Prédio urbano em Moura" in md
+    top, _, _rest = md.partition("## Ending within 7 days")
+    assert "Prédio sem valor publicado" not in top
+    assert "Prédio sem valor publicado" in md
     assert "Ouro & Joias (Gold & Jewelry) — 1 listings" in md
     assert "| bpi | error |" in md and "1 source(s) failing" in md
     assert os.path.exists(tmp_path / "report.docx")
     assert os.path.exists(tmp_path / "report.pdf")
+
+
+def test_shown_score_uses_the_unclamped_rank():
+    assert _shown_score({"score": 100, "rank": 118.4}) == 118
+    assert _shown_score({"score": 73, "rank": 73.2}) == 73
+    assert _shown_score({"score": 40, "rank": 30}) == 40
 
 
 def test_md_cell():

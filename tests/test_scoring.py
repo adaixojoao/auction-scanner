@@ -142,6 +142,12 @@ def test_categorize():
     assert categorize(item(title="Prédio com auditório")) == "imoveis"
     assert categorize(item(title="Audi A4 2015")) == "outros"
     assert categorize(item(title="Anel em ouro")) == "ouro_joias"
+    assert categorize(item(title="Lote composto por lamina de ouro de 999.9‰.")) == "ouro_joias"
+    assert categorize(item(title="Peças de Ouro e Relojoaria - Lisboa (V.6 - Cautela)")) == "ouro_joias"
+    # A place called Ouro, or the river Douro, is not a jewelry lot.
+    assert categorize(item(title="Moradia na Quinta do Ouro, Ourém")) == "imoveis"
+    assert categorize(item(title="Prédio urbano sito na Rua do Ouro, Lisboa")) == "imoveis"
+    assert categorize(item(title="Moradia em Ervedosa do Douro")) == "imoveis"
     assert categorize(item(title="Loja", tipo="loja")) == "imoveis"
     assert categorize(item(title="Vivienda en Loja", tipo="inmueble")) == "imoveis"
     assert categorize(item(title="3 dormitorios en Valencia", tipo="Piso")) == "imoveis"
