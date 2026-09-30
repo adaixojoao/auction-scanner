@@ -137,6 +137,8 @@ def test_a_spanish_cadastral_reference_is_asked_of_the_catastro(client, db, add,
 
 
 def _citius(add, external_id, **over):
+    import config
+    config.update_config({"checklist": {"blocking": {"pt_court": []}}})   # only the location gate here
     raw = {"processo": "165/10.3TBMRA, Juízo", "tribunal": "Juízo de Moura",
            "modalidade": "Venda mediante propostas em carta fechada", "agente_email": "ae@solic.pt"}
     add("citius", external_id, title="Moradia", price=30000, area_m2=120, raw_json=json.dumps({**raw, **over}))

@@ -426,6 +426,18 @@ logged. On Offers, an offer for a listing placed only at its town warns you;
 with Settings → Location check set to "ask my reason", it is sent or logged
 only with a reason, which is kept with the offer.
 
+Each sale on Offers has a **due-diligence checklist** that follows how it is
+sold (Portugal court / e-leiloes / bank, Spain BOE / bank, France court,
+Germany ZVG, Italy court, Netherlands executieveiling, or a generic list), with
+rural-land items for plots. You set each item to not started, requested,
+verified, not applicable or a concern, with notes, a link or document
+reference, a date and who checked it; every change is logged. Items that block
+(the land registry and charges by default; Settings → Due-diligence checklist
+changes them) must be verified or not applicable before an offer is sent or
+logged, or you give a reason, which is kept with the offer along with the
+checklist summary. "Checklist PDF" prints it. It is your own record, not legal
+advice.
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access

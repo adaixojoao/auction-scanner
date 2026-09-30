@@ -37,29 +37,6 @@ const EMPTY = {
   sent: "Nothing waiting for an answer.", closed: "Nothing closed yet.", rejected: "Nothing rejected.",
 };
 const PRICE_LABEL = {PT: "Base value", ES: "Auction value", FR: "Mise à prix"};
-const CHECKLIST = {
-  PT: ["Checked the land registry (conservatória)", "Checked the tax record (caderneta predial)",
-       "No IMI or condominium debts", "Property is vacant", "Visited the property, or seen recent photos",
-       "Mortgage is cancelled by the sale"],
-  ES: ["Checked the land registry (nota simple)", "Know which charges (cargas) survive the sale",
-       "Community fees and IBI debts known", "Occupancy known (situación posesoria)",
-       "Visited the property, or seen recent photos", "Deposit ready (5% on the BOE portal) / financing ready"],
-  FR: ["Read the cahier des conditions de vente", "Visited the property (visits are set by the lawyer)",
-       "Occupancy known (libre or occupé)", "Bank cheque for 10% of the mise à prix (min. €3,000) ready",
-       "Budget includes the fees (roughly 10–15% on top of the price)", "A lawyer at that court has agreed to bid for you"],
-  DE: ["Read the valuation report (Gutachten)", "Know which land-register rights survive the sale (bestehen bleibende Rechte)",
-       "Occupancy known (vermietet, bewohnt or leer)", "Security (10% of the Verkehrswert) transferred in time, or certified cheque ready",
-       "ID ready (and a certified power of attorney if someone bids for you)", "Budget includes property transfer tax and court fees"],
-  IT: ["Read the avviso di vendita and the perizia", "Visited with the custode", "Occupancy and date of vacating known",
-       "Condominium arrears known (the buyer can owe the current and previous year)", "Deposit (cauzione) ready as the notice requires",
-       "Offer at or above the offerta minima"],
-  NL: ["Read the veilingvoorwaarden", "Viewed the property, or accept buying it unseen", "Know whether tenants stay",
-       "Registered and identified for the auction", "Financing or bank guarantee ready",
-       "Budget includes transfer tax and notary costs"],
-  "*": ["Checked the land registry", "Debts on the property known", "Occupancy known",
-        "Visited the property, or seen recent photos", "Know how offers must be submitted"],
-};
-
 async function load() {
   const {location_gate_mode, ...lists} = await (await fetch("/api/offers")).json();
   data = lists; gateMode = location_gate_mode || "warn";
@@ -73,12 +50,18 @@ function current() { return data[tab].find(x => x.key === sel); }
 // Settings → Location: an offer for a listing placed only at its town (or not
 // at all) warns, and with "block" asks why before it is sent or logged.
 let gateMode = "warn";
-function locationReason(c, isOffer) {
-  if (!isOffer || !c.location_gate || gateMode !== "block") return "";
-  const r = prompt(`${c.location_check.label}: the property's own position is not known. Why send this offer anyway? (kept with the offer)`);
+// One question for what holds an offer back (the location check, blocking
+// checklist items): {} when nothing does, null when you cancelled.
+function overrideReason(c, isOffer) {
+  if (!isOffer) return {};
+  const why = [];
+  if (c.location_gate && gateMode === "block") why.push(`${c.location_check.label}: the property's own position is not known.`);
+  if (c.checklist && c.checklist.blocking_left) why.push(`Checklist: ${c.checklist.summary}`);
+  if (!why.length) return {};
+  const r = prompt(why.join("\n") + "\n\nWhy send this offer anyway? (kept with the offer)");
   if (r === null) return null;
   if (r.trim().length < 5) { AS.toast("Give a short reason (at least 5 characters)", "bad"); return null; }
-  return r.trim();
+  return {location_override: r.trim(), checklist_override: r.trim()};
 }
 function locationNotice(c) {
   const l = c.location_check || {};
@@ -86,8 +69,10 @@ function locationNotice(c) {
   const warn = c.location_gate && gateMode !== "off" && !c.offer
     ? `<div class="notice warn">⚠ ${AS.esc(l.label)}: ${AS.esc(l.reliable)} Check where the property is before a binding offer: Listings → ⓘ → Verify location.${gateMode === "block" ? " Sending an offer will ask for your reason." : ""}</div>`
     : "";
-  const kept = c.offer && c.offer.location_override
-    ? `<p class="small muted">Sent with the location at ${AS.esc(c.offer.location_level || "?")} level. Your reason: ${AS.esc(c.offer.location_override)}</p>` : "";
+  const o = c.offer;
+  const kept = (o && o.location_override
+    ? `<p class="small muted">Sent with the location at ${AS.esc(o.location_level || "?")} level. Your reason: ${AS.esc(o.location_override)}</p>` : "")
+    + (o && o.checklist_summary ? `<p class="small muted">Checklist when it was sent: ${AS.esc(o.checklist_summary)}</p>` : "");
   return {badge, warn, kept};
 }
 function typeOf(c, key) { return c.letter_types.find(t => t.key === key) || null; }
@@ -117,7 +102,8 @@ function renderList() {
       </div>
       <div class="m">${AS.esc(c.sale)}${c.status === "shortlisted" ? ' · <span class="warn">★ shortlisted</span>' : ""} · ${AS.esc(c.location || "")}${overdue(c.offer) ? ` · <span class="warn">no answer for ${overdue(c.offer)} days</span>` : ""}</div>
       <div class="m">${c.price ? AS.esc(PRICE_LABEL[c.country] || "Price") + " " + AS.money(c.price) : "no price"}${c.offer ? " · " + offerSummary(c.offer) : (c.bid ? ` · suggested EUR ${AS.esc(c.bid)}` : "")}
-        ${c.date_end ? " · ends " + AS.esc(c.date_end.slice(0, 10)) : ""}</div>
+        ${c.date_end ? " · ends " + AS.esc(c.date_end.slice(0, 10)) : ""}
+        ${!c.offer && c.checklist && c.checklist.blocking_left ? ` · <span class="warn">${c.checklist.blocking_left} blocking</span>` : ""}</div>
     </div>`).join("");
 }
 
@@ -146,7 +132,6 @@ function renderDetail() {
   const onlineBid = !!bc && !(done && c.offer.method !== "online");
   const showOnline = onlineBid && (!done || c.offer.method === "online");
   const showLetter = c.letter_types.length && (!done || c.offer.method !== "online");
-  const checklist = CHECKLIST[c.country] || CHECKLIST["*"];
   const lock = done || d.edited;   // an edited letter keeps its amount and type
   const stored = done && c.offer.letter_text;
   const note = stored ? `The letter exactly as it was sent on ${AS.esc(c.offer.sent_date || "")}.`
@@ -227,8 +212,9 @@ function renderDetail() {
 
   ${done ? "" : `
   <div class="card">
-    ${t && !t.is_offer && !onlineBid ? "" : `<h2>${onlineBid && !(t && t.is_offer) ? "Before you bid" : "Before you send an offer"}</h2>
-    ${checklist.map(l => `<label class="check" style="margin-bottom:6px"><input type="checkbox"> ${AS.esc(l)}</label>`).join("")}`}
+    ${t && !t.is_offer && !onlineBid ? "" : `<div class="row"><h2 style="margin:0">${onlineBid && !(t && t.is_offer) ? "Before you bid" : "Before you send an offer"}</h2>
+      <span class="spacer"></span><a class="btn btn-sm" href="/api/checklist.pdf?id=${encodeURIComponent(c.id)}">Checklist PDF</a></div>
+    <div id="checklist-box" class="small muted">Loading the checklist…</div>`}
     <div class="row" style="margin-top:12px">
       ${showLetter ? `<select id="method" style="max-width:190px">
           <option value="email">I e-mailed it myself</option><option value="post">I posted it (registered)</option>
@@ -249,6 +235,43 @@ function renderDetail() {
   on("online", "input", e => { d.online = e.target.value; refreshOnline(); });
   refreshLetter();
   refreshOnline();
+  loadChecklist(c);
+}
+
+// ── The due-diligence checklist (checklist.py): only you set a status ──
+let ckStatuses = [];
+async function loadChecklist(c) {
+  if (!$("checklist-box")) return;
+  const ck = await (await fetch("/api/checklist?id=" + encodeURIComponent(c.id))).json();
+  if (ck.error || current() !== c || !$("checklist-box")) return;
+  ckStatuses = ck.statuses || ckStatuses;
+  renderChecklist(c, ck);
+}
+function renderChecklist(c, ck) {
+  c.checklist = {summary: ck.summary, blocking_left: ck.blocking_left.length, concerns: ck.concerns.length};
+  const item = x => `<div class="ck-item" data-key="${AS.esc(x.key)}">
+      <select class="ck-status" onchange="saveCheck(this)">${ckStatuses.map(([k, v]) =>
+        `<option value="${k}" ${k === x.status ? "selected" : ""}>${AS.esc(v)}</option>`).join("")}</select>
+      <span class="${x.status === "concern" ? "bad" : ""}">${AS.esc(x.label)}${x.blocking ? ' <span class="badge b-hidden">blocking</span>' : ""}</span>
+      <details class="ck-more"><summary class="faint">notes${x.notes || x.reference ? " ✎" : ""}</summary>
+        <input class="ck-notes" placeholder="notes" value="${AS.esc(x.notes)}">
+        <input class="ck-ref" placeholder="a link, or where the document is" value="${AS.esc(x.reference)}">
+        <input class="ck-date" type="date" value="${AS.esc(x.checked_on)}">
+        <input class="ck-by" placeholder="checked by" value="${AS.esc(x.verified_by)}">
+        <button class="btn btn-sm" onclick="saveCheck(this)">Save</button></details></div>`;
+  const cats = ck.categories.filter(([k]) => ck.items.some(x => x.category === k));
+  $("checklist-box").innerHTML = `<p class="${ck.blocking_left.length ? "warn" : "ok"}" style="margin:8px 0"><b>${AS.esc(ck.summary)}</b>
+      <span class="faint">${AS.esc(ck.route_label)}</span></p>`
+    + cats.map(([k, title]) => `<div class="ck-cat"><div class="k">${AS.esc(title)}</div>${
+        ck.items.filter(x => x.category === k).map(item).join("")}</div>`).join("")
+    + `<p class="faint" style="margin-top:6px">"Verified" means you checked it. This is your own record, not legal advice; ask a local lawyer where it matters.</p>`;
+}
+async function saveCheck(el) {
+  const row = el.closest(".ck-item"), c = current(), v = s => row.querySelector(s).value;
+  const ck = await AS.api("/api/checklist", {method: "POST", body: {id: c.id, key: row.dataset.key,
+    status: v(".ck-status"), notes: v(".ck-notes"), reference: v(".ck-ref"), checked_on: v(".ck-date"),
+    verified_by: v(".ck-by")}});
+  renderChecklist(c, ck);
 }
 
 function outcomeCard(c) {
@@ -354,30 +377,28 @@ function showSent(logId, msg) {
 }
 async function markSent() {
   const c = current(), d = draft(c);
-  const reason = locationReason(c, (typeOf(c, d.type) || {}).is_offer);
-  if (reason === null) return;
-  const r = await AS.api("/api/offers/sent", {method: "POST", body: {...letterBody(c), to: d.to, method: $("method").value,
-                                                                  location_override: reason}});
+  const why = overrideReason(c, (typeOf(c, d.type) || {}).is_offer);
+  if (!why) return;
+  const r = await AS.api("/api/offers/sent", {method: "POST", body: {...letterBody(c), to: d.to, method: $("method").value, ...why}});
   showSent(r.log_id, "Logged as sent — it is now under Sent");
 }
 async function sendEmail() {
   const c = current(), d = draft(c), btn = $("send-btn");
   if (!d.to) { AS.toast("Fill in who to send it to", "bad"); $("to").focus(); return; }
-  const reason = locationReason(c, (typeOf(c, d.type) || {}).is_offer);
-  if (reason === null) return;
+  const why = overrideReason(c, (typeOf(c, d.type) || {}).is_offer);
+  if (!why) return;
   if (!confirm(`Send this letter with its PDF to ${d.to}?`)) return;
   btn.disabled = true; btn.textContent = "Sending…";
   try {
-    const r = await AS.api("/api/offers/email", {method: "POST", body: {...letterBody(c), to: d.to, location_override: reason}});
+    const r = await AS.api("/api/offers/email", {method: "POST", body: {...letterBody(c), to: d.to, ...why}});
     showSent(r.log_id, `Sent to ${r.to} — it is now under Sent`);
   } catch (e) { btn.disabled = false; btn.textContent = "Send by e-mail with PDF"; }
 }
 async function logOnline() {
   const c = current(), d = draft(c);
-  const reason = locationReason(c, true);
-  if (reason === null) return;
-  const r = await AS.api("/api/offers/sent", {method: "POST", body: {id: c.id, bid: d.online, method: "online",
-                                                                  location_override: reason}});
+  const why = overrideReason(c, true);
+  if (!why) return;
+  const r = await AS.api("/api/offers/sent", {method: "POST", body: {id: c.id, bid: d.online, method: "online", ...why}});
   showSent(r.log_id, "Bid logged — it is now under Sent");
 }
 async function reject() {

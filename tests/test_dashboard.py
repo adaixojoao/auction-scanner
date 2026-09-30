@@ -111,7 +111,8 @@ def test_offer_flow_review_letter_pdf_sent_won(client, db, add, monkeypatch):
     assert pdf.status_code == 200 and pdf.data.startswith(b"%PDF")
     assert "carta_165-10.3TBMRA.pdf" in pdf.headers["Content-Disposition"]
 
-    sent = client.post("/api/offers/sent", json={"id": "citius:p1", "bid": "4.000,00"}).get_json()
+    sent = client.post("/api/offers/sent", json={"id": "citius:p1", "bid": "4.000,00",
+                                                 "checklist_override": "certidão seen at the court"}).get_json()
     offers = client.get("/api/offers").get_json()
     assert offers["review"] == [] and offers["sent"][0]["key"] == f"log:{sent['log_id']}"
     assert offers["sent"][0]["offer"]["bid"] == "4.000,00"
@@ -203,7 +204,8 @@ def test_spanish_information_request_by_email(client, add, monkeypatch):
     assert offers["closed"][0]["offer"]["outcome"] == "answered"
 
     logged = client.post("/api/offers/sent", json={"id": "spain:SUB-JA-2099-1", "bid": "70.000,00",
-                                                   "method": "online"}).get_json()
+                                                   "method": "online",
+                                                   "checklist_override": "checked with the court"}).get_json()
     offer = client.get("/api/offers").get_json()["sent"][0]["offer"]
     assert offer["log_id"] == logged["log_id"] and offer["method"] == "online" and offer["bid"] == "70.000,00"
 
@@ -218,7 +220,8 @@ def test_sent_letters_are_kept_as_sent(client, add, monkeypatch):
 
     pdf = client.post("/api/offers/letter.pdf", json={**q, "text": edited})
     assert pdf.status_code == 200 and pdf.data.startswith(b"%PDF")
-    sent = client.post("/api/offers/sent", json={**q, "text": edited, "method": "lawyer"}).get_json()
+    sent = client.post("/api/offers/sent", json={**q, "text": edited, "method": "lawyer",
+                                                 "checklist_override": "the lawyer checked it"}).get_json()
 
     # later changes to your details or the listing do not rewrite what was sent
     config.update_config({"proponente": {"nome": "Someone Else"}})
