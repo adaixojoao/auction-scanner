@@ -149,8 +149,12 @@ def sources_page():
 
 @app.route("/settings")
 def settings_page():
+    import checklist
     from scoring import WEIGHTS
-    return _page("settings.html", "settings", "Settings", weights=list(WEIGHTS.items()))
+    cfg = _config()
+    routes = [(route, label, [(it.key, it.label, it.key in checklist.blocking_keys(route, cfg)) for it in items])
+              for route, (label, items) in checklist.TEMPLATES.items()]
+    return _page("settings.html", "settings", "Settings", weights=list(WEIGHTS.items()), checklist_routes=routes)
 
 
 # Old addresses from before the pages were unified.
@@ -558,13 +562,16 @@ def _format_amount(value) -> str:
     return format_bid(value) if value is not None else ""
 
 
-def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
+def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | None = None,
+                cfg: dict | None = None) -> dict:
+    import checklist
     import listing_info
     from letters import bid_card, channel, classify_property, guidance, letter_types_for, place_of
     raw = _raw(it)
     area = it.get("area_m2") or 0
     types = [t.public(it) for t in letter_types_for(it)]
     first_offer = next((t for t in types if t["is_offer"]), None)
+    ck = checklist.build(it, (checks or {}).get(it["id"], {}), cfg)
     return {
         "key": key,
         "id": it["id"],
@@ -595,6 +602,8 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
         "climate": listing_info.climate_panel(it),
         "location_check": geo.location_confidence(it),
         "location_gate": location_gate_applies(it),     # with /api/offers' location_gate_mode
+        "checklist": {"summary": ck["summary"], "blocking_left": len(ck["blocking_left"]),
+                      "concerns": len(ck["concerns"])},
         "status": it.get("status"),
         "bid": (first_offer or {}).get("suggested", ""),   # online-only sales: nothing to suggest
         "contact": _contact(it, raw),
@@ -606,19 +615,22 @@ def _offer_view(it: dict, key: str, offer: dict | None = None) -> dict:
                    "letter_text": offer.get("letter_text") or "",        # exactly what was sent
                    "letter_subject": offer.get("letter_subject") or "",
                    "location_level": offer.get("location_level"),
-                   "location_override": offer.get("location_override") or ""}
+                   "location_override": offer.get("location_override") or "",
+                   "checklist_summary": offer.get("checklist_summary") or ""}
                   if offer else None),
     }
 
 
 @app.route("/api/offers")
 def api_offers():
+    import checklist
     from letters import channel, classify_property
 
     db = get_db()
     try:
         items = load_listings(db, filters=_config().get("filters"), include_hidden=True)
         logs = [dict(r) for r in db.execute("SELECT * FROM carta_log ORDER BY created_at DESC, id DESC")]
+        checks = checklist.stored_all(db)
     finally:
         db.close()
     by_id = {it["id"]: it for it in items}
@@ -647,7 +659,7 @@ def api_offers():
                                       it.get("area_m2") or 0) is not None):
             candidates.append(it)
     candidates.sort(key=lambda it: -it.get("rank", it["score"]))
-    review = [_offer_view(it, it["id"]) for it in
+    review = [_offer_view(it, it["id"], checks=checks, cfg=cfg) for it in
               sorted(shortlisted, key=lambda it: -it.get("rank", it["score"])) + candidates[:size]]
 
     sent, closed = [], []
@@ -655,10 +667,10 @@ def api_offers():
         it = by_id.get(log["listing_id"])
         if not it:
             continue
-        view = _offer_view(it, f"log:{log['id']}", log)
+        view = _offer_view(it, f"log:{log['id']}", log, checks=checks, cfg=cfg)
         (sent if log["outcome"] == "pending" else closed).append(view)
 
-    rejected = [_offer_view(it, it["id"]) for it in items
+    rejected = [_offer_view(it, it["id"], checks=checks, cfg=cfg) for it in items
                 if it["status"] == "dismissed" and it["category"] == "imoveis"]
     return jsonify({"review": review[:150], "sent": sent, "closed": closed, "rejected": rejected[:150],
                     "location_gate_mode": location_gate_mode()})
@@ -823,6 +835,88 @@ def _location_gate(item: dict, is_offer: bool, data: dict):
     return None, reason
 
 
+def _checklist_gate(item: dict, is_offer: bool, data: dict):
+    """(error response or None, the checklist, the reason to record). An offer
+    with blocking checklist items left needs your reason; a request does not."""
+    import checklist
+    db = get_db()
+    try:
+        ck = checklist.build(item, checklist.stored(db, item["id"]), _config())
+    finally:
+        db.close()
+    if not is_offer or not ck["blocking_left"]:
+        return None, ck, None
+    reason = str(data.get("checklist_override") or "").strip()[:500]
+    if len(reason) < checklist.MIN_OVERRIDE_REASON:
+        return (jsonify({"error": f"Checklist: {ck['summary']} Say why you are sending this offer anyway.",
+                         "checklist_gate": True}), 409), ck, None
+    return None, ck, reason
+
+
+def _record_checklist(item: dict, log_id: int, ck: dict, reason: str | None) -> None:
+    import checklist
+    db = get_db()
+    try:
+        checklist.record_offer(db, item["id"], log_id, ck["summary"], reason)
+    finally:
+        db.close()
+
+
+@app.route("/api/checklist")
+def api_checklist():
+    import checklist
+    item = _listing(request.args.get("id", ""))
+    if not item:
+        return jsonify({"error": "no such listing"}), 404
+    db = get_db()
+    try:
+        out = checklist.build(item, checklist.stored(db, item["id"]), _config())
+        out["history"] = checklist.history(db, item["id"])[:50]
+    finally:
+        db.close()
+    out["statuses"] = [[k, checklist.STATUS_LABELS[k]] for k in checklist.STATUSES]
+    return jsonify(out)
+
+
+@app.route("/api/checklist", methods=["POST"])
+def api_checklist_save():
+    """Your status for one item. Only you set statuses: nothing else writes them."""
+    import checklist
+    data = request.get_json(silent=True) or {}
+    item = _listing(str(data.get("id") or ""))
+    if not item:
+        return jsonify({"error": "no such listing"}), 404
+    fields = {k: str(data.get(k) or "").strip() for k in ("notes", "reference", "checked_on", "verified_by")}
+    if fields["checked_on"] and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", fields["checked_on"]):
+        return jsonify({"error": "checked_on must be a date (YYYY-MM-DD)"}), 400
+    db = get_db()
+    try:
+        try:
+            checklist.set_status(db, item, str(data.get("key") or ""), str(data.get("status") or ""), **fields)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        out = checklist.build(item, checklist.stored(db, item["id"]), _config())
+    finally:
+        db.close()
+    return jsonify(out)
+
+
+@app.route("/api/checklist.pdf")
+def api_checklist_pdf():
+    import checklist
+    from letters import text_pdf
+    item = _listing(request.args.get("id", ""))
+    if not item:
+        abort(404)
+    db = get_db()
+    try:
+        ck = checklist.build(item, checklist.stored(db, item["id"]), _config())
+    finally:
+        db.close()
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", item["id"])
+    return _pdf_response(text_pdf(checklist.as_text(item, ck), ref=f"Ref: {item['id']}"), f"checklist_{safe}.pdf")
+
+
 @app.route("/api/offers/sent", methods=["POST"])
 def api_offer_sent():
     """Record a letter you sent yourself (post, your own e-mail, your lawyer),
@@ -839,12 +933,18 @@ def api_offer_sent():
             return jsonify({"error": "no such listing"}), 404
         if not letter:
             return jsonify({"error": f"no letter of type {ltype!r} for this listing"}), 400
-    blocked, reason = _location_gate(item, letter.is_offer if letter else True, data)
+    is_offer = letter.is_offer if letter else True
+    blocked, reason = _location_gate(item, is_offer, data)
+    if blocked:
+        return blocked
+    blocked, ck, ck_reason = _checklist_gate(item, is_offer, data)
     if blocked:
         return blocked
     method = data.get("method") or ("online" if item.get("source") == "eleiloes" else "email")
     log_id = _log_sent(item, letter=letter, bid=bid, method=method,
                        sent_to=data.get("to", ""), notes=data.get("notes", ""), location_override=reason)
+    if is_offer:
+        _record_checklist(item, log_id, ck, ck_reason)
     return jsonify({"ok": True, "log_id": log_id})
 
 
@@ -861,6 +961,9 @@ def api_offer_email():
     blocked, reason = _location_gate(item, letter.is_offer, data)
     if blocked:
         return blocked
+    blocked, ck, ck_reason = _checklist_gate(item, letter.is_offer, data)
+    if blocked:
+        return blocked
     to = (data.get("to") or letter.to_email or "").strip()
     db = get_db()
     try:
@@ -870,6 +973,8 @@ def api_offer_email():
         db.close()
     if error:
         return jsonify({"error": error}), 400
+    if letter.is_offer:
+        _record_checklist(item, log_id, ck, ck_reason)
     return jsonify({"ok": True, "log_id": log_id, "to": to})
 
 
@@ -1059,6 +1164,7 @@ EDITABLE = {
     "backup": ("folder", "keep"),
     "climate": ("bid_guardrail",),
     "location": ("gate",),
+    "checklist": ("blocking",),
 }
 
 
@@ -1101,6 +1207,13 @@ def api_settings_save():
             return jsonify({"error": "weights: known names, each 0 to 2"}), 400
     if not isinstance((changes.get("climate") or {}).get("bid_guardrail", False), bool):
         return jsonify({"error": "climate.bid_guardrail must be true or false"}), 400
+    blocking = (changes.get("checklist") or {}).get("blocking")
+    if blocking is not None:
+        from checklist import TEMPLATES
+        if not isinstance(blocking, dict) or any(
+                route not in TEMPLATES or not isinstance(keys, list)
+                or not set(keys) <= {it.key for it in TEMPLATES[route][1]} for route, keys in blocking.items()):
+            return jsonify({"error": "checklist.blocking: route → list of that route's item keys"}), 400
     if (changes.get("location") or {}).get("gate", "warn") not in LOCATION_GATE_MODES:
         return jsonify({"error": "location.gate must be off, warn or block"}), 400
     countries = (changes.get("filters") or {}).get("countries")

@@ -31,7 +31,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -270,8 +270,40 @@ def _migrate_v9(db: sqlite3.Connection):
     _add_column(db, "carta_log", "location_override", "TEXT")
 
 
+def _migrate_v10(db: sqlite3.Connection):
+    """Your due-diligence checklist per listing (checklist.py), every change to
+    it, the reasons you gave for sending an offer with blocking items left, and
+    on each offer the checklist's summary when it was sent."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS checklist_items (
+            listing_id  TEXT NOT NULL,
+            item_key    TEXT NOT NULL,
+            status      TEXT NOT NULL,     -- not_started | requested | verified | not_applicable | concern
+            notes       TEXT,
+            reference   TEXT,              -- a link, or where the document is
+            checked_on  TEXT,
+            verified_by TEXT,
+            updated_at  TEXT NOT NULL,
+            PRIMARY KEY (listing_id, item_key)
+        );
+        CREATE TABLE IF NOT EXISTS checklist_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id   TEXT NOT NULL,
+            carta_log_id INTEGER,
+            item_key     TEXT,
+            action       TEXT NOT NULL,    -- status | override
+            old_status   TEXT,
+            new_status   TEXT,
+            reason       TEXT,
+            created_at   TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_checklist_log ON checklist_log(listing_id, created_at);
+    """)
+    _add_column(db, "carta_log", "checklist_summary", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
-               6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9}
+               6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10}
 
 
 def init_db(db: sqlite3.Connection):

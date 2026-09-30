@@ -156,6 +156,12 @@ table.list tr.dim td { opacity: .45; }
 .l-exact { background: rgba(34,197,94,.18); color: var(--green); }
 .l-street, .l-area { background: rgba(234,179,8,.18); color: var(--yellow); }
 .l-municipality, .l-unknown { background: rgba(239,68,68,.15); color: var(--red); }
+.ck-cat { margin-top: 8px; }
+.ck-cat > .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
+.ck-item { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; padding: 2px 0; font-size: 13px; }
+.ck-item .ck-status { max-width: 150px; font-size: 12px; }
+.ck-more { flex-basis: 100%; margin-left: 158px; }
+.ck-more input { margin: 3px 4px 0 0; max-width: 260px; }
 .loc-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
 .loc-form input { flex: 1; min-width: 220px; }
 .tags { display: flex; gap: 4px; flex-wrap: wrap; }

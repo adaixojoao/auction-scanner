@@ -131,6 +131,12 @@ DEFAULTS = {
         "gate": "warn",
     },
 
+    "checklist": {
+        # route → the item keys that must be done before an offer goes out
+        # (checklist.TEMPLATES); a route not listed uses the template's own.
+        "blocking": {},
+    },
+
     # CourtBid via Apify (python scraper.py --source courtbid)
     "apify_token": "",
 
