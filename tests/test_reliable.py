@@ -1,7 +1,5 @@
 """A top the owner can trust: unchecked listings stay below the minimum, the
 score keeps apart the good and the best, and "excellent" means every wish."""
-from types import SimpleNamespace
-
 import geo
 from scoring import display_score, excellent, score_detail
 from sources.es import servihabitat_town
