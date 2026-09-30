@@ -1,3 +1,4 @@
 -r requirements.txt
+-r requirements-climate.txt
 pytest>=8
 pyflakes>=3
