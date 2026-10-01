@@ -453,6 +453,13 @@ fields on each offer (winning bid, all-in cost, lost reason, diligence
 blocker, occupancy/title/access/condition found) feed that page. An anonymised
 CSV export stays on this PC.
 
+Rural listings get a non-binding **Climate & Land Stewardship Plan** on
+Listings → ⓘ (risks, opportunities, 90-day and 3-year actions, questions for
+local advisers, planning-allowance costs). It uses the climate maps and
+location confidence only; cork/oak or riparian ideas are labelled "verify
+locally". Export as Markdown, PDF or Word. Settings → Stewardship can also
+show it on homes and urban plots.
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access

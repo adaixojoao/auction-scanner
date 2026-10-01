@@ -151,6 +151,23 @@ DEFAULTS = {
         },
     },
 
+    # Settings → Stewardship: Climate & Land Stewardship Plan (stewardship.py).
+    "stewardship": {
+        "enable_for_mixed": False,       # also show the plan on homes / urban plots
+        "profile": {
+            "region_label": "Portugal interior",
+            "suggest_cork_oak": True,    # still labelled "verify locally" in the plan
+            "conservation_priority": "biodiversity and fire resilience",
+        },
+        # Planning allowances €/ha (low, high) — not quotes.
+        "cost_eur_per_ha": {
+            "baseline": [200, 600],
+            "soil_cover": [300, 1200],
+            "regen": [100, 500],
+            "planting_trial": [400, 2000],
+        },
+    },
+
     # CourtBid via Apify (python scraper.py --source courtbid)
     "apify_token": "",
 
