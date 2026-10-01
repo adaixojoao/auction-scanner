@@ -159,6 +159,9 @@ def w(name: str) -> float:
 
 
 UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
+DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
+SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira"}
+DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
@@ -571,6 +574,15 @@ _DESC_OPENS_AS_OTHER = re.compile(
     r"(?:un[oa']? ?)?)?(?:ufficio|uffici|negozio|magazzino|capannone|laboratorio|box auto|garage|posto auto)\b")
 
 
+# Portals title everything "Casa en X" / "Maison à X"; the first words of the
+# description say what it really is. A barn, granary or bare rural plot is not a home.
+_DESC_OPENS_AS_OUTBUILDING = re.compile(
+    r"^\W*(?:se vende |vendo |a saisir \W*)?(?:une |una |un |ancienne |belle |grande |vieille )*"
+    r"(?:grange|granges|panera|horreo|hangar|ecurie|cabanon|palheiro|curral)\b")
+_DESC_OPENS_AS_FINCA = re.compile(r"^\W*(?:se vende |vendo )?(?:una |gran |bonita )*finca rustica\b")
+_FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
+
+
 def property_kind(item: dict) -> str | None:
     """"home", "urban_plot", "rural_plot", "other" (shop, garage, storage…) or
     None when the listing does not say. The title and the portal's own type
@@ -607,8 +619,11 @@ def property_kind(item: dict) -> str | None:
             return "rural_plot" if area >= 5000 else "urban_plot"
         return None
 
-    if tipo in NOT_PROPERTY_TYPES or _DESC_OPENS_AS_OTHER.match(normalize(desc)):
+    ndesc = normalize(desc)
+    if tipo in NOT_PROPERTY_TYPES or _DESC_OPENS_AS_OTHER.match(ndesc) or _DESC_OPENS_AS_OUTBUILDING.match(ndesc):
         return "other"
+    if _DESC_OPENS_AS_FINCA.match(ndesc) and not _FINCA_WITH_HOUSE.search(ndesc[:200]):
+        return "rural_plot" if area >= 1000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
         # The portal says land (or "Lote Moradia"): a plot, whatever house word follows.
@@ -958,6 +973,20 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         # the top 15 were there only because nothing could be held against them.
         caps.append(UNCHECKED_CAP)
         reasons.append("location unknown — climate not checked")
+
+    if item.get("place_conflict"):
+        # The title names a town far from where the listing is placed: the
+        # climate and distances belong to the wrong place.
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"title names {item['place_conflict']['town']}, "
+                       f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
+    if (kind == "home" and item.get("source") in SALE_PORTALS
+            and pay and pay < DOUBTFUL_HOME_EUR and area >= 40):     # court sales do start this low
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"price doubtful (€{pay:,.0f} for a home) — probably a rent or a typo")
+    if kind in ("urban_plot", "rural_plot") and pay and area and pay / area < DOUBTFUL_LAND_EUR_M2:
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"price doubtful (€{pay:,.0f} for {_ha(area)}) — check the price and area")
 
     # Land: too small is not wanted at all.
     if kind in ("urban_plot", "rural_plot"):
