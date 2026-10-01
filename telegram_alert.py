@@ -461,7 +461,7 @@ def alert_source_failures(db, cfg: dict, scanned: list[str]) -> int:
     health = {h["source"]: h for h in source_health(db) if h["source"] in set(scanned)}
 
     failing = [h for h in health.values()
-               if h["state"] in ("error", "broken") and h["failing_runs"] >= SOURCE_FAILS_BEFORE_ALARM]
+               if h["state"] in ("error", "broken", "blocked") and h["failing_runs"] >= SOURCE_FAILS_BEFORE_ALARM]
     fresh_keys = not_yet_alerted(db, SOURCE_CHANNEL, [_source_key(h) for h in failing])
     new_fail = [h for h in failing if _source_key(h) in fresh_keys]
 
@@ -482,7 +482,9 @@ def alert_source_failures(db, cfg: dict, scanned: list[str]) -> int:
         lines.append(f"⚠️ <b>{len(new_fail)} source(s) stopped working</b>\n")
         for h in sorted(new_fail, key=lambda h: h["source"]):
             since = f"last worked {h['last_ok'][:10]}" if h["last_ok"] else "has not worked yet"
-            why = h["last_message"] or ("finds nothing" if h["state"] == "broken" else "error")
+            why = h["last_message"] or (
+                "finds nothing" if h["state"] == "broken"
+                else "blocked" if h["state"] == "blocked" else "error")
             lines.append(f"• <b>{_esc(h['source'])}</b> — {_esc(why)} "
                          f"({h['failing_runs']} runs, {since})")
         lines.append(f"\nSources page: {_dashboard_url(cfg, '/sources')}")
@@ -520,7 +522,7 @@ def alert_weekly_summary(token: str, chat_id: str, stats: dict, health: list[dic
         f"⏳ Pending: {stats.get('pending', 0)}\n"
         f"\U0001f4b6 Total exposure: €{stats.get('exposure', 0):,.0f}\n"
     )
-    failing = [h for h in (health or []) if h["state"] in ("error", "broken")]
+    failing = [h for h in (health or []) if h["state"] in ("error", "broken", "blocked")]
     if failing:
         msg += f"\n⚠️ <b>{len(failing)} source(s) failing</b>: " + \
                ", ".join(_esc(h["source"]) for h in failing[:15]) + "\n"

@@ -16,32 +16,94 @@
     <span><b class="ok">ok</b> returned listings last run</span>
     <span><b class="bad">broken</b> used to work, now returns nothing — usually the site changed</span>
     <span><b class="warn">never worked</b> has never returned a listing — its page layout was never confirmed</span>
-    <span><b class="bad">error</b> the site failed; the message says how</span>
+    <span><b class="bad">blocked</b> bot wall, closed site, or login-only — not worked around</span>
+    <span><b class="bad">error</b> HTTP or network failure; the message says how</span>
+    <span><b class="warn">fixture failing</b> offline parser fixture no longer matches</span>
   </div>
 </div>
 
+<div class="card" style="margin-bottom:14px" id="maintenance">
+  <h3 style="margin:0 0 8px">Maintenance priorities</h3>
+  <p class="small muted" style="margin:0 0 8px">Sources with stored listings or past offers that are degraded now. Expected blocked sites rank lower. Refresh with the list below.</p>
+  <div id="maint-rows" class="small muted">Loading…</div>
+</div>
+
 <table class="list">
-  <thead><tr><th>Source</th><th></th><th>State</th><th>Last run</th><th>Last count</th><th>Runs without results</th><th>Last OK</th><th>Stored</th><th>Message</th><th></th></tr></thead>
+  <thead><tr>
+    <th>Source</th><th></th><th>Kind</th><th>Access</th><th>State</th>
+    <th>Last run</th><th>Last count</th><th>Runs without results</th><th>Last OK</th><th>Stored</th>
+    <th>Message</th><th></th>
+  </tr></thead>
   <tbody id="rows"></tbody>
 </table>
 {% endblock %}
 {% block scripts %}
 <script>
-const CLS = {"ok": "ok", "broken": "bad", "error": "bad", "never worked": "warn", "never run": "faint"};
+const CLS = {"ok": "ok", "broken": "bad", "error": "bad", "blocked": "bad",
+             "never worked": "warn", "never run": "faint", "fixture failing": "warn"};
+async function validateSrc(name, live) {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/sources/" + encodeURIComponent(name) + "/validate", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({live: !!live}),
+    });
+    const j = await r.json();
+    if (!r.ok) { AS.toast(j.error || "Validate failed"); return; }
+    const bits = [];
+    if (j.fixture && j.fixture.message) bits.push("Fixture: " + j.fixture.message);
+    else if (j.fixture && j.fixture.ok === true) bits.push("Fixture ok");
+    else if (j.fixture && j.fixture.ok === false) bits.push("Fixture failed");
+    if (j.live && j.live.message) bits.push(j.live.message);
+    AS.toast(bits.join(" · ") || "Done");
+    load();
+  } finally { btn.disabled = false; }
+}
+async function loadMaint() {
+  const data = await (await fetch("/api/sources/maintenance")).json();
+  const rows = data.priorities || [];
+  const el = document.getElementById("maint-rows");
+  if (!rows.length) {
+    el.innerHTML = "<span class=\"ok\">Nothing urgent — degraded sources have little history, or all active ones are ok.</span>";
+    return;
+  }
+  el.innerHTML = "<table class=\"list\" style=\"margin:0\"><thead><tr>"
+    + "<th>Source</th><th>State</th><th>Stored</th><th>Offers</th><th>Why</th></tr></thead><tbody>"
+    + rows.slice(0, 12).map(r => `<tr>
+      <td><b>${AS.esc(r.source)}</b> ${AS.flag(r.country || "")}</td>
+      <td class="${CLS[r.state] || ""}">${AS.esc(r.state)}</td>
+      <td>${r.listings}</td><td>${r.offers}</td>
+      <td class="muted">${AS.esc(r.why || "")}</td>
+    </tr>`).join("")
+    + "</tbody></table>";
+}
 async function load() {
   const rows = await (await fetch("/api/health")).json();
   document.getElementById("rows").innerHTML = rows.map(h => `<tr>
-    <td><b>${AS.esc(h.source)}</b>${h.default ? "" : ' <span class="badge b-muted" title="Not part of country scans">on request</span>'}<div class="small faint">${AS.esc(h.description || "")}</div></td>
+    <td><b>${AS.esc(h.source)}</b>${h.default ? "" : ' <span class="badge b-muted" title="Not part of country scans">on request</span>'}
+      ${h.has_fixture ? ' <span class="badge b-muted" title="Has an offline parser fixture">fixture</span>' : ""}
+      <div class="small faint">${AS.esc(h.description || "")}</div>
+      ${h.limitation ? `<div class="small muted">${AS.esc(h.limitation)}</div>` : ""}
+      ${h.detail ? `<div class="small faint">${AS.esc(h.detail)}</div>` : ""}
+    </td>
     <td>${AS.flag(h.country)}</td>
+    <td class="small">${AS.esc(h.kind || "–")}</td>
+    <td class="small">${AS.esc(h.access || "–")}</td>
     <td class="${CLS[h.state] || ""}" style="font-weight:700">${AS.esc(h.state)}</td>
     <td class="small nowrap">${AS.ago(h.last_run)}</td>
     <td>${h.last_count ?? "–"}</td>
     <td>${h.failing_runs}</td>
     <td class="small nowrap">${h.last_ok ? AS.ago(h.last_ok) : "–"}</td>
     <td>${h.listings}</td>
-    <td class="small muted" style="max-width:340px">${AS.esc(h.last_message || "")}</td>
-    <td><button class="btn btn-sm" data-src="${AS.esc(h.source)}" onclick="AS.startScan({source: this.dataset.src})">Run</button></td>
+    <td class="small muted" style="max-width:280px">${AS.esc(h.last_message || "")}</td>
+    <td class="row" style="gap:4px;flex-wrap:wrap">
+      <button class="btn btn-sm" data-src="${AS.esc(h.source)}" onclick="AS.startScan({source: this.dataset.src})">Run</button>
+      <button class="btn btn-sm" data-src="${AS.esc(h.source)}" onclick="validateSrc(this.dataset.src, false)">Validate</button>
+      ${h.access === "blocked" ? "" : `<button class="btn btn-sm" data-src="${AS.esc(h.source)}" title="One rate-limited request to the site's public page" onclick="validateSrc(this.dataset.src, true)">Live</button>`}
+    </td>
   </tr>`).join("");
+  loadMaint();
 }
 document.addEventListener("scan-finished", load);
 load();

@@ -1,0 +1,23 @@
+{
+  "source": "eleiloes",
+  "expect_count": 2,
+  "expect_fields": [
+    "title",
+    "price",
+    "url"
+  ],
+  "reject_prices": [
+    900
+  ],
+  "max_price": 100000,
+  "responses": [
+    {
+      "match": "/api/Eventos/?",
+      "file": "eleiloes_page.json"
+    },
+    {
+      "match": "/LO101",
+      "file": "eleiloes_detail.json"
+    }
+  ]
+}
