@@ -227,7 +227,7 @@ function locationHtml(d) {
     ${l.scanner ? `<p class="small muted">The scanner's own position is kept: ${AS.esc(ll(l.scanner.lat, l.scanner.lon))} (${AS.esc(l.scanner.source)}).</p>` : ""}
     <div class="loc-form">
       <select class="loc-method">${methods.map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
-      <input class="loc-value" type="text" placeholder="38.7223, -9.1393 · a Google Maps link · Rua…, village, town">
+      <input class="loc-value" type="text" placeholder="latitude, longitude · a Google Maps link · street, village, town">
       <button class="btn btn-sm btn-primary" data-id="${id}" onclick="verifyLocation(this)">Verify location</button>
       ${l.verified ? `<button class="btn btn-sm" data-id="${id}" onclick="clearLocation(this)">Use the scanner's position</button>` : ""}
     </div>
@@ -277,6 +277,7 @@ function detailsHtml(d) {
   const sv = d.street_view;
   const streetView = sv ? `<div class="guide street">
       <b>Where it is</b> <span class="small muted">(${AS.esc(sv.precision)})</span>
+      <code class="small">${Number(sv.lat).toFixed(5)}, ${Number(sv.lon).toFixed(5)}</code>
       ${sv.embed ? `<iframe class="sv-frame" src="${AS.esc(sv.embed)}" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>` : ""}
       <p class="d-links">${AS.link(sv.url, "Street View ↗")} · ${AS.link(sv.satellite, "Satellite ↗")}
       ${sv.embed ? "" : `<span class="small faint"> · Add a Google Maps key in Settings to see Street View here.</span>`}</p>

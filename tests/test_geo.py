@@ -46,7 +46,59 @@ def test_pending_listings_are_located_once_and_kept(db, add):
     assert geo.geocode_pending(db, session, load_listings(db, include_hidden=True)) == 0
     assert len(session.calls) == 1
     row = db.execute("SELECT raw_json FROM listings WHERE id='citius:1'").fetchone()[0]
-    assert json.loads(row)["geo"]["precision"] == "street"
+    kept = json.loads(row)
+    assert kept["geo"]["precision"] == "street"
+    assert kept["geo_tried"] == [
+        "Canada da Galega, Ribeira das Tainhas, Vila Franca do Campo",
+        "Ribeira das Tainhas, Vila Franca do Campo",
+        "Vila Franca do Campo",
+    ]
+
+
+def test_a_failed_lookup_is_retried_when_the_town_becomes_readable(db, add):
+    """Citius often puts a street in `concelho`. The first scan marks the
+    listing checked with no pin; once the postcode names the town, ask again."""
+    from db import load_listings
+    add("citius", "1", title="Fracção no largo de São Vicente",
+        concelho="largo de São Vicente", price=20000,
+        raw_json=json.dumps({"geo_checked": True}))
+    assert geo.queries(dict(db.execute("SELECT * FROM listings WHERE id='citius:1'").fetchone())) == []
+    assert geo.geocode_pending(db, FakeSession(lambda *_: FakeResponse(json_data=[])),
+                               load_listings(db, include_hidden=True)) == 0
+
+    full = "Fracção no largo de São Vicente, nº 13 - 8650 - 408 Vila do Bispo"
+    db.execute("UPDATE listings SET title=?, raw_json=? WHERE id='citius:1'",
+               ("Fracção no largo de São Vicente", json.dumps({"geo_checked": True, "descricao_completa": full})))
+    db.commit()
+    hit = [{"lat": "37.081", "lon": "-8.908", "addresstype": "town"}]
+    session = FakeSession(lambda m, url, kw: FakeResponse(json_data=hit))
+    items = load_listings(db, include_hidden=True)
+    assert geo.municipality(items[0]) == "Vila do Bispo"
+    assert geo.geocode_pending(db, session, items) == 1
+    kept = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='citius:1'").fetchone()[0])
+    assert kept["geo"]["lat"] == 37.081
+    assert kept["geo_tried"][0].endswith("Vila do Bispo")
+    assert geo.geocode_pending(db, session, load_listings(db, include_hidden=True)) == 0
+
+
+def test_saint_abbreviations_match_the_municipality_table(tmp_path, monkeypatch):
+    """Banks write 'S. João da Pesqueira'; INE and OSM use the full word."""
+    import csv
+
+    import prices
+    path = tmp_path / "pt.csv"
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=prices.COLUMNS)
+        w.writeheader()
+        w.writerow({"municipality": "São João da Pesqueira", "eur_m2": 700, "period": "Q", "source": "INE"})
+    monkeypatch.setattr(prices, "PT_FILE", str(path))
+    prices._load.cache_clear()
+    assert prices.place_key("S. João Da Pesqueira") == "sao joao da pesqueira"
+    assert prices.place_key("Sta. Maria da Feira") == "santa maria da feira"
+    assert geo.municipality({"country": "PT", "concelho": "S. João Da Pesqueira", "raw_json": "{}"}) \
+        == "S. João Da Pesqueira"
+    assert geo.queries({"country": "PT", "concelho": "S. João Da Pesqueira",
+                        "title": "Moradia", "raw_json": "{}"}) == ["S. João Da Pesqueira"]
 
 
 def test_a_failed_lookup_is_tried_next_scan(db, add):

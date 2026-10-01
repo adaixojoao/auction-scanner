@@ -27,7 +27,8 @@ def test_guarda_no_longer_scores():
 
 
 def test_excellent_needs_every_wish():
-    item = {**HOME, "climate": MILD, "airport": {"km": 40, "text": "40 km from the airport"}}
+    item = {**HOME, "description": "Em bom estado", "climate": MILD,
+            "airport": {"km": 40, "text": "40 km from the airport"}}
     s, reasons = score_detail(item)
     assert excellent(item, display_score(s), reasons)
     hot = {**item, "climate": {**MILD, "hot_days": {"rcp45_2071-2100": 9}}}
@@ -38,6 +39,8 @@ def test_excellent_needs_every_wish():
     assert excellent(remote, 90, score_detail(remote)[1]) is None
     dear = {**item, "price": 45000}
     assert excellent(dear, 90, score_detail(dear)[1]) is None
+    silent = {**HOME, "climate": MILD, "airport": {"km": 40, "text": "40 km from the airport"}}
+    assert excellent(silent, 90, score_detail(silent)[1]) is None   # condition unknown ≠ pristine
 
 
 def test_servihabitat_town_keeps_its_article():
@@ -66,7 +69,8 @@ def test_a_lookup_made_with_a_wrong_town_is_redone():
 
 
 def test_azores_mild_summer_counts_where_the_day_grid_ends():
-    item = {**HOME, "climate": {"heat": {"ssp245_2081-2100": 26.1}, "water_km": 0.2},
+    item = {**HOME, "description": "Em bom estado",
+            "climate": {"heat": {"ssp245_2081-2100": 26.1}, "water_km": 0.2},
             "airport": {"km": 25, "text": "25 km from the airport"}}
     s, reasons = score_detail(item)
     assert excellent(item, display_score(s), reasons)

@@ -110,9 +110,13 @@ def _real_municipality(name: str | None, country: str) -> str | None:
 
 
 def _address_text(item: dict) -> str:
+    """Title, description and the sale's own address fields, joined so a
+    postcode's town name cannot run into the next field ("408 Vila do Bispo
+    Fracção…" when both title and description mention the place)."""
     raw = _raw(item)
-    return " ".join(str(x or "") for x in (raw.get("morada"), raw.get("descricao_completa"),
-                                           item.get("title"), item.get("description")))
+    parts = [str(x).strip() for x in (raw.get("morada"), raw.get("descricao_completa"),
+                                      item.get("title"), item.get("description")) if x]
+    return ". ".join(parts)
 
 
 def municipality(item: dict) -> str | None:
@@ -209,15 +213,41 @@ def geocode(session, item: dict, towns: dict | None = None) -> dict | None:
     return None
 
 
+def _should_geocode(item: dict, raw: dict) -> bool:
+    """Whether this listing still needs an OpenStreetMap lookup.
+
+    A listing is tried once per set of address queries. When the first try found
+    nothing because the municipality field was a street (Citius), and a later
+    scrape or parser fix made the town readable, the queries change and we ask
+    again. A stored pin whose query named another town is also redone
+    (`stale_lookup`)."""
+    if position(item):
+        return False
+    q = queries(item)
+    if not q:
+        return False
+    if not raw.get("geo_checked"):
+        return True
+    stored = raw.get("geo")
+    if isinstance(stored, dict) and stale_lookup(item, stored):
+        return True
+    # Checked with nothing (or older code that did not keep what it asked):
+    # retry when the address we would ask about is new.
+    if not stored and raw.get("geo_tried") != q:
+        return True
+    return False
+
+
 def geocode_pending(db, session, items: list[dict], limit: int = GEOCODE_PER_SCAN,
                     towns: dict | None = None) -> int:
-    """Look up the listings (best first) that have no position yet, once each."""
+    """Look up the listings (best first) that have no position yet, once each
+    set of address queries."""
     done = 0
     for item in items:
         if done >= limit:
             break
         raw = _raw(item)
-        if position(item) or (raw.get("geo_checked") and not (raw.get("geo") and stale_lookup(item, raw["geo"]))):
+        if not _should_geocode(item, raw):
             continue
         try:
             geo = geocode(session, item, towns)
@@ -225,6 +255,7 @@ def geocode_pending(db, session, items: list[dict], limit: int = GEOCODE_PER_SCA
             LOG.info(f"OpenStreetMap lookup failed ({type(e).__name__}); trying next scan")
             break
         raw["geo_checked"] = True
+        raw["geo_tried"] = queries(item)
         if geo:
             raw["geo"] = geo
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))

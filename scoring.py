@@ -315,12 +315,15 @@ HEAVY_WORK = [
     "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
     "reforma integra", "para rehabilitación", "requiere rehabilitación", "a restaurar",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
-    "à réhabiliter", "da ristrutturare", "rudere", "fatiscente", "inagibile",
+    "à réhabiliter", "da ristrutturare", "rudere", "fatiscente", "inagibile", "non abitabile",
+    "pessimo stato", "in pessimo stato", "da rifare", "al grezzo", "allo stato grezzo",
+    "al rustico", "allo stato rustico", "priva di tramezzatura", "prive di tramezzature",
+    "pericolo di crollo", "parzialmente crollat*", "crollat*",
     "sanierungsbedürftig", "renovierungsbedürftig", "abrissreif", "baufällig", "ruine",
     "opknapper", "bouwvallig", "renovatie nodig",
     # Abandoned: empty for years, falling apart ("devoluta" alone is only empty).
     "abandonad*", "ao abandono", "em abandono", "estado de abandono", "votad* ao abandono",
-    "abbandonat*", "in stato di abbandono", "à l'abandon", "verwaarloosd", "verlaten",
+    "abbandonat*", "in stato di abbandono", "à l'abandon", "verwaerloosd", "verlaten",
 ]
 RUIN_WORDS = HEAVY_WORK   # older name
 SOME_WORK = [
@@ -329,6 +332,8 @@ SOME_WORK = [
     "para remodelar", "a remodelar", "para renovar", "a renovar", "para restaurar",
     "para actualizar", "requiere reforma", "requiere reformas", "recomendable reforma", "necesita rehabilitación",
     "necesita rehabilitacion", "para finalizar", "por finalizar", "travaux à prévoir", "à rafraîchir", "a rafraichir", "da rimodernare",
+    "da sistemare", "necessita di lavori", "necessita di interventi", "mediocre stato", "discreto stato",
+    "scarsa manutenzione", "manutenzione straordinaria",
     "modernisierungsbedürftig", "renovierungsbedarf",
 ]
 GOOD_CONDITION = [
@@ -514,7 +519,8 @@ def buyer_priorities(targets: dict | None = None) -> str:
         "good condition in a great location well under market price; a large farm plot next to "
         "water (river, stream, lake, reservoir) that is very cheap; a house needing some repairs, "
         "dirt cheap, in a great location; a medium farm plot next to water, dirt cheap; a house "
-        "in good condition, dirt cheap, in an ordinary location. Rural plots only if at least "
+        "in good condition, dirt cheap, in an ordinary location. When the listing does not say "
+        "the condition, treat it as needing work (not as a sound home). Rural plots only if at least "
         f"{t['rural_min_m2']:,.0f} m² and cheap (at most €{t['rural_max_eur_m2']:.2f}/m², about "
         f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare). Not wanted: small or partial homes "
         "or plots; homes needing heavy work (ruins, full rebuilds) unless they come with a big "
@@ -780,10 +786,12 @@ def excellent(item: dict, score: float, reasons: list[str]) -> list[str] | None:
     access = (airport.get("km") or 999) <= EXCELLENT_AIRPORT_KM or (station.get("km") or 999) <= EXCELLENT_STATION_KM
     if not access:
         return None
-    if kind == "home" and (condition(item) in ("heavy", "some")
-                           or any(r.startswith(("needs heavy work", "ruin", "abandoned", "degraded", "size unknown"))
+    if kind == "home" and (condition(item) != "good"
+                           or any(r.startswith(("needs heavy work", "needs some work", "condition not stated",
+                                                "ruin", "abandoned", "degraded", "size unknown"))
                                   for r in reasons)):
-        return None             # the owner wants it pristine: any work admitted is not excellent
+        return None             # pristine only: unknown condition is not excellent either
+
     if kind == "rural_plot" and not (item.get("area_m2") or find_area(item.get("title") or "")):
         return None
     return [f"{days:.0f} days above 35 °C by 2090", "water", "access", f"€{pay:,.0f}"]
@@ -1279,6 +1287,11 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     elif state == "some":
         s -= 12
         reasons.append(f"needs some work{seen}")
+    elif state == "unknown":
+        # Most judicial cards never say: treat like work until the text or photos do.
+        # Otherwise Italy's silent listings crowd out homes that admit their state.
+        s -= 10
+        reasons.append("condition not stated — assume it needs work")
     elif state == "good":
         s += 15
         reasons.append(f"good condition{seen}")
