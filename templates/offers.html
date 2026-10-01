@@ -297,6 +297,36 @@ function outcomeCard(c) {
   const o = c.offer;
   const choices = o.is_offer ? ["won", "lost", "cancelled", "pending"] : ["answered", "cancelled", "pending"];
   const what = o.is_offer ? (o.method === "online" ? `bid EUR ${AS.esc(o.bid)} online` : `offer of EUR ${AS.esc(o.bid)}`) : "information request";
+  const reasons = [["", "— reason —"], ["outbid", "Outbid"], ["minimum_not_met", "Below the minimum"],
+    ["withdrawn", "I withdrew"], ["title", "Title / charges"], ["occupancy", "Occupancy"],
+    ["access", "Access / visit"], ["condition", "Condition"], ["climate", "Climate / location"],
+    ["cost", "All-in cost"], ["diligence", "Diligence blocker"], ["other", "Other"]];
+  const detail = o.is_offer ? `
+    <div class="form-grid" style="margin-top:12px">
+      <div class="field"><label>Winning bid (if known)</label>
+        <input id="oc_winning" type="number" min="0" step="100" value="${o.winning_bid != null ? AS.esc(String(o.winning_bid)) : ""}"></div>
+      <div class="field"><label>Your all-in cost (if won)</label>
+        <input id="oc_allin" type="number" min="0" step="100" value="${o.all_in_cost != null ? AS.esc(String(o.all_in_cost)) : ""}"></div>
+      <div class="field"><label>Why lost / withdrawn</label>
+        <select id="oc_reason">${reasons.map(([k, v]) =>
+          `<option value="${k}" ${k === (o.lost_reason || "") ? "selected" : ""}>${AS.esc(v)}</option>`).join("")}</select></div>
+      <div class="field"><label>Diligence found a blocker</label>
+        <select id="oc_blocker">
+          <option value="" ${o.diligence_blocker == null ? "selected" : ""}>—</option>
+          <option value="1" ${o.diligence_blocker === 1 ? "selected" : ""}>Yes</option>
+          <option value="0" ${o.diligence_blocker === 0 ? "selected" : ""}>No</option>
+        </select></div>
+      <div class="field"><label>Occupancy found</label>
+        <input id="oc_occ" placeholder="vacant / tenanted / …" value="${AS.esc(o.occupancy_found || "")}"></div>
+      <div class="field"><label>Title found</label>
+        <input id="oc_title" placeholder="clear / encumbered / …" value="${AS.esc(o.title_found || "")}"></div>
+      <div class="field"><label>Access found</label>
+        <input id="oc_access" placeholder="ok / blocked / …" value="${AS.esc(o.access_found || "")}"></div>
+      <div class="field"><label>Condition after purchase</label>
+        <input id="oc_cond" placeholder="good / needs work / ruin" value="${AS.esc(o.condition_after || "")}"></div>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="btn btn-sm" onclick="saveOutcomeDetail(${o.log_id})">Save details</button>
+      <span class="small muted">Used on the Outcomes page. No titles or contacts leave this PC.</span></div>` : "";
   return `<div class="card"><h2>Outcome</h2>
     <p class="small muted">Sent ${AS.esc(o.sent_date || "")} · ${what}${o.sent_to ? " · to " + AS.esc(o.sent_to) : ""} · currently <b>${AS.esc(o.outcome)}</b></p>
     ${overdue(o) ? `<div class="notice bad">No answer after ${overdue(o)} days. Time to phone${o.sent_to ? " or write again to " + AS.esc(o.sent_to) : ""}${c.contact && c.contact.phone ? " (" + AS.esc(c.contact.phone) + ")" : ""}.</div>` : ""}
@@ -304,7 +334,7 @@ function outcomeCard(c) {
     <div class="row" style="margin-top:10px">
       ${choices.filter(x => x !== o.outcome).map(x =>
         `<button class="btn ${x === "won" ? "btn-success" : x === "lost" ? "btn-danger" : ""}" onclick="setOutcome(${o.log_id}, '${x}')">Mark ${x}</button>`).join("")}
-    </div></div>`;
+    </div>${detail}</div>`;
 }
 
 function letterQuery(c) {
@@ -433,6 +463,22 @@ async function unshortlist() {
 async function setOutcome(logId, outcome) {
   await AS.api(`/api/carta-log/${logId}`, {method: "PATCH", body: {outcome}});
   AS.toast(outcome === "won" ? "Congratulations! 🎉" : `Marked ${outcome}`);
+  load();
+}
+async function saveOutcomeDetail(logId) {
+  const v = id => ($(id) || {}).value;
+  const body = {
+    winning_bid: v("oc_winning") || null,
+    all_in_cost: v("oc_allin") || null,
+    lost_reason: v("oc_reason") || "",
+    diligence_blocker: v("oc_blocker") === "" ? null : Number(v("oc_blocker")),
+    occupancy_found: v("oc_occ"),
+    title_found: v("oc_title"),
+    access_found: v("oc_access"),
+    condition_after: v("oc_cond"),
+  };
+  await AS.api(`/api/carta-log/${logId}`, {method: "PATCH", body});
+  AS.toast("Outcome details saved");
   load();
 }
 

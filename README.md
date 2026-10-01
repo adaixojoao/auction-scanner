@@ -445,6 +445,14 @@ recommended bid and an absolute maximum, shown as a waterfall. It never changes
 an amount you type; when you send a different figure the difference is kept
 with the offer. It is an estimate from local medians, not a valuation.
 
+The **Outcomes** page summarises how your offers did (won / lost / cancelled /
+no response) by country, source, sale method, property kind, score band and
+bid-to-value band, with median days from discovery to submission and a
+feedback list for scoring — weights are never changed automatically. Optional
+fields on each offer (winning bid, all-in cost, lost reason, diligence
+blocker, occupancy/title/access/condition found) feed that page. An anonymised
+CSV export stays on this PC.
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access
