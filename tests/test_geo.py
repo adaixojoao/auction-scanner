@@ -34,6 +34,12 @@ def test_lookups_go_from_the_street_to_the_town():
                for c in session.calls)
 
 
+def test_uf_parish_labels_are_stripped_from_lookups():
+    item = {"country": "PT", "freguesia": "U.F. BEJA (SALVADOR E SANTA MARIA DA FEIRA)",
+            "concelho": "Beja", "title": "Moradia", "raw_json": "{}"}
+    assert geo.queries(item)[0] == "Salvador E Santa Maria Da Feira, Beja"
+
+
 def test_pending_listings_are_located_once_and_kept(db, add):
     from db import load_listings
     add("citius", "1", title="Casa na Canada da Galega, freguesia de Ribeira das Tainhas", freguesia="Ribeira das Tainhas",

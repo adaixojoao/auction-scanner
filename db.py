@@ -31,7 +31,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -416,9 +416,23 @@ def _migrate_v14(db: sqlite3.Connection):
                 (title, town, row["id"]))
 
 
+def _migrate_v15(db: sqlite3.Connection):
+    """Rewrite Whitestar união-de-freguesias labels into geocodable parish names."""
+    from common import uf_parish
+
+    for row in db.execute(
+            "SELECT id, freguesia FROM listings "
+            "WHERE freguesia IS NOT NULL AND freguesia LIKE 'U.F.%'"):
+        cleaned = uf_parish(row["freguesia"])
+        if cleaned and cleaned != row["freguesia"]:
+            db.execute("UPDATE listings SET freguesia = ? WHERE id = ?",
+                       (cleaned, row["id"]))
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
-               11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14}
+               11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
+               15: _migrate_v15}
 
 
 def init_db(db: sqlite3.Connection):
