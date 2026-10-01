@@ -260,3 +260,14 @@ def test_water_is_asked_at_the_plot_and_about_the_village_and_counts_like_the_wo
     # Once each; nothing found is remembered too.
     assert geo.check_water_pending(db, session, [row]) == 0
     assert exact["external_id"] == "w1"
+
+
+def test_geocode_budget_catches_up_when_the_queue_is_long():
+    """Place-field repairs leave hundreds of board listings addressable; the
+    scan then spends ~3 minutes on OpenStreetMap instead of ~1."""
+    few = [{"country": "PT", "concelho": "Moura", "raw_json": "{}"} for _ in range(10)]
+    many = [{"country": "PT", "concelho": f"Town{i}", "raw_json": "{}"}
+            for i in range(geo.GEOCODE_CATCHUP_WHEN + 1)]
+    assert geo.geocode_budget(few) == geo.GEOCODE_PER_SCAN
+    assert geo.geocode_budget(many) == geo.GEOCODE_CATCHUP
+    assert geo.geocode_budget(many, limit=5) == 5
