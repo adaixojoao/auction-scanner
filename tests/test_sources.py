@@ -184,7 +184,7 @@ def test_cyprus_ids_are_stable_across_runs(db, fake_http):
 
 
 def test_fina_csv_parser():
-    from sources.hr import parse_fina_csv
+    from sources.hr import fina_place, parse_fina_csv
     header = ("ID nadmetanja;Datum i vrijeme završetka nadmetanja;Vrsta predmeta prodaje;"
               "Početna cijena za nadmetanje;Opis;Nadležno tijelo;Poslovni broj spisa;"
               "Minimalna zakonska cijena ispod koje se predmet prodaje ne može prodati;"
@@ -194,12 +194,34 @@ def test_fina_csv_parser():
         "78;2000-01-01 12:00:00;Nekretnina;1000;Old;Sud;P-2;;",
         ";2099-01-01 12:00:00;Nekretnina;1000;Bez ID;Sud;P-3;;",
         "79;2099-01-01 12:00:00;Pokretnina;1000;Auto;Sud;P-4;;",
+        "80;2099-01-01 12:00:00;Nekretnina;9000;Nekretnina k.o. Oljasi, kč.br. 600;"
+        "Općinski sud u Zlataru;P-5;4500,00;",
     ]
     out = list(parse_fina_csv("\n".join([header] + rows), max_price=100000))
-    assert [r["title"] for r in out] == ["Stan u Splitu", "Bez ID"]
+    assert [r["title"] for r in out] == ["Stan u Splitu", "Bez ID",
+                                         "Nekretnina k.o. Oljasi, kč.br. 600"]
     assert out[0]["price"] == 15000.5 and out[0]["min_price"] == 7500
     assert out[0]["date_end"] == "2099-01-01T12:00:00"
+    assert out[0]["district"] is None          # court is not a place
+    assert json.loads(out[0]["raw_json"])["sud"] == "Općinski sud Split"
     assert len(out[1]["external_id"]) == 12   # md5 fallback, unchanged from before
+    assert out[2]["concelho"] == "Oljasi"
+    assert fina_place("k.o. 332437, Budanica kčbr. 1151") == "Budanica"
+    assert fina_place("Zemljišnoknjižni odjel Virovitica, u zk") == "Virovitica"
+    assert fina_place("k.o. 300605") is None
+
+
+def test_licitor_list_title_splits_department_and_town():
+    from sources.fr import parse_licitor_list_title
+    title, town = parse_licitor_list_title("22PlémetUne maison d'habitationde 162,62 m²")
+    assert town == "Plémet" and title.startswith("Une maison")
+    title, town = parse_licitor_list_title("59 Solesmes Une maison d'habitation de 80 m²")
+    assert town == "Solesmes" and "maison" in title.lower()
+    title, town = parse_licitor_list_title("72Le MansUne maison à usage d'habitation")
+    assert town == "Le Mans"
+    title, town = parse_licitor_list_title("59Dunkerque (Petite-Synthe)Une maison individuelle")
+    assert town == "Dunkerque (Petite-Synthe)"
+    assert parse_licitor_list_title("Une maison sans code") == ("Une maison sans code", None)
 
 
 def test_spain_detail_parser():
@@ -439,15 +461,21 @@ def test_citius_place_keeps_abbreviations_and_drops_streets(db):
     assert _citius_extract_location("Prédio sito em L. de Cima, com 200 m2")[1] is None
     assert _citius_extract_location("Prédio sito na Rua do Canto das Naves, lugar de Bonvisinho")[1] is None
     assert _citius_extract_location("Prédio sito em Póvoa de Santarém, com casa de habitação")[1] == "Póvoa de Santarém"
+    assert _citius_extract_location(
+        "Fracção sito na Travessa Quinta dos Cubos, freguesia de Oliveira do Douro"
+    ) == (None, None, "Oliveira do Douro")
+    assert _citius_extract_location("Prédio sito no lugar de Lage, com área de 2760 m2")[1] is None
 
     upsert_listing(db, make_listing("citius", "bad", title="Prédio sito na R. das Flores", concelho="R"))
     upsert_listing(db, make_listing("citius", "street", title="Prédio", concelho="Rua do Canto das Naves"))
+    upsert_listing(db, make_listing("citius", "lugar", title="Prédio", concelho="lugar de Lage"))
     upsert_listing(db, make_listing("citius", "good", title="Prédio", concelho="Moura"))
-    for eid in ("bad", "street", "good"):
+    for eid in ("bad", "street", "lugar", "good"):
         _clear_implausible_place(db, {"id": f"citius:{eid}", "concelho": None})
     places = dict(db.execute("SELECT id, concelho FROM listings WHERE source='citius'"))
     assert places["citius:bad"] is None
     assert places["citius:street"] is None
+    assert places["citius:lugar"] is None
     assert places["citius:good"] == "Moura"
 
 

@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import time
 from datetime import datetime
 
@@ -17,6 +18,43 @@ CROATIA_PROPERTY_KW = [
     "nekretnin", "stan", "kuć", "zemljišt", "poslovn", "garaž",
     "zgrada", "etaž", "parcela", "objekt", "dražb",
 ]
+
+# "k.o. Oljasi" / "k.o. 332437, Budanica" — cadastral municipality, not the court.
+_KO_PLACE = re.compile(
+    r"k\.\s*o\.\s+(?:\d+[,\s]+)?([A-ZČĆŽŠĐ][^,;]{1,40}?)"
+    r"(?=\s*[,;]|\s+k[čc]\.?b|\s+i\s+to\b|\s+na\s+adresi|\s+u\s+naravi|\s*$)",
+    re.I,
+)
+_ODJEL_PLACE = re.compile(
+    r"Zemlji[sš]noknji[zž]ni odjel\s+"
+    r"([A-ZČĆŽŠĐ][\wČĆŽŠĐčćžšđ'\-]*(?:\s+[A-ZČĆŽŠĐ][\wČĆŽŠĐčćžšđ'\-]*){0,2})",
+    re.I,
+)
+_COURT = re.compile(r"\bsud\b", re.I)
+
+
+def fina_place(text: str) -> str | None:
+    """The cadastral municipality in a FINA description, when it names one."""
+    m = _KO_PLACE.search(text or "")
+    if m:
+        name = m.group(1).strip(" .")
+        if name and not name.isdigit() and len(re.sub(r"\W", "", name)) >= 3:
+            return name
+    m = _ODJEL_PLACE.search(text or "")
+    return m.group(1).strip() if m else None
+
+
+def _clear_court_district(db, row: dict) -> None:
+    """Drop a stored court name that used to sit in district.
+
+    Updates keep the old value when the new one is missing, so "Općinski sud …"
+    would otherwise stay and be treated as the town for distances."""
+    listing_id = row.get("id")
+    if not listing_id or row.get("district"):
+        return
+    current = db.execute("SELECT district FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if current and current[0] and _COURT.search(current[0]):
+        db.execute("UPDATE listings SET district = NULL WHERE id = ?", (listing_id,))
 
 
 def _croatia_to_listing(item: dict) -> dict | None:
@@ -100,18 +138,24 @@ def parse_fina_csv(text: str, max_price: float, now: datetime | None = None):
         eid = bid_id or hashlib.md5(
             f"{d.get('Poslovni broj spisa', '')}{end_str}".encode()).hexdigest()[:12]
         title = d.get("Opis", "")[:120]
+        note = d.get("Napomena uz detalje predmeta prodaje", "")[:500] or None
+        court = (d.get("Nadležno tijelo", "") or "").strip() or None
+        place = fina_place(f"{title} {note or ''}")
+        raw = {"sud": court} if court else None
         yield make_listing(
             "fina", eid, "HR",
             title=title or f"Nekretnina {eid}",
-            description=d.get("Napomena uz detalje predmeta prodaje", "")[:500] or None,
+            description=note,
             tipo="nekretnina",
             price=price,
             min_price=parse_price(d.get(
                 "Minimalna zakonska cijena ispod koje se predmet prodaje ne može prodati", ""
             ).replace(",", ".")),
-            district=d.get("Nadležno tijelo", ""),
+            # The court is not a place: geo.municipality used to fall back to it.
+            concelho=place,
             url=f"https://ponip.fina.hr/ocevidnik-web/#/predmet-prodaje/{eid}" if bid_id else None,
             date_end=end_str.replace(" ", "T"),
+            raw_json=json.dumps(raw, ensure_ascii=False) if raw else None,
         )
 
 
@@ -125,5 +169,6 @@ def scrape_fina_csv(db, max_price: float = 50000, **_):
     total_scraped = 0
     for listing in parse_fina_csv(resp.content.decode("utf-8-sig"), max_price):
         upsert_listing(db, listing)
+        _clear_court_district(db, listing)
         total_scraped += 1
     return total_scraped

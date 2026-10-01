@@ -45,6 +45,43 @@ def test_legacy_database_migrates_in_place(tmp_path):
     connect(path).close()
 
 
+def test_place_field_repairs_run_once_on_upgrade(tmp_path):
+    """v13 rewrites the bad place values earlier scrapers left in an existing DB."""
+    path = str(tmp_path / "places.db")
+    conn = connect(path)
+    conn.execute("PRAGMA user_version = 12")
+    now = datetime.now(timezone.utc).isoformat()
+    rows = [
+        ("servihabitat:1", "servihabitat", "ES", "1",
+         "Casa en venta en C. Larga, 26, Campo De Peñaranda, El, Salamanca",
+         None, "El", None),
+        ("france:1", "france", "FR", "1",
+         "22PlémetUne maison d'habitationde 162 m²", None, None, None),
+        ("citius:1", "citius", "PT", "1", "Prédio", None, "lugar de Lage", None),
+        ("fina:1", "fina", "HR", "1",
+         "Nekretnina k.o. Oljasi, kč.br. 600", "Općinski sud u Zlataru", None, None),
+    ]
+    for lid, source, country, eid, title, district, concelho, freguesia in rows:
+        conn.execute(
+            "INSERT INTO listings (id, source, country, external_id, title, district, "
+            "concelho, freguesia, first_seen, last_seen, is_new) VALUES (?,?,?,?,?,?,?,?,?,?,0)",
+            (lid, source, country, eid, title, district, concelho, freguesia, now, now))
+    conn.commit()
+    conn.close()
+
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+    got = {r["id"]: dict(r) for r in conn.execute(
+        "SELECT id, title, district, concelho FROM listings")}
+    assert got["servihabitat:1"]["concelho"] == "El Campo De Peñaranda"
+    assert got["france:1"]["concelho"] == "Plémet"
+    assert got["france:1"]["title"].startswith("Une maison")
+    assert got["citius:1"]["concelho"] is None
+    assert got["fina:1"]["district"] is None
+    assert got["fina:1"]["concelho"] == "Oljasi"
+    conn.close()
+
+
 def test_legacy_bad_url_is_sanitised_on_read(tmp_path):
     path = str(tmp_path / "legacy.db")
     raw = sqlite3.connect(path)

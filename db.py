@@ -31,7 +31,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -327,9 +327,61 @@ def _migrate_v12(db: sqlite3.Connection):
         _add_column(db, "carta_log", col, decl)
 
 
+def _migrate_v13(db: sqlite3.Connection):
+    """Repair place fields that earlier scrapers wrote wrong: Spanish article-only
+    towns, French glued titles, Portuguese streets in concelho, Croatian courts
+    sitting in district. Parsers refuse these going forward; this clears what is
+    already stored so the next lookup does not use them."""
+    from sources.es import _ARTICLE, servihabitat_town
+    from sources.fr import parse_licitor_list_title
+    from sources.hr import _COURT, fina_place
+    from sources.pt import _plausible_place
+
+    for row in db.execute(
+            "SELECT id, title, concelho FROM listings WHERE source = 'servihabitat'"):
+        c = (row["concelho"] or "").strip()
+        if not c or not _ARTICLE.match(c):
+            continue
+        town = servihabitat_town(row["title"] or "")
+        if town and not _ARTICLE.match(town.strip()):
+            db.execute("UPDATE listings SET concelho = ? WHERE id = ?", (town, row["id"]))
+        else:
+            db.execute("UPDATE listings SET concelho = NULL WHERE id = ?", (row["id"],))
+
+    for row in db.execute(
+            "SELECT id, title, concelho FROM listings WHERE source = 'france'"):
+        title, town = parse_licitor_list_title(row["title"] or "")
+        if not town:
+            continue
+        db.execute(
+            "UPDATE listings SET title = ?, concelho = COALESCE(?, concelho) WHERE id = ?",
+            (title, town, row["id"]))
+
+    for row in db.execute(
+            "SELECT id, district, concelho, freguesia FROM listings WHERE source = 'citius'"):
+        for field in ("district", "concelho", "freguesia"):
+            val = row[field]
+            if val and not _plausible_place(val):
+                db.execute(f"UPDATE listings SET {field} = NULL WHERE id = ?", (row["id"],))
+
+    for row in db.execute(
+            "SELECT id, title, description, district, concelho FROM listings "
+            "WHERE source = 'fina'"):
+        place = fina_place(f"{row['title'] or ''} {row['description'] or ''}")
+        sets, args = [], []
+        if place and not row["concelho"]:
+            sets.append("concelho = ?")
+            args.append(place)
+        if row["district"] and _COURT.search(row["district"]):
+            sets.append("district = NULL")
+        if sets:
+            db.execute(f"UPDATE listings SET {', '.join(sets)} WHERE id = ?",
+                       (*args, row["id"]))
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
-               11: _migrate_v11, 12: _migrate_v12}
+               11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13}
 
 
 def init_db(db: sqlite3.Connection):

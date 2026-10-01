@@ -587,6 +587,11 @@ def _citius_extract_location(desc: str) -> tuple[str | None, str | None, str | N
     freguesia = after("freguesia")
     concelho = after("concelho")
     district = after("distrito")
+    # Labelled fields can still be a street ("concelho de Rua …" is rare; the
+    # old sito-fallback left "Travessa…" / "lugar de …" in the column).
+    freguesia = freguesia if _plausible_place(freguesia) else None
+    concelho = concelho if _plausible_place(concelho) else None
+    district = district if _plausible_place(district) else None
     if not concelho:
         sm = re.search(r"sito\s+(?:em|na|no)\s+([^,.;]+)", text, re.I)
         if sm:
