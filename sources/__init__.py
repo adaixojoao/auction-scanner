@@ -28,11 +28,18 @@ class Source:
     func: Callable
     default: bool = True  # part of --country / "all" runs
     description: str = ""
+    # Optional catalog fields (source_validation.CATALOG is the usual overlay).
+    kind: str = ""              # official | aggregator | bank | experimental
+    access: str = ""            # public_html | public_api | authenticated | blocked
+    listing_type: str = "property"
+    docs_url: str = ""
+    limitation: str = ""
+    parser_version: str = ""
 
 
 class SourceUnavailable(RuntimeError):
     """The site cannot be scraped (closed, login-only, bot wall). Its message
-    is shown as-is on the Sources page."""
+    is shown as-is on the Sources page. run_source records status "blocked"."""
 
 
 REGISTRY: dict[str, Source] = {}
@@ -41,11 +48,17 @@ _MODULES = ("pt", "es", "fr", "it", "nl", "hr", "de", "gr", "be", "ro", "pl", "c
 _loaded = False
 
 
-def register(name: str, country: str, *, default: bool = True, description: str = ""):
+def register(name: str, country: str, *, default: bool = True, description: str = "",
+             kind: str = "", access: str = "", listing_type: str = "property",
+             docs_url: str = "", limitation: str = "", parser_version: str = ""):
     def deco(func):
         if name in REGISTRY:
             raise ValueError(f"source {name!r} registered twice")
-        REGISTRY[name] = Source(name, country, func, default, description or (func.__doc__ or "").strip().split("\n")[0])
+        REGISTRY[name] = Source(
+            name, country, func, default,
+            description or (func.__doc__ or "").strip().split("\n")[0],
+            kind=kind, access=access, listing_type=listing_type,
+            docs_url=docs_url, limitation=limitation, parser_version=parser_version)
         return func
     return deco
 
@@ -94,7 +107,11 @@ def describe_error(e: Exception) -> str:
 
 
 def run_source(db, source: Source, *, max_price: float, config: dict | None = None) -> dict:
-    """Run one scraper, never raising. Records the outcome in scrape_log."""
+    """Run one scraper, never raising. Records the outcome in scrape_log.
+
+    Statuses: ok (listings), empty (page ok, nothing kept), error (HTTP/network
+    or unexpected), blocked (SourceUnavailable — bot wall, closed site, login).
+    """
     from db import record_scrape
 
     started_iso = utcnow_iso()
@@ -104,6 +121,11 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
         count = source.func(db, max_price=max_price, config=config or {}) or 0
         db.commit()
         status = "ok" if count > 0 else "empty"
+    except SourceUnavailable as e:
+        db.rollback()
+        count, status = 0, "blocked"
+        message = str(e)
+        LOG.warning(f"Source {source.name} blocked: {e}")
     except Exception as e:  # noqa: BLE001 — one broken site must not stop the run
         db.rollback()
         count, status = 0, "error"

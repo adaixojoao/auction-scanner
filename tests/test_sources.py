@@ -36,7 +36,7 @@ def test_every_scraper_survives_an_empty_site(db, fake_http):
     fake_http(lambda m, u, kw: FakeResponse("<html><body></body></html>", json_data={}))
     for source in sources_for(None, include_optional=False):
         result = run_source(db, source, max_price=100000)
-        assert result["status"] in ("empty", "error"), result
+        assert result["status"] in ("empty", "error", "blocked"), result
         assert result["count"] == 0
     rows = db.execute("SELECT COUNT(*) FROM scrape_log").fetchone()[0]
     assert rows == len(sources_for(None))

@@ -293,8 +293,16 @@ Many scrapers were written from a site's address without confirming the page
 layout, and sites change. A scraper that silently finds nothing looks exactly
 like "no listings today", so every run is recorded and the **Sources** page
 says which state each is in: **ok**, **broken** (worked before, finds nothing
-now), **never worked**, or **error** (with the reason in plain words). Failing
-sources are also listed in the report and the weekly Telegram summary.
+now), **never worked**, **blocked** (bot wall, closed site, or login-only — never
+worked around), or **error** (HTTP/network, with the reason in plain words). Each
+source also shows its kind (official / bank / aggregator / experimental) and
+access mode. **Validate** checks the offline parser fixture when one exists;
+**Live** makes one rate-limited request to the site's public page and stops at
+a CAPTCHA or bot wall. A maintenance list ranks sources that used to yield
+listings or offers but are degraded now. Offline fixtures live under
+`tests/fixtures/sources/` (start with e-leilões); add one when you confirm a
+parser. Failing sources are also listed in the report and the weekly Telegram
+summary.
 
 | Country | Sources |
 |---|---|

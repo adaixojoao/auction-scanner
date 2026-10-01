@@ -126,7 +126,7 @@ def test_cgd_uses_the_sites_key_and_token(db, fake_http):
 def test_cgd_without_a_key_says_the_page_changed(db, fake_http):
     fake_http(lambda m, url, kw: FakeResponse(CGD_HOME if url.endswith("/pt") else "var a=1;"))
     result = run_source(db, REGISTRY["cgd"], max_price=100000)
-    assert result["status"] == "error" and "API key not found" in result["message"]
+    assert result["status"] == "blocked" and "API key not found" in result["message"]
 
 
 # ─── Santander (HTML cards, page number in the path) ────────────────
@@ -226,14 +226,14 @@ def test_unavailable_sources_explain_themselves(db):
     for name, words in [("novobanco", "no longer exists"),
                         ("aeat", "subastas.boe.es")]:
         result = run_source(db, REGISTRY[name], max_price=100000)
-        assert result["status"] == "error" and words in result["message"], (name, result)
+        assert result["status"] == "blocked" and words in result["message"], (name, result)
 
 
 def test_sareb_bot_wall_is_named(db, fake_http):
     wall = '<html><head><script src="/_Incapsula_Resource?SWJIYLWA=1"></script></head></html>'
     fake_http(lambda m, url, kw: FakeResponse(wall))
     result = run_source(db, REGISTRY["sareb"], max_price=100000)
-    assert result["status"] == "error" and "Incapsula" in result["message"]
+    assert result["status"] == "blocked" and "Incapsula" in result["message"]
 
 
 def test_firewall_refusal_is_described():

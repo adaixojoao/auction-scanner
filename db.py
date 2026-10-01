@@ -623,6 +623,8 @@ def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
             failing += 1
         if not history:
             state = "never run"
+        elif last["status"] == "blocked":
+            state = "blocked"
         elif last["status"] == "error":
             state = "error"
         elif (last["count"] or 0) > 0:
@@ -643,8 +645,10 @@ def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
             "failing_runs": failing,
             "listings": listing_counts.get(name, 0),
         })
-    order = {"error": 0, "broken": 1, "never worked": 2, "never run": 3, "ok": 4}
-    out.sort(key=lambda s: (order[s["state"]], s["source"]))
+    # blocked sits with error: the site is not giving us listings either way.
+    order = {"error": 0, "blocked": 0, "broken": 1, "fixture failing": 1,
+             "never worked": 2, "never run": 3, "ok": 4}
+    out.sort(key=lambda s: (order.get(s["state"], 9), s["source"]))
     return out
 
 

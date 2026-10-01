@@ -112,7 +112,7 @@ def build_markdown(items, hidden_counts: Counter, health, max_price, max_bid, no
         "",
     ]
 
-    broken = [h for h in health if h["state"] in ("error", "broken")]
+    broken = [h for h in health if h["state"] in ("error", "broken", "blocked")]
     if broken:
         lines.append(f"> ⚠️ {len(broken)} source(s) failing: "
                      + ", ".join(f"{h['source']} ({h['state']})" for h in broken)
@@ -409,7 +409,7 @@ def print_console_summary(db, max_price: float = 50000, *, filters: dict | None 
             _safe_print(f"     {', '.join(it['reasons'])[:60]}")
             _safe_print(f"     {it.get('url') or ''}")
 
-    failing = [h for h in source_health(db, known_sources) if h["state"] in ("error", "broken")]
+    failing = [h for h in source_health(db, known_sources) if h["state"] in ("error", "broken", "blocked")]
     if failing:
         _safe_print(f"\n  Sources needing attention ({len(failing)}):")
         for h in failing:

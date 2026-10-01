@@ -311,7 +311,7 @@ def api_listings():
             "rural_plots": sum(1 for it in visible if it["kind"] == "rural_plot"),
             "shortlisted": sum(1 for it in visible if it["status"] == "shortlisted"),
             "hidden": dict(hidden_counts),
-            "sources_failing": sum(1 for h in health if h["state"] in ("error", "broken")),
+            "sources_failing": sum(1 for h in health if h["state"] in ("error", "broken", "blocked")),
         },
         "last_scrape": last_scrape,
     })
@@ -498,6 +498,7 @@ def api_scan_start():
 
 @app.route("/api/health")
 def api_health():
+    import source_validation
     db = get_db()
     try:
         registry = _registry()
@@ -509,7 +510,47 @@ def api_health():
         h["country"] = src.country if src else None
         h["default"] = src.default if src else None
         h["description"] = src.description if src else None
+        enriched = source_validation.enrich_health_row(h, src)
+        h.update(enriched)
     return jsonify(health)
+
+
+@app.route("/api/sources/maintenance")
+def api_sources_maintenance():
+    """Weekly-style priority list: useful history but degraded health."""
+    import source_validation
+    db = get_db()
+    try:
+        rows = source_validation.maintenance_report(db, _registry())
+    finally:
+        db.close()
+    return jsonify({"generated_at": __import__("common").utcnow_iso(), "priorities": rows})
+
+
+@app.route("/api/sources/<name>/validate", methods=["POST"])
+def api_source_validate(name):
+    """Offline fixture check and, if asked, one rate-limited live probe.
+
+    Never bypasses a bot wall. Body: {"live": false}.
+    """
+    import source_validation
+    registry = _registry()
+    if name not in registry:
+        return jsonify({"error": f"unknown source {name}"}), 400
+    data = request.get_json(silent=True) or {}
+    live = bool(data.get("live"))
+    db = get_db()
+    try:
+        # Fixtures are exercised by pytest (fake_http). Here we report whether
+        # a fixture exists and optionally probe one live URL.
+        result = source_validation.validate_source(
+            db, name, live=live, registry=registry, fake_http=None)
+        db.commit()
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    finally:
+        db.close()
 
 
 # ─── Offers ──────────────────────────────────────────────────────────
