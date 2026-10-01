@@ -49,7 +49,7 @@ def test_taps_shortlist_dismiss_and_undo(db, add, api):
     assert listing_statuses(db) == {"eleiloes:a": "shortlisted"}
     edit = next(p for m, p in calls if m == "editMessageReplyMarkup")
     assert edit["message_id"] == 77 and edit["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "u|eleiloes:a"
-    assert ("answerCallbackQuery", {"callback_query_id": "cq10", "text": "☆ Shortlisted"}) in calls
+    assert ("answerCallbackQuery", {"callback_query_id": "cq10", "text": "☆ On Offers"}) in calls
 
     queue.append(tap(11, "u|eleiloes:a"))
     telegram_bot.poll_once(db, CFG)

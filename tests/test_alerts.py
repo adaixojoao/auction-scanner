@@ -208,7 +208,7 @@ def test_the_shortlist_counts_whatever_it_scores(db, add, sent):
 
     set_listing_status(db, "eleiloes:s2", "shortlisted")
     telegram_alert.alert_price_cuts(db, CFG)
-    assert len(sent) == 1 and "on your shortlist" in sent[0]
+    assert len(sent) == 1 and "on your Offers list" in sent[0]
 
 
 def test_price_cuts_are_not_sent_without_telegram(db, add, sent):
