@@ -186,6 +186,30 @@ function costsHtml(c) {
     <p class="small muted">${AS.esc(c.note)}</p>${rent}</div>`;
 }
 
+function stewardshipHtml(d) {
+  const s = d.stewardship;
+  if (!s || !s.available) return "";
+  const id = encodeURIComponent(d.id);
+  const list = (title, items, map) => items && items.length
+    ? `<div class="k" style="margin-top:8px">${AS.esc(title)}</div><ul class="small">${items.map(map).join("")}</ul>` : "";
+  return `<div class="guide stewardship">
+    <b>Climate &amp; Land Stewardship Plan</b>
+    <span class="small muted">${s.area_ha != null ? s.area_ha + " ha · " : ""}climate ${AS.esc(s.climate_grade || "?")}</span>
+    <p class="small">${AS.esc(s.suitability || "")}</p>
+    ${s.location_warning ? `<div class="notice warn">${AS.esc(s.location_warning)}</div>` : ""}
+    ${list("Risks", s.risks, r => `<li><b>${AS.esc(r.title)}:</b> ${AS.esc(r.text)}</li>`)}
+    ${list("Opportunities", s.opportunities, r => `<li><b>${AS.esc(r.title)}:</b> ${AS.esc(r.text)}</li>`)}
+    ${list("First 90 days", s.days_90, t => `<li>${AS.esc(t)}</li>`)}
+    ${list("Do not", s.do_not, t => `<li>${AS.esc(t)}</li>`)}
+    <p class="small muted">${AS.esc(s.note || "")}</p>
+    <p class="d-links">
+      <a href="/api/stewardship.md?id=${id}">Markdown</a> ·
+      <a href="/api/stewardship.pdf?id=${id}">PDF</a> ·
+      <a href="/api/stewardship.docx?id=${id}">Word</a>
+    </p>
+  </div>`;
+}
+
 // How exact the position is (geo.location_confidence), and a form to verify it.
 function locationHtml(d) {
   const l = d.location;
@@ -277,6 +301,7 @@ function detailsHtml(d) {
       ${costsHtml(d.costs)}
       ${AS.bidCapHtml(d.bid_cap)}
       ${AS.climateHtml(d.climate)}
+      ${stewardshipHtml(d)}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${d.past_results ? `<div class="d-lots"><b>What auctions within ${d.past_results.km} km sold for</b>
         <span class="small muted">(last year, final bid: ${d.past_results.count} lots, median ${AS.money(d.past_results.median)},

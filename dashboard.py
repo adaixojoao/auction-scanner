@@ -346,6 +346,7 @@ def api_listing_detail():
         "costs": costs.estimate(it),
         "bid_cap": _bid_cap(it),
         "climate": listing_info.climate_panel(it),
+        "stewardship": _stewardship(it),
         "location": {**geo.location_confidence(it), "history": history, "country": it.get("country") or "PT"},
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
@@ -572,6 +573,11 @@ def _format_amount(value) -> str:
 def _bid_cap(item: dict, cfg: dict | None = None) -> dict:
     import bidcap
     return bidcap.for_item(item, cfg or _config())
+
+
+def _stewardship(item: dict, cfg: dict | None = None) -> dict:
+    import stewardship
+    return stewardship.build(item, cfg or _config())
 
 
 def _record_bid_cap(item: dict, log_id: int, bid: str) -> None:
@@ -951,6 +957,57 @@ def api_checklist_pdf():
     return _pdf_response(text_pdf(checklist.as_text(item, ck), ref=f"Ref: {item['id']}"), f"checklist_{safe}.pdf")
 
 
+@app.route("/api/stewardship")
+def api_stewardship():
+    """Climate & Land Stewardship Plan for a rural listing (stewardship.py)."""
+    item = _listing(request.args.get("id", ""))
+    if not item:
+        return jsonify({"error": "no such listing"}), 404
+    return jsonify(_stewardship(item))
+
+
+@app.route("/api/stewardship.md")
+def api_stewardship_md():
+    import stewardship
+    item = _listing(request.args.get("id", ""))
+    if not item:
+        abort(404)
+    plan = stewardship.build(item, _config())
+    body = stewardship.as_markdown(item, plan)
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", item["id"])
+    return Response(body, mimetype="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=stewardship_{safe}.md"})
+
+
+@app.route("/api/stewardship.pdf")
+def api_stewardship_pdf():
+    import stewardship
+    from letters import text_pdf
+    item = _listing(request.args.get("id", ""))
+    if not item:
+        abort(404)
+    plan = stewardship.build(item, _config())
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", item["id"])
+    return _pdf_response(text_pdf(stewardship.as_text(item, plan), ref=f"Ref: {item['id']}"),
+                         f"stewardship_{safe}.pdf")
+
+
+@app.route("/api/stewardship.docx")
+def api_stewardship_docx():
+    import stewardship
+    item = _listing(request.args.get("id", ""))
+    if not item:
+        abort(404)
+    plan = stewardship.build(item, _config())
+    try:
+        data = stewardship.as_docx(item, plan)
+    except ImportError:
+        return jsonify({"error": "python-docx is not installed"}), 500
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", item["id"])
+    return Response(data, mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": f"attachment; filename=stewardship_{safe}.docx"})
+
+
 @app.route("/api/offers/sent", methods=["POST"])
 def api_offer_sent():
     """Record a letter you sent yourself (post, your own e-mail, your lawyer),
@@ -1244,6 +1301,7 @@ EDITABLE = {
     "bid_cap": ("max_all_in", "margin_pct", "contingency_pct", "rural_reserve_per_ha",
                 "rural_reserve_fixed", "require_exact", "adviser_reserve_eur",
                 "adviser_reserve_by_country"),
+    "stewardship": ("enable_for_mixed", "profile", "cost_eur_per_ha"),
 }
 
 
@@ -1308,6 +1366,10 @@ def api_settings_save():
         if by is not None and (not isinstance(by, dict)
                                or any(not isinstance(v, (int, float)) or v < 0 for v in by.values())):
             return jsonify({"error": "bid_cap.adviser_reserve_by_country: country → amount ≥ 0"}), 400
+    stewards = changes.get("stewardship")
+    if stewards is not None:
+        if "enable_for_mixed" in stewards and not isinstance(stewards["enable_for_mixed"], bool):
+            return jsonify({"error": "stewardship.enable_for_mixed must be true or false"}), 400
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):
         return jsonify({"error": "unknown country code"}), 400

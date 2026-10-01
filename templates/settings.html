@@ -116,6 +116,12 @@
   </div>
 </div>
 
+<div class="card" id="stewardship">
+  <h2>Stewardship plan</h2>
+  <p class="small muted" style="margin-bottom:10px">Rural listings get a non-binding Climate &amp; Land Stewardship Plan on Listings → ⓘ (risks, opportunities, 90-day and 3-year actions, questions for local advisers). It uses the climate maps and location confidence only; it never invents protected areas, water rights or planting permission. Costs are planning allowances. Export as Markdown, PDF or Word.</p>
+  <label class="check"><input type="checkbox" id="st_enable_mixed"> Also show the plan on homes and urban plots</label>
+</div>
+
 <div class="card" id="climate">
   <h2>Climate</h2>
   <p class="small muted" style="margin-bottom:10px">Each listing's Climate panel grades the place from the climate maps (heat, floods, water, fire). With the guardrail on, the AI check on Offers lowers its suggested bid and maximum for a <b>caution</b> or <b>poor</b> grade (more for poor, and it says by how much), only where the position is exact. It never changes an amount you type. The grade is a planning indicator, not a survey or due diligence.</p>
@@ -271,6 +277,7 @@ async function load() {
   setv("ai_ollama_model", ai.ollama_model || "qwen2.5vl:3b");
   $("ai_photo_check").checked = ai.photo_check !== false;
   $("climate_guardrail").checked = !!(c.climate || {}).bid_guardrail;
+  $("st_enable_mixed").checked = !!(c.stewardship || {}).enable_for_mixed;
   setv("location_gate", (c.location || {}).gate || "warn");
   const bc = c.bid_cap || {};
   setv("bc_max_all_in", bc.max_all_in ?? 0);
@@ -396,6 +403,7 @@ async function save() {
                     to_emails: $("em_to_emails").value.split(",").map(s => s.trim()).filter(Boolean), min_score: num("em_min_score")},
     report: {desktop_copy: $("desktop_copy").checked},
     climate: {bid_guardrail: $("climate_guardrail").checked},
+    stewardship: {enable_for_mixed: $("st_enable_mixed").checked},
     location: {gate: $("location_gate").value},
     bid_cap: {
       max_all_in: num("bc_max_all_in") || 0, margin_pct: num("bc_margin_pct") || 0,
