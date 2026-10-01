@@ -257,6 +257,8 @@ def test_italian_condition_words_and_silent_cards():
     assert condition({"title": "Appartamento", "description": "allo stato attuale non abitabile"}) == "heavy"
     assert condition({"title": "Casa", "description": "immobile al grezzo, priva di tramezzatura"}) == "heavy"
     assert condition({"title": "Abitazione", "description": "necessita di lavori di manutenzione"}) == "some"
+    assert condition({"title": "Casa", "description": "immobile degradato, in stato di degrado"}) == "some"
+    assert condition({"title": "Casa", "description": "molto degradato"}) == "heavy"
     base = dict(source="pvp_giustizia", country="IT", title="Abitazione di tipo civile",
                 price=8000, area_m2=90, concelho="Talamona")
     silent, r_silent = score(item(**base))
@@ -264,6 +266,16 @@ def test_italian_condition_words_and_silent_cards():
     sound, _ = score(item(**base, description="in buono stato"))
     assert "condition not stated — assume it needs work" in r_silent
     assert sound > silent > stated
+
+
+def test_condition_words_in_fr_pt_es_hr():
+    from scoring import condition
+    assert condition({"title": "Maison", "description": "partiellement en travaux"}) == "some"
+    assert condition({"title": "Immeuble", "description": "trois appartements en travaux"}) == "some"
+    assert condition({"title": "Moradia", "description": "Estado: novo"}) == "good"
+    assert condition({"title": "Piso", "description": "vivienda en mal estado"}) == "heavy"
+    assert condition({"title": "Kuća", "description": "ruševina, dotrajala"}) == "heavy"
+    assert condition({"title": "Kuća", "description": "potrebno renoviranje"}) == "some"
 
 
 def test_land_is_not_priced_like_buildings():
