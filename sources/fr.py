@@ -15,6 +15,41 @@ from sources._cards import CardSite, scrape_cards
 
 LICITOR_BASE = "https://www.licitor.com"
 
+# List-page titles glue department, town and kind with no spaces
+# ("22PlémetUne maison…"). Split them so the town can be the place field.
+_FR_KIND = (
+    r"Une?|Un|Des|Appartement|Maison|Immeuble|Box|Terrain|Local|Garage|"
+    r"Ensemble|Ferme|Propri[eé]t[eé]|Parcelle|Studio|B[aâ]timent"
+)
+_FR_LIST_TITLE = re.compile(
+    rf"^(\d{{2,3}})\s*(.+?)(?=(?:{_FR_KIND})\b)((?:{_FR_KIND})\b.*)$",
+    re.I | re.S,
+)
+
+
+def parse_licitor_list_title(text: str) -> tuple[str, str | None]:
+    """Return (readable title, town) from a licitor list-page link text."""
+    title = re.sub(r"\s+", " ", (text or "").strip())
+    m = _FR_LIST_TITLE.match(title)
+    if not m:
+        title = _unglue_french(title)
+        return title[:120], None
+    town = m.group(2).strip(" -")
+    if len(re.sub(r"\W", "", town)) < 2:
+        return _unglue_french(title)[:120], None
+    return _unglue_french(m.group(3).strip() or title)[:120], town
+
+
+def _unglue_french(title: str) -> str:
+    """Insert spaces the list page left out ('habitationde', 'occupationMise')."""
+    title = re.sub(r"(habitation)(de)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(individuelle)(de)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(occupation)(Mise)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(habitation)(Mise)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(immeuble)(sur)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(appartement)(de)\b", r"\1 \2", title, flags=re.I)
+    return title
+
 
 @register("france", "FR")
 def scrape_france(db, max_price: float = 50000, **_):
@@ -44,9 +79,11 @@ def scrape_france(db, max_price: float = 50000, **_):
         for a in BeautifulSoup(resp.text, "html.parser").select(
                 "a[href*='/annonce/'], a[href*='/vente-aux-encheres']"):
             href = a.get("href", "")
-            title = a.get_text(strip=True)[:120]
-            if not href or not title or len(title) < 5:
+            # Space between child nodes: strip=True alone glued "22PlémetUne…".
+            raw_title = a.get_text(" ", strip=True)
+            if not href or not raw_title or len(raw_title) < 5:
                 continue
+            title, town = parse_licitor_list_title(raw_title)
             m_id = re.search(r"/(\d+)\.html", href)
             eid = m_id.group(1) if m_id else href.strip("/").split("/")[-1].replace(".html", "")
             price = find_price(a.parent.get_text(" ", strip=True)) if a.parent else None
@@ -54,7 +91,7 @@ def scrape_france(db, max_price: float = 50000, **_):
                 continue
             upsert_listing(db, make_listing(
                 "france", eid, "FR", title=title, tipo="immobilier", price=price,
-                url=href, base_url=LICITOR_BASE,
+                concelho=town, url=href, base_url=LICITOR_BASE,
             ))
             count += 1
 
@@ -172,6 +209,11 @@ def enrich_france_details(db, session, limit: int = 60):
         fields["price"] = fields["price"] or info.get("mise_a_prix")
         fields["date_end"] = info.get("audience") or fields["date_end"]
         fields["district"] = fields["district"] or info.get("tribunal_ville")
+        # Older scrapes glued "22PlémetUne…"; split when the stored title still is.
+        title, town = parse_licitor_list_title(fields.get("title") or "")
+        if town:
+            fields["title"] = title
+            fields["concelho"] = fields.get("concelho") or town
         fields["raw_json"] = json.dumps(raw, ensure_ascii=False)
         upsert_listing(db, make_listing("france", item["external_id"], "FR", **fields))
         db.commit()

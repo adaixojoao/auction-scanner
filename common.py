@@ -148,12 +148,17 @@ def price_to_pay(item: dict) -> float:
     """What you would realistically pay for a listing: the current bid, else the
     minimum accepted, else the base value. A bid below the minimum accepted does
     not buy it (e-leilões opens at 50% but accepts from 85%), so the minimum
-    wins then. One definition, used by the scorer, the round matcher, the cost
-    estimate and Offers."""
-    bid, floor = item.get("current_bid") or 0, item.get("min_price") or 0
+    wins then. A floor under 20% of the base value is a bidding step (Spain's
+    "puja mínima" of €1,743 on a €174,300 flat), not a price that buys it. One
+    definition, used by the scorer, the round matcher, the cost estimate and Offers."""
+    bid = item.get("current_bid") or 0
+    floor = item.get("min_price") or 0
+    base = item.get("price") or 0
+    if floor and base and floor < 0.2 * base:
+        floor = 0
     if bid:
         return max(bid, floor)
-    return floor or item.get("price") or 0
+    return floor or base or 0
 
 
 def make_listing(source: str, external_id, country: str = "PT", *,

@@ -184,8 +184,8 @@ DEEP_FLOOD_M = 1.0
 # Whatever else is good about them (a court sale, no minimum bid…), these are
 # not the goal, so their score stays under the default minimum score (45) and
 # they are hidden unless you shortlist them.
-NOT_THE_GOAL_CAP = {"not a home or plot": 35, "needs heavy work": 40, "isolated location": 40,
-                    "rejected:": 30}
+NOT_THE_GOAL_CAP = {"not a home or plot": 35, "unclear what it is": 40, "needs heavy work": 40,
+                    "isolated location": 40, "rejected:": 30}
 
 # Rejected outright, whatever else looks good (the owner's rules, Sept 2026).
 _REJECTS = [
@@ -289,7 +289,8 @@ RURAL_TYPES = {normalize(t) for t in (
 
 OTHER_WORDS = [   # not a home and not a plot
     "parking", "garagem", "garage", "garaje", "box", "emplacement", "estacionamento",
-    "lugar de garagem", "arrecadação", "arrecadacao", "arrumos", "arrumo", "loja", "armazém", "armazem",
+    "lugar de garagem", "lugar de aparcamento", "lugar de estacionamento", "aparcamento",
+    "arrecadação", "arrecadacao", "arrumos", "arrumo", "loja", "armazém", "armazem",
     "escritório", "escritorio", "pavilhão", "pavilhao", "industrial", "estabelecimento",
     "local comercial", "nave", "oficina", "trastero", "aparcamiento", "plaza de garaje",
     "commerce", "local commercial", "bureau", "entrepôt", "hangar", "cave",
@@ -297,6 +298,7 @@ OTHER_WORDS = [   # not a home and not a plot
     "stellplatz", "tiefgarage", "lager", "büro", "gewerbe*", "bedrijfspand", "kantoor",
     "hotel", "restaurante", "café",
     "lavandaria", "lavanderia", "rouparia", "portaria", "casa das máquinas", "ginásio", "sala de condomínio",
+    "computador*", "ordenador*", "portátil*", "portateis", "portáteis",
 ]
 OTHER_TYPES = {normalize(t) for t in (
     "loja/escritorio", "loja", "escritório", "armazem", "industrial", "garagem", "hotel",

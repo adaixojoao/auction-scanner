@@ -46,7 +46,33 @@ def test_excellent_needs_every_wish():
 def test_servihabitat_town_keeps_its_article():
     assert servihabitat_town("Casa en venta en C. Larga, 26, Campo De Peñaranda, El, Salamanca") == \
         "El Campo De Peñaranda"
+    assert servihabitat_town("Casa en venta en C. Amargura, 16, Puebla De Los Infantes, La, Sevilla") == \
+        "La Puebla De Los Infantes"
     assert servihabitat_town("Piso en venta en Ba. La Herrera-Ijalde, 8, Zalla, Bizkaia") == "Zalla"
+    # An article alone is not a town (it used to pin a beach in another province).
+    assert servihabitat_town("Casa en venta en El, Salamanca") is None
+    assert servihabitat_town("Casa, El, Salamanca") is None
+
+
+def test_servihabitat_repairs_a_stored_article_concelho(db):
+    from common import make_listing
+    from db import upsert_listing
+    from sources.es import repair_servihabitat_place
+
+    upsert_listing(db, make_listing(
+        "servihabitat", "1", "ES",
+        title="Casa en venta en C. Larga, 26, Campo De Peñaranda, El, Salamanca",
+        concelho="El"))
+    repair_servihabitat_place(db, {
+        "id": "servihabitat:1",
+        "title": "Casa en venta en C. Larga, 26, Campo De Peñaranda, El, Salamanca",
+        "concelho": "El Campo De Peñaranda",
+    })
+    assert db.execute("SELECT concelho FROM listings WHERE id='servihabitat:1'").fetchone()[0] == \
+        "El Campo De Peñaranda"
+    upsert_listing(db, make_listing("servihabitat", "2", "ES", title="Casa", concelho="La"))
+    repair_servihabitat_place(db, {"id": "servihabitat:2", "title": "Casa", "concelho": None})
+    assert db.execute("SELECT concelho FROM listings WHERE id='servihabitat:2'").fetchone()[0] is None
 
 
 def test_a_street_hit_in_another_town_is_ignored(monkeypatch):

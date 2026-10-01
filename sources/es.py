@@ -240,6 +240,23 @@ def _spain_parse_detail(html: str) -> dict:
     }
 
 
+def clear_step_min_price(db, row: dict) -> None:
+    """Drop a stored puja mínima that is a bidding step, not a buying price.
+
+    Updates keep the old value when the new one is missing, so €1,743 on a
+    €174,300 flat would otherwise stay and look like a bargain forever."""
+    listing_id = row.get("id")
+    if not listing_id:
+        return
+    current = db.execute(
+        "SELECT price, min_price FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if not current:
+        return
+    price, floor = current["price"], current["min_price"]
+    if price and floor and floor < 0.2 * price:
+        db.execute("UPDATE listings SET min_price = NULL WHERE id = ?", (listing_id,))
+
+
 # A BOE detail page has tabs: ver=1 general information, ver=2 the managing
 # authority (court or agency: name, address, e-mail), ver=3 the goods (address,
 # occupancy, visits). Tab numbers and labels are from the site's public layout
@@ -434,7 +451,9 @@ def enrich_spain_details(db, session, limit: int = 300):
             "district", "concelho", "freguesia", "url", "image_url", "date_end")}
         fields.update(parsed)
         fields["raw_json"] = json.dumps(raw, ensure_ascii=False)
-        upsert_listing(db, make_listing("spain", item["external_id"], "ES", **fields))
+        listing = make_listing("spain", item["external_id"], "ES", **fields)
+        upsert_listing(db, listing)
+        clear_step_min_price(db, listing)
         if parsed.get("price") is not None:
             filled += 1
         db.commit()
@@ -544,13 +563,39 @@ def servihabitat_town(title: str) -> str | None:
     """The town in "Casa en venta en C. Larga, 26, Campo De Peñaranda, El, Salamanca":
     the part before the province, with a trailing article put back in front
     ("El Campo De Peñaranda"); alone, "El" found a beach in Tarragona."""
-    parts = [p.strip() for p in title.split(",")]
+    parts = [p.strip() for p in (title or "").split(",") if p.strip()]
     if len(parts) < 3:
         return None
     town = parts[-2]
-    if _ARTICLE.match(town) and len(parts) >= 4:
-        town = f"{town} {parts[-3]}"
+    if _ARTICLE.match(town):
+        # Need a name before the article ("Campo De Peñaranda, El, Salamanca").
+        if len(parts) < 4:
+            return None
+        prev = next((p for p in reversed(parts[:-2]) if p and not p[0].isdigit()), None)
+        if not prev:
+            return None
+        town = f"{town} {prev}"
+    if _ARTICLE.match(town):
+        return None
     return town or None
+
+
+def repair_servihabitat_place(db, row: dict) -> None:
+    """Replace a stored article-only concelho, or clear it when the title has none.
+
+    Updates keep the old value when the new one is missing, so "El" from an
+    earlier parse would otherwise stay forever and pick the wrong beach."""
+    listing_id = row.get("id")
+    if not listing_id:
+        return
+    current = db.execute("SELECT concelho FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if not current or not current[0] or not _ARTICLE.match(current[0].strip()):
+        return
+    town = row.get("concelho") or servihabitat_town(row.get("title") or "")
+    if town and not _ARTICLE.match(town.strip()):
+        db.execute("UPDATE listings SET concelho = ? WHERE id = ?", (town, listing_id))
+    else:
+        db.execute("UPDATE listings SET concelho = NULL WHERE id = ?", (listing_id,))
 
 
 def parse_servihabitat_page(html: str, province: str) -> list[dict]:
@@ -640,6 +685,7 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
     _servihabitat_details(db, session, found, details_left)
     for row in found:
         upsert_listing(db, row)
+        repair_servihabitat_place(db, row)
         total += 1
     db.commit()
     if full:
