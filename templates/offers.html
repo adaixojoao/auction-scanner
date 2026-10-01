@@ -3,12 +3,12 @@
 <div class="page-head">
   <div>
     <h1>Offers</h1>
-    <p>Prepare, send and track your letters (offers, information requests, instructions to a lawyer) and the bids you place online. <b>To review</b> has strong sales where the offer is a letter, plus anything you ☆ on Listings.</p>
+    <p>Prepare, send and track letters and online bids. <b>To review</b> is strong letter-sale candidates plus anything you ☆ on Listings. <b>Sent</b> awaits an answer; <b>Closed</b> is won/lost/cancelled; <b>Rejected</b> is what you dismissed.</p>
   </div>
-  <a class="btn" href="/api/offers/calendar.ics" title="Sale dates of your shortlist and of offers waiting for an answer, with a reminder the day before">📅 Deadlines to my calendar</a>
+  <a class="btn" href="/api/offers/calendar.ics" title="Sale dates of listings on Offers and of offers waiting for an answer, with a reminder the day before">📅 Deadlines to my calendar</a>
 </div>
 {% if not proponente_ok %}
-<div class="notice bad" style="margin:0 0 14px">Your name, NIF and address are not set, so letters will be incomplete. <a href="/settings#details">Fill them in under Settings</a>.</div>
+<div class="notice bad" style="margin:0 0 14px">Your name, tax number (NIF) and address are not set, so letters will be incomplete. <a href="/settings#details">Fill them in under Settings → Buying</a>.</div>
 {% endif %}
 
 <div class="split">
@@ -118,7 +118,7 @@ function renderList() {
       <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start">
         <div class="t" style="flex:1">${AS.flag(c.country)} ${AS.esc(c.title)}</div>${AS.scoreBadge(c.score, c.rank)}
       </div>
-      <div class="m">${AS.esc(c.sale)}${c.status === "shortlisted" ? ' · <span class="warn">★ shortlisted</span>' : ""} · ${AS.esc(c.location || "")}${overdue(c.offer) ? ` · <span class="warn">no answer for ${overdue(c.offer)} days</span>` : ""}</div>
+      <div class="m">${AS.esc(c.sale)}${c.status === "shortlisted" ? ' · <span class="warn">★ on Offers</span>' : ""} · ${AS.esc(c.location || "")}${overdue(c.offer) ? ` · <span class="warn">no answer for ${overdue(c.offer)} days</span>` : ""}</div>
       <div class="m">${c.price ? AS.esc(PRICE_LABEL[c.country] || "Price") + " " + AS.money(c.price) : "no price"}${c.offer ? " · " + offerSummary(c.offer) : (c.bid ? ` · suggested EUR ${AS.esc(c.bid)}` : "")}
         ${c.date_end ? " · ends " + AS.esc(c.date_end.slice(0, 10)) : ""}
         ${!c.offer && c.checklist && c.checklist.blocking_left ? ` · <span class="warn">${c.checklist.blocking_left} blocking</span>` : ""}</div>
@@ -157,14 +157,15 @@ function renderDetail() {
     : d.edited ? "Edited by you: the PDF and e-mail use your text, and the amount and letter type are locked. Keep the blank lines between sender, date, recipient, subject and body so the PDF is laid out properly."
     : "Built from your details in Settings and the listing. What you see here is exactly what the PDF and e-mail contain. Edit it to add anything (for example your lawyer's name).";
   $("detail").innerHTML = `
-  <div class="card">
+  <details class="panel" open>
+    <summary>Property</summary>
     <div class="row" style="align-items:flex-start">
       <div style="flex:1">
         <h2 style="font-size:16px;margin-bottom:6px">${AS.flag(c.country)} ${AS.esc(c.title)}</h2>
         <div class="row" style="gap:6px">
           <span class="badge b-muted">${AS.esc(c.sale)}</span>
           <span class="badge b-muted">${AS.esc(c.categoria)}</span>${AS.scoreBadge(c.score, c.rank)}
-          ${c.status === "shortlisted" ? '<span class="badge b-short">★ shortlisted</span>' : ""}${loc.badge}
+          ${c.status === "shortlisted" ? '<span class="badge b-short">★ on Offers</span>' : ""}${loc.badge}
         </div>
       </div>
       <div style="text-align:right">${c.url ? AS.link(c.url, "Open listing ↗") : ""}
@@ -182,28 +183,27 @@ function renderDetail() {
     ${AS.bidCapHtml(c.bid_cap, {done, compare: bidCompare(c, d.bid || d.online)})}
     <div class="notice info">${AS.esc(c.guidance)}</div>
     <div style="margin-top:12px"><button class="btn" id="ai-btn" onclick="analyze()">AI check</button><div id="ai"></div></div>
-  </div>
+  </details>
 
   ${done ? outcomeCard(c) : ""}
 
   ${showOnline ? `
-  <div class="card">
-    <h2>${done ? "Bid logged" : AS.esc(bc.title)}</h2>
+  <details class="panel" open>
+    <summary>${done ? "Bid logged" : AS.esc(bc.title)}</summary>
     <p class="small muted">${AS.esc(bc.text)}${c.url ? ` ${AS.link(c.url, "Open listing ↗")}` : ""}</p>
     <div class="form-grid" style="margin-top:8px">
       <div class="field"><label>Amount (EUR)</label><input id="online" value="${AS.esc(d.online)}" ${done ? "disabled" : ""}></div>
     </div>
     <div id="online-warn"></div>
     ${done ? "" : `<div class="row" style="margin-top:10px"><button class="btn btn-success" onclick="logOnline()">${AS.esc(bc.button)}</button></div>`}
-  </div>` : ""}
+  </details>` : ""}
 
   ${showLetter ? `
-  <div class="card">
-    <div class="row"><h2 style="margin:0">Letter</h2><span class="spacer"></span>
-      ${done ? "" : `<select id="ltype" style="max-width:460px" ${d.edited ? "disabled" : ""}>${c.letter_types.map(x =>
+  <details class="panel" open>
+    <summary>Letter${t ? " · " + AS.esc(t.label) : ""}</summary>
+    <div class="row">${done ? "" : `<select id="ltype" style="max-width:460px" ${d.edited ? "disabled" : ""}>${c.letter_types.map(x =>
         `<option value="${AS.esc(x.key)}" ${x.key === d.type ? "selected" : ""}>${AS.esc(x.label)}</option>`).join("")}</select>`}
     </div>
-    ${done ? `<p class="small muted" style="margin-top:4px">${AS.esc(t ? t.label : "")}</p>` : ""}
     ${t && t.is_offer ? `
     <div class="form-grid" style="margin-top:10px">
       <div class="field"><label>${AS.esc(t.amount_label)}</label><input id="bid" value="${AS.esc(d.bid)}" ${lock ? "disabled" : ""}></div>
@@ -227,12 +227,12 @@ function renderDetail() {
       <button class="btn btn-primary" id="send-btn" onclick="sendEmail()" ${SMTP_OK ? "" : "disabled"}>Send by e-mail with PDF</button>
       ${SMTP_OK ? "" : `<span class="small faint">Set up e-mail under <a href="/settings#email">Settings</a> to send from here.</span>`}
     </div>`}
-  </div>` : ""}
+  </details>` : ""}
 
   ${done ? "" : `
-  <div class="card">
-    ${t && !t.is_offer && !onlineBid ? "" : `<div class="row"><h2 style="margin:0">${onlineBid && !(t && t.is_offer) ? "Before you bid" : "Before you send an offer"}</h2>
-      <span class="spacer"></span><a class="btn btn-sm" href="/api/checklist.pdf?id=${encodeURIComponent(c.id)}">Checklist PDF</a></div>
+  <details class="panel" open>
+    <summary>${onlineBid && !(t && t.is_offer) ? "Before you bid" : "Before you send"}</summary>
+    ${t && !t.is_offer && !onlineBid ? "" : `<div class="row"><span class="spacer"></span><a class="btn btn-sm" href="/api/checklist.pdf?id=${encodeURIComponent(c.id)}">Checklist PDF</a></div>
     <div id="checklist-box" class="small muted">Loading the checklist…</div>`}
     <div class="row" style="margin-top:12px">
       ${showLetter ? `<select id="method" style="max-width:190px">
@@ -240,9 +240,9 @@ function renderDetail() {
           <option value="hand">I handed it in</option>${d.type === "fr_mandat" ? '<option value="lawyer" selected>I gave it to my lawyer</option>' : ""}</select>
         <button class="btn btn-success" onclick="markSent()">Mark letter as sent</button>` : ""}
       <button class="btn btn-danger" onclick="reject()">Reject</button>
-      ${c.status === "shortlisted" ? `<button class="btn" onclick="unshortlist()">Remove from shortlist</button>` : ""}
+      ${c.status === "shortlisted" ? `<button class="btn" onclick="unshortlist()">Remove from Offers</button>` : ""}
     </div>
-  </div>`}`;
+  </details>`}`;
 
   const on = (id, ev, fn) => $(id) && $(id).addEventListener(ev, fn);
   on("ltype", "change", e => { const nt = typeOf(c, e.target.value); d.type = nt.key;
@@ -327,14 +327,14 @@ function outcomeCard(c) {
     </div>
     <div class="row" style="margin-top:8px"><button class="btn btn-sm" onclick="saveOutcomeDetail(${o.log_id})">Save details</button>
       <span class="small muted">Used on the Outcomes page. No titles or contacts leave this PC.</span></div>` : "";
-  return `<div class="card"><h2>Outcome</h2>
+  return `<details class="panel" open><summary>Outcome</summary>
     <p class="small muted">Sent ${AS.esc(o.sent_date || "")} · ${what}${o.sent_to ? " · to " + AS.esc(o.sent_to) : ""} · currently <b>${AS.esc(o.outcome)}</b></p>
     ${overdue(o) ? `<div class="notice bad">No answer after ${overdue(o)} days. Time to phone${o.sent_to ? " or write again to " + AS.esc(o.sent_to) : ""}${c.contact && c.contact.phone ? " (" + AS.esc(c.contact.phone) + ")" : ""}.</div>` : ""}
     ${o.is_offer ? "" : `<p class="small faint">When they answer, mark it answered: the listing goes back to To review so you can make an offer.</p>`}
     <div class="row" style="margin-top:10px">
       ${choices.filter(x => x !== o.outcome).map(x =>
         `<button class="btn ${x === "won" ? "btn-success" : x === "lost" ? "btn-danger" : ""}" onclick="setOutcome(${o.log_id}, '${x}')">Mark ${x}</button>`).join("")}
-    </div>${detail}</div>`;
+    </div>${detail}</details>`;
 }
 
 function letterQuery(c) {
@@ -458,7 +458,7 @@ async function reject() {
 async function unshortlist() {
   const c = current();
   await AS.api("/api/listings/status", {method: "POST", body: {id: c.id, status: null}});
-  AS.toast("Removed from shortlist"); sel = null; load();
+  AS.toast("Removed from Offers"); sel = null; load();
 }
 async function setOutcome(logId, outcome) {
   await AS.api(`/api/carta-log/${logId}`, {method: "PATCH", body: {outcome}});

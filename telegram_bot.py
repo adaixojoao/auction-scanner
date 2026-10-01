@@ -1,6 +1,6 @@
 """telegram_bot.py — act on alerts from Telegram.
 
-New-listing alerts carry buttons (☆ Shortlist, ✕ Dismiss). Taps come back as
+New-listing alerts carry buttons (☆ Offers, ✕ Dismiss). Taps come back as
 Telegram "updates", which this module fetches with getUpdates (no webhook: the
 app runs on a PC, not a server):
 
@@ -32,9 +32,9 @@ TOP_COUNT = 5
 # callback_data may hold at most 64 bytes; longer listing IDs get a short reference.
 _MAX_ID_IN_BUTTON = 56
 
-ACTIONS = {"s": ("shortlisted", "☆ Shortlisted"), "d": ("dismissed", "✕ Dismissed"), "u": (None, "↩ Undone")}
+ACTIONS = {"s": ("shortlisted", "☆ On Offers"), "d": ("dismissed", "✕ Dismissed"), "u": (None, "↩ Undone")}
 
-HELP = ("Tap <b>☆ Shortlist</b> or <b>✕ Dismiss</b> under an alert; <b>↩ Undo</b> reverses it.\n"
+HELP = ("Tap <b>☆ Offers</b> or <b>✕ Dismiss</b> under an alert; <b>↩ Undo</b> reverses it.\n"
         "/top — the best listings you have not decided on yet\n"
         "/help — this message")
 
@@ -56,7 +56,7 @@ def _listing_id(db, ref: str) -> str | None:
 def listing_keyboard(db, listing_id: str) -> dict:
     ref = _ref(db, listing_id)
     return {"inline_keyboard": [[
-        {"text": "☆ Shortlist", "callback_data": f"s|{ref}"},
+        {"text": "☆ Offers", "callback_data": f"s|{ref}"},
         {"text": "✕ Dismiss", "callback_data": f"d|{ref}"},
     ]]}
 

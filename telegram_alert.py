@@ -174,7 +174,7 @@ def price_cuts(db, cfg: dict, *, min_pct: float = 5, min_score: float = 60, now=
     """Visible listings whose price fell at its last change and that you have
     not been told about since. Each gains cut_from, cut_pct and cut_at.
 
-    Your shortlist counts whatever it scores: you already said you want it."""
+    Your Offers list counts whatever it scores: you already said you want it."""
     history = _price_history(db)
     told = alerted_at(db, CUT_CHANNEL)
     out = []
@@ -199,7 +199,7 @@ def format_cut(item: dict) -> str:
     flag = FLAGS.get(item.get("country") or "PT", "\U0001f30d")
     loc = ", ".join(filter(None, [item.get("concelho"), item.get("district")]))
     ends = (item.get("date_end") or "")[:10]
-    mine = "\u2b50 on your shortlist" if item.get("status") == "shortlisted" else f"Score {item['score']:.0f}/100"
+    mine = "\u2b50 on your Offers list" if item.get("status") == "shortlisted" else f"Score {item['score']:.0f}/100"
     return (
         f"{flag} \U0001f4c9 <b>Price cut \u2014 {item['cut_pct']:.0f}% off</b>\n\n"
         f"<b>{_esc((item.get('title') or '?')[:80])}</b>\n"
@@ -320,7 +320,7 @@ def alert_carta_deadlines(db, cfg: dict, score_fn=None):
         mark_alerted(db, FOLLOW_UP_CHANNEL, [f"carta_log:{r['id']}" for r in waiting])
 
 
-# ─── Reminders for your shortlist ───────────────────────────────────
+# ─── Reminders for listings on Offers ───────────────────────────────────
 # The morning digest covers every good sale ending soon. A listing you starred
 # gets its own message, whatever its score: three days before (time to visit,
 # to get the cheque) and on the last day. Each once.
@@ -354,7 +354,7 @@ def shortlist_reminders(db, cfg: dict, now=None) -> list[tuple[dict, str, str]]:
     return [d for d in due if d[1] in told]
 
 
-def format_reminder(item: dict, label: str, hours: float, why: str = "your shortlist") -> str:
+def format_reminder(item: dict, label: str, hours: float, why: str = "your Offers list") -> str:
     import costs
     from common import price_to_pay
     pay = price_to_pay(item)

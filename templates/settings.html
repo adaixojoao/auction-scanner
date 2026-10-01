@@ -8,8 +8,18 @@
   <button class="btn btn-primary" onclick="save()">Save settings</button>
 </div>
 
+<nav class="settings-nav" aria-label="Settings sections">
+  <a href="#buying">Buying</a>
+  <a href="#alerts">Alerts</a>
+  <a href="#accounts-group">Accounts</a>
+  <a href="#advanced">Advanced</a>
+</nav>
+
+<section class="settings-group" id="buying">
+  <h2 class="group-title">Buying</h2>
+
 <div class="card">
-  <h2>What you are looking for</h2>
+  <h3>Looking for</h3>
   <p class="small muted" style="margin-bottom:10px">Homes and plots at very low prices. Homes score higher in a good location (a town with services, "centro", near the beach) and in good condition; they score lower when they need heavy work (ruins, "para recuperar") or are isolated. Urban plots are welcome. Rural plots only count when they are big and cheap:</p>
   <div class="form-grid">
     <div class="field"><label>Rural plots: at least (m²)</label><input type="number" id="rural_min_m2" min="0" step="1000">
@@ -20,7 +30,7 @@
 </div>
 
 <div class="card" id="weights">
-  <h2>How much each thing counts</h2>
+  <h3>Score weights</h3>
   <p class="small muted" style="margin-bottom:10px">100% is the normal weight; 0% ignores it, 200% doubles it. Only bonuses and penalties move: the rules (too hot by 2090, occupied, plot too small…) stay rules. Saved with the other settings; the list re-scores at once.</p>
   <div class="weights">
     {% for key, label in weights %}
@@ -33,7 +43,7 @@
 </div>
 
 <div class="card">
-  <h2>Budget &amp; what to show</h2>
+  <h3>Budget &amp; what to show</h3>
   <div class="form-grid">
     <div class="field"><label>Maximum price (EUR)</label><input type="number" id="max_price" step="5000"></div>
     <div class="field"><label>Show at most (listings, best first)</label><input type="number" id="max_listings" min="10" max="1000" step="10"></div>
@@ -53,10 +63,10 @@
 </div>
 
 <div class="card" id="details">
-  <h2>Your details (printed on every letter)</h2>
+  <h3>Your details (on every letter)</h3>
   <div class="form-grid">
     <div class="field"><label>Full name</label><input id="p_nome"></div>
-    <div class="field"><label>NIF</label><input id="p_nif"></div>
+    <div class="field"><label>Tax number (NIF)</label><input id="p_nif"></div>
     <div class="field"><label>E-mail</label><input id="p_email" type="email"></div>
     <div class="field"><label>Phone (optional)</label><input id="p_telefone" type="tel"></div>
     <div class="field"><label>Town (next to the date)</label><input id="p_localidade"></div>
@@ -64,72 +74,8 @@
   <div class="field" style="margin-top:12px"><label>Address</label><textarea id="p_morada" rows="2"></textarea></div>
 </div>
 
-<div class="card">
-  <h2>Automatic scanning</h2>
-  <label class="check"><input type="checkbox" id="while_app_open"> Scan on this timetable while the app is open</label>
-  <div class="form-grid" style="margin-top:12px">
-    <div class="field"><label>Portugal every (hours)</label><input type="number" id="pt_every_hours" min="0" step="1"></div>
-    <div class="field"><label>Other countries every (hours, 0 = never)</label><input type="number" id="eu_every_hours" min="0" step="1"></div>
-  </div>
-  <div style="margin-top:14px" id="background">
-    <label class="check"><input type="checkbox" id="bg_enabled"> Keep scanning when the app is closed (Windows background task, every 30 min when something is due)</label>
-    <p class="help" id="bg_help" style="margin-top:6px"></p>
-  </div>
-</div>
-
-<div class="card">
-  <h2>Telegram alerts</h2>
-  <label class="check"><input type="checkbox" id="tg_enabled"> Send Telegram alerts</label>
-  <div class="form-grid" style="margin-top:12px">
-    <div class="field"><label>Bot token</label><input id="tg_token" type="password" autocomplete="off"></div>
-    <div class="field"><label>Chat ID</label><input id="tg_chat_id"></div>
-    <div class="field"><label>Alert new listings scoring at least</label><input type="number" id="tg_min_score" min="0" max="100"></div>
-    <div class="field"><label>Deadline reminders scoring at least</label><input type="number" id="tg_deadline_min_score" min="0" max="100"></div>
-    <div class="field"><label>Price-cut alerts from (% off)</label><input type="number" id="tg_cut_min_pct" min="1" max="90"></div>
-    <div class="field"><label>Price cuts on listings scoring at least</label><input type="number" id="tg_cut_min_score" min="0" max="100"></div>
-  </div>
-  <p class="help" style="margin-top:6px">A cut on something you shortlisted is always sent, whatever it scores.</p>
-  <label class="check" style="margin-top:10px"><input type="checkbox" id="tg_source_alerts"> Tell me when a site stops working, and when it works again</label>
-</div>
-
-<div class="card" id="maps">
-  <h2>Street View</h2>
-  <p class="small muted" style="margin-bottom:10px">Each listing's panel links to Google Street View at the property. To see Street View inside the panel, paste a Google Maps <b>Embed API</b> key (free: Google Cloud console → APIs → "Maps Embed API" → Credentials). It stays on this PC.</p>
-  <div class="form-grid"><div class="field"><label>Google Maps Embed API key</label><input id="maps_google_key" type="password" autocomplete="off"></div></div>
-</div>
-
-<div class="card" id="accounts">
-  <h2>Accounts</h2>
-  <p class="small muted" style="margin-bottom:10px">Some sites show their best sales only to account holders (the Portal das Finanças' seized goods). With your account here the scan signs in for you. The password is encrypted by Windows for your user on this PC and never shown again. If a site asks for an SMS code, shows a CAPTCHA or refuses the password, the app stops trying for a day and tells you on Telegram.</p>
-  <div id="accounts-list"></div>
-</div>
-
-<div class="card" id="ai">
-  <h2>Photo check</h2>
-  <p class="small muted" style="margin-bottom:10px">After each scan, a vision model looks at the photos of the best homes (a few each scan, each once) and says whether the building looks sound, needs work or is a ruin. It is used when the listing's text says nothing about the condition. <b>Open model (Ollama)</b>: free and private, runs on this PC — install Ollama from ollama.com and run <code>ollama pull qwen2.5vl:3b</code>; without a graphics card a photo takes about a minute. <b>Claude</b>: faster, needs an Anthropic API key (it stays on this PC; the AI check on Offers uses it too).</p>
-  <div class="form-grid">
-    <div class="field"><label>Model</label><select id="ai_provider"><option value="ollama">Open model on this PC (Ollama)</option><option value="anthropic">Claude (API key)</option></select></div>
-    <div class="field"><label>Ollama model</label><input id="ai_ollama_model" type="text" placeholder="qwen2.5vl:3b"></div>
-    <div class="field"><label>Anthropic API key</label><input id="ai_anthropic_key" type="password" autocomplete="off"></div>
-    <div class="field"><label>Homes a scan (0 = automatic)</label><input id="ai_photos_per_scan" type="number" min="0" max="100"></div>
-    <div class="field"><label><input id="ai_photo_check" type="checkbox"> Check photos</label></div>
-  </div>
-</div>
-
-<div class="card" id="stewardship">
-  <h2>Stewardship plan</h2>
-  <p class="small muted" style="margin-bottom:10px">Rural listings get a non-binding Climate &amp; Land Stewardship Plan on Listings → ⓘ (risks, opportunities, 90-day and 3-year actions, questions for local advisers). It uses the climate maps and location confidence only; it never invents protected areas, water rights or planting permission. Costs are planning allowances. Export as Markdown, PDF or Word.</p>
-  <label class="check"><input type="checkbox" id="st_enable_mixed"> Also show the plan on homes and urban plots</label>
-</div>
-
-<div class="card" id="climate">
-  <h2>Climate</h2>
-  <p class="small muted" style="margin-bottom:10px">Each listing's Climate panel grades the place from the climate maps (heat, floods, water, fire). With the guardrail on, the AI check on Offers lowers its suggested bid and maximum for a <b>caution</b> or <b>poor</b> grade (more for poor, and it says by how much), only where the position is exact. It never changes an amount you type. The grade is a planning indicator, not a survey or due diligence.</p>
-  <label class="check"><input type="checkbox" id="climate_guardrail"> Lower AI-suggested bids where the climate grade is caution or poor</label>
-</div>
-
 <div class="card" id="bid_cap">
-  <h2>Maximum bid</h2>
+  <h3>Bid cap</h3>
   <p class="small muted" style="margin-bottom:10px">The calculator on Listings and Offers works from the local median price (or your land target), the taxes and fees, the renovation bands, a risk reserve and the climate grade. It shows a recommended bid and an absolute maximum, with a waterfall of how it got there. It never changes an amount you type; when you send or log a different figure, the difference is kept with the offer. It is an estimate from local medians, not a valuation.</p>
   <div class="form-grid">
     <div class="field"><label>Max all-in budget (€, 0 = none)</label><input type="number" id="bc_max_all_in" min="0" step="1000"></div>
@@ -143,7 +89,7 @@
 </div>
 
 <div class="card" id="checklist">
-  <h2>Due-diligence checklist</h2>
+  <h3>Due-diligence checklist</h3>
   <p class="small muted" style="margin-bottom:10px">Each offer on the Offers page has a checklist for its country and way of selling. Ticked items below are <b>blocking</b>: until you mark them verified or not applicable, sending or logging an offer asks why you are going ahead, and your reason is kept with the offer. "Verified" means you checked it; the checklist is your own record, not legal advice.</p>
   {% for route, label, items in checklist_routes %}
   <details style="margin-bottom:6px"><summary>{{ label }}</summary>
@@ -155,24 +101,58 @@
 </div>
 
 <div class="card" id="location">
-  <h2>Location check</h2>
+  <h3>Location check</h3>
   <p class="small muted" style="margin-bottom:10px">Most sales place a property only at its town. Then the climate, flood, water and distance checks describe the town, not the property. Verify a position in the listing's ⓘ panel (coordinates, an address, or a Spanish cadastral reference). For an offer on a listing placed only at its municipality or not at all, the Offers page can warn you, or also ask your reason before the offer is sent or logged. The reason is kept with the offer. Information requests are never held back.</p>
   <div class="form-grid"><div class="field"><label>Offers without a known location</label>
     <select id="location_gate"><option value="warn">Warn me</option><option value="block">Warn and ask my reason before sending</option><option value="off">Say nothing</option></select></div></div>
 </div>
 
-<div class="card" id="requests">
-  <h2>Information requests</h2>
-  <p class="small muted" style="margin-bottom:10px">After a scan, for strong sales where the agente, court or lawyer's e-mail is known, the app prepares the information request (is the sale still on, deadline, deposit, charges, occupancy, visits) and offers it on Telegram with <b>Send</b>, <b>Show letter</b> and <b>Skip</b>. Nothing is sent until you tap Send; sent requests appear under Offers → Sent. Needs Telegram, the e-mail account and your name and e-mail above.</p>
-  <label class="check"><input type="checkbox" id="ar_enabled"> Prepare information requests for me</label>
+<div class="card" id="climate">
+  <h3>Climate</h3>
+  <p class="small muted" style="margin-bottom:10px">Each listing's Climate panel grades the place from the climate maps (heat, floods, water, fire). With the guardrail on, the AI check on Offers lowers its suggested bid and maximum for a <b>caution</b> or <b>poor</b> grade (more for poor, and it says by how much), only where the position is exact. It never changes an amount you type. The grade is a planning indicator, not a survey or due diligence.</p>
+  <label class="check"><input type="checkbox" id="climate_guardrail"> Lower AI-suggested bids where the climate grade is caution or poor</label>
+</div>
+
+<div class="card" id="stewardship">
+  <h3>Land stewardship</h3>
+  <p class="small muted" style="margin-bottom:10px">Rural listings get a non-binding Climate &amp; Land Stewardship Plan on Listings → ⓘ (risks, opportunities, 90-day and 3-year actions, questions for local advisers). It uses the climate maps and location confidence only; it never invents protected areas, water rights or planting permission. Costs are planning allowances. Export as Markdown, PDF or Word.</p>
+  <label class="check"><input type="checkbox" id="st_enable_mixed"> Also show the plan on homes and urban plots</label>
+</div>
+</section>
+
+<section class="settings-group" id="alerts">
+  <h2 class="group-title">Alerts</h2>
+
+<div class="card">
+  <h3>Automatic scanning</h3>
+  <label class="check"><input type="checkbox" id="while_app_open"> Scan on this timetable while the app is open</label>
   <div class="form-grid" style="margin-top:12px">
-    <div class="field"><label>For sales scoring at least</label><input type="number" id="ar_min_score" min="0" max="100"></div>
-    <div class="field"><label>At most this many new ones per day</label><input type="number" id="ar_per_day" min="1" max="50"></div>
+    <div class="field"><label>Portugal every (hours)</label><input type="number" id="pt_every_hours" min="0" step="1"></div>
+    <div class="field"><label>Other countries every (hours, 0 = never)</label><input type="number" id="eu_every_hours" min="0" step="1"></div>
+  </div>
+  <div style="margin-top:14px" id="background">
+    <label class="check"><input type="checkbox" id="bg_enabled"> Keep scanning when the app is closed (Windows background task, every 30 min when something is due)</label>
+    <p class="help" id="bg_help" style="margin-top:6px"></p>
   </div>
 </div>
 
+<div class="card">
+  <h3>Telegram</h3>
+  <label class="check"><input type="checkbox" id="tg_enabled"> Send Telegram alerts</label>
+  <div class="form-grid" style="margin-top:12px">
+    <div class="field"><label>Bot token</label><input id="tg_token" type="password" autocomplete="off"></div>
+    <div class="field"><label>Chat ID</label><input id="tg_chat_id"></div>
+    <div class="field"><label>Alert new listings scoring at least</label><input type="number" id="tg_min_score" min="0" max="100"></div>
+    <div class="field"><label>Deadline reminders scoring at least</label><input type="number" id="tg_deadline_min_score" min="0" max="100"></div>
+    <div class="field"><label>Price-cut alerts from (% off)</label><input type="number" id="tg_cut_min_pct" min="1" max="90"></div>
+    <div class="field"><label>Price cuts on listings scoring at least</label><input type="number" id="tg_cut_min_score" min="0" max="100"></div>
+  </div>
+  <p class="help" style="margin-top:6px">A cut on something on Offers is always sent, whatever it scores.</p>
+  <label class="check" style="margin-top:10px"><input type="checkbox" id="tg_source_alerts"> Tell me when a site stops working, and when it works again</label>
+</div>
+
 <div class="card" id="email">
-  <h2>E-mail</h2>
+  <h3>E-mail</h3>
   <p class="small muted" style="margin-bottom:10px">The account the app sends from: alerts, and letters sent with <b>Send by e-mail</b> on Offers (a copy of each letter comes back to this account). Gmail: smtp.gmail.com, port 587, and an app password.</p>
   <label class="check"><input type="checkbox" id="em_enabled"> Send e-mail alerts after each scan</label>
   <div class="form-grid" style="margin-top:12px">
@@ -185,9 +165,51 @@
   </div>
 </div>
 
+<div class="card" id="requests">
+  <h3>Information requests</h3>
+  <p class="small muted" style="margin-bottom:10px">After a scan, for strong sales where the agente, court or lawyer's e-mail is known, the app prepares the information request (is the sale still on, deadline, deposit, charges, occupancy, visits) and offers it on Telegram with <b>Send</b>, <b>Show letter</b> and <b>Skip</b>. Nothing is sent until you tap Send; sent requests appear under Offers → Sent. Needs Telegram, the e-mail account and your name and e-mail under Buying.</p>
+  <label class="check"><input type="checkbox" id="ar_enabled"> Prepare information requests for me</label>
+  <div class="form-grid" style="margin-top:12px">
+    <div class="field"><label>For sales scoring at least</label><input type="number" id="ar_min_score" min="0" max="100"></div>
+    <div class="field"><label>At most this many new ones per day</label><input type="number" id="ar_per_day" min="1" max="50"></div>
+  </div>
+</div>
+</section>
+
+<section class="settings-group" id="accounts-group">
+  <h2 class="group-title">Accounts</h2>
+
+<div class="card" id="accounts">
+  <h3>Site logins</h3>
+  <p class="small muted" style="margin-bottom:10px">Some sites show their best sales only to account holders (the Portal das Finanças' seized goods). With your account here the scan signs in for you. The password is encrypted by Windows for your user on this PC and never shown again. If a site asks for an SMS code, shows a CAPTCHA or refuses the password, the app stops trying for a day and tells you on Telegram.</p>
+  <div id="accounts-list"></div>
+</div>
+
+<div class="card" id="maps">
+  <h3>Street View</h3>
+  <p class="small muted" style="margin-bottom:10px">Each listing's panel links to Google Street View at the property. To see Street View inside the panel, paste a Google Maps <b>Embed API</b> key (free: Google Cloud console → APIs → "Maps Embed API" → Credentials). It stays on this PC.</p>
+  <div class="form-grid"><div class="field"><label>Google Maps Embed API key</label><input id="maps_google_key" type="password" autocomplete="off"></div></div>
+</div>
+
+<div class="card" id="ai">
+  <h3>Photo check</h3>
+  <p class="small muted" style="margin-bottom:10px">After each scan, a vision model looks at the photos of the best homes (a few each scan, each once) and says whether the building looks sound, needs work or is a ruin. It is used when the listing's text says nothing about the condition. <b>Open model (Ollama)</b>: free and private, runs on this PC — install Ollama from ollama.com and run <code>ollama pull qwen2.5vl:3b</code>; without a graphics card a photo takes about a minute. <b>Claude</b>: faster, needs an Anthropic API key (it stays on this PC; the AI check on Offers uses it too).</p>
+  <div class="form-grid">
+    <div class="field"><label>Model</label><select id="ai_provider"><option value="ollama">Open model on this PC (Ollama)</option><option value="anthropic">Claude (API key)</option></select></div>
+    <div class="field"><label>Ollama model</label><input id="ai_ollama_model" type="text" placeholder="qwen2.5vl:3b"></div>
+    <div class="field"><label>Anthropic API key</label><input id="ai_anthropic_key" type="password" autocomplete="off"></div>
+    <div class="field"><label>Homes a scan (0 = automatic)</label><input id="ai_photos_per_scan" type="number" min="0" max="100"></div>
+    <div class="field"><label><input id="ai_photo_check" type="checkbox"> Check photos</label></div>
+  </div>
+</div>
+</section>
+
+<section class="settings-group" id="advanced">
+  <h2 class="group-title">Advanced</h2>
+
 <div class="card" id="backup">
-  <h2>Backup</h2>
-  <p class="small muted" style="margin-bottom:10px">Everything you have decided — the shortlist, the offers, the letters, the whole history — is in <code>auctions.db</code> on this PC. Give the app a folder that is <b>not</b> on this PC (a OneDrive or Dropbox folder, another drive, a memory stick) and it copies the database there once a day, keeping the last few. To go back to a copy: close the app, and rename the copy to <code>auctions.db</code> in the app's folder.</p>
+  <h3>Backup</h3>
+  <p class="small muted" style="margin-bottom:10px">Everything you have decided — Offers picks, sent letters, outcomes, the whole history — is in <code>auctions.db</code> on this PC. Give the app a folder that is <b>not</b> on this PC (a OneDrive or Dropbox folder, another drive, a memory stick) and it copies the database there once a day, keeping the last few. To go back to a copy: close the app, and rename the copy to <code>auctions.db</code> in the app's folder.</p>
   <div class="form-grid">
     <div class="field"><label>Folder (empty: no copies are made)</label><input id="bk_folder" placeholder="C:\Users\you\OneDrive\Auction Scanner"></div>
     <div class="field"><label>Copies to keep there</label><input type="number" id="bk_keep" min="1" max="100"></div>
@@ -197,7 +219,7 @@
 </div>
 
 <div class="card" id="updates">
-  <h2>Updates</h2>
+  <h3>Updates</h3>
   <p class="small muted" style="margin-bottom:10px">New versions are published on GitHub (the <code>master</code> branch). The app fetches them when it starts, backs up your database to <code>backups/</code>, installs any new packages and restarts itself. Your listings, offers and settings are never touched.</p>
   <label class="check"><input type="checkbox" id="upd_auto"> Update automatically when the app starts</label>
   <div id="upd_state" class="small" style="margin-top:12px">Checking…</div>
@@ -208,10 +230,11 @@
 </div>
 
 <div class="card">
-  <h2>Reports</h2>
+  <h3>Reports</h3>
   <label class="check"><input type="checkbox" id="desktop_copy"> Also put Auction-Report.docx / .pdf on the Desktop after each scan</label>
   <p class="help" style="margin-top:6px">Reports are always available from Listings → Export report.</p>
 </div>
+</section>
 
 <div class="row" style="margin-top:14px"><span class="spacer"></span><button class="btn btn-primary" onclick="save()">Save settings</button></div>
 {% endblock %}
