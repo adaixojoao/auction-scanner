@@ -78,6 +78,22 @@ def test_no_price_on_an_offer_sale_is_a_chance():
     assert "no price — you set your offer" not in r_online
 
 
+def test_no_price_without_an_offer_sale_is_capped():
+    """Dutch/German cards often publish no figure; climate used to put them in
+    the top 20 ahead of priced Portuguese homes."""
+    from scoring import NO_PRICE_CAP, property_kind, condition
+    bare, r_bare = score(item(title="Historische eengezinswoning in Barby",
+                              source="veilingnotaris", country="DE", price=None,
+                              concelho="Barby"))
+    assert "price unknown — cannot judge cheapness" in r_bare
+    assert "no price — you set your offer" not in r_bare
+    assert bare <= NO_PRICE_CAP
+    # Commercial space is not a home, even when the platform lists it as vastgoed.
+    assert property_kind(item(title="Warffum, Noorderstraat 11 (Bedrijfsruimte)",
+                              description="Type: Bedrijfsruimte")) == "other"
+    assert condition(item(title="Vlaardingen, Diepenbrockstraat 5 (Kluswoning)")) == "some"
+
+
 def test_price_outweighs_how_the_court_sells():
     court = dict(source="citius", description="Venda mediante proposta em carta fechada")
     dear_court, r_dear = score(item(title="Fracção - habitação no 3º andar", price=97500, **court))
