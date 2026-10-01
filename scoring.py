@@ -159,6 +159,7 @@ def w(name: str) -> float:
 
 
 UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
+NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
 # all year round, no fires, no floods. Heat is the mean daily maximum of the
@@ -296,6 +297,7 @@ OTHER_WORDS = [   # not a home and not a plot
     "commerce", "local commercial", "bureau", "entrepôt", "hangar", "cave",
     "negozio", "magazzino", "capannone", "ufficio", "posto auto",
     "stellplatz", "tiefgarage", "lager", "büro", "gewerbe*", "bedrijfspand", "kantoor",
+    "bedrijfsruimte", "bedrijfshal*", "bedrijfshallen", "bedrijfsunit*", "winkelruimte",
     "hotel", "restaurante", "café",
     "lavandaria", "lavanderia", "rouparia", "portaria", "casa das máquinas", "ginásio", "sala de condomínio",
     "computador*", "ordenador*", "portátil*", "portateis", "portáteis",
@@ -337,6 +339,7 @@ SOME_WORK = [
     "da sistemare", "necessita di lavori", "necessita di interventi", "mediocre stato", "discreto stato",
     "scarsa manutenzione", "manutenzione straordinaria",
     "modernisierungsbedürftig", "renovierungsbedarf",
+    "kluswoning", "kluswoningen",          # Dutch: sold as a renovation project
 ]
 GOOD_CONDITION = [
     "bom estado", "excelente estado", "ótimo estado", "renovad*", "remodelad*", "recuperad*",
@@ -527,8 +530,10 @@ def buyer_priorities(targets: dict | None = None) -> str:
         f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare). Not wanted: small or partial homes "
         "or plots; homes needing heavy work (ruins, full rebuilds) unless they come with a big "
         "farm plot that carries the value; expensive homes; isolated or bad locations; timeshares "
-        "(a few weeks a year); shops, "
-        "garages, storage and offices. Water is only a plus where the land does not flood; "
+        "(a few weeks a year); shops, garages, storage, offices and other commercial premises "
+        "(bedrijfsruimte, lojas). Without a published price — unless it is a sealed-bid or "
+        "private-negotiation sale where you name the offer — the listing cannot be judged for "
+        "cheapness and stays out of the top. Water is only a plus where the land does not flood; "
         "a home in a flood zone is a risk."
     )
 
@@ -1059,10 +1064,16 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
 
     # Minimum bid signal (one bonus per listing: these all describe the same fact).
     min_p = item.get("min_price") or 0
-    if not pay and (sealed or source in FORCED_SOURCES
-                    or has_term(full, OFFER_SALE_PATTERNS, negations=False)):
+    offer_sale = sealed or source in FORCED_SOURCES or has_term(full, OFFER_SALE_PATTERNS, negations=False)
+    if not pay and offer_sale:
         s += 18 * w("sale")
         reasons.append("no price — you set your offer")
+    elif not pay:
+        # Climate and location alone used to push Dutch/German cards with no
+        # figure into the top 20; without a price the cheapness goal cannot be
+        # checked, so they stay under the board until one appears.
+        caps.append(NO_PRICE_CAP)
+        reasons.append("price unknown — cannot judge cheapness")
     elif min_p and price and price > 1000 and min_p < price and curve(min_p, LOW_MIN_BID_POINTS) > 0:
         s += curve(min_p, LOW_MIN_BID_POINTS)
         reasons.append(f"min bid only €{min_p:.0f}")
