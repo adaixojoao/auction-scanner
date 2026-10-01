@@ -314,7 +314,7 @@ HEAVY_WORK = [
     "para recuperação", "recuperação total", "necessita de recuperação", "a necessitar de recuperação",
     "carece de recuperação", "para reabilitação", "para reabilitar",
     "obras profundas", "reabilitação total", "reabilitação integral", "inabitável", "sem telhado",
-    "telhado caído", "muito degradad*", "mau estado", "para demolir", "demolição",
+    "telhado caído", "muito degradad*", "mau estado", "mal estado", "en mal estado", "para demolir", "demolição",
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
     "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
     "reforma integra", "para rehabilitación", "requiere rehabilitación", "a restaurar",
@@ -322,9 +322,10 @@ HEAVY_WORK = [
     "à réhabiliter", "da ristrutturare", "rudere", "fatiscente", "inagibile", "non abitabile",
     "pessimo stato", "in pessimo stato", "da rifare", "al grezzo", "allo stato grezzo",
     "al rustico", "allo stato rustico", "priva di tramezzatura", "prive di tramezzature",
-    "pericolo di crollo", "parzialmente crollat*", "crollat*",
+    "pericolo di crollo", "parzialmente crollat*", "crollat*", "molto degradat*", "fortemente degradat*",
     "sanierungsbedürftig", "renovierungsbedürftig", "abrissreif", "baufällig", "ruine",
     "opknapper", "bouwvallig", "renovatie nodig",
+    "ruševina*", "rušev*", "dotrajal*", "zapušten*",
     # Abandoned: empty for years, falling apart ("devoluta" alone is only empty).
     "abandonad*", "ao abandono", "em abandono", "estado de abandono", "votad* ao abandono",
     "abbandonat*", "in stato di abbandono", "à l'abandon", "verwaerloosd", "verlaten",
@@ -332,23 +333,29 @@ HEAVY_WORK = [
 RUIN_WORDS = HEAVY_WORK   # older name
 SOME_WORK = [
     "necessita de obras", "precisa de obras", "necessitar de obras", "carece de obras",
-    "obras de conservação", "degradad*", "necesita reforma", "necesita reformas",
+    "obras de conservação", "degradad*", "degradat*", "in stato di degrado",
+    "necesita reforma", "necesita reformas",
     "para remodelar", "a remodelar", "para renovar", "a renovar", "para restaurar",
     "para actualizar", "requiere reforma", "requiere reformas", "recomendable reforma", "necesita rehabilitación",
-    "necesita rehabilitacion", "para finalizar", "por finalizar", "travaux à prévoir", "à rafraîchir", "a rafraichir", "da rimodernare",
+    "necesita rehabilitacion", "para finalizar", "por finalizar",
+    "travaux à prévoir", "à rafraîchir", "a rafraichir", "en travaux", "partiellement en travaux",
+    "travaux à réaliser", "da rimodernare",
     "da sistemare", "necessita di lavori", "necessita di interventi", "mediocre stato", "discreto stato",
     "scarsa manutenzione", "manutenzione straordinaria",
     "modernisierungsbedürftig", "renovierungsbedarf",
     "kluswoning", "kluswoningen",          # Dutch: sold as a renovation project
+    "potrebno renoviranje", "za renoviranje", "potrebno uređenje", "za uređenje",
 ]
 GOOD_CONDITION = [
-    "bom estado", "excelente estado", "ótimo estado", "renovad*", "remodelad*", "recuperad*",
+    "bom estado", "excelente estado", "ótimo estado", "estado novo", "estado: novo", "em estado novo",
+    "renovad*", "remodelad*", "recuperad*",
     "pronto a habitar", "como nov*", "construção recente",
     "buen estado", "reformad*", "a estrenar", "para entrar a vivir", "listo para vivir",
     "bon état", "très bon état", "rénové", "rénovée", "refait à neuf", "habitable de suite",
     "buono stato", "ottimo stato", "ristrutturat*", "abitabile",
     "renoviert", "saniert", "modernisiert", "gepflegt", "bezugsfertig", "neuwertig",
     "goede staat", "gerenoveerd", "instapklaar",
+    "dobrom stanju", "odličnom stanju",
 ]
 GOOD_LOCATION = [
     "centro da cidade", "centro da vila", "centro da localidade", "centro histórico", "no centro",
