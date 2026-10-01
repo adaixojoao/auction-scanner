@@ -81,7 +81,9 @@ DEFAULTS = {
 
     # A vision model looks at the photos of the best homes to judge their
     # condition (photos.py): an open model on this PC through Ollama (free), or
-    # Claude with an Anthropic API key. photos_per_scan 0 = 5 locally, 20 on Claude.
+    # Claude with an Anthropic API key. photos_per_scan 0 = the default for the
+    # looker (5 Ollama / 20 Claude); when many homes wait, a higher catch-up
+    # budget is used automatically.
     "ai": {
         "provider": "ollama",
         "ollama_url": "http://127.0.0.1:11434",

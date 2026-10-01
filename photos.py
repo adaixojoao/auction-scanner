@@ -13,7 +13,9 @@ Two ways to look (Settings → Photo check):
   (ollama.com), free and private. On a laptop without a graphics card a photo
   takes about a minute, so only a few homes are looked at each scan.
 - "anthropic": Claude, with an Anthropic API key. Faster, paid.
-Nothing happens when neither is set up.
+Nothing happens when neither is set up. When hundreds of board homes are
+waiting (after a scrape or a new source), the per-scan budget rises so the
+queue drains in days rather than months.
 """
 from __future__ import annotations
 
@@ -27,8 +29,15 @@ MODEL = "claude-haiku-4-5"          # the same model as the AI check (analysis.p
 OLLAMA_URL = "http://127.0.0.1:11434"
 OLLAMA_MODEL = "qwen2.5vl:3b"       # an open vision model that fits in 6 GB of memory
 PHOTOS_PER_SCAN = {"ollama": 5, "anthropic": 20}
+# When many board homes still have photos and no answer, drain faster. Ollama
+# is slow on CPU (~1 min/image), so its catch-up stays modest; Claude can do more.
+PHOTOS_CATCHUP = {"ollama": 12, "anthropic": 60}
+PHOTOS_CATCHUP_WHEN = 40            # pending homes that trigger catch-up
 MAX_PHOTOS = {"ollama": 2, "anthropic": 4}
 MAX_PHOTO_BYTES = 3_000_000
+# Gallery keys scrapers have used (and a few common alternate spellings).
+_GALLERY_KEYS = ("fotos", "photos", "images", "imagens", "immagini", "gallery",
+                 "slike", "media", "imagini")
 
 PHOTO_SCHEMA = {
     "type": "object",
@@ -54,6 +63,22 @@ def api_key(cfg: dict | None = None) -> str | None:
     return ((cfg or {}).get("ai") or {}).get("anthropic_key") or os.environ.get("ANTHROPIC_API_KEY") or None
 
 
+def _url(value) -> str | None:
+    """A usable photo URL: https preferred; http upgraded; protocol-relative allowed."""
+    if isinstance(value, dict):
+        value = value.get("url") or value.get("src") or value.get("href") or value.get("photo_url")
+    if not isinstance(value, str):
+        return None
+    u = value.strip()
+    if u.startswith("//"):
+        u = "https:" + u
+    elif u.startswith("http://"):
+        u = "https://" + u[len("http://"):]
+    if u.startswith("https://") and len(u) > 12:
+        return u
+    return None
+
+
 def photo_urls(item: dict) -> list[str]:
     """The listing's photos: the cover, then any gallery the source gave."""
     try:
@@ -61,15 +86,49 @@ def photo_urls(item: dict) -> list[str]:
     except ValueError:
         raw = {}
     urls = [item.get("image_url")]
-    for key in ("fotos", "photos", "images", "imagens"):
-        gallery = raw.get(key) if isinstance(raw, dict) else None
-        if isinstance(gallery, list):
-            urls += [g if isinstance(g, str) else (g or {}).get("url") for g in gallery]
+    if isinstance(raw, dict):
+        for key in _GALLERY_KEYS:
+            gallery = raw.get(key)
+            if isinstance(gallery, list):
+                urls += gallery
+            elif isinstance(gallery, dict):
+                urls += list(gallery.values())
     out = []
     for u in urls:
-        if isinstance(u, str) and u.startswith("https://") and u not in out:
-            out.append(u)
+        cleaned = _url(u)
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
     return out[:max(MAX_PHOTOS.values())]
+
+
+def needs_photo_check(item: dict) -> bool:
+    """True when this home still has photos and no stored answer."""
+    kind = item.get("kind")
+    if kind is None:
+        from scoring import property_kind
+        kind = property_kind(item)
+    if kind != "home":
+        return False
+    if '"photo_check"' in (item.get("raw_json") or ""):
+        return False
+    return bool(photo_urls(item))
+
+
+def photos_budget(items: list[dict], looker_name: str, configured: int | None = None) -> int:
+    """How many homes this scan should look at.
+
+    Settings `photos_per_scan` of 0 means "use the default for this looker".
+    When many board homes still wait, raise to PHOTOS_CATCHUP so condition
+    from photos can catch Italy's silent cards in days, not months."""
+    if configured:
+        return int(configured)
+    pending = 0
+    for item in items:
+        if needs_photo_check(item):
+            pending += 1
+            if pending > PHOTOS_CATCHUP_WHEN:
+                return PHOTOS_CATCHUP.get(looker_name, PHOTOS_PER_SCAN.get(looker_name, 5))
+    return PHOTOS_PER_SCAN.get(looker_name, 5)
 
 
 class ClaudeLooker:
@@ -165,14 +224,18 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
         return 0
     looker = looker or make_looker(cfg)
     if looker is None:
+        waiting = sum(1 for it in items if needs_photo_check(it))
+        if waiting:
+            LOG.info(f"Photo check: {waiting} homes waiting, but no looker is set up "
+                     f"(start Ollama with the vision model, or set an Anthropic key)")
         return 0
     if limit is None:
-        limit = ai.get("photos_per_scan") or PHOTOS_PER_SCAN.get(looker.name, 5)
+        limit = photos_budget(items, looker.name, ai.get("photos_per_scan") or None)
     done = 0
     for item in items:
         if done >= limit:
             break
-        if item.get("kind") != "home" or '"photo_check"' in (item.get("raw_json") or "") or not photo_urls(item):
+        if not needs_photo_check(item):
             continue
         try:
             found = check_photos(looker, item)

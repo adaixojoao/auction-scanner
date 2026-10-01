@@ -112,3 +112,42 @@ def test_without_ollama_running_nothing_is_sent(monkeypatch):
             raise ConnectionError("refused")
     monkeypatch.setattr(common, "make_session", lambda *a, **k: Down())
     assert photos.make_looker({"ai": {"provider": "ollama"}}) is None
+
+
+def test_photo_urls_upgrade_http_and_read_more_gallery_keys():
+    item = {
+        "image_url": "http://example.com/cover.jpg",
+        "raw_json": json.dumps({
+            "immagini": [{"url": "//cdn.example.com/a.jpg"}, "https://cdn.example.com/b.jpg"],
+            "gallery": ["https://cdn.example.com/cover.jpg"],
+        }),
+    }
+    assert photos.photo_urls(item) == [
+        "https://example.com/cover.jpg",
+        "https://cdn.example.com/a.jpg",
+        "https://cdn.example.com/b.jpg",
+        "https://cdn.example.com/cover.jpg",
+    ]
+
+
+def test_photos_budget_catches_up_when_the_queue_is_long():
+    few = [make_listing("eleiloes", str(i), **HOUSE) for i in range(3)]
+    for row in few:
+        row["kind"] = "home"
+    many = [make_listing("eleiloes", str(i), **HOUSE) for i in range(photos.PHOTOS_CATCHUP_WHEN + 1)]
+    for row in many:
+        row["kind"] = "home"
+    assert photos.photos_budget(few, "ollama") == photos.PHOTOS_PER_SCAN["ollama"]
+    assert photos.photos_budget(many, "ollama") == photos.PHOTOS_CATCHUP["ollama"]
+    assert photos.photos_budget(many, "anthropic") == photos.PHOTOS_CATCHUP["anthropic"]
+    assert photos.photos_budget(many, "ollama", configured=7) == 7
+
+
+def test_check_pending_says_when_homes_wait_without_a_looker(db, monkeypatch, caplog):
+    import logging
+    upsert_listing(db, make_listing("eleiloes", "1", **HOUSE))
+    db.commit()
+    monkeypatch.setattr(photos, "make_looker", lambda cfg: None)
+    with caplog.at_level(logging.INFO):
+        assert photos.check_pending(db, {}, load_listings(db, apply_min_score=False)) == 0
+    assert any("homes waiting" in r.message for r in caplog.records)
