@@ -551,20 +551,29 @@ _STREET_START = re.compile(
     r"urbaniza[cç][aã]o|alameda|cal[cç]ada|rotunda|loteamento|lugar|"
     r"r|av|tv|lg|en|l)\b",
     re.I)
+# Trailing descriptive junk after a place name in Citius prose.
+_PLACE_STOP = re.compile(
+    r"\s+(?:constitu[ií]d|composto|composta|com a [aá]rea|confront|"
+    r"descrit|inscrit|com\s+\d)",
+    re.I)
+_LABEL_START = re.compile(r"^(?:freguesia|concelho|distrito)\b", re.I)
 
 
 def _place_name(text: str) -> str | None:
     """A place cut out of a description, or None when it is too short to be one."""
     name = text.replace(_PLACE_DOT, ".").strip(" .,;")
+    name = _PLACE_STOP.split(name, 1)[0].strip(" .,;-")
     letters = re.sub(r"[^0-9A-Za-zÀ-ÿ]", "", name)
-    if len(letters) < 3:
+    if len(letters) < 3 or len(name) > 60:
         return None
     return name
 
 
 def _plausible_place(name: str | None) -> bool:
     """True when `name` can be kept as a district, concelho or freguesia."""
-    if not name or _STREET_START.match(name):
+    if not name or _STREET_START.match(name) or _LABEL_START.match(name):
+        return False
+    if "constitu" in name.lower() or len(name) > 60:
         return False
     return _place_name(name) == name.strip()
 
@@ -574,7 +583,8 @@ def _citius_extract_location(desc: str) -> tuple[str | None, str | None, str | N
 
     Abbreviation periods stay in the name ("S. João da Pesqueira"). A street
     after "sito na …" is not stored as the concelho: distances and local prices
-    treat that field as the municipality.
+    treat that field as the municipality. "freguesia de Saboia - Odemira" is
+    parish then municipality.
     """
     if not desc:
         return None, None, None
@@ -587,6 +597,12 @@ def _citius_extract_location(desc: str) -> tuple[str | None, str | None, str | N
     freguesia = after("freguesia")
     concelho = after("concelho")
     district = after("distrito")
+    # "freguesia de Saboia - Odemira": parish left of the dash, town to the right.
+    if freguesia and " - " in freguesia and not concelho:
+        left, right = freguesia.split(" - ", 1)
+        left, right = _place_name(left), _place_name(right)
+        if left and right:
+            freguesia, concelho = left, right
     # Labelled fields can still be a street ("concelho de Rua …" is rare; the
     # old sito-fallback left "Travessa…" / "lugar de …" in the column).
     freguesia = freguesia if _plausible_place(freguesia) else None

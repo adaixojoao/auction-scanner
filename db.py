@@ -31,7 +31,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -379,9 +379,46 @@ def _migrate_v13(db: sqlite3.Connection):
                        (*args, row["id"]))
 
 
+def _migrate_v14(db: sqlite3.Connection):
+    """Clear Spain bidding-step floors that still look like bargains, and polish
+    leftover place/title junk the v13 parsers left behind."""
+    from sources.es import clear_step_min_price
+    from sources.fr import parse_licitor_list_title
+    from sources.hr import fina_place
+    from sources.pt import _plausible_place
+
+    for row in db.execute(
+            "SELECT id, price, min_price FROM listings WHERE source = 'spain' "
+            "AND price IS NOT NULL AND min_price IS NOT NULL"):
+        clear_step_min_price(db, {"id": row["id"]})
+
+    for row in db.execute(
+            "SELECT id, district, concelho, freguesia FROM listings WHERE source = 'citius'"):
+        for field in ("district", "concelho", "freguesia"):
+            val = row[field]
+            if val and not _plausible_place(val):
+                db.execute(f"UPDATE listings SET {field} = NULL WHERE id = ?", (row["id"],))
+
+    for row in db.execute(
+            "SELECT id, title, description, concelho FROM listings WHERE source = 'fina'"):
+        place = fina_place(f"{row['title'] or ''} {row['description'] or ''}")
+        if place and place != row["concelho"]:
+            db.execute("UPDATE listings SET concelho = ? WHERE id = ?", (place, row["id"]))
+        elif row["concelho"] and row["concelho"].endswith(")"):
+            db.execute("UPDATE listings SET concelho = ? WHERE id = ?",
+                       (row["concelho"].rstrip(")"), row["id"]))
+
+    for row in db.execute("SELECT id, title, concelho FROM listings WHERE source = 'france'"):
+        title, town = parse_licitor_list_title(row["title"] or "")
+        if title != (row["title"] or "") or (town and not row["concelho"]):
+            db.execute(
+                "UPDATE listings SET title = ?, concelho = COALESCE(?, concelho) WHERE id = ?",
+                (title, town, row["id"]))
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
-               11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13}
+               11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14}
 
 
 def init_db(db: sqlite3.Connection):

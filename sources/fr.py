@@ -32,11 +32,23 @@ def parse_licitor_list_title(text: str) -> tuple[str, str | None]:
     title = re.sub(r"\s+", " ", (text or "").strip())
     m = _FR_LIST_TITLE.match(title)
     if not m:
+        title = _unglue_french(title)
         return title[:120], None
     town = m.group(2).strip(" -")
     if len(re.sub(r"\W", "", town)) < 2:
-        return title[:120], None
-    return (m.group(3).strip() or title)[:120], town
+        return _unglue_french(title)[:120], None
+    return _unglue_french(m.group(3).strip() or title)[:120], town
+
+
+def _unglue_french(title: str) -> str:
+    """Insert spaces the list page left out ('habitationde', 'occupationMise')."""
+    title = re.sub(r"(habitation)(de)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(individuelle)(de)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(occupation)(Mise)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(habitation)(Mise)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(immeuble)(sur)\b", r"\1 \2", title, flags=re.I)
+    title = re.sub(r"(appartement)(de)\b", r"\1 \2", title, flags=re.I)
+    return title
 
 
 @register("france", "FR")

@@ -240,6 +240,23 @@ def _spain_parse_detail(html: str) -> dict:
     }
 
 
+def clear_step_min_price(db, row: dict) -> None:
+    """Drop a stored puja mínima that is a bidding step, not a buying price.
+
+    Updates keep the old value when the new one is missing, so €1,743 on a
+    €174,300 flat would otherwise stay and look like a bargain forever."""
+    listing_id = row.get("id")
+    if not listing_id:
+        return
+    current = db.execute(
+        "SELECT price, min_price FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if not current:
+        return
+    price, floor = current["price"], current["min_price"]
+    if price and floor and floor < 0.2 * price:
+        db.execute("UPDATE listings SET min_price = NULL WHERE id = ?", (listing_id,))
+
+
 # A BOE detail page has tabs: ver=1 general information, ver=2 the managing
 # authority (court or agency: name, address, e-mail), ver=3 the goods (address,
 # occupancy, visits). Tab numbers and labels are from the site's public layout
@@ -434,7 +451,9 @@ def enrich_spain_details(db, session, limit: int = 300):
             "district", "concelho", "freguesia", "url", "image_url", "date_end")}
         fields.update(parsed)
         fields["raw_json"] = json.dumps(raw, ensure_ascii=False)
-        upsert_listing(db, make_listing("spain", item["external_id"], "ES", **fields))
+        listing = make_listing("spain", item["external_id"], "ES", **fields)
+        upsert_listing(db, listing)
+        clear_step_min_price(db, listing)
         if parsed.get("price") is not None:
             filled += 1
         db.commit()

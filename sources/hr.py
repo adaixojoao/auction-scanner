@@ -21,8 +21,8 @@ CROATIA_PROPERTY_KW = [
 
 # "k.o. Oljasi" / "k.o. 332437, Budanica" — cadastral municipality, not the court.
 _KO_PLACE = re.compile(
-    r"k\.\s*o\.\s+(?:\d+[,\s]+)?([A-ZČĆŽŠĐ][^,;]{1,40}?)"
-    r"(?=\s*[,;]|\s+k[čc]\.?b|\s+i\s+to\b|\s+na\s+adresi|\s+u\s+naravi|\s*$)",
+    r"k\.\s*o\.\s+(?:\d+[,\s]+)?([A-ZČĆŽŠĐ][^,;(]{1,40}?)"
+    r"(?=\s*[,;(]|\s+k[čc]\.?b|\s+čkbr|\s+i\s+to\b|\s+na\s+adresi|\s+u\s+naravi|\s*$)",
     re.I,
 )
 _ODJEL_PLACE = re.compile(
@@ -37,11 +37,11 @@ def fina_place(text: str) -> str | None:
     """The cadastral municipality in a FINA description, when it names one."""
     m = _KO_PLACE.search(text or "")
     if m:
-        name = m.group(1).strip(" .")
+        name = m.group(1).strip(" .)")
         if name and not name.isdigit() and len(re.sub(r"\W", "", name)) >= 3:
             return name
     m = _ODJEL_PLACE.search(text or "")
-    return m.group(1).strip() if m else None
+    return m.group(1).strip(" .)") if m else None
 
 
 def _clear_court_district(db, row: dict) -> None:

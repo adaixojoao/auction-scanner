@@ -328,6 +328,8 @@ OWNER_DOES_NOT_WANT = {
                         area_m2=100, price=9000),
     "small plot": _ex(title="Terreno rústico", description="Junto à ribeira.", area_m2=2000, price=500),
     "small building plot": _ex(title="Lote de terreno para construção", area_m2=90, price=3000),
+    "parking": _ex(title="Lugar de aparcamento no rés-do-chão", price=2000),
+    "unclear": _ex(title="Artigo urbano 4517, sito no Montoiro", price=1372),
 }
 
 
@@ -431,8 +433,14 @@ def test_storage_rooms_and_unclear_listings():
                    title="Fracção Autómoma designada pelas letras ZB, respeitante a arrumos ao nível do sotão")
     assert property_kind(storage) == "other" and score(storage)[0] <= 35
     assert property_kind(item(title="Casa com arrumos e quintal")) == "home"
+    parking = item(source="citius", price=2000,
+                   title="Lugar de aparcamento no rés-do-chão designado pela letra P")
+    assert property_kind(parking) == "other" and score(parking)[0] <= 35
+    computer = item(source="citius", price=300,
+                    title="Um computador de marca Flaton, de cor preta, com a respetiva impressora")
+    assert property_kind(computer) == "other" and score(computer)[0] <= 35
     sc, reasons = score(item(source="citius", price=1372, title="Artigo urbano 4517, sito no Montoiro"))
-    assert "unclear what it is — check" in reasons
+    assert "unclear what it is — check" in reasons and sc <= 40
     clear, _ = score(item(source="citius", price=1372, title="Moradia sita no Montoiro"))
     assert clear > sc
 
@@ -545,6 +553,9 @@ def test_a_bid_below_the_minimum_accepted_is_judged_at_the_minimum():
     assert price_to_pay(house) == 19975
     assert price_to_pay({**house, "current_bid": 21000}) == 21000
     assert price_to_pay({**house, "current_bid": None}) == 19975
+    # Spain's "puja mínima" can be the bidding step, not a buying price.
+    assert price_to_pay({"price": 174300, "min_price": 1743, "current_bid": None}) == 174300
+    assert price_to_pay({"price": 36163, "min_price": 25000, "current_bid": None}) == 25000
     at_floor, reasons = score_detail({**house, "current_bid": 19975})
     assert score_detail(house)[0] == at_floor            # the low bid earns nothing extra
     assert not any("50%" in r for r in reasons)

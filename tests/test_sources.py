@@ -209,12 +209,15 @@ def test_fina_csv_parser():
     assert fina_place("k.o. 332437, Budanica kčbr. 1151") == "Budanica"
     assert fina_place("Zemljišnoknjižni odjel Virovitica, u zk") == "Virovitica"
     assert fina_place("k.o. 300605") is None
+    assert fina_place("zk.ul. broj 2130 k.o. Hlevnica (ranije k.o. Hlevnica), čkbr. 1244/2") == \
+        "Hlevnica"
 
 
 def test_licitor_list_title_splits_department_and_town():
     from sources.fr import parse_licitor_list_title
     title, town = parse_licitor_list_title("22PlémetUne maison d'habitationde 162,62 m²")
     assert town == "Plémet" and title.startswith("Une maison")
+    assert "habitation de" in title
     title, town = parse_licitor_list_title("59 Solesmes Une maison d'habitation de 80 m²")
     assert town == "Solesmes" and "maison" in title.lower()
     title, town = parse_licitor_list_title("72Le MansUne maison à usage d'habitation")
@@ -222,6 +225,19 @@ def test_licitor_list_title_splits_department_and_town():
     title, town = parse_licitor_list_title("59Dunkerque (Petite-Synthe)Une maison individuelle")
     assert town == "Dunkerque (Petite-Synthe)"
     assert parse_licitor_list_title("Une maison sans code") == ("Une maison sans code", None)
+
+
+def test_spain_clears_a_stored_bidding_step(db):
+    from common import make_listing, price_to_pay
+    from db import upsert_listing
+    from sources.es import clear_step_min_price
+
+    upsert_listing(db, make_listing(
+        "spain", "SUB-JA-1", "ES", title="Piso", price=174300, min_price=1743))
+    assert price_to_pay(dict(db.execute("SELECT * FROM listings WHERE id='spain:SUB-JA-1'").fetchone())) == 174300
+    clear_step_min_price(db, {"id": "spain:SUB-JA-1"})
+    row = db.execute("SELECT price, min_price FROM listings WHERE id='spain:SUB-JA-1'").fetchone()
+    assert row["price"] == 174300 and row["min_price"] is None
 
 
 def test_spain_detail_parser():
@@ -465,6 +481,10 @@ def test_citius_place_keeps_abbreviations_and_drops_streets(db):
         "Fracção sito na Travessa Quinta dos Cubos, freguesia de Oliveira do Douro"
     ) == (None, None, "Oliveira do Douro")
     assert _citius_extract_location("Prédio sito no lugar de Lage, com área de 2760 m2")[1] is None
+    assert _citius_extract_location(
+        "Prédio rústico denominado Vale Piteira sito na freguesia de Saboia - Odemira "
+        "constituido por terreno de cultura arvense com a área de 0,5 ha"
+    ) == (None, "Odemira", "Saboia")
 
     upsert_listing(db, make_listing("citius", "bad", title="Prédio sito na R. das Flores", concelho="R"))
     upsert_listing(db, make_listing("citius", "street", title="Prédio", concelho="Rua do Canto das Naves"))

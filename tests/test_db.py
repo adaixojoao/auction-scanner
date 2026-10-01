@@ -70,7 +70,7 @@ def test_place_field_repairs_run_once_on_upgrade(tmp_path):
     conn.close()
 
     conn = connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == dbmod.SCHEMA_VERSION
     got = {r["id"]: dict(r) for r in conn.execute(
         "SELECT id, title, district, concelho FROM listings")}
     assert got["servihabitat:1"]["concelho"] == "El Campo De Peñaranda"
