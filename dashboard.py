@@ -338,6 +338,7 @@ def api_listing_detail():
         "excellent": it.get("excellent"),
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),
+        "bid_cap": _bid_cap(it),
         "climate": listing_info.climate_panel(it),
         "location": {**geo.location_confidence(it), "history": history, "country": it.get("country") or "PT"},
         "how_to_find": listing_info.how_to_find(it),
@@ -562,6 +563,21 @@ def _format_amount(value) -> str:
     return format_bid(value) if value is not None else ""
 
 
+def _bid_cap(item: dict, cfg: dict | None = None) -> dict:
+    import bidcap
+    return bidcap.for_item(item, cfg or _config())
+
+
+def _record_bid_cap(item: dict, log_id: int, bid: str) -> None:
+    import bidcap
+    from letters import parse_bid
+    db = get_db()
+    try:
+        bidcap.record_offer(db, log_id, bidcap.for_item(item, _config()), parse_bid(bid))
+    finally:
+        db.close()
+
+
 def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | None = None,
                 cfg: dict | None = None) -> dict:
     import checklist
@@ -604,6 +620,7 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
         "location_gate": location_gate_applies(it),     # with /api/offers' location_gate_mode
         "checklist": {"summary": ck["summary"], "blocking_left": len(ck["blocking_left"]),
                       "concerns": len(ck["concerns"])},
+        "bid_cap": _bid_cap(it, cfg),
         "status": it.get("status"),
         "bid": (first_offer or {}).get("suggested", ""),   # online-only sales: nothing to suggest
         "contact": _contact(it, raw),
@@ -616,7 +633,10 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
                    "letter_subject": offer.get("letter_subject") or "",
                    "location_level": offer.get("location_level"),
                    "location_override": offer.get("location_override") or "",
-                   "checklist_summary": offer.get("checklist_summary") or ""}
+                   "checklist_summary": offer.get("checklist_summary") or "",
+                   "bid_cap_recommended": offer.get("bid_cap_recommended"),
+                   "bid_cap_absolute": offer.get("bid_cap_absolute"),
+                   "bid_cap_note": offer.get("bid_cap_note") or ""}
                   if offer else None),
     }
 
@@ -945,6 +965,7 @@ def api_offer_sent():
                        sent_to=data.get("to", ""), notes=data.get("notes", ""), location_override=reason)
     if is_offer:
         _record_checklist(item, log_id, ck, ck_reason)
+        _record_bid_cap(item, log_id, bid)
     return jsonify({"ok": True, "log_id": log_id})
 
 
@@ -975,6 +996,7 @@ def api_offer_email():
         return jsonify({"error": error}), 400
     if letter.is_offer:
         _record_checklist(item, log_id, ck, ck_reason)
+        _record_bid_cap(item, log_id, data.get("bid", ""))
     return jsonify({"ok": True, "log_id": log_id, "to": to})
 
 
@@ -1165,6 +1187,9 @@ EDITABLE = {
     "climate": ("bid_guardrail",),
     "location": ("gate",),
     "checklist": ("blocking",),
+    "bid_cap": ("max_all_in", "margin_pct", "contingency_pct", "rural_reserve_per_ha",
+                "rural_reserve_fixed", "require_exact", "adviser_reserve_eur",
+                "adviser_reserve_by_country"),
 }
 
 
@@ -1216,6 +1241,19 @@ def api_settings_save():
             return jsonify({"error": "checklist.blocking: route → list of that route's item keys"}), 400
     if (changes.get("location") or {}).get("gate", "warn") not in LOCATION_GATE_MODES:
         return jsonify({"error": "location.gate must be off, warn or block"}), 400
+    bid_cap = changes.get("bid_cap")
+    if bid_cap is not None:
+        nums = ("max_all_in", "margin_pct", "contingency_pct", "rural_reserve_per_ha",
+                "rural_reserve_fixed", "adviser_reserve_eur")
+        if any(k in bid_cap and (not isinstance(bid_cap[k], (int, float)) or bid_cap[k] < 0)
+               for k in nums):
+            return jsonify({"error": "bid_cap: amounts and percentages must be numbers ≥ 0"}), 400
+        if "require_exact" in bid_cap and not isinstance(bid_cap["require_exact"], bool):
+            return jsonify({"error": "bid_cap.require_exact must be true or false"}), 400
+        by = bid_cap.get("adviser_reserve_by_country")
+        if by is not None and (not isinstance(by, dict)
+                               or any(not isinstance(v, (int, float)) or v < 0 for v in by.values())):
+            return jsonify({"error": "bid_cap.adviser_reserve_by_country: country → amount ≥ 0"}), 400
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):
         return jsonify({"error": "unknown country code"}), 400

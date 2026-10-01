@@ -438,6 +438,13 @@ logged, or you give a reason, which is kept with the offer along with the
 checklist summary. "Checklist PDF" prints it. It is your own record, not legal
 advice.
 
+The **maximum bid** calculator (Listings ⓘ and Offers) turns the local median
+price (or your rural €/m² target), the taxes and fees, the renovation bands, a
+risk and climate reserve and your Settings → Maximum bid policy into a
+recommended bid and an absolute maximum, shown as a waterfall. It never changes
+an amount you type; when you send a different figure the difference is kept
+with the offer. It is an estimate from local medians, not a valuation.
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access

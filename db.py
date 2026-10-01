@@ -31,7 +31,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -302,8 +302,17 @@ def _migrate_v10(db: sqlite3.Connection):
     _add_column(db, "carta_log", "checklist_summary", "TEXT")
 
 
+def _migrate_v11(db: sqlite3.Connection):
+    """With each offer: the bid calculator's recommended and absolute figures
+    (bidcap.py), and a note when the amount you sent differed from them."""
+    _add_column(db, "carta_log", "bid_cap_recommended", "REAL")
+    _add_column(db, "carta_log", "bid_cap_absolute", "REAL")
+    _add_column(db, "carta_log", "bid_cap_note", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
-               6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10}
+               6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
+               11: _migrate_v11}
 
 
 def init_db(db: sqlite3.Connection):

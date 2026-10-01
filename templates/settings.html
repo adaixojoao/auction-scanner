@@ -122,6 +122,20 @@
   <label class="check"><input type="checkbox" id="climate_guardrail"> Lower AI-suggested bids where the climate grade is caution or poor</label>
 </div>
 
+<div class="card" id="bid_cap">
+  <h2>Maximum bid</h2>
+  <p class="small muted" style="margin-bottom:10px">The calculator on Listings and Offers works from the local median price (or your land target), the taxes and fees, the renovation bands, a risk reserve and the climate grade. It shows a recommended bid and an absolute maximum, with a waterfall of how it got there. It never changes an amount you type; when you send or log a different figure, the difference is kept with the offer. It is an estimate from local medians, not a valuation.</p>
+  <div class="form-grid">
+    <div class="field"><label>Max all-in budget (€, 0 = none)</label><input type="number" id="bc_max_all_in" min="0" step="1000"></div>
+    <div class="field"><label>Margin below value (%)</label><input type="number" id="bc_margin_pct" min="0" max="80" step="1"></div>
+    <div class="field"><label>Contingency reserve (%)</label><input type="number" id="bc_contingency_pct" min="0" max="50" step="1"></div>
+    <div class="field"><label>Lawyer / adviser reserve (€)</label><input type="number" id="bc_adviser_reserve_eur" min="0" step="100"></div>
+    <div class="field"><label>Rural reserve per hectare (€)</label><input type="number" id="bc_rural_reserve_per_ha" min="0" step="50"></div>
+    <div class="field"><label>Rural fixed reserve (€)</label><input type="number" id="bc_rural_reserve_fixed" min="0" step="100"></div>
+  </div>
+  <label class="check" style="margin-top:8px"><input type="checkbox" id="bc_require_exact"> Only show a bid cap when the location and climate data are exact</label>
+</div>
+
 <div class="card" id="checklist">
   <h2>Due-diligence checklist</h2>
   <p class="small muted" style="margin-bottom:10px">Each offer on the Offers page has a checklist for its country and way of selling. Ticked items below are <b>blocking</b>: until you mark them verified or not applicable, sending or logging an offer asks why you are going ahead, and your reason is kept with the offer. "Verified" means you checked it; the checklist is your own record, not legal advice.</p>
@@ -258,6 +272,14 @@ async function load() {
   $("ai_photo_check").checked = ai.photo_check !== false;
   $("climate_guardrail").checked = !!(c.climate || {}).bid_guardrail;
   setv("location_gate", (c.location || {}).gate || "warn");
+  const bc = c.bid_cap || {};
+  setv("bc_max_all_in", bc.max_all_in ?? 0);
+  setv("bc_margin_pct", bc.margin_pct ?? 15);
+  setv("bc_contingency_pct", bc.contingency_pct ?? 10);
+  setv("bc_adviser_reserve_eur", bc.adviser_reserve_eur ?? 1500);
+  setv("bc_rural_reserve_per_ha", bc.rural_reserve_per_ha ?? 500);
+  setv("bc_rural_reserve_fixed", bc.rural_reserve_fixed ?? 0);
+  $("bc_require_exact").checked = !!bc.require_exact;
   const ar = c.auto_requests || {};
   $("ar_enabled").checked = ar.enabled !== false;
   setv("ar_min_score", ar.min_score ?? 75);
@@ -375,6 +397,12 @@ async function save() {
     report: {desktop_copy: $("desktop_copy").checked},
     climate: {bid_guardrail: $("climate_guardrail").checked},
     location: {gate: $("location_gate").value},
+    bid_cap: {
+      max_all_in: num("bc_max_all_in") || 0, margin_pct: num("bc_margin_pct") || 0,
+      contingency_pct: num("bc_contingency_pct") || 0, adviser_reserve_eur: num("bc_adviser_reserve_eur") || 0,
+      rural_reserve_per_ha: num("bc_rural_reserve_per_ha") || 0, rural_reserve_fixed: num("bc_rural_reserve_fixed") || 0,
+      require_exact: $("bc_require_exact").checked,
+    },
     checklist: {blocking: [...document.querySelectorAll(".ck-blocking")].reduce((acc, cb) => {
       (acc[cb.dataset.route] = acc[cb.dataset.route] || []);
       if (cb.checked) acc[cb.dataset.route].push(cb.dataset.key);

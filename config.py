@@ -137,6 +137,20 @@ DEFAULTS = {
         "blocking": {},
     },
 
+    # Settings → Maximum bid: how the bid calculator (bidcap.py) plans.
+    "bid_cap": {
+        "max_all_in": 0,                 # 0 = no budget ceiling
+        "margin_pct": 15,                # recommended bid stays this % below the estimated value
+        "contingency_pct": 10,           # risk reserve as a % of the value
+        "rural_reserve_per_ha": 500,     # conservation / clearing reserve for rural land
+        "rural_reserve_fixed": 0,
+        "require_exact": False,          # no bid cap until location and climate are exact
+        "adviser_reserve_eur": 1500,     # lawyer / adviser buffer (default for every country)
+        "adviser_reserve_by_country": {  # overrides for countries that need their own lawyer
+            "FR": 3000, "DE": 2500, "IT": 2000, "NL": 2000,
+        },
+    },
+
     # CourtBid via Apify (python scraper.py --source courtbid)
     "apify_token": "",
 
