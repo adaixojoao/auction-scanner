@@ -24,6 +24,12 @@ from common import LOG, normalize
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "auction-scanner (+https://github.com/adaixojoao/auction-scanner)"
 GEOCODE_PER_SCAN = 60
+# After place-field repairs (or a long gap between scans) hundreds of board
+# listings suddenly become addressable; drain them faster so climate and water
+# can run. Still one Nominatim request a second (~3 minutes at the catch-up
+# limit).
+GEOCODE_CATCHUP = 180
+GEOCODE_CATCHUP_WHEN = 120   # pending addressable listings that trigger catch-up
 COUNTRY_CODES = {"PT": "pt", "ES": "es", "FR": "fr", "IT": "it", "NL": "nl", "DE": "de", "BE": "be",
                  "HR": "hr", "GR": "gr", "RO": "ro", "PL": "pl", "CY": "cy"}
 _STREET = re.compile(r"\b((?:Rua|Travessa|Avenida|Av\.|Largo|Estrada|Caminho|Praceta|Beco|Canada|Calçada|Alameda|"
@@ -238,10 +244,28 @@ def _should_geocode(item: dict, raw: dict) -> bool:
     return False
 
 
-def geocode_pending(db, session, items: list[dict], limit: int = GEOCODE_PER_SCAN,
+def geocode_budget(items: list[dict], limit: int | None = None) -> int:
+    """How many OpenStreetMap lookups this scan should attempt.
+
+    Steady state stays at GEOCODE_PER_SCAN. When a place-field repair or a gap
+    between scans leaves a long queue, use GEOCODE_CATCHUP so pins (and then
+    climate / water) catch up in a few scans instead of dozens."""
+    if limit is not None:
+        return limit
+    pending = 0
+    for item in items:
+        if _should_geocode(item, _raw(item)):
+            pending += 1
+            if pending > GEOCODE_CATCHUP_WHEN:
+                return GEOCODE_CATCHUP
+    return GEOCODE_PER_SCAN
+
+
+def geocode_pending(db, session, items: list[dict], limit: int | None = None,
                     towns: dict | None = None) -> int:
     """Look up the listings (best first) that have no position yet, once each
     set of address queries."""
+    limit = geocode_budget(items, limit)
     done = 0
     for item in items:
         if done >= limit:
