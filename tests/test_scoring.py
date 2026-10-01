@@ -259,6 +259,19 @@ def test_italian_condition_words_and_silent_cards():
     assert condition({"title": "Abitazione", "description": "necessita di lavori di manutenzione"}) == "some"
     assert condition({"title": "Casa", "description": "immobile degradato, in stato di degrado"}) == "some"
     assert condition({"title": "Casa", "description": "molto degradato"}) == "heavy"
+    # Live board misses (Sept/Oct 2026): plurals, "pessime condizioni", shells, collapsing.
+    assert condition({"title": "Appartamento", "description": "soppalchi non abitabili"}) == "heavy"
+    assert condition({"title": "Abitazione", "description": "in pessime condizioni di manutenzione"}) == "heavy"
+    assert condition({"title": "Rustico", "description": "immobile diruto, edificio cadente"}) == "heavy"
+    assert condition({"title": "Casa", "description": "fabbricato pericolante, in rovina"}) == "heavy"
+    assert condition({"title": "Abitazione (collabente)", "description": ""}) == "heavy"
+    assert condition({"title": "Abitazione", "description": "intera proprietà di un rustico di 121 mq"}) == "heavy"
+    assert condition({"title": "Casa", "description": "fabbricato incompiuto, non ultimato"}) == "heavy"
+    assert condition({"title": "Appartamento",
+                      "description": "Stato di manutenzione scadente. Presenza di abusi"}) == "some"
+    # "sottotetto abitabile" is a room, not proof the house is sound.
+    assert condition({"title": "Casa", "description": "con seminterrato e sottotetto abitabile"}) == "unknown"
+    assert condition({"title": "Casa", "description": "appartamento abitabile in buono stato"}) == "good"
     base = dict(source="pvp_giustizia", country="IT", title="Abitazione di tipo civile",
                 price=8000, area_m2=90, concelho="Talamona")
     silent, r_silent = score(item(**base))
