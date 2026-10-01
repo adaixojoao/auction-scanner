@@ -178,11 +178,14 @@ BPI_PAGE = """
 
 def test_bpi_cards_are_links_with_the_sites_id(db, fake_http):
     fake_http(lambda m, url, kw: FakeResponse(BPI_PAGE))
-    assert REGISTRY["bpi"].func(db, max_price=100000) == 1
-    row = rows(db, "bpi")["15590001"]                         # the "a…" ref, not a URL hash
+    # keep_over_budget: the €1.1M flat is saved too (Listings hides it until the budget rises).
+    assert REGISTRY["bpi"].func(db, max_price=100000) == 2
+    by_id = rows(db, "bpi")
+    row = by_id["15590001"]                                   # the "a…" ref, not a URL hash
     assert row["id"] == "bpi:15590001" and row["title"] == "Moradia T3"
     assert row["price"] == 85000 and row["concelho"] == "Viseu, Viseu"
     assert row["url"] == "https://bpiexpressoimobiliario.net/moradia/t3/viseu/viseu/abraveses/a15590001"
+    assert by_id["15596911"]["price"] == 1100000
 
 
 # ─── Bid Leiloeira (sale cards, value on the sale page) ─────────────

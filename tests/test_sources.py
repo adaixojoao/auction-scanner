@@ -19,7 +19,7 @@ def test_registry_is_complete():
     # (and, since Sept 2026, the ones behind a bot wall or a broken certificate)
     assert optional == {"idealista", "courtbid", "novobanco", "aeat",
                         "sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece",
-                        "veilingbiljet"}                  # the same lots as openbareverkoop.nl
+                        "veilingbiljet", "justiz_auktion"}
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
@@ -167,6 +167,68 @@ def test_cards_dedupe_and_price_from_currency(db):
         cards.make_session = orig
     row = db.execute("SELECT * FROM listings").fetchone()
     assert row["id"] == "t:555" and row["price"] == 85000   # not "2024", not €2
+
+
+def test_cards_can_keep_over_budget_listings(db):
+    """BPI-style: a small bank portal where every flat is dearer than the budget."""
+    html = """
+    <a class="announce-details" href="/apartamento/a99">
+      <span class="announce-title">T2 Lisboa</span>
+      <span class="announce-price">760.000 €</span>
+    </a>
+    """
+    site = CardSite(source="bpi", country="PT", base="https://bpi.example", path="/",
+                    card_selector="a.announce-details", title_selector=".announce-title",
+                    price_selector=".announce-price", page_param=None, id_pattern=r"/a(\d+)$",
+                    keep_over_budget=True)
+    import sources._cards as cards
+    from conftest import FakeSession
+    session = FakeSession(lambda m, u, kw: FakeResponse(html))
+    orig = cards.make_session
+    cards.make_session = lambda **k: session
+    try:
+        assert scrape_cards(db, site, max_price=100000) == 1
+    finally:
+        cards.make_session = orig
+    row = db.execute("SELECT id, price FROM listings").fetchone()
+    assert row["id"] == "bpi:99" and row["price"] == 760000
+
+
+def test_zvg_parses_aktenzeichen_blocks():
+    from sources.de import parse_zvg_results
+    html = """
+    <table>
+      <tr><td>Aktenzeichen</td><td><a href="index.php?button=showZvg&amp;zvg_id=49073&amp;land_abk=by">0009 K 0099/2024 (Detailansicht)</a></td></tr>
+      <tr><td>Amtsgericht</td><td>in Bayern</td></tr>
+      <tr><td>Objekt/Lage</td><td>Eigentumswohnung : Ortsstrasse 16, 90602 Pyrbaum</td></tr>
+      <tr><td>Verkehrswert in €</td><td>45.000,00 EUR</td></tr>
+      <tr><td>Termin</td><td>15.11.2026</td></tr>
+      <tr><td>Aktenzeichen</td><td><a href="index.php?button=showZvg&amp;zvg_id=49052&amp;land_abk=by">0004 K 0117/2024 (Detailansicht)</a></td></tr>
+      <tr><td>Amtsgericht</td><td>in Bayern</td></tr>
+      <tr><td>Objekt/Lage</td><td>Einfamilienhaus : Musterweg 1</td></tr>
+      <tr><td>Verkehrswert in €</td><td>210.000,00 EUR</td></tr>
+    </table>
+    """
+    rows = parse_zvg_results(html, "by")
+    assert len(rows) == 2
+    assert rows[0]["eid"] == "49073" and rows[0]["price"] == 45000
+    assert "Pyrbaum" in rows[0]["title"]
+    assert rows[0]["date_end"] and rows[0]["date_end"].startswith("2026-11-15")
+    assert rows[1]["eid"] == "49052" and rows[1]["price"] == 210000
+
+
+def test_poland_parses_licytacje_links():
+    from sources.pl import parse_poland_list
+    html = """
+    <a href="/licytacje/82717/nieruchomosc-gruntowa-zabudowana">stacjonarna Opublikowano:19.08.2026</a>
+    <a href="/licytacje/82717/nieruchomosc-gruntowa-zabudowana">dup</a>
+    <a href="/licytacje/83126/dzialka-zabudowana-budynkiem-mieszkalnym">dom</a>
+    <a href="/popularne-pytania">ignore</a>
+    """
+    rows = parse_poland_list(html)
+    assert [r["eid"] for r in rows] == ["82717", "83126"]
+    assert "Nieruchomosc gruntowa" in rows[0]["title"] or "nieruchomosc" in rows[0]["title"].lower()
+    assert rows[0]["url"].endswith("/licytacje/82717/nieruchomosc-gruntowa-zabudowana")
 
 
 def test_listing_id_from_url():

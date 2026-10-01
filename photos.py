@@ -30,9 +30,12 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 OLLAMA_MODEL = "qwen2.5vl:3b"       # an open vision model that fits in 6 GB of memory
 PHOTOS_PER_SCAN = {"ollama": 5, "anthropic": 20}
 # When many board homes still have photos and no answer, drain faster. Ollama
-# is slow on CPU (~1 min/image), so its catch-up stays modest; Claude can do more.
-PHOTOS_CATCHUP = {"ollama": 12, "anthropic": 60}
+# is slow on CPU (~1–3 min/home), so catch-up stays modest; Claude can do more.
+# A second, higher tier kicks in when the queue is huge (hundreds waiting).
+PHOTOS_CATCHUP = {"ollama": 18, "anthropic": 60}
+PHOTOS_CATCHUP_HARD = {"ollama": 24, "anthropic": 80}
 PHOTOS_CATCHUP_WHEN = 40            # pending homes that trigger catch-up
+PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
 MAX_PHOTOS = {"ollama": 2, "anthropic": 4}
 MAX_PHOTO_BYTES = 3_000_000
 # Gallery keys scrapers have used (and a few common alternate spellings).
@@ -126,8 +129,10 @@ def photos_budget(items: list[dict], looker_name: str, configured: int | None = 
     for item in items:
         if needs_photo_check(item):
             pending += 1
-            if pending > PHOTOS_CATCHUP_WHEN:
-                return PHOTOS_CATCHUP.get(looker_name, PHOTOS_PER_SCAN.get(looker_name, 5))
+            if pending > PHOTOS_CATCHUP_HARD_WHEN:
+                return PHOTOS_CATCHUP_HARD.get(looker_name, PHOTOS_CATCHUP.get(looker_name, 5))
+    if pending > PHOTOS_CATCHUP_WHEN:
+        return PHOTOS_CATCHUP.get(looker_name, PHOTOS_PER_SCAN.get(looker_name, 5))
     return PHOTOS_PER_SCAN.get(looker_name, 5)
 
 

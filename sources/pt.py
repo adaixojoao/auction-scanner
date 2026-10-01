@@ -1373,6 +1373,10 @@ BPI = CardSite(
     location_selector=".announce-location",
     page_param=None, id_pattern=r"/a(\d+)$",
     description="Imóvel BPI (BPI Expresso Imobiliário)", price_is_min_price=True,
+    # Stock is mostly Lisbon flats well above a typical max_price; keep them so
+    # the source is not stuck on "never worked", and Listings can show them if
+    # the budget is raised.
+    keep_over_budget=True,
 )
 
 

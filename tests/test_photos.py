@@ -137,9 +137,13 @@ def test_photos_budget_catches_up_when_the_queue_is_long():
     many = [make_listing("eleiloes", str(i), **HOUSE) for i in range(photos.PHOTOS_CATCHUP_WHEN + 1)]
     for row in many:
         row["kind"] = "home"
+    huge = [make_listing("eleiloes", str(i), **HOUSE) for i in range(photos.PHOTOS_CATCHUP_HARD_WHEN + 1)]
+    for row in huge:
+        row["kind"] = "home"
     assert photos.photos_budget(few, "ollama") == photos.PHOTOS_PER_SCAN["ollama"]
     assert photos.photos_budget(many, "ollama") == photos.PHOTOS_CATCHUP["ollama"]
     assert photos.photos_budget(many, "anthropic") == photos.PHOTOS_CATCHUP["anthropic"]
+    assert photos.photos_budget(huge, "ollama") == photos.PHOTOS_CATCHUP_HARD["ollama"]
     assert photos.photos_budget(many, "ollama", configured=7) == 7
 
 
