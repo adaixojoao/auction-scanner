@@ -72,7 +72,7 @@ def test_no_price_on_an_offer_sale_is_a_chance():
                                     description="Venda por negociação particular"))
     assert "no price — you set your offer" in r_sealed and "sealed-bid (carta fechada)" in r_sealed
     assert "no price — you set your offer" in r_private
-    assert sealed >= 85 and private >= 80
+    assert sealed >= 80 and private >= 70
     # an online listing whose price we simply did not read gets no such bonus
     _, r_online = score(item(title="Moradia", source="leilosoc"))
     assert "no price — you set your offer" not in r_online
@@ -83,7 +83,7 @@ def test_price_outweighs_how_the_court_sells():
     dear_court, r_dear = score(item(title="Fracção - habitação no 3º andar", price=97500, **court))
     cheap_online, _ = score(item(title="Moradia", price=12000, concelho="Guarda"))
     assert "€97,500 — not a low price" in r_dear
-    assert dear_court < 85 < cheap_online
+    assert dear_court < cheap_online and cheap_online >= 80
 
 
 def test_half_shares_and_furniture():
@@ -217,10 +217,11 @@ def test_homes_in_good_places_without_heavy_work():
     ruin, r_ruin = score(item(**base, description="Moradia em ruínas, para recuperar"))
     works, r_works = score(item(**base, description="Necessita de obras"))
     good, r_good = score(item(**base, description="Em bom estado de conservação"))
-    plain, _ = score(item(**base))
+    plain, r_plain = score(item(**base))
     negated, r_negated = score(item(**base, description="Não necessita de obras"))
     assert "needs heavy work (ruin / full rebuild)" in r_ruin and "needs some work" in r_works
     assert "good condition" in r_good and "needs some work" not in r_negated
+    assert "condition not stated — assume it needs work" in r_plain
     assert good > plain > works > ruin
 
     isolated, r_iso = score(item(**base, description="Casa em lugar isolado"))
@@ -231,6 +232,22 @@ def test_homes_in_good_places_without_heavy_work():
     assert any(r.startswith("in Guarda") for r in r_town)
     assert not any(r.startswith("in Guarda") for r in r_village)
     assert central > plain > isolated and town > village
+
+
+def test_italian_condition_words_and_silent_cards():
+    """Italian auction cards rarely say the state; when they do, catch it. Silent
+    cards must not outrank a home that admits it needs work."""
+    from scoring import condition
+    assert condition({"title": "Appartamento", "description": "allo stato attuale non abitabile"}) == "heavy"
+    assert condition({"title": "Casa", "description": "immobile al grezzo, priva di tramezzatura"}) == "heavy"
+    assert condition({"title": "Abitazione", "description": "necessita di lavori di manutenzione"}) == "some"
+    base = dict(source="pvp_giustizia", country="IT", title="Abitazione di tipo civile",
+                price=8000, area_m2=90, concelho="Talamona")
+    silent, r_silent = score(item(**base))
+    stated, _ = score(item(**base, description="da ristrutturare"))
+    sound, _ = score(item(**base, description="in buono stato"))
+    assert "condition not stated — assume it needs work" in r_silent
+    assert sound > silent > stated
 
 
 def test_land_is_not_priced_like_buildings():

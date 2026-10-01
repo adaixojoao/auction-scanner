@@ -34,9 +34,23 @@ RENT_FILES = {"FR": os.path.join(HERE, "data", "fr_rents.csv"),
               "ES": os.path.join(HERE, "data", "es_rents.csv")}
 
 
+# Court and bank texts often write "S. João da Pesqueira" / "Sta. Maria"; the
+# INE table and OpenStreetMap use the full word. Expand only with a period so
+# "casas grandes" is not mangled.
+_SAINT_ABBREV = (
+    (re.compile(r"\bsta\.\s*"), "santa "),
+    (re.compile(r"\bsto\.\s*"), "santo "),
+    (re.compile(r"\bs\.\s*"), "sao "),
+)
+
+
 def place_key(name: str) -> str:
-    """"Lisboa (Santa Maria Maior)" / "PORTO, Porto" / "Lagoa (Algarve)" → "lisboa" / "porto" / "lagoa"."""
-    return re.split(r"[,(/]| - ", normalize(name))[0].strip()
+    """"Lisboa (Santa Maria Maior)" / "S. João da Pesqueira" / "Lagoa (Algarve)"
+    → "lisboa" / "sao joao da pesqueira" / "lagoa"."""
+    low = normalize(name)
+    for pat, repl in _SAINT_ABBREV:
+        low = pat.sub(repl, low)
+    return re.split(r"[,(/]| - ", low)[0].strip()
 
 
 # INE marks the island municipalities: "Calheta (R.A.M.)" is Madeira's,
