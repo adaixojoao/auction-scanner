@@ -82,6 +82,26 @@ def test_place_field_repairs_run_once_on_upgrade(tmp_path):
     conn.close()
 
 
+def test_uf_parish_labels_are_rewritten_on_upgrade(tmp_path):
+    path = str(tmp_path / "uf.db")
+    conn = connect(path)
+    conn.execute("PRAGMA user_version = 14")
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO listings (id, source, country, external_id, title, freguesia, "
+        "concelho, first_seen, last_seen, is_new) VALUES (?,?,?,?,?,?,?,?,?,0)",
+        ("whitestar:1", "whitestar", "PT", "1", "Moradia",
+         "U.F. BEJA (SALVADOR E SANTA MARIA DA FEIRA)", "Beja", now, now))
+    conn.commit()
+    conn.close()
+
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == dbmod.SCHEMA_VERSION
+    assert conn.execute("SELECT freguesia FROM listings WHERE id='whitestar:1'").fetchone()[0] \
+        == "Salvador E Santa Maria Da Feira"
+    conn.close()
+
+
 def test_legacy_bad_url_is_sanitised_on_read(tmp_path):
     path = str(tmp_path / "legacy.db")
     raw = sqlite3.connect(path)

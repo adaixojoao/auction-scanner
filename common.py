@@ -134,6 +134,25 @@ def clean_text(value) -> str | None:
     return text or None
 
 
+_UF_PARISH = re.compile(r"^\s*U\.?\s*F\.?\s+(.+?)(?:\s*\(([^)]+)\))?\s*$", re.I)
+
+
+def uf_parish(name: str | None) -> str | None:
+    """Portuguese união de freguesias → a place name Nominatim can find.
+
+    Whitestar stores labels like "U.F. BEJA (SALVADOR E SANTA MARIA DA FEIRA)".
+    The "U.F." prefix is not a place; prefer the parenthetical parish list, else
+    the short name after the prefix. Leave ordinary parish names alone."""
+    text = clean_text(name)
+    if not text:
+        return None
+    m = _UF_PARISH.match(text)
+    if not m:
+        return text
+    cleaned = clean_text(m.group(2) or m.group(1))
+    return cleaned.title() if cleaned else None
+
+
 def to_number(value) -> float | None:
     if value is None or value == "":
         return None

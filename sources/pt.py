@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
-                    parse_price, safe_url, stable_id, to_number, utcnow_iso)
+                    parse_price, safe_url, stable_id, to_number, uf_parish, utcnow_iso)
 from db import upsert_listing
 from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
@@ -1089,7 +1089,7 @@ def parse_whitestar_page(html: str, max_price: float) -> list[dict]:
         description = pick(".wsi-asset-description")
         state = specs.get("Estado")
         district, concelho = (location + [None, None])[:2]
-        freguesia = ", ".join(location[2:]) or None
+        freguesia = uf_parish(", ".join(location[2:]) or None)
         rows.append(make_listing(
             "whitestar", m.group(1), "PT",
             title=", ".join(x for x in (typology, (freguesia or concelho or "").title()) if x)[:200]

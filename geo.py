@@ -19,7 +19,7 @@ import re
 import time
 import urllib.parse
 
-from common import LOG, normalize
+from common import LOG, normalize, uf_parish
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "auction-scanner (+https://github.com/adaixojoao/auction-scanner)"
@@ -162,6 +162,8 @@ def queries(item: dict) -> list[str]:
     if not town:
         return []
     parish = item.get("freguesia")
+    if parish:
+        parish = uf_parish(parish)
     if not parish or _NOT_A_PLACE.match(parish):
         m = _FREGUESIA.search(text)
         parish = m.group(1).strip() if m else None

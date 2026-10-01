@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from common import (effective_end, find_price, find_terms, make_listing, parse_date_dmy,
-                    parse_dt, parse_price, safe_url, stable_id)
+                    parse_dt, parse_price, safe_url, stable_id, uf_parish)
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -100,3 +100,17 @@ def test_dates():
 ])
 def test_find_terms_whole_words(text, term, hit):
     assert bool(find_terms(text, [term])) is hit
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("U.F. BEJA (SALVADOR E SANTA MARIA DA FEIRA)",
+     "Salvador E Santa Maria Da Feira"),
+    ("U.F. MONTALEGRE E PADROSO", "Montalegre E Padroso"),
+    ("U.F. SÃO PEDRO DO SUL, VÁRZEA E BAIÕES",
+     "São Pedro Do Sul, Várzea E Baiões"),
+    ("Ribeira das Tainhas", "Ribeira das Tainhas"),
+    (None, None),
+    ("", None),
+])
+def test_uf_parish_strips_the_label(raw, expected):
+    assert uf_parish(raw) == expected
