@@ -43,6 +43,10 @@ class CardSite:
     description: str | Callable = ""
     tipo: str = "imovel"
     price_is_min_price: bool = False
+    # When True, still save cards above max_price (Listings hides them). Use for
+    # small bank portals where every listing is dearer than the buyer's budget —
+    # otherwise the source looks "never worked" forever.
+    keep_over_budget: bool = False
     id_prefix: str | None = None              # only to keep IDs from before CardSite
     id_pattern: str | None = None             # regex on the URL; group 1 is the site's ID
 
@@ -103,7 +107,7 @@ def scrape_cards(db, site: CardSite, max_price: float) -> int:
                 price = parse_price(_text(card.select_one(site.price_selector)))
             else:
                 price = find_price(_text(card))
-            if price and price > max_price:
+            if price and price > max_price and not site.keep_over_budget:
                 continue
 
             title = _text(card.select_one(site.title_selector))[:200] or f"{site.source} #{eid}"
