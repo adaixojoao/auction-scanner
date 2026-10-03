@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 47
+    assert len(REGISTRY) == 48
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -783,3 +783,27 @@ def test_tgss_reads_the_table_adds_charges_and_drops_the_owner():
     assert listing["area_m2"] == 12089.0 and listing["concelho"] == "Vega De Pas"
     assert "12345678Z" not in listing["description"] and "NOMBRE" not in listing["description"]
     assert price_to_pay(listing) == 18863.24          # the debts stay with the land
+
+
+PISOS_CARD = """<div id="675.105" class="ad-preview ad-preview--has-desc">
+<div class="ad-preview__bottom"><div class="ad-preview__info">
+<a href="/comprar/casa_rustica-ortigueira-675_105/" class="ad-preview__title">Casa r&#xFA;stica en calle Lugar Veiga, 4</a>
+<p class="p-sm ad-preview__subtitle">Ortigueira</p>
+<p class="ad-preview__char p-sm">4 habs.</p><p class="ad-preview__char p-sm">187 m&#xB2;</p>
+<p class="ad-preview__description">Gran oportunidad en Barbos...</p></div>
+<div class="contact-box" data-ad-id="675.105" data-ad-price="40000"></div></div>
+<img src="https://fotos.imghs.net/a.jpg"></div>"""
+
+PISOS_DETAIL = """<a data-src="/mapa?latitude=43.688&amp;longitude=-7.82411&amp;zoom=17"></a>
+<div class="description__content">Gran oportunidad en Barbos, Ortigueira. Casa de 187 metros con parcela de 297 m.</div>"""
+
+
+def test_pisos_reads_cards_and_the_detail_page():
+    from sources.es import parse_pisos, pisos_cards, pisos_detail
+    cards = pisos_cards(PISOS_CARD)
+    assert len(cards) == 1 and cards[0]["price"] == 40000 and cards[0]["area"] == 187
+    row = parse_pisos(cards[0], "vivienda", "a_coruna", pisos_detail(PISOS_DETAIL))
+    assert row["id"] == "pisos:675.105" and row["district"] == "A Coruña" and row["concelho"] == "Ortigueira"
+    assert row["description"].startswith("Gran oportunidad en Barbos, Ortigueira")
+    assert '"lat": 43.688' in row["raw_json"]
+    assert row["url"] == "https://www.pisos.com/comprar/casa_rustica-ortigueira-675_105/"

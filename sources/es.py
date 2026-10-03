@@ -1063,3 +1063,115 @@ def scrape_tgss(db, max_price: float = 50000, **_):
         time.sleep(0.8)
     LOG.info(f"TGSS: {total} listings")
     return total
+
+
+# ─── pisos.com ───────────────────────────────────────────────────────
+# Private sales in the green north, like fotocasa. The search page has price,
+# size, town and the start of the text; the full text and the map position are
+# on the detail page, read once for listings not seen before.
+
+PISOS = "https://www.pisos.com"
+# Coolest and wettest first: they get the detail budget before the hot inland.
+PISOS_PROVINCES = {"a_coruna": "A Coruña", "lugo": "Lugo", "asturias": "Asturias", "cantabria": "Cantabria",
+                   "pontevedra": "Pontevedra", "vizcaya_bizkaia": "Bizkaia", "guipuzcoa_gipuzkoa": "Gipuzkoa",
+                   "navarra": "Navarra", "leon": "León", "ourense": "Ourense"}
+PISOS_SEARCHES = [("casas", "vivienda"), ("fincas_rusticas", "terreno")]
+PISOS_MAX_PAGES = 15
+PISOS_DETAILS_PER_SCAN = 400
+
+
+def pisos_cards(html: str) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    cards = []
+    for card in soup.select("div.ad-preview[id]"):
+        link = card.select_one("a.ad-preview__title")
+        box = card.select_one("[data-ad-price]")
+        if not link or not box:
+            continue
+        try:
+            price = float(box["data-ad-price"])
+        except (TypeError, ValueError):
+            continue
+        chars = [p.get_text(" ", strip=True) for p in card.select(".ad-preview__char")]
+        img = card.select_one("img[src]")
+        town = card.select_one(".ad-preview__subtitle")
+        text = card.select_one(".ad-preview__description")
+        cards.append({"id": card["id"], "title": link.get_text(" ", strip=True), "path": link["href"],
+                      "price": price, "town": town.get_text(" ", strip=True) if town else None,
+                      "area": find_area(" ".join(chars)), "excerpt": text.get_text(" ", strip=True) if text else "",
+                      "image": img["src"] if img else None})
+    return cards
+
+
+def pisos_detail(html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+    out = {}
+    body = soup.select_one(".description__content")
+    if body:
+        out["description"] = body.get_text(" ", strip=True)
+    m = re.search(r"latitude=(-?\d+\.\d+)&(?:amp;)?longitude=(-?\d+\.\d+)", html)
+    if m:
+        out["geo"] = {"lat": float(m.group(1)), "lon": float(m.group(2)), "precision": "street"}
+    return out
+
+
+def parse_pisos(card: dict, tipo: str, province: str, detail: dict | None = None) -> dict:
+    detail = detail or {}
+    raw = {"geo": detail["geo"]} if detail.get("geo") else {}
+    return make_listing(
+        "pisos", card["id"], "ES", title=card["title"], tipo=tipo,
+        description=(detail.get("description") or card["excerpt"] or "")[:3000] or None,
+        area_m2=card["area"], price=card["price"], min_price=card["price"],
+        district=PISOS_PROVINCES.get(province, province), concelho=card["town"],
+        url=f"{PISOS}{card['path']}", image_url=card["image"],
+        raw_json=json.dumps(raw) if raw else None,
+    )
+
+
+@register("pisos", "ES", description="pisos.com — private homes and rural land in the green north of Spain")
+def scrape_pisos(db, max_price: float = 50000, **_):
+    """pisos.com — private homes and rural land in the green north of Spain."""
+    session = make_session(timeout=30)
+    # Listings whose detail page was read (it holds the map position); the rest
+    # are read as the budget allows, a few hundred a scan.
+    read = {r[0] for r in db.execute(
+        """SELECT external_id FROM listings WHERE source = 'pisos' AND raw_json LIKE '%"geo"%'""")}
+    budget, total = PISOS_DETAILS_PER_SCAN, 0
+    for province in PISOS_PROVINCES:
+        for slug, tipo in PISOS_SEARCHES:
+            for page in range(1, PISOS_MAX_PAGES + 1):
+                url = f"{PISOS}/venta/{slug}-{province}/hasta-{int(max_price)}/" + (f"{page}/" if page > 1 else "")
+                try:
+                    resp = session.get(url)
+                    resp.raise_for_status()
+                except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
+                    if total == 0 and page == 1 and province == next(iter(PISOS_PROVINCES)):
+                        raise
+                    LOG.info(f"pisos.com {slug}-{province} p{page}: {type(e).__name__}")
+                    break
+                cards = pisos_cards(resp.text)
+                for card in cards:
+                    if card["price"] > max_price:
+                        continue
+                    detail = None
+                    if card["id"] not in read and budget > 0:
+                        budget -= 1
+                        try:
+                            got = session.get(f"{PISOS}{card['path']}")
+                            detail = pisos_detail(got.text) if got.ok else None
+                        except Exception:  # noqa: BLE001 — the card alone is still worth keeping
+                            detail = None
+                        time.sleep(0.5)
+                    row = parse_pisos(card, tipo, province, detail)
+                    if detail is None:
+                        row.pop("raw_json", None)          # never drop a position read earlier
+                    upsert_listing(db, row)
+                    if detail and detail.get("geo"):
+                        read.add(card["id"])
+                    total += 1
+                db.commit()
+                if len(cards) < 30 or f"/{page + 1}/" not in resp.text:
+                    break
+                time.sleep(0.8)
+    LOG.info(f"pisos.com: {total} listings")
+    return total

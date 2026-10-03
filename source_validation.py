@@ -93,6 +93,7 @@ CATALOG: dict[str, dict] = {
     "altamira": {"kind": "bank", "access": "public_html", "listing_type": "property"},
     "fotocasa": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     "tgss": {"kind": "official", "access": "public_html", "listing_type": "property"},
+    "pisos": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     # France / Italy / NL / …
     "france": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "encheres_publiques": {"kind": "official", "access": "public_html", "listing_type": "property"},
