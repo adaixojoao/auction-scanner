@@ -946,3 +946,120 @@ def scrape_fotocasa(db, max_price: float = 50000, **_):
                 time.sleep(0.8)
     LOG.info(f"Fotocasa: {total} listings")
     return total
+
+
+# ─── Seguridad Social (TGSS) ─────────────────────────────────────────
+# Property seized for social-security debts, auctioned by the Tesorería. Not in
+# the BOE portal. A three-step form kept in the session: types, area, results.
+
+TGSS = "https://w6.seg-social.es/subastas/"
+TGSS_APP = TGSS + "SubaSeControladorInter"
+TGSS_TYPES = [("EMB_TIPOBIEN", "0101"), ("EMB_TIPOBIEN", "0102")]   # rural and urban property
+TGSS_MAX_PAGES = 40
+
+
+def _euros(text: str) -> float | None:
+    m = re.search(r"([\d.]+,\d{2})", text or "")
+    return float(m.group(1).replace(".", "").replace(",", ".")) if m else None
+
+
+def tgss_rows(html: str) -> list[dict]:
+    """The results table: one dict per lot with id, address, values and date."""
+    soup = BeautifulSoup(html, "html.parser")
+    rows = []
+    for table in soup.select("div.tablas-resultados table"):
+        caption = table.caption.get_text(" ", strip=True) if table.caption else ""
+        kind = caption.split(" - ")[0].strip()
+        for tr in table.select("tbody tr"):
+            cells = tr.find_all("td")
+            link = tr.find("a", href=True)
+            m = re.search(r"EMB_ID=(\d+)", link["href"]) if link else None
+            if not m or len(cells) < 7:
+                continue
+            rows.append({"id": m.group(1), "kind": kind, "address": " ".join(link.get_text(" ", strip=True).split()),
+                         "valuation": _euros(cells[2].get_text()), "charges": _euros(cells[3].get_text()) or 0.0,
+                         "price": _euros(cells[5].get_text()), "date": cells[6].get_text(" ", strip=True)})
+    return rows
+
+
+def tgss_detail(html: str) -> dict:
+    """Description and full location from a lot's detail page."""
+    text = re.sub(r"\s+", " ", BeautifulSoup(html, "html.parser").get_text(" "))
+    out = {}
+    for key, label in (("description", r"Descripci[óo]n General del Bien:"), ("location", r"Localizaci[óo]n:")):
+        m = re.search(label + r"\s*(.+?)\s+(?:Localizaci|Subasta Fecha|Lote:|Tipo de enajenaci)", text)
+        if m:
+            out[key] = m.group(1).strip()
+    return out
+
+
+# The registry text names the owner and their ID; neither is kept.
+_TGSS_OWNER = re.compile(r"TITULARIDAD:.*?(?=\d+\s*%|PLENO DOMINIO|FINCA|URBANA|R[ÚU]STICA|$)|"
+                         r"\b(?:D\.?N\.?I\.?|N\.?I\.?F\.?|N\.?I\.?E\.?)\s*:?\s*[XYZ]?\d{7,8}\s*-?\s*[A-Z]?\b", re.I)
+_TGSS_HECTARES = re.compile(r"Superficie:\s*([\d.]+(?:,\d+)?)\s*\(hect[áa]reas\)", re.I)
+
+
+def _tgss_area(text: str) -> float | None:
+    m = _TGSS_HECTARES.search(text or "")
+    if m:
+        return round(float(m.group(1).replace(".", "").replace(",", ".")) * 10000, 1)
+    return find_area(text)
+
+
+def parse_tgss(row: dict, detail: dict) -> dict | None:
+    if not row.get("price"):
+        return None
+    place = re.search(r"\(\s*([^)]+?)\s*\)\s*$", row["address"])
+    town = place.group(1).title() if place else None
+    location = detail.get("location") or row["address"]
+    postcode = re.search(r"\((\d{5})\)\s*(.+)$", location)
+    if postcode:
+        town = postcode.group(2).strip().title()
+    rural = "stica" in row["kind"]
+    description = " · ".join(x for x in (detail.get("description"), location,
+                                         f"Tasación {row['valuation']:,.2f} €" if row.get("valuation") else None,
+                                         f"Cargas {row['charges']:,.2f} € (a cargo del comprador)"
+                                         if row.get("charges") else None,
+                                         "Subasta de la Seguridad Social") if x)
+    description = re.sub(r"\s{2,}", " ", _TGSS_OWNER.sub(" ", description)).strip()
+    raw = {"charges_eur": row["charges"]} if row.get("charges") else {}
+    return make_listing(
+        "tgss", row["id"], "ES", title=f"{row['kind']} en {town or row['address']}",
+        description=description, tipo="terreno" if rural else "vivienda",
+        area_m2=_tgss_area(description), price=row["price"], min_price=row["price"],
+        concelho=town, date_end=parse_date_dmy(row.get("date")),
+        url=f"{TGSS_APP}?opcion=13&EMB_ID={row['id']}&opcion2=1&tipoOperacion=1",
+        raw_json=json.dumps(raw) if raw else None,
+    )
+
+
+@register("tgss", "ES", description="Seguridad Social auctions of seized property (all of Spain)")
+def scrape_tgss(db, max_price: float = 50000, **_):
+    """TGSS — property seized for social-security debts, all of Spain."""
+    session = make_session(timeout=60)
+    session.get(TGSS).raise_for_status()
+    session.get(TGSS_APP, params=[("opcion", "10")] + TGSS_TYPES).raise_for_status()
+    total = 0
+    for page in range(1, TGSS_MAX_PAGES + 1):
+        params = {"opcion": "8", "tipoOperacion": "1"}
+        if page > 1:                   # the first page refuses "pagina=1"
+            params = {"pagina": page, **params}
+        resp = session.get(TGSS_APP, params=params)
+        resp.raise_for_status()
+        rows = tgss_rows(resp.text)
+        for row in rows:
+            if not row.get("price") or row["price"] + row["charges"] > max_price:
+                continue
+            detail = session.get(TGSS_APP, params={"opcion": "13", "EMB_ID": row["id"], "opcion2": "1",
+                                                   "tipoOperacion": "1"})
+            listing = parse_tgss(row, tgss_detail(detail.text) if detail.ok else {})
+            if listing:
+                upsert_listing(db, listing)
+                total += 1
+            time.sleep(0.4)
+        db.commit()
+        if len(rows) < 20:
+            break
+        time.sleep(0.8)
+    LOG.info(f"TGSS: {total} listings")
+    return total

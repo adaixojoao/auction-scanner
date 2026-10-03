@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 46
+    assert len(REGISTRY) == 47
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -759,3 +759,27 @@ def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
     sent = [json.loads(c[2]["params"]["filters"]) for c in session.calls]
     assert [(f["minPrice"], f["maxPrice"]) for f in sent[:3]] == [(0, 25000), (25000, 37500), (37500, 50000)]
     assert sent[3]["propertyType"] == ["terrain"] and sent[3]["minArea"] == 10000
+
+
+TGSS_TABLE = """<div class="tablas-resultados"><table><caption>Finca Rústica - CANTABRIA - (03/10/2026)</caption>
+<tbody><tr class="par">
+<td><a href="/subastas/SubaSeControladorInter?opcion=13&amp;EMB_ID=901&amp;opcion2=1&amp;tipoOperacion=1">YERA  (VEGA DE PAS)</a></td>
+<td>-</td><td class="moneda"> 16.863,24 &euro;</td><td class="moneda"> 2.000,00 &euro;</td><td>Lote: 1</td>
+<td class="moneda"> 16.863,24 &euro;</td><td>15/12/2026 12:00</td></tr></tbody></table></div>"""
+
+TGSS_DETAIL = """<div>Descripci&oacute;n General del Bien: Prado. TITULARIDAD: APELLIDO NOMBRE D.N.I. 12345678Z
+100 % PROPIEDAD Superficie: 1,2089 (hect&aacute;reas) Localizaci&oacute;n: YERA (39728) VEGA DE PAS
+Subasta Fecha: 15/12/2026 12:00</div>"""
+
+
+def test_tgss_reads_the_table_adds_charges_and_drops_the_owner():
+    from common import price_to_pay
+    from sources.es import parse_tgss, tgss_detail, tgss_rows
+    rows = tgss_rows(TGSS_TABLE)
+    assert rows == [{"id": "901", "kind": "Finca Rústica", "address": "YERA (VEGA DE PAS)", "valuation": 16863.24,
+                     "charges": 2000.0, "price": 16863.24, "date": "15/12/2026 12:00"}]
+    listing = parse_tgss(rows[0], tgss_detail(TGSS_DETAIL))
+    assert listing["id"] == "tgss:901" and listing["tipo"] == "terreno"
+    assert listing["area_m2"] == 12089.0 and listing["concelho"] == "Vega De Pas"
+    assert "12345678Z" not in listing["description"] and "NOMBRE" not in listing["description"]
+    assert price_to_pay(listing) == 18863.24          # the debts stay with the land
