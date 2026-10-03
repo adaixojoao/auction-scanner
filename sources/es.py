@@ -1175,3 +1175,118 @@ def scrape_pisos(db, max_price: float = 50000, **_):
                 time.sleep(0.8)
     LOG.info(f"pisos.com: {total} listings")
     return total
+
+
+# ─── thinkSPAIN ──────────────────────────────────────────────────────
+# A portal for buyers from abroad: many stone houses and fincas in Galicia and
+# Asturias listed by agencies that are on no Spanish portal we read. The search
+# page carries a schema.org ItemList (name, price, image, start of the text);
+# the full text is read from the detail page for new listings.
+
+THINKSPAIN = "https://www.thinkspain.com"
+THINKSPAIN_PROVINCES = {"a-coruna": "A Coruña", "lugo": "Lugo", "asturias": "Asturias", "cantabria": "Cantabria",
+                        "pontevedra": "Pontevedra", "leon": "León", "orense": "Ourense"}
+THINKSPAIN_MAX_PAGES = 10
+THINKSPAIN_DETAILS_PER_SCAN = 150
+_TS_NAME = re.compile(r"^(?P<what>.+?) for sale in (?P<town>.+?)(?: with .+?)? - € [\d,]+", re.I)
+
+
+def thinkspain_items(html: str) -> list[dict]:
+    m = re.search(r'id="item-list-structured-data"[^>]*>\s*(\{.*?\})\s*</script>', html, re.S)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(1))
+    except ValueError:
+        return []
+    items = []
+    for entry in data.get("itemListElement") or []:
+        item = entry.get("item") or {}
+        try:
+            price = float((item.get("offers") or {}).get("price"))
+        except (TypeError, ValueError):
+            continue
+        name = item.get("name") or ""
+        parts = _TS_NAME.match(name)
+        items.append({"id": str(item.get("productID") or ""), "name": name, "price": price,
+                      "what": parts.group("what") if parts else name, "town": parts.group("town") if parts else None,
+                      "excerpt": item.get("description") or "", "image": item.get("image"), "url": item.get("url")})
+    return [i for i in items if i["id"]]
+
+
+def thinkspain_detail(html: str) -> str | None:
+    body = BeautifulSoup(html, "html.parser").select_one("#property-description")
+    return body.get_text(" ", strip=True) if body else None
+
+
+_TS_AREA = re.compile(r"(\d{1,3}(?:[.,]\d{3})*|\d+)\s*(?:square\s+met(?:er|re)s?|sq\.?\s*m|m2|m²)\b", re.I)
+
+
+def _thinkspain_area(text: str) -> float | None:
+    """The first size given in square metres (the text is English); 10 m² or
+    less is a stray number, not a size."""
+    m = _TS_AREA.search(text or "")
+    if m:
+        value = float(re.sub(r"[.,]", "", m.group(1)))
+    else:
+        value = find_area(text) or 0
+    return value if value > 10 else None
+
+
+def parse_thinkspain(item: dict, province: str, description: str | None = None) -> dict:
+    text = description or item["excerpt"]
+    land = re.search(r"\b(?:plot|land|ruin)\b", item["what"], re.I)
+    return make_listing(
+        "thinkspain", item["id"], "ES", title=f"{item['what']} in {item['town'] or province}",
+        description=text[:3000] or None, tipo="terreno" if land else "vivienda",
+        area_m2=_thinkspain_area(text), price=item["price"], min_price=item["price"],
+        district=THINKSPAIN_PROVINCES.get(province, province), concelho=item["town"],
+        url=item["url"] or f"{THINKSPAIN}/property-for-sale/{item['id']}", image_url=item["image"],
+    )
+
+
+@register("thinkspain", "ES", description="thinkSPAIN — agency listings in Galicia, Asturias, Cantabria and León")
+def scrape_thinkspain(db, max_price: float = 50000, **_):
+    """thinkSPAIN — agency listings for buyers from abroad in the green north of Spain."""
+    session = make_session(timeout=40)
+    full = {r[0] for r in db.execute(
+        "SELECT external_id FROM listings WHERE source = 'thinkspain' AND length(description) > 400")}
+    budget, total = THINKSPAIN_DETAILS_PER_SCAN, 0
+    for province in THINKSPAIN_PROVINCES:
+        for page in range(1, THINKSPAIN_MAX_PAGES + 1):
+            params = {"maxprice": int(max_price)}
+            if page > 1:
+                params["numpag"] = page
+            try:
+                resp = session.get(f"{THINKSPAIN}/property-for-sale/{province}", params=params)
+                resp.raise_for_status()
+                resp.encoding = "utf-8"          # not declared in the headers: "€" came out as "â¬"
+            except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
+                if total == 0 and page == 1 and province == next(iter(THINKSPAIN_PROVINCES)):
+                    raise
+                LOG.info(f"thinkSPAIN {province} p{page}: {type(e).__name__}")
+                break
+            items = thinkspain_items(resp.text)
+            for item in items:
+                if item["price"] > max_price:
+                    continue
+                description = None
+                if item["id"] not in full and budget > 0:
+                    budget -= 1
+                    try:
+                        got = session.get(item["url"] or f"{THINKSPAIN}/property-for-sale/{item['id']}")
+                        got.encoding = "utf-8"
+                        description = thinkspain_detail(got.text) if got.ok else None
+                    except Exception:  # noqa: BLE001 — the search card alone is still worth keeping
+                        description = None
+                    time.sleep(1.0)
+                upsert_listing(db, parse_thinkspain(item, province, description))
+                if description and len(description) > 400:
+                    full.add(item["id"])
+                total += 1
+            db.commit()
+            if len(items) < 16:
+                break
+            time.sleep(1.5)
+    LOG.info(f"thinkSPAIN: {total} listings")
+    return total
