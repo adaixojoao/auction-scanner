@@ -184,7 +184,7 @@ def w(name: str) -> float:
 
 UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
 DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
-SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos"}
+SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 
