@@ -1133,10 +1133,12 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     return s, reasons
 
 
-# The 1-in-10-year coldest day if the AMOC collapses in a 2 °C warmer world.
-# Galicia and north Portugal: about -5 °C; Brittany -10; Limousin and Paris -18.
-AMOC_COLD_POINTS = [(-25, -15), (-15, -10), (-10, -5), (-5, 0)]
-AMOC_COLD_WARN_C = -5
+# The 1-in-10-year coldest night if the AMOC collapses in a 2 °C warmer world:
+# local cold (E-OBS + EURO-CORDEX, 12 km) plus the collapse model's change.
+# North Galician and Asturian coast about -8 °C, Lugo -10, Rennes -18, Grenoble
+# -24, Alpine villages -31 and colder. A stone house copes with -8 once a decade.
+AMOC_COLD_POINTS = [(-30, -15), (-20, -10), (-12, -4), (-8, 0)]
+AMOC_COLD_WARN_C = -10
 # April-September rain minus evaporation, change if the AMOC collapses (mm).
 # North Galician coast: +30 (cooler, less evaporation); Porto -40; Oviedo -75; the Alps -160.
 AMOC_DRY_POINTS = [(-250, -10), (-50, 0)]
