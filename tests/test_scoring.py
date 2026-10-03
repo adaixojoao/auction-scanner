@@ -717,6 +717,26 @@ def test_italian_shells_and_offices_filed_as_homes():
     assert "rejected: unfinished building" not in reasons
 
 
+def test_amoc_collapse_cold_costs_points_where_winters_would_freeze():
+    from scoring import score_detail
+    base = item(source="fotocasa", country="FR", title="Maison", price=25000, area_m2=100)
+    mild = {"amoc_cold10": {"on": 4.2, "off": -2.7}}       # Galicia
+    harsh = {"amoc_cold10": {"on": -7.6, "off": -23.6}}    # Vosges
+    sc_mild, _ = score_detail({**base, "climate": mild})
+    sc_harsh, reasons = score_detail({**base, "climate": harsh})
+    assert sc_harsh < sc_mild
+    assert any("Atlantic current collapses" in r for r in reasons)
+    off, _ = score_detail({**base, "climate": harsh}, targets={"weights": {"amoc": 0}})
+    assert off == sc_mild
+
+
+def test_amoc_collapse_drying_costs_points():
+    from scoring import score_detail
+    base = item(source="fotocasa", country="FR", title="Maison", price=25000, area_m2=100)
+    wetter, _ = score_detail({**base, "climate": {"amoc_dry_mm": 33}})      # north Galician coast
+    drier, reasons = score_detail({**base, "climate": {"amoc_dry_mm": -162}})  # Valbonnais
+    assert drier < wetter
+    assert any("water balance" in r for r in reasons)
 def test_spanish_subsidised_housing_is_skipped():
     sc, reasons = score(item(source="aliseda", country="ES", title="Vivienda en Narón", price=29750,
                              area_m2=89, description="Vivienda protegida en venta en Narón (La Coruña)."))

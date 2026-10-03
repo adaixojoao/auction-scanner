@@ -166,6 +166,7 @@ WEIGHTS = {
     "beach": "Beach",
     "transport": "Airport and train station",
     "risks": "Fire and flood risk",
+    "amoc": "Winter cold if the Atlantic current (AMOC) collapses",
     "price": "Low price",
     "sale": "How it is sold (sealed bids, forced sales, deadline)",
 }
@@ -1201,6 +1202,18 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     return s, reasons
 
 
+# The 1-in-10-year coldest night if the AMOC collapses in a 2 °C warmer world:
+# local cold (E-OBS + EURO-CORDEX, 12 km) plus the collapse model's change.
+# North Galician and Asturian coast about -8 °C, Lugo -10, Rennes -18, Grenoble
+# -24, Alpine villages -31 and colder. A stone house copes with -8 once a decade.
+AMOC_COLD_POINTS = [(-30, -15), (-20, -10), (-12, -4), (-8, 0)]
+AMOC_COLD_WARN_C = -10
+# April-September rain minus evaporation, change if the AMOC collapses (mm).
+# North Galician coast: +30 (cooler, less evaporation); Porto -40; Oviedo -75; the Alps -160.
+AMOC_DRY_POINTS = [(-250, -10), (-50, 0)]
+AMOC_DRY_WARN_MM = -50
+
+
 def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -> float:
     """Heat in 2081-2100, permanent water, water stress, fires and floods where
     the listing is (climate.for_item). From a town-level position the local
@@ -1273,6 +1286,19 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     elif flood and flood > 1 and kind != "home":
         s -= 4 * local
         reasons.append(f"floods in a 100-year flood ({flood:.1f} m)")
+    amoc = c.get("amoc_cold10") or {}
+    if amoc.get("off") is not None:
+        s += curve(amoc["off"], AMOC_COLD_POINTS) * w("amoc")
+        if amoc["off"] <= AMOC_COLD_WARN_C:
+            reasons.append(f"coldest day in 10 years {amoc['off']:.0f} °C if the Atlantic current collapses"
+                           + (f" ({amoc['on']:.0f} °C if not)" if amoc.get("on") is not None else "")
+                           + " — one model, ~200 km grid (van Westen 2025)")
+    dry = c.get("amoc_dry_mm")
+    if dry is not None:
+        s += curve(dry, AMOC_DRY_POINTS) * w("amoc")
+        if dry <= AMOC_DRY_WARN_MM:
+            reasons.append(f"summer water balance {dry:+.0f} mm if the Atlantic current collapses"
+                           " — one model, ~200 km grid (van Westen 2025)")
     return s
 
 
