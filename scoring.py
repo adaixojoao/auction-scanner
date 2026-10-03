@@ -143,6 +143,7 @@ WEIGHTS = {
     "beach": "Beach",
     "transport": "Airport and train station",
     "risks": "Fire and flood risk",
+    "amoc": "Winter cold if the Atlantic current (AMOC) collapses",
     "price": "Low price",
     "sale": "How it is sold (sealed bids, forced sales, deadline)",
 }
@@ -1132,6 +1133,12 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     return s, reasons
 
 
+# The 1-in-10-year coldest day if the AMOC collapses in a 2 °C warmer world.
+# Galicia and north Portugal: about -5 °C; Brittany -10; Limousin and Paris -18.
+AMOC_COLD_POINTS = [(-25, -15), (-15, -10), (-10, -5), (-5, 0)]
+AMOC_COLD_WARN_C = -5
+
+
 def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -> float:
     """Heat in 2081-2100, permanent water, water stress, fires and floods where
     the listing is (climate.for_item). From a town-level position the local
@@ -1204,6 +1211,13 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     elif flood and flood > 1 and kind != "home":
         s -= 4 * local
         reasons.append(f"floods in a 100-year flood ({flood:.1f} m)")
+    amoc = c.get("amoc_cold10") or {}
+    if amoc.get("off") is not None:
+        s += curve(amoc["off"], AMOC_COLD_POINTS) * w("amoc")
+        if amoc["off"] <= AMOC_COLD_WARN_C:
+            reasons.append(f"coldest day in 10 years {amoc['off']:.0f} °C if the Atlantic current collapses"
+                           + (f" ({amoc['on']:.0f} °C if not)" if amoc.get("on") is not None else "")
+                           + " — one model, ~200 km grid (van Westen 2025)")
     return s
 
 

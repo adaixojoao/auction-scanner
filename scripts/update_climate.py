@@ -325,6 +325,49 @@ def build_hot_days(data_dir: str, out_dir: str) -> None:
         print(f"hot35_{name}: {len(per_model)} models")
 
 
+AMOC_ZIP = "https://zenodo.org/records/14586440"   # van Westen & Baatsen 2025, CC-BY 4.0
+AMOC_RUNS = {"on": "CESM_0600_RCP45", "off": "CESM_1500_RCP45"}   # AMOC 15 Sv vs collapsed (6 Sv), both ~2 °C warmer
+
+
+def build_amoc(data_dir: str, out_dir: str) -> None:
+    """amoc_cold10_{on,off}.tif: the 1-in-10-year coldest day (°C) in a 2 °C
+    warmer world with the AMOC as now and collapsed (CESM, 2° grid, GRL 2025).
+    One coarse model: a stress test, smoothed to 0.25° so neighbours blend."""
+    import zipfile
+
+    import numpy as np
+    import rasterio
+    import xarray as xr
+    from rasterio.transform import from_origin
+    from scipy.interpolate import RegularGridInterpolator
+
+    archive = os.path.join(data_dir, "amoc", "amoc.zip")
+    if not os.path.exists(archive):
+        raise SystemExit(f"Download the archive from {AMOC_ZIP} to {archive} first")
+    res, lats, lons = 0.25, np.arange(27, 72.01, 0.25), np.arange(-32, 45.01, 0.25)
+    with zipfile.ZipFile(archive) as z:
+        for name, run in AMOC_RUNS.items():
+            member = next(n for n in z.namelist()
+                          if n.endswith(f"Data/{run}/Atmosphere/TEMP_2m_extremes_GEV_fit_minima.nc"))
+            target = os.path.join(data_dir, "amoc", f"{run}_minima.nc")
+            with open(target, "wb") as f:
+                f.write(z.read(member))
+            d = xr.open_dataset(target)
+            # The 10-year return level of the yearly minimum, as the paper's ReturnValue().
+            p = 0.1
+            level = d["loc"] - (d["scale"] / d["shape"]) * (1 - (-np.log(1 - p)) ** (-d["shape"]))
+            level = level.assign_coords(lon=((level.lon + 180) % 360) - 180).sortby("lon")
+            interp = RegularGridInterpolator((level.lat.values, level.lon.values), level.values.astype("float64"))
+            yy, xx = np.meshgrid(lats, lons, indexing="ij")
+            grid = interp(np.stack([yy, xx], axis=-1)).astype("float32")
+            with rasterio.open(os.path.join(out_dir, f"amoc_cold10_{name}.tif"), "w", driver="GTiff",
+                               height=grid.shape[0], width=grid.shape[1], count=1, dtype="float32",
+                               crs="EPSG:4326", nodata=np.nan, compress="deflate",
+                               transform=from_origin(lons[0] - res / 2, lats[-1] + res / 2, res, res)) as dst:
+                dst.write(grid[::-1], 1)
+            print(f"amoc_cold10_{name}: {run}")
+
+
 def main(argv=None) -> int:
     parts = (argv if argv is not None else sys.argv[1:]) or ["heat", "fire", "water"]
     data_dir = climate.data_dir()
@@ -338,6 +381,8 @@ def main(argv=None) -> int:
         build_water(data_dir, out_dir)
     if "hotdays" in parts:
         build_hot_days(data_dir, out_dir)
+    if "amoc" in parts:
+        build_amoc(data_dir, out_dir)
     if "firefuture" in parts:
         build_fire_future(data_dir, out_dir)
     with open(os.path.join(out_dir, "built.json"), "w", encoding="utf-8") as f:

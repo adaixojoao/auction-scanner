@@ -715,3 +715,16 @@ def test_italian_shells_and_offices_filed_as_homes():
     _, reasons = score_detail(dict(source="pvp", country="IT", title="Casale rustico con terreno", price=12000,
                                    area_m2=120))
     assert "rejected: unfinished building" not in reasons
+
+
+def test_amoc_collapse_cold_costs_points_where_winters_would_freeze():
+    from scoring import score_detail
+    base = item(source="fotocasa", country="FR", title="Maison", price=25000, area_m2=100)
+    mild = {"amoc_cold10": {"on": 4.2, "off": -2.7}}       # Galicia
+    harsh = {"amoc_cold10": {"on": -7.6, "off": -23.6}}    # Vosges
+    sc_mild, _ = score_detail({**base, "climate": mild})
+    sc_harsh, reasons = score_detail({**base, "climate": harsh})
+    assert sc_harsh < sc_mild
+    assert any("Atlantic current collapses" in r for r in reasons)
+    off, _ = score_detail({**base, "climate": harsh}, targets={"weights": {"amoc": 0}})
+    assert off == sc_mild
