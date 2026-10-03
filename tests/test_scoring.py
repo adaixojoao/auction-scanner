@@ -737,3 +737,7 @@ def test_amoc_collapse_drying_costs_points():
     drier, reasons = score_detail({**base, "climate": {"amoc_dry_mm": -162}})  # Valbonnais
     assert drier < wetter
     assert any("water balance" in r for r in reasons)
+def test_spanish_subsidised_housing_is_skipped():
+    sc, reasons = score(item(source="aliseda", country="ES", title="Vivienda en Narón", price=29750,
+                             area_m2=89, description="Vivienda protegida en venta en Narón (La Coruña)."))
+    assert sc == 0 and "subsidised" in reasons[0]

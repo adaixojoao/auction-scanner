@@ -388,6 +388,46 @@ def locate_towns(db, session, items: list[dict], limit: int = TOWNS_PER_SCAN) ->
     return done
 
 
+TITLE_TOWN_CONFLICT_KM = 40
+_TOWN_PATTERNS: dict = {}
+
+
+def _town_pattern(towns: dict[str, dict], country: str):
+    """One whole-word regex of the known town names of a country (cached per index)."""
+    key = (id(towns), len(towns), country)
+    if key not in _TOWN_PATTERNS:
+        import prices
+        names = {}
+        for k, t in towns.items():
+            if k.startswith(f"{country}:") and len(t.get("name") or "") >= 5:
+                names[prices.place_key(t["name"])] = t
+        alts = "|".join(sorted((re.escape(n) for n in names), key=len, reverse=True))
+        _TOWN_PATTERNS.clear()
+        _TOWN_PATTERNS[key] = (re.compile(rf"\b(?:{alts})\b") if alts else None, names)
+    return _TOWN_PATTERNS[key]
+
+
+def title_town_conflict(item: dict, towns: dict[str, dict] | None) -> dict | None:
+    """{"town", "km"} when the title names a known town far from where the listing
+    is placed (a portal that files a Covilhã house under the agency's town)."""
+    pos = _place(item, towns) if towns else None
+    if not pos or not item.get("title"):
+        return None
+    import prices
+    pattern, names = _town_pattern(towns, (item.get("country") or "PT").upper())
+    if not pattern:
+        return None
+    own = prices.place_key(municipality(item) or "")
+    for m in pattern.finditer(normalize(item["title"])):
+        town = names[m.group(0)]
+        if m.group(0) == own:
+            continue
+        km = distance_km(pos["lat"], pos["lon"], town["lat"], town["lon"])
+        if km > TITLE_TOWN_CONFLICT_KM:
+            return {"town": town["name"], "km": km}
+    return None
+
+
 def distance_to_town(item: dict, towns: dict[str, dict]) -> dict | None:
     """{"km", "town", "approx", "text"} — how far this property is from the middle of
     its town. None when either position is unknown, when the property is only
