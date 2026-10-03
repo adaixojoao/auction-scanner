@@ -88,6 +88,10 @@ ACCESS_PATTERNS = [
     "encravado", "landlocked",
 ]
 
+# Spanish social housing: only buyers who qualify, as their own home, at a capped resale price.
+SUBSIDISED_HOUSING = ["vivienda protegida", "vivienda de protección oficial", "vpo",
+                      "régimen de protección oficial", "vivienda de protección pública"]
+
 UNFINISHED_HOUSE = ["vivienda en construcción", "vivienda en construccion", "casa en construcción",
                     "obra parada", "obra sin terminar", "obra inacabada", "construção inacabada",
                     "moradia inacabada", "em construção", "maison inachevée"]
@@ -982,6 +986,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
 
     if has_term(full, USUFRUCT_PATTERNS):
         return 0.0, ["usufruct — skip"]
+
+    if has_term(full, SUBSIDISED_HOUSING):
+        return 0.0, ["subsidised housing (buyer must qualify, resale price capped) — skip"]
 
     if is_timeshare(full):
         return 0.0, ["timeshare (some weeks a year) — skip"]
