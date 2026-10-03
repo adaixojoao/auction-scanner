@@ -715,3 +715,9 @@ def test_italian_shells_and_offices_filed_as_homes():
     _, reasons = score_detail(dict(source="pvp", country="IT", title="Casale rustico con terreno", price=12000,
                                    area_m2=120))
     assert "rejected: unfinished building" not in reasons
+
+
+def test_spanish_subsidised_housing_is_skipped():
+    sc, reasons = score(item(source="aliseda", country="ES", title="Vivienda en Narón", price=29750,
+                             area_m2=89, description="Vivienda protegida en venta en Narón (La Coruña)."))
+    assert sc == 0 and "subsidised" in reasons[0]
