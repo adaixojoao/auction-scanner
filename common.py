@@ -175,9 +175,20 @@ def price_to_pay(item: dict) -> float:
     base = item.get("price") or 0
     if floor and base and floor < 0.2 * base:
         floor = 0
-    if bid:
-        return max(bid, floor)
-    return floor or base or 0
+    pay = max(bid, floor) if bid else (floor or base or 0)
+    return pay + _charges(item) if pay else pay
+
+
+def _charges(item: dict) -> float:
+    """Debts that stay with the property after the sale ("cargas" in a TGSS
+    auction): the buyer pays them on top of the bid."""
+    raw = item.get("raw_json")
+    if not raw or "charges_eur" not in raw:
+        return 0.0
+    try:
+        return float(json.loads(raw).get("charges_eur") or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def make_listing(source: str, external_id, country: str = "PT", *,
