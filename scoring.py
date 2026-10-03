@@ -38,6 +38,17 @@ _SHARE_RE = re.compile(r"(?<![\d/.])(\d{1,6})\s*/\s*(\d{1,6})(?![\d/.])")
 _HOUSE_NUMBER_RE = re.compile(r"(?:\bn\.?\s*[ºo°]|\bn[uú]mero|\bporta)\s*$", re.I)
 
 
+# A share stated as a percentage, usually only in the description.
+_PERCENT_SHARE = re.compile(
+    r"(?:\b(?:el|un|o|uma?)\s+)?\b\d{1,2}(?:[.,]\d+)?\s*%?\s+(?:del|de la|do|da|de)\s+"
+    r"(?:pleno dominio|plena propiedad|propiedad|pleno dominio|nuda propiedad|propriedade|dominio)\b"
+    r"|\bproindiviso\b|\bpro indiviso\b")
+
+
+def is_percent_share(text: str) -> bool:
+    return bool(_PERCENT_SHARE.search(normalize(text or "")))
+
+
 def is_fractional_share(title: str) -> bool:
     if has_term(title, FRAC_PATTERNS, negations=False):
         return True
@@ -76,6 +87,18 @@ ACCESS_PATTERNS = [
     "sem acesso", "acesso condicionado", "sem servidão",
     "encravado", "landlocked",
 ]
+
+# Spanish social housing: only buyers who qualify, as their own home, at a capped resale price.
+SUBSIDISED_HOUSING = ["vivienda protegida", "vivienda de protección oficial", "vpo",
+                      "régimen de protección oficial", "vivienda de protección pública"]
+
+UNFINISHED_HOUSE = ["vivienda en construcción", "vivienda en construccion", "casa en construcción",
+                    "obra parada", "obra sin terminar", "obra inacabada", "construção inacabada",
+                    "moradia inacabada", "em construção", "maison inachevée"]
+NO_VIEWING = ["sin visitas previas", "subasta fácil", "subasta facil"]
+
+NOT_A_BUILDING = ["casa movel", "casa móvel", "casa prefabricada móvil", "mobile home", "mobil-home",
+                  "mobilhome", "caravana residencial"]
 
 USUFRUCT_PATTERNS = [
     "usufruto", "usufructo", "usufruct", "nue-propri*", "nuda proprietà",
@@ -143,6 +166,7 @@ WEIGHTS = {
     "beach": "Beach",
     "transport": "Airport and train station",
     "risks": "Fire and flood risk",
+    "amoc": "Winter cold if the Atlantic current (AMOC) collapses",
     "price": "Low price",
     "sale": "How it is sold (sealed bids, forced sales, deadline)",
 }
@@ -159,6 +183,9 @@ def w(name: str) -> float:
 
 
 UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
+DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
+SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain"}
+DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
@@ -571,6 +598,19 @@ _DESC_OPENS_AS_OTHER = re.compile(
     r"(?:un[oa']? ?)?)?(?:ufficio|uffici|negozio|magazzino|capannone|laboratorio|box auto|garage|posto auto)\b")
 
 
+# Portals title everything "Casa en X" / "Maison à X"; the first words of the
+# description say what it really is. A barn, granary or bare rural plot is not a home.
+_DESC_OPENS_AS_OUTBUILDING = re.compile(
+    r"^\W*(?:se vende |vendo |a saisir \W*)?(?:une |una |un |ancienne |belle |grande |vieille )*"
+    r"(?:grange|granges|panera|horreo|hangar|ecurie|cabanon|palheiro|curral)\b"
+    r"|^\W*(?:se vende |vendo )?(?:una |la )?finca con cuadra\b")
+_DESC_OPENS_AS_FINCA = re.compile(
+    r"^\W*(?:se vende |vendo )?(?:una |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela)\b"
+    r"|^\W*(?:\W*\w+\W*){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
+_SELLS_A_PLOT = re.compile(r"\bse vende (?:una )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica)\b")
+_FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
+
+
 def property_kind(item: dict) -> str | None:
     """"home", "urban_plot", "rural_plot", "other" (shop, garage, storage…) or
     None when the listing does not say. The title and the portal's own type
@@ -607,8 +647,12 @@ def property_kind(item: dict) -> str | None:
             return "rural_plot" if area >= 5000 else "urban_plot"
         return None
 
-    if tipo in NOT_PROPERTY_TYPES or _DESC_OPENS_AS_OTHER.match(normalize(desc)):
+    ndesc = normalize(desc)
+    if tipo in NOT_PROPERTY_TYPES or _DESC_OPENS_AS_OTHER.match(ndesc) or _DESC_OPENS_AS_OUTBUILDING.match(ndesc):
         return "other"
+    if ((_DESC_OPENS_AS_FINCA.match(ndesc) or _SELLS_A_PLOT.search(ndesc[:300]))
+            and not _FINCA_WITH_HOUSE.search(ndesc[:300])):
+        return "rural_plot" if area >= 1000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
         # The portal says land (or "Lote Moradia"): a plot, whatever house word follows.
@@ -935,11 +979,17 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(likely["text"])
     kind    = property_kind(item)
 
-    if is_fractional_share(title):
+    if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
         return 0.0, ["fractional share — skip"]
+
+    if has_term(full, NOT_A_BUILDING, negations=False):
+        return 0.0, ["mobile home or caravan, not a house — skip"]
 
     if has_term(full, USUFRUCT_PATTERNS):
         return 0.0, ["usufruct — skip"]
+
+    if has_term(full, SUBSIDISED_HOUSING):
+        return 0.0, ["subsidised housing (buyer must qualify, resale price capped) — skip"]
 
     if is_timeshare(full):
         return 0.0, ["timeshare (some weeks a year) — skip"]
@@ -958,6 +1008,26 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         # the top 15 were there only because nothing could be held against them.
         caps.append(UNCHECKED_CAP)
         reasons.append("location unknown — climate not checked")
+
+    if has_term(full, UNFINISHED_HOUSE, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("house still under construction — check what is built and licensed")
+    if has_term(full, NO_VIEWING, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("auction resold by a middleman: no viewing, cash only")
+    if item.get("place_conflict"):
+        # The title names a town far from where the listing is placed: the
+        # climate and distances belong to the wrong place.
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"title names {item['place_conflict']['town']}, "
+                       f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
+    if (kind == "home" and item.get("source") in SALE_PORTALS
+            and pay and pay < DOUBTFUL_HOME_EUR and area >= 40):     # court sales do start this low
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"price doubtful (€{pay:,.0f} for a home) — probably a rent or a typo")
+    if kind in ("urban_plot", "rural_plot") and pay and area and pay / area < DOUBTFUL_LAND_EUR_M2:
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"price doubtful (€{pay:,.0f} for {_ha(area)}) — check the price and area")
 
     # Land: too small is not wanted at all.
     if kind in ("urban_plot", "rural_plot"):
@@ -1132,6 +1202,18 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     return s, reasons
 
 
+# The 1-in-10-year coldest night if the AMOC collapses in a 2 °C warmer world:
+# local cold (E-OBS + EURO-CORDEX, 12 km) plus the collapse model's change.
+# North Galician and Asturian coast about -8 °C, Lugo -10, Rennes -18, Grenoble
+# -24, Alpine villages -31 and colder. A stone house copes with -8 once a decade.
+AMOC_COLD_POINTS = [(-30, -15), (-20, -10), (-12, -4), (-8, 0)]
+AMOC_COLD_WARN_C = -10
+# April-September rain minus evaporation, change if the AMOC collapses (mm).
+# North Galician coast: +30 (cooler, less evaporation); Porto -40; Oviedo -75; the Alps -160.
+AMOC_DRY_POINTS = [(-250, -10), (-50, 0)]
+AMOC_DRY_WARN_MM = -50
+
+
 def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -> float:
     """Heat in 2081-2100, permanent water, water stress, fires and floods where
     the listing is (climate.for_item). From a town-level position the local
@@ -1204,6 +1286,19 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
     elif flood and flood > 1 and kind != "home":
         s -= 4 * local
         reasons.append(f"floods in a 100-year flood ({flood:.1f} m)")
+    amoc = c.get("amoc_cold10") or {}
+    if amoc.get("off") is not None:
+        s += curve(amoc["off"], AMOC_COLD_POINTS) * w("amoc")
+        if amoc["off"] <= AMOC_COLD_WARN_C:
+            reasons.append(f"coldest day in 10 years {amoc['off']:.0f} °C if the Atlantic current collapses"
+                           + (f" ({amoc['on']:.0f} °C if not)" if amoc.get("on") is not None else "")
+                           + " — one model, ~200 km grid (van Westen 2025)")
+    dry = c.get("amoc_dry_mm")
+    if dry is not None:
+        s += curve(dry, AMOC_DRY_POINTS) * w("amoc")
+        if dry <= AMOC_DRY_WARN_MM:
+            reasons.append(f"summer water balance {dry:+.0f} mm if the Atlantic current collapses"
+                           " — one model, ~200 km grid (van Westen 2025)")
     return s
 
 

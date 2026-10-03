@@ -244,6 +244,27 @@ def fire_danger(lat: float, lon: float) -> dict | None:
 _CACHE: dict[str, dict] = {}
 
 
+def amoc_cold(lat: float, lon: float) -> dict:
+    """The 1-in-10-year coldest day (°C) with the AMOC as now ("on") and
+    collapsed ("off"), both in a 2 °C warmer world (van Westen & Baatsen 2025,
+    one model on a ~200 km grid: a stress test, not a forecast)."""
+    model = {}
+    for name in ("on", "off"):
+        v = _sample(os.path.join(_layers(), f"amoc_cold10_{name}.tif"), lat, lon)
+        if v is not None:
+            model[name] = v
+    if len(model) < 2:
+        return {}
+    # Delta method: the model's change, added to the local 12 km cold (which
+    # knows the altitude). Without the local layer, the coarse model's own values.
+    today = _sample(os.path.join(_layers(), "cold10_today.tif"), lat, lon)
+    change = _sample(os.path.join(_layers(), "cold10_change.tif"), lat, lon)
+    local = today if today is not None and change is not None else None
+    on = today + change if local is not None else model["on"]
+    return {"on": round(on, 1), "off": round(on + model["off"] - model["on"], 1),
+            "local": local is not None}
+
+
 def assess(lat: float, lon: float) -> dict:
     key = f"{lat:.3f},{lon:.3f}"
     if key in _CACHE:
@@ -255,6 +276,12 @@ def assess(lat: float, lon: float) -> dict:
     d = hot_days(lat, lon)
     if d:
         out["hot_days"] = d
+    a = amoc_cold(lat, lon)
+    if a:
+        out["amoc_cold10"] = a
+    dry = _sample(os.path.join(_layers(), "amoc_dry_change.tif"), lat, lon)
+    if dry is not None:
+        out["amoc_dry_mm"] = round(dry)
     for name, fn in (("flood_m", flood_depth), ("water_km", permanent_water_km), ("fire", fires_near),
                      ("stress", water_stress), ("fire_danger", fire_danger)):
         try:

@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 47
+    assert len(REGISTRY) == 51
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -782,3 +782,82 @@ def test_immoweb_keeps_plain_sales_and_skips_annuities_and_options():
     assert parse_immoweb(_immoweb_ad(flags={"main": "under_option", "secondary": []}), "maison") is None
     assert parse_immoweb(_immoweb_ad(flags={"main": None, "secondary": ["life_annuity"]}), "maison") is None
     assert immoweb_results(":results='[{&quot;id&quot;:1}]'") == [{"id": 1}]
+def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
+    from sources.fr import parse_notaires
+    ad = {"annonceId": 2082120, "prixAffiche": 10000, "prixTotal": 10600, "typeBien": "MAI", "typeTransaction": "VENTE",
+          "communeNom": "Berrien", "codePostal": "29690", "departementNom": "Finistère", "surface": 30.0,
+          "surfaceTerrain": 2111, "descriptionFr": "Une ancienne maison<br>à rénover entièrement avec terrain",
+          "urlDetailAnnonceFr": "https://www.immobilier.notaires.fr/fr/annonce-immo/vente/maison/berrien-29/2082120"}
+    row = parse_notaires(ad)
+    assert row["id"] == "notaires:2082120" and row["price"] == 10600          # notary fees included
+    assert row["area_m2"] == 30 and row["concelho"] == "Berrien" and "<br>" not in row["description"]
+    assert parse_notaires({**ad, "viager": "OUI"}) is None
+    assert parse_notaires({**ad, "descriptionFr": "Sous compromis : maison"}) is None
+    land = parse_notaires({**ad, "typeBien": "TER"})
+    assert land["tipo"] == "terrain" and land["area_m2"] == 2111
+TGSS_TABLE = """<div class="tablas-resultados"><table><caption>Finca Rústica - CANTABRIA - (03/10/2026)</caption>
+<tbody><tr class="par">
+<td><a href="/subastas/SubaSeControladorInter?opcion=13&amp;EMB_ID=901&amp;opcion2=1&amp;tipoOperacion=1">YERA  (VEGA DE PAS)</a></td>
+<td>-</td><td class="moneda"> 16.863,24 &euro;</td><td class="moneda"> 2.000,00 &euro;</td><td>Lote: 1</td>
+<td class="moneda"> 16.863,24 &euro;</td><td>15/12/2026 12:00</td></tr></tbody></table></div>"""
+
+TGSS_DETAIL = """<div>Descripci&oacute;n General del Bien: Prado. TITULARIDAD: APELLIDO NOMBRE D.N.I. 12345678Z
+100 % PROPIEDAD Superficie: 1,2089 (hect&aacute;reas) Localizaci&oacute;n: YERA (39728) VEGA DE PAS
+Subasta Fecha: 15/12/2026 12:00</div>"""
+
+
+def test_tgss_reads_the_table_adds_charges_and_drops_the_owner():
+    from common import price_to_pay
+    from sources.es import parse_tgss, tgss_detail, tgss_rows
+    rows = tgss_rows(TGSS_TABLE)
+    assert rows == [{"id": "901", "kind": "Finca Rústica", "address": "YERA (VEGA DE PAS)", "valuation": 16863.24,
+                     "charges": 2000.0, "price": 16863.24, "date": "15/12/2026 12:00"}]
+    listing = parse_tgss(rows[0], tgss_detail(TGSS_DETAIL))
+    assert listing["id"] == "tgss:901" and listing["tipo"] == "terreno"
+    assert listing["area_m2"] == 12089.0 and listing["concelho"] == "Vega De Pas"
+    assert "12345678Z" not in listing["description"] and "NOMBRE" not in listing["description"]
+    assert price_to_pay(listing) == 18863.24          # the debts stay with the land
+
+
+PISOS_CARD = """<div id="675.105" class="ad-preview ad-preview--has-desc">
+<div class="ad-preview__bottom"><div class="ad-preview__info">
+<a href="/comprar/casa_rustica-ortigueira-675_105/" class="ad-preview__title">Casa r&#xFA;stica en calle Lugar Veiga, 4</a>
+<p class="p-sm ad-preview__subtitle">Ortigueira</p>
+<p class="ad-preview__char p-sm">4 habs.</p><p class="ad-preview__char p-sm">187 m&#xB2;</p>
+<p class="ad-preview__description">Gran oportunidad en Barbos...</p></div>
+<div class="contact-box" data-ad-id="675.105" data-ad-price="40000"></div></div>
+<img src="https://fotos.imghs.net/a.jpg"></div>"""
+
+PISOS_DETAIL = """<a data-src="/mapa?latitude=43.688&amp;longitude=-7.82411&amp;zoom=17"></a>
+<div class="description__content">Gran oportunidad en Barbos, Ortigueira. Casa de 187 metros con parcela de 297 m.</div>"""
+
+
+def test_pisos_reads_cards_and_the_detail_page():
+    from sources.es import parse_pisos, pisos_cards, pisos_detail
+    cards = pisos_cards(PISOS_CARD)
+    assert len(cards) == 1 and cards[0]["price"] == 40000 and cards[0]["area"] == 187
+    row = parse_pisos(cards[0], "vivienda", "a_coruna", pisos_detail(PISOS_DETAIL))
+    assert row["id"] == "pisos:675.105" and row["district"] == "A Coruña" and row["concelho"] == "Ortigueira"
+    assert row["description"].startswith("Gran oportunidad en Barbos, Ortigueira")
+    assert '"lat": 43.688' in row["raw_json"]
+    assert row["url"] == "https://www.pisos.com/comprar/casa_rustica-ortigueira-675_105/"
+
+
+THINKSPAIN_LIST = """<script id="item-list-structured-data" type="application/ld+json">
+{"@context": "http://schema.org","@type": "ItemList","itemListElement": [{"@type": "ListItem","position":1,"item":
+{"@type": "Product","name": "1 bedroom Townhouse for sale in Monforte de Lemos with garden - € 43,600 (Ref: 10009160)",
+"image": "https://cdn.thinkwebcontent.com/a.jpg","description": "A traditional Galician stone house...",
+"productID": "10009160","url": "https://www.thinkspain.com/property-for-sale/10009160",
+"offers": {"@type": "Offer","priceCurrency": "EUR","price": "43600"}}}]}
+</script>"""
+
+
+def test_thinkspain_reads_the_item_list():
+    from sources.es import parse_thinkspain, thinkspain_detail, thinkspain_items
+    items = thinkspain_items(THINKSPAIN_LIST)
+    assert len(items) == 1 and items[0]["town"] == "Monforte de Lemos" and items[0]["price"] == 43600
+    text = thinkspain_detail('<div id="property-description"><p>Stone house. Built area of 94 m2. '
+                             'The plot is 622 square meters, 2 minutes from town.</p></div>')
+    row = parse_thinkspain(items[0], "lugo", text)
+    assert row["id"] == "thinkspain:10009160" and row["district"] == "Lugo" and row["tipo"] == "vivienda"
+    assert row["title"] == "1 bedroom Townhouse in Monforte de Lemos" and row["area_m2"] == 94

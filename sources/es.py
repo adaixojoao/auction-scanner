@@ -946,3 +946,347 @@ def scrape_fotocasa(db, max_price: float = 50000, **_):
                 time.sleep(0.8)
     LOG.info(f"Fotocasa: {total} listings")
     return total
+
+
+# ─── Seguridad Social (TGSS) ─────────────────────────────────────────
+# Property seized for social-security debts, auctioned by the Tesorería. Not in
+# the BOE portal. A three-step form kept in the session: types, area, results.
+
+TGSS = "https://w6.seg-social.es/subastas/"
+TGSS_APP = TGSS + "SubaSeControladorInter"
+TGSS_TYPES = [("EMB_TIPOBIEN", "0101"), ("EMB_TIPOBIEN", "0102")]   # rural and urban property
+TGSS_MAX_PAGES = 40
+
+
+def _euros(text: str) -> float | None:
+    m = re.search(r"([\d.]+,\d{2})", text or "")
+    return float(m.group(1).replace(".", "").replace(",", ".")) if m else None
+
+
+def tgss_rows(html: str) -> list[dict]:
+    """The results table: one dict per lot with id, address, values and date."""
+    soup = BeautifulSoup(html, "html.parser")
+    rows = []
+    for table in soup.select("div.tablas-resultados table"):
+        caption = table.caption.get_text(" ", strip=True) if table.caption else ""
+        kind = caption.split(" - ")[0].strip()
+        for tr in table.select("tbody tr"):
+            cells = tr.find_all("td")
+            link = tr.find("a", href=True)
+            m = re.search(r"EMB_ID=(\d+)", link["href"]) if link else None
+            if not m or len(cells) < 7:
+                continue
+            rows.append({"id": m.group(1), "kind": kind, "address": " ".join(link.get_text(" ", strip=True).split()),
+                         "valuation": _euros(cells[2].get_text()), "charges": _euros(cells[3].get_text()) or 0.0,
+                         "price": _euros(cells[5].get_text()), "date": cells[6].get_text(" ", strip=True)})
+    return rows
+
+
+def tgss_detail(html: str) -> dict:
+    """Description and full location from a lot's detail page."""
+    text = re.sub(r"\s+", " ", BeautifulSoup(html, "html.parser").get_text(" "))
+    out = {}
+    for key, label in (("description", r"Descripci[óo]n General del Bien:"), ("location", r"Localizaci[óo]n:")):
+        m = re.search(label + r"\s*(.+?)\s+(?:Localizaci|Subasta Fecha|Lote:|Tipo de enajenaci)", text)
+        if m:
+            out[key] = m.group(1).strip()
+    return out
+
+
+# The registry text names the owner and their ID; neither is kept.
+_TGSS_OWNER = re.compile(r"TITULARIDAD:.*?(?=\d+\s*%|PLENO DOMINIO|FINCA|URBANA|R[ÚU]STICA|$)|"
+                         r"\b(?:D\.?N\.?I\.?|N\.?I\.?F\.?|N\.?I\.?E\.?)\s*:?\s*[XYZ]?\d{7,8}\s*-?\s*[A-Z]?\b", re.I)
+_TGSS_HECTARES = re.compile(r"Superficie:\s*([\d.]+(?:,\d+)?)\s*\(hect[áa]reas\)", re.I)
+
+
+def _tgss_area(text: str) -> float | None:
+    m = _TGSS_HECTARES.search(text or "")
+    if m:
+        return round(float(m.group(1).replace(".", "").replace(",", ".")) * 10000, 1)
+    return find_area(text)
+
+
+def parse_tgss(row: dict, detail: dict) -> dict | None:
+    if not row.get("price"):
+        return None
+    place = re.search(r"\(\s*([^)]+?)\s*\)\s*$", row["address"])
+    town = place.group(1).title() if place else None
+    location = detail.get("location") or row["address"]
+    postcode = re.search(r"\((\d{5})\)\s*(.+)$", location)
+    if postcode:
+        town = postcode.group(2).strip().title()
+    rural = "stica" in row["kind"]
+    description = " · ".join(x for x in (detail.get("description"), location,
+                                         f"Tasación {row['valuation']:,.2f} €" if row.get("valuation") else None,
+                                         f"Cargas {row['charges']:,.2f} € (a cargo del comprador)"
+                                         if row.get("charges") else None,
+                                         "Subasta de la Seguridad Social") if x)
+    description = re.sub(r"\s{2,}", " ", _TGSS_OWNER.sub(" ", description)).strip()
+    raw = {"charges_eur": row["charges"]} if row.get("charges") else {}
+    return make_listing(
+        "tgss", row["id"], "ES", title=f"{row['kind']} en {town or row['address']}",
+        description=description, tipo="terreno" if rural else "vivienda",
+        area_m2=_tgss_area(description), price=row["price"], min_price=row["price"],
+        concelho=town, date_end=parse_date_dmy(row.get("date")),
+        url=f"{TGSS_APP}?opcion=13&EMB_ID={row['id']}&opcion2=1&tipoOperacion=1",
+        raw_json=json.dumps(raw) if raw else None,
+    )
+
+
+@register("tgss", "ES", description="Seguridad Social auctions of seized property (all of Spain)")
+def scrape_tgss(db, max_price: float = 50000, **_):
+    """TGSS — property seized for social-security debts, all of Spain."""
+    session = make_session(timeout=60)
+    session.get(TGSS).raise_for_status()
+    session.get(TGSS_APP, params=[("opcion", "10")] + TGSS_TYPES).raise_for_status()
+    total = 0
+    for page in range(1, TGSS_MAX_PAGES + 1):
+        params = {"opcion": "8", "tipoOperacion": "1"}
+        if page > 1:                   # the first page refuses "pagina=1"
+            params = {"pagina": page, **params}
+        resp = session.get(TGSS_APP, params=params)
+        resp.raise_for_status()
+        rows = tgss_rows(resp.text)
+        for row in rows:
+            if not row.get("price") or row["price"] + row["charges"] > max_price:
+                continue
+            detail = session.get(TGSS_APP, params={"opcion": "13", "EMB_ID": row["id"], "opcion2": "1",
+                                                   "tipoOperacion": "1"})
+            listing = parse_tgss(row, tgss_detail(detail.text) if detail.ok else {})
+            if listing:
+                upsert_listing(db, listing)
+                total += 1
+            time.sleep(0.4)
+        db.commit()
+        if len(rows) < 20:
+            break
+        time.sleep(0.8)
+    LOG.info(f"TGSS: {total} listings")
+    return total
+
+
+# ─── pisos.com ───────────────────────────────────────────────────────
+# Private sales in the green north, like fotocasa. The search page has price,
+# size, town and the start of the text; the full text and the map position are
+# on the detail page, read once for listings not seen before.
+
+PISOS = "https://www.pisos.com"
+# Coolest and wettest first: they get the detail budget before the hot inland.
+PISOS_PROVINCES = {"a_coruna": "A Coruña", "lugo": "Lugo", "asturias": "Asturias", "cantabria": "Cantabria",
+                   "pontevedra": "Pontevedra", "vizcaya_bizkaia": "Bizkaia", "guipuzcoa_gipuzkoa": "Gipuzkoa",
+                   "navarra": "Navarra", "leon": "León", "ourense": "Ourense"}
+PISOS_SEARCHES = [("casas", "vivienda"), ("fincas_rusticas", "terreno")]
+PISOS_MAX_PAGES = 15
+PISOS_DETAILS_PER_SCAN = 400
+
+
+def pisos_cards(html: str) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    cards = []
+    for card in soup.select("div.ad-preview[id]"):
+        link = card.select_one("a.ad-preview__title")
+        box = card.select_one("[data-ad-price]")
+        if not link or not box:
+            continue
+        try:
+            price = float(box["data-ad-price"])
+        except (TypeError, ValueError):
+            continue
+        chars = [p.get_text(" ", strip=True) for p in card.select(".ad-preview__char")]
+        img = card.select_one("img[src]")
+        town = card.select_one(".ad-preview__subtitle")
+        text = card.select_one(".ad-preview__description")
+        cards.append({"id": card["id"], "title": link.get_text(" ", strip=True), "path": link["href"],
+                      "price": price, "town": town.get_text(" ", strip=True) if town else None,
+                      "area": find_area(" ".join(chars)), "excerpt": text.get_text(" ", strip=True) if text else "",
+                      "image": img["src"] if img else None})
+    return cards
+
+
+def pisos_detail(html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+    out = {}
+    body = soup.select_one(".description__content")
+    if body:
+        out["description"] = body.get_text(" ", strip=True)
+    m = re.search(r"latitude=(-?\d+\.\d+)&(?:amp;)?longitude=(-?\d+\.\d+)", html)
+    if m:
+        out["geo"] = {"lat": float(m.group(1)), "lon": float(m.group(2)), "precision": "street"}
+    return out
+
+
+def parse_pisos(card: dict, tipo: str, province: str, detail: dict | None = None) -> dict:
+    detail = detail or {}
+    raw = {"geo": detail["geo"]} if detail.get("geo") else {}
+    return make_listing(
+        "pisos", card["id"], "ES", title=card["title"], tipo=tipo,
+        description=(detail.get("description") or card["excerpt"] or "")[:3000] or None,
+        area_m2=card["area"], price=card["price"], min_price=card["price"],
+        district=PISOS_PROVINCES.get(province, province), concelho=card["town"],
+        url=f"{PISOS}{card['path']}", image_url=card["image"],
+        raw_json=json.dumps(raw) if raw else None,
+    )
+
+
+@register("pisos", "ES", description="pisos.com — private homes and rural land in the green north of Spain")
+def scrape_pisos(db, max_price: float = 50000, **_):
+    """pisos.com — private homes and rural land in the green north of Spain."""
+    session = make_session(timeout=30)
+    # Listings whose detail page was read (it holds the map position); the rest
+    # are read as the budget allows, a few hundred a scan.
+    read = {r[0] for r in db.execute(
+        """SELECT external_id FROM listings WHERE source = 'pisos' AND raw_json LIKE '%"geo"%'""")}
+    budget, total = PISOS_DETAILS_PER_SCAN, 0
+    for province in PISOS_PROVINCES:
+        for slug, tipo in PISOS_SEARCHES:
+            for page in range(1, PISOS_MAX_PAGES + 1):
+                url = f"{PISOS}/venta/{slug}-{province}/hasta-{int(max_price)}/" + (f"{page}/" if page > 1 else "")
+                try:
+                    resp = session.get(url)
+                    resp.raise_for_status()
+                except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
+                    if total == 0 and page == 1 and province == next(iter(PISOS_PROVINCES)):
+                        raise
+                    LOG.info(f"pisos.com {slug}-{province} p{page}: {type(e).__name__}")
+                    break
+                cards = pisos_cards(resp.text)
+                for card in cards:
+                    if card["price"] > max_price:
+                        continue
+                    detail = None
+                    if card["id"] not in read and budget > 0:
+                        budget -= 1
+                        try:
+                            got = session.get(f"{PISOS}{card['path']}")
+                            detail = pisos_detail(got.text) if got.ok else None
+                        except Exception:  # noqa: BLE001 — the card alone is still worth keeping
+                            detail = None
+                        time.sleep(0.5)
+                    row = parse_pisos(card, tipo, province, detail)
+                    if detail is None:
+                        row.pop("raw_json", None)          # never drop a position read earlier
+                    upsert_listing(db, row)
+                    if detail and detail.get("geo"):
+                        read.add(card["id"])
+                    total += 1
+                db.commit()
+                if len(cards) < 30 or f"/{page + 1}/" not in resp.text:
+                    break
+                time.sleep(0.8)
+    LOG.info(f"pisos.com: {total} listings")
+    return total
+
+
+# ─── thinkSPAIN ──────────────────────────────────────────────────────
+# A portal for buyers from abroad: many stone houses and fincas in Galicia and
+# Asturias listed by agencies that are on no Spanish portal we read. The search
+# page carries a schema.org ItemList (name, price, image, start of the text);
+# the full text is read from the detail page for new listings.
+
+THINKSPAIN = "https://www.thinkspain.com"
+THINKSPAIN_PROVINCES = {"a-coruna": "A Coruña", "lugo": "Lugo", "asturias": "Asturias", "cantabria": "Cantabria",
+                        "pontevedra": "Pontevedra", "leon": "León", "orense": "Ourense"}
+THINKSPAIN_MAX_PAGES = 10
+THINKSPAIN_DETAILS_PER_SCAN = 150
+_TS_NAME = re.compile(r"^(?P<what>.+?) for sale in (?P<town>.+?)(?: with .+?)? - € [\d,]+", re.I)
+
+
+def thinkspain_items(html: str) -> list[dict]:
+    m = re.search(r'id="item-list-structured-data"[^>]*>\s*(\{.*?\})\s*</script>', html, re.S)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(1))
+    except ValueError:
+        return []
+    items = []
+    for entry in data.get("itemListElement") or []:
+        item = entry.get("item") or {}
+        try:
+            price = float((item.get("offers") or {}).get("price"))
+        except (TypeError, ValueError):
+            continue
+        name = item.get("name") or ""
+        parts = _TS_NAME.match(name)
+        items.append({"id": str(item.get("productID") or ""), "name": name, "price": price,
+                      "what": parts.group("what") if parts else name, "town": parts.group("town") if parts else None,
+                      "excerpt": item.get("description") or "", "image": item.get("image"), "url": item.get("url")})
+    return [i for i in items if i["id"]]
+
+
+def thinkspain_detail(html: str) -> str | None:
+    body = BeautifulSoup(html, "html.parser").select_one("#property-description")
+    return body.get_text(" ", strip=True) if body else None
+
+
+_TS_AREA = re.compile(r"(\d{1,3}(?:[.,]\d{3})*|\d+)\s*(?:square\s+met(?:er|re)s?|sq\.?\s*m|m2|m²)\b", re.I)
+
+
+def _thinkspain_area(text: str) -> float | None:
+    """The first size given in square metres (the text is English); 10 m² or
+    less is a stray number, not a size."""
+    m = _TS_AREA.search(text or "")
+    if m:
+        value = float(re.sub(r"[.,]", "", m.group(1)))
+    else:
+        value = find_area(text) or 0
+    return value if value > 10 else None
+
+
+def parse_thinkspain(item: dict, province: str, description: str | None = None) -> dict:
+    text = description or item["excerpt"]
+    land = re.search(r"\b(?:plot|land|ruin)\b", item["what"], re.I)
+    return make_listing(
+        "thinkspain", item["id"], "ES", title=f"{item['what']} in {item['town'] or province}",
+        description=text[:3000] or None, tipo="terreno" if land else "vivienda",
+        area_m2=_thinkspain_area(text), price=item["price"], min_price=item["price"],
+        district=THINKSPAIN_PROVINCES.get(province, province), concelho=item["town"],
+        url=item["url"] or f"{THINKSPAIN}/property-for-sale/{item['id']}", image_url=item["image"],
+    )
+
+
+@register("thinkspain", "ES", description="thinkSPAIN — agency listings in Galicia, Asturias, Cantabria and León")
+def scrape_thinkspain(db, max_price: float = 50000, **_):
+    """thinkSPAIN — agency listings for buyers from abroad in the green north of Spain."""
+    session = make_session(timeout=40)
+    full = {r[0] for r in db.execute(
+        "SELECT external_id FROM listings WHERE source = 'thinkspain' AND length(description) > 400")}
+    budget, total = THINKSPAIN_DETAILS_PER_SCAN, 0
+    for province in THINKSPAIN_PROVINCES:
+        for page in range(1, THINKSPAIN_MAX_PAGES + 1):
+            params = {"maxprice": int(max_price)}
+            if page > 1:
+                params["numpag"] = page
+            try:
+                resp = session.get(f"{THINKSPAIN}/property-for-sale/{province}", params=params)
+                resp.raise_for_status()
+                resp.encoding = "utf-8"          # not declared in the headers: "€" came out as "â¬"
+            except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
+                if total == 0 and page == 1 and province == next(iter(THINKSPAIN_PROVINCES)):
+                    raise
+                LOG.info(f"thinkSPAIN {province} p{page}: {type(e).__name__}")
+                break
+            items = thinkspain_items(resp.text)
+            for item in items:
+                if item["price"] > max_price:
+                    continue
+                description = None
+                if item["id"] not in full and budget > 0:
+                    budget -= 1
+                    try:
+                        got = session.get(item["url"] or f"{THINKSPAIN}/property-for-sale/{item['id']}")
+                        got.encoding = "utf-8"
+                        description = thinkspain_detail(got.text) if got.ok else None
+                    except Exception:  # noqa: BLE001 — the search card alone is still worth keeping
+                        description = None
+                    time.sleep(1.0)
+                upsert_listing(db, parse_thinkspain(item, province, description))
+                if description and len(description) > 400:
+                    full.add(item["id"])
+                total += 1
+            db.commit()
+            if len(items) < 16:
+                break
+            time.sleep(1.5)
+    LOG.info(f"thinkSPAIN: {total} listings")
+    return total
