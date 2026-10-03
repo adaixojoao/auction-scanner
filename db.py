@@ -550,6 +550,40 @@ def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: st
 RELISTING_SOURCES = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain"}
 
 
+TWIN_UNIT_TOLERANCE = 0.10
+TWIN_UNIT_OPENING = 80    # characters of description that must match: portals title by town only
+
+
+def _twin_units(rows, dup_of: dict) -> list[list]:
+    """Groups of rows from one source with the same title, place and opening words whose price
+    and size differ by at most 10%: the floors of one building in a court sale,
+    the flats of one promotion. Rows already flagged are left out."""
+    by_title: dict[tuple, list] = defaultdict(list)
+    for r in rows:
+        if r["id"] not in dup_of and r["title"]:
+            opening = normalize(r["description"] or "")[:TWIN_UNIT_OPENING].strip()
+            by_title[(r["source"], normalize(r["concelho"]).strip(), normalize(r["title"]).strip(),
+                      opening)].append(r)
+    groups = []
+    for same in by_title.values():
+        if len(same) < 2:
+            continue
+        same.sort(key=lambda r: r["price"])
+        group = [same[0]]
+        for r in same[1:]:
+            base = group[0]
+            if (r["price"] <= base["price"] * (1 + TWIN_UNIT_TOLERANCE)
+                    and abs(r["area_m2"] - base["area_m2"]) <= base["area_m2"] * TWIN_UNIT_TOLERANCE):
+                group.append(r)
+            else:
+                if len(group) > 1:
+                    groups.append(group)
+                group = [r]
+        if len(group) > 1:
+            groups.append(group)
+    return groups
+
+
 def mark_duplicates(db: sqlite3.Connection) -> int:
     """Flag cross-source near-duplicates (same country + concelho, price within
     €500, area within 5 m²). The most complete row stays visible; the others get
@@ -580,13 +614,22 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                     continue
                 if other["source"] == keeper["source"]:
                     # Portals re-post the same house under a new id: the same price
-                    # and size there is the same house. Courts sell twin lots.
-                    if not (keeper["source"] in RELISTING_SOURCES and other["price"] == keeper["price"]
+                    # and size there is the same house.
+                    if (keeper["source"] in RELISTING_SOURCES and other["price"] == keeper["price"]
                             and other["area_m2"] == keeper["area_m2"]):
-                        continue
+                        dup_of[other["id"]] = keeper["id"]
+                    continue
                 if (abs(other["price"] - keeper["price"]) < 500
                         and abs(other["area_m2"] - keeper["area_m2"]) < 5):
                     dup_of[other["id"]] = keeper["id"]
+
+    # Flats of one building or promotion (same source, same title, price and
+    # size within 10%): one choice, so only the cheapest stays visible.
+    for group in _twin_units(rows, dup_of):
+        cheapest = min(group, key=lambda r: (r["price"], r["id"]))
+        for r in group:
+            if r["id"] != cheapest["id"]:
+                dup_of[r["id"]] = cheapest["id"]
 
     # A Citius sale joined to its e-leilões auction (links.py) is one sale.
     from links import linked_pairs
@@ -890,6 +933,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["earlier_round"] = rounds.earlier_round(item, cases, now)
         item["case_land"] = rounds.land_in_case(item, cases, now, property_kind)
         item["town_distance"] = geo.distance_to_town(item, towns) if towns else None
+        item["place_conflict"] = geo.title_town_conflict(item, towns) if towns else None
         item["beach"] = geo.nearest_beach(item, towns=towns)
         item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
         item["station"] = geo.nearest_hub(item, "station", towns=towns)
