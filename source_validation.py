@@ -112,6 +112,7 @@ CATALOG: dict[str, dict] = {
     "justiz_auktion": {"kind": "official", "access": "public_html", "listing_type": "property",
                        "limitation": "No property category left; surplus goods only — off by default"},
     "zvg_de": {"kind": "official", "access": "public_html", "listing_type": "property"},
+    "immoweb": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     "biddit": {"kind": "official", "access": "blocked", "listing_type": "property",
                "limitation": "On request; access often restricted"},
     "poland": {"kind": "official", "access": "public_html", "listing_type": "property",

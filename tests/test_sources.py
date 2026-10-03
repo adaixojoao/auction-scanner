@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 46
+    assert len(REGISTRY) == 47
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -23,7 +23,7 @@ def test_registry_is_complete():
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"BE", "CY", "GR", "RO"} | {"EU"}
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY", "GR", "RO"} | {"EU"}
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name
@@ -759,3 +759,26 @@ def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
     sent = [json.loads(c[2]["params"]["filters"]) for c in session.calls]
     assert [(f["minPrice"], f["maxPrice"]) for f in sent[:3]] == [(0, 25000), (25000, 37500), (37500, 50000)]
     assert sent[3]["propertyType"] == ["terrain"] and sent[3]["minArea"] == 10000
+
+
+def _immoweb_ad(**over):
+    ad = {"id": 21881855, "flags": {"main": None, "secondary": []},
+          "property": {"type": "HOUSE", "subtype": "HOUSE", "title": "Maison à rénover", "netHabitableSurface": 120,
+                       "landSurface": 400, "salesPitch": {"fr": "Avec jardin"},
+                       "location": {"province": "Hainaut", "locality": "Hollain", "postalCode": "7620",
+                                    "latitude": 50.54, "longitude": 3.42}},
+          "transaction": {"certificate": "G"}, "price": {"type": "residential_sale", "mainValue": 45000}}
+    ad.update(over)
+    return ad
+
+
+def test_immoweb_keeps_plain_sales_and_skips_annuities_and_options():
+    from sources.be import immoweb_results, parse_immoweb
+    row = parse_immoweb(_immoweb_ad(), "maison")
+    assert row["id"] == "immoweb:21881855" and row["price"] == 45000 and row["area_m2"] == 120
+    assert row["title"] == "Maison à Hollain (7620)" and "Avec jardin" in row["description"]
+    assert '"lat": 50.54' in row["raw_json"] and row["url"].endswith("/fr/annonce/21881855")
+    assert parse_immoweb(_immoweb_ad(price={"type": "annuity_monthly_amount", "mainValue": 400}), "maison") is None
+    assert parse_immoweb(_immoweb_ad(flags={"main": "under_option", "secondary": []}), "maison") is None
+    assert parse_immoweb(_immoweb_ad(flags={"main": None, "secondary": ["life_annuity"]}), "maison") is None
+    assert immoweb_results(":results='[{&quot;id&quot;:1}]'") == [{"id": 1}]
