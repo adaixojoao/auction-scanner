@@ -728,3 +728,12 @@ def test_amoc_collapse_cold_costs_points_where_winters_would_freeze():
     assert any("Atlantic current collapses" in r for r in reasons)
     off, _ = score_detail({**base, "climate": harsh}, targets={"weights": {"amoc": 0}})
     assert off == sc_mild
+
+
+def test_amoc_collapse_drying_costs_points():
+    from scoring import score_detail
+    base = item(source="fotocasa", country="FR", title="Maison", price=25000, area_m2=100)
+    wetter, _ = score_detail({**base, "climate": {"amoc_dry_mm": 33}})      # north Galician coast
+    drier, reasons = score_detail({**base, "climate": {"amoc_dry_mm": -162}})  # Valbonnais
+    assert drier < wetter
+    assert any("water balance" in r for r in reasons)

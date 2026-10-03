@@ -1137,6 +1137,10 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
 # Galicia and north Portugal: about -5 °C; Brittany -10; Limousin and Paris -18.
 AMOC_COLD_POINTS = [(-25, -15), (-15, -10), (-10, -5), (-5, 0)]
 AMOC_COLD_WARN_C = -5
+# April-September rain minus evaporation, change if the AMOC collapses (mm).
+# North Galician coast: +30 (cooler, less evaporation); Porto -40; Oviedo -75; the Alps -160.
+AMOC_DRY_POINTS = [(-250, -10), (-50, 0)]
+AMOC_DRY_WARN_MM = -50
 
 
 def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -> float:
@@ -1218,6 +1222,12 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float]) -
             reasons.append(f"coldest day in 10 years {amoc['off']:.0f} °C if the Atlantic current collapses"
                            + (f" ({amoc['on']:.0f} °C if not)" if amoc.get("on") is not None else "")
                            + " — one model, ~200 km grid (van Westen 2025)")
+    dry = c.get("amoc_dry_mm")
+    if dry is not None:
+        s += curve(dry, AMOC_DRY_POINTS) * w("amoc")
+        if dry <= AMOC_DRY_WARN_MM:
+            reasons.append(f"summer water balance {dry:+.0f} mm if the Atlantic current collapses"
+                           " — one model, ~200 km grid (van Westen 2025)")
     return s
 
 
