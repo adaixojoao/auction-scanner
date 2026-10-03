@@ -49,3 +49,39 @@ def test_title_town_far_from_the_pin_is_flagged():
     sc, reasons = score_detail({**item(country="PT", price=17500, area_m2=84,
                                        title=listing["title"]), "place_conflict": found})
     assert sc <= UNCHECKED_CAP and any("check the location" in r for r in reasons)
+
+
+def test_share_in_the_description_is_skipped():
+    for desc in ("A la venta el 12,5 del pleno dominio de un piso de 87 m² ubicado en Ferrol",
+                 "PROINDIVISO: 66,67% de titularidad. A Pedreira-O Val, Narón"):
+        sc, reasons = score_detail(item(title="Vivienda en Ferrol", price=19000, area_m2=87, description=desc))
+        assert sc == 0 and "fractional" in reasons[0], desc
+
+
+def test_mobile_home_is_skipped():
+    sc, reasons = score_detail(item(source="imovirtual", country="PT", title="Casa movel T3 mais fossa 2000lt",
+                                    price=16000, area_m2=80))
+    assert sc == 0 and "mobile home" in reasons[0]
+
+
+def test_unfinished_house_and_blind_auction_are_capped():
+    sc, reasons = score_detail(item(title="Casa en Cariño", price=17000, area_m2=190,
+                                    description="- - VIVIENDA EN CONSTRUCCIÓN - - . Vivienda en construcción."))
+    assert sc <= UNCHECKED_CAP and any("under construction" in r for r in reasons)
+    sc, reasons = score_detail(item(title="Vivienda en Vigo", price=28000, area_m2=84,
+                                    description="La compra de inmuebles en subasta se realiza SIN VISITAS PREVIAS"))
+    assert sc <= UNCHECKED_CAP and any("middleman" in r for r in reasons)
+
+
+def test_plot_and_stable_under_a_house_title_are_not_homes():
+    assert property_kind(item(title="Casa en Santoña", tipo="house",
+                              description="¡Tu refugio privado en el Monte de Santoña! Parcela con infinitas "
+                                          "posibilidades. Se vende preciosa parcela rústica de 1.747 m²")) == "rural_plot"
+    assert property_kind(item(title="Casa en Corvera", tipo="house", area_m2=2320,
+                              description="Finca de recreo en Cancienes, con 2320 m²")) == "rural_plot"
+    assert property_kind(item(title="Vivienda en Aller", tipo="house",
+                              description="Se vende finca con cuadra de dos plantas")) == "other"
+    # A traditional house that also has a stable and a hórreo stays a home.
+    assert property_kind(item(title="Casa en Valdés - Luarca", tipo="house",
+                              description="Se vende casa tradicional asturiana con cuadra, pajar grande, hórreo, "
+                                          "finca de unos 1000 metros cuadrados y manantial propio.")) == "home"

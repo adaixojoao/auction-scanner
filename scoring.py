@@ -38,6 +38,17 @@ _SHARE_RE = re.compile(r"(?<![\d/.])(\d{1,6})\s*/\s*(\d{1,6})(?![\d/.])")
 _HOUSE_NUMBER_RE = re.compile(r"(?:\bn\.?\s*[ºo°]|\bn[uú]mero|\bporta)\s*$", re.I)
 
 
+# A share stated as a percentage, usually only in the description.
+_PERCENT_SHARE = re.compile(
+    r"(?:\b(?:el|un|o|uma?)\s+)?\b\d{1,2}(?:[.,]\d+)?\s*%?\s+(?:del|de la|do|da|de)\s+"
+    r"(?:pleno dominio|plena propiedad|propiedad|pleno dominio|nuda propiedad|propriedade|dominio)\b"
+    r"|\bproindiviso\b|\bpro indiviso\b")
+
+
+def is_percent_share(text: str) -> bool:
+    return bool(_PERCENT_SHARE.search(normalize(text or "")))
+
+
 def is_fractional_share(title: str) -> bool:
     if has_term(title, FRAC_PATTERNS, negations=False):
         return True
@@ -76,6 +87,14 @@ ACCESS_PATTERNS = [
     "sem acesso", "acesso condicionado", "sem servidão",
     "encravado", "landlocked",
 ]
+
+UNFINISHED_HOUSE = ["vivienda en construcción", "vivienda en construccion", "casa en construcción",
+                    "obra parada", "obra sin terminar", "obra inacabada", "construção inacabada",
+                    "moradia inacabada", "em construção", "maison inachevée"]
+NO_VIEWING = ["sin visitas previas", "subasta fácil", "subasta facil"]
+
+NOT_A_BUILDING = ["casa movel", "casa móvel", "casa prefabricada móvil", "mobile home", "mobil-home",
+                  "mobilhome", "caravana residencial"]
 
 USUFRUCT_PATTERNS = [
     "usufruto", "usufructo", "usufruct", "nue-propri*", "nuda proprietà",
@@ -578,8 +597,12 @@ _DESC_OPENS_AS_OTHER = re.compile(
 # description say what it really is. A barn, granary or bare rural plot is not a home.
 _DESC_OPENS_AS_OUTBUILDING = re.compile(
     r"^\W*(?:se vende |vendo |a saisir \W*)?(?:une |una |un |ancienne |belle |grande |vieille )*"
-    r"(?:grange|granges|panera|horreo|hangar|ecurie|cabanon|palheiro|curral)\b")
-_DESC_OPENS_AS_FINCA = re.compile(r"^\W*(?:se vende |vendo )?(?:una |gran |bonita )*finca rustica\b")
+    r"(?:grange|granges|panera|horreo|hangar|ecurie|cabanon|palheiro|curral)\b"
+    r"|^\W*(?:se vende |vendo )?(?:una |la )?finca con cuadra\b")
+_DESC_OPENS_AS_FINCA = re.compile(
+    r"^\W*(?:se vende |vendo )?(?:una |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela)\b"
+    r"|^\W*(?:\W*\w+\W*){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
+_SELLS_A_PLOT = re.compile(r"\bse vende (?:una )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica)\b")
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
 
 
@@ -622,7 +645,8 @@ def property_kind(item: dict) -> str | None:
     ndesc = normalize(desc)
     if tipo in NOT_PROPERTY_TYPES or _DESC_OPENS_AS_OTHER.match(ndesc) or _DESC_OPENS_AS_OUTBUILDING.match(ndesc):
         return "other"
-    if _DESC_OPENS_AS_FINCA.match(ndesc) and not _FINCA_WITH_HOUSE.search(ndesc[:200]):
+    if ((_DESC_OPENS_AS_FINCA.match(ndesc) or _SELLS_A_PLOT.search(ndesc[:300]))
+            and not _FINCA_WITH_HOUSE.search(ndesc[:300])):
         return "rural_plot" if area >= 1000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
@@ -950,8 +974,11 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(likely["text"])
     kind    = property_kind(item)
 
-    if is_fractional_share(title):
+    if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
         return 0.0, ["fractional share — skip"]
+
+    if has_term(full, NOT_A_BUILDING, negations=False):
+        return 0.0, ["mobile home or caravan, not a house — skip"]
 
     if has_term(full, USUFRUCT_PATTERNS):
         return 0.0, ["usufruct — skip"]
@@ -974,6 +1001,12 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         caps.append(UNCHECKED_CAP)
         reasons.append("location unknown — climate not checked")
 
+    if has_term(full, UNFINISHED_HOUSE, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("house still under construction — check what is built and licensed")
+    if has_term(full, NO_VIEWING, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("auction resold by a middleman: no viewing, cash only")
     if item.get("place_conflict"):
         # The title names a town far from where the listing is placed: the
         # climate and distances belong to the wrong place.
