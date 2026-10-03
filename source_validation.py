@@ -99,6 +99,7 @@ CATALOG: dict[str, dict] = {
     "france": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "encheres_publiques": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "bienici": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
+    "notaires": {"kind": "official", "access": "public_api", "listing_type": "property"},
     "italy": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     "pvp_giustizia": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "gobidreal": {"kind": "experimental", "access": "public_html", "listing_type": "property",

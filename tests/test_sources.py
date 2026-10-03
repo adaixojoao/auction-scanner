@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 49
+    assert len(REGISTRY) == 50
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -761,6 +761,19 @@ def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
     assert sent[3]["propertyType"] == ["terrain"] and sent[3]["minArea"] == 10000
 
 
+def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
+    from sources.fr import parse_notaires
+    ad = {"annonceId": 2082120, "prixAffiche": 10000, "prixTotal": 10600, "typeBien": "MAI", "typeTransaction": "VENTE",
+          "communeNom": "Berrien", "codePostal": "29690", "departementNom": "Finistère", "surface": 30.0,
+          "surfaceTerrain": 2111, "descriptionFr": "Une ancienne maison<br>à rénover entièrement avec terrain",
+          "urlDetailAnnonceFr": "https://www.immobilier.notaires.fr/fr/annonce-immo/vente/maison/berrien-29/2082120"}
+    row = parse_notaires(ad)
+    assert row["id"] == "notaires:2082120" and row["price"] == 10600          # notary fees included
+    assert row["area_m2"] == 30 and row["concelho"] == "Berrien" and "<br>" not in row["description"]
+    assert parse_notaires({**ad, "viager": "OUI"}) is None
+    assert parse_notaires({**ad, "descriptionFr": "Sous compromis : maison"}) is None
+    land = parse_notaires({**ad, "typeBien": "TER"})
+    assert land["tipo"] == "terrain" and land["area_m2"] == 2111
 TGSS_TABLE = """<div class="tablas-resultados"><table><caption>Finca Rústica - CANTABRIA - (03/10/2026)</caption>
 <tbody><tr class="par">
 <td><a href="/subastas/SubaSeControladorInter?opcion=13&amp;EMB_ID=901&amp;opcion2=1&amp;tipoOperacion=1">YERA  (VEGA DE PAS)</a></td>

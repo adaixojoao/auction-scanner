@@ -312,3 +312,90 @@ def scrape_bienici(db, max_price: float = 50000, **_):
                 time.sleep(0.5)
     LOG.info(f"Bien'ici: {total} listings")
     return total
+
+
+# ─── Notaires de France ──────────────────────────────────────────────
+# Houses and land sold through notaries, including their online auctions
+# (36h-immo / VNI) and notarial auctions (VAE). A public JSON service behind the
+# listing page; its robots.txt asks for 10 s between requests, so one request
+# of up to 100 listings per department and type, then a pause.
+
+NOTAIRES = "https://www.immobilier.notaires.fr"
+NOTAIRES_API = NOTAIRES + "/pub-services/inotr-www-annonces/v1/annonces"
+# The west and north-west: Brittany, Normandy, Pays de la Loire, Poitou and Limousin.
+NOTAIRES_DEPARTMENTS = ["29", "22", "56", "35", "50", "14", "61", "27", "76", "44", "49", "53", "72", "85",
+                        "79", "86", "16", "17", "87", "23", "19", "24"]
+NOTAIRES_TYPES = {"MAI": "maison", "TER": "terrain"}
+NOTAIRES_PAUSE = 10
+NOTAIRES_MAX_PAGES = 5
+NOTAIRES_SALE = {"VENTE": "sale", "VNI": "online auction (36h-immo)", "VAE": "notarial auction"}
+
+
+def parse_notaires(ad: dict) -> dict | None:
+    if not ad.get("annonceId") or ad.get("viager") == "OUI" or ad.get("bienVendu") == "OUI":
+        return None                    # a life annuity is not a purchase; sold is sold
+    price = ad.get("prixTotal") or ad.get("prixAffiche")
+    if not price:
+        return None
+    tipo = NOTAIRES_TYPES.get(ad.get("typeBien"), "maison")
+    land = ad.get("surfaceTerrain")
+    built = ad.get("surface")
+    sale = NOTAIRES_SALE.get(ad.get("typeTransaction"), "sale")
+    town = ad.get("communeNom") or ad.get("localiteNom")
+    extras = [f"Terrain {land:,.0f} m²" if land else None, f"Surface {built:,.0f} m²" if built else None,
+              f"Prix frais de notaire inclus: {price:,.0f} €",
+              "Vente aux enchères" if ad.get("typeTransaction") in ("VNI", "VAE") else None]
+    text = re.sub(r"\s*<br\s*/?>\s*", "\n", ad.get("descriptionFr") or "")
+    text = re.sub(r"<[^>]+>", " ", text).strip()
+    if re.match(r"\W*sous (?:compromis|offre)", text, re.I):
+        return None                    # already promised to a buyer
+    description = " · ".join(x for x in [text] + extras if x)
+    raw = {"sale": sale}
+    if ad.get("origineJudiciaire") == "OUI":
+        raw["judicial"] = True
+    return make_listing(
+        "notaires", ad["annonceId"], "FR",
+        title=f"{'Maison' if tipo == 'maison' else 'Terrain'} à {town} ({ad.get('codePostal') or ''})",
+        description=description[:3000], tipo=tipo,
+        area_m2=(land if tipo == "terrain" else built) or land or built,
+        price=float(price), min_price=float(price),
+        district=ad.get("departementNom"), concelho=town,
+        url=ad.get("urlDetailAnnonceFr"), image_url=ad.get("urlPhotoPrincipale"),
+        raw_json=json.dumps(raw, ensure_ascii=False),
+    )
+
+
+@register("notaires", "FR", description="Notaires de France — houses, land and notary auctions in the west")
+def scrape_notaires(db, max_price: float = 50000, **_):
+    """Notaires de France — houses and land (and notary auctions) in the west of France."""
+    session = make_session(timeout=40)
+    session.headers["Accept"] = "application/json"
+    total, first = 0, True
+    for department in NOTAIRES_DEPARTMENTS:
+        for code in NOTAIRES_TYPES:
+            for page in range(1, NOTAIRES_MAX_PAGES + 1):
+                if not first:
+                    time.sleep(NOTAIRES_PAUSE)
+                first = False
+                params = {"offset": (page - 1) * 100, "page": page, "parPage": 100,
+                          "typeTransactions": "VENTE,VNI,VAE", "typeBiens": code, "prixMax": int(max_price),
+                          "departements": department}
+                try:
+                    resp = session.get(NOTAIRES_API, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as e:  # noqa: BLE001 — one department failing is not the source failing
+                    if total == 0 and department == NOTAIRES_DEPARTMENTS[0]:
+                        raise
+                    LOG.info(f"Notaires {department} {code} p{page}: {type(e).__name__}")
+                    break
+                for ad in data.get("annonceResumeDto") or []:
+                    row = parse_notaires(ad)
+                    if row and row["price"] <= max_price:
+                        upsert_listing(db, row)
+                        total += 1
+                db.commit()
+                if page >= (data.get("nbPages") or 1):
+                    break
+    LOG.info(f"Notaires: {total} listings")
+    return total
