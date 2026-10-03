@@ -547,7 +547,7 @@ def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: st
     db.commit()
 
 
-RELISTING_SOURCES = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira"}
+RELISTING_SOURCES = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos"}
 
 
 def mark_duplicates(db: sqlite3.Connection) -> int:
