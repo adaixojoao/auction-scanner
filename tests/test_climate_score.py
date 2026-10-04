@@ -128,7 +128,7 @@ def test_listings_filter_by_climate_grade_and_exact_data(client, add):
         raw_json=_stored({**MILD, "water_km": 0.2}))
     # poor (arid by 2080) but not rejected by the score, so it is listed
     add(external_id="hot", title="Moradia T2", tipo="moradia", area_m2=120, price=20000,
-        raw_json=_stored({"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": -1}}))
+        raw_json=_stored({"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": -1}, "water_km": 1.0}))
     add(external_id="town", title="Moradia T4", tipo="moradia", area_m2=120, price=20000,
         raw_json=_stored({**MILD, "approx": True}))
     add(external_id="none", title="Moradia T1", tipo="moradia", area_m2=120, price=20000)

@@ -115,3 +115,16 @@ def test_citius_land_names_its_municipality_under_localizacao():
     item = {"country": "PT", "description": "Prédio rústico localização : Rojanda, Freixedas, Pinhel ano de "
                                             "inscrição na matriz: 1969 área total: 4,6905 ha"}
     assert geo.municipality(item) == "Pinhel"
+
+
+def test_somewhere_to_swim_within_1_5_km_is_a_must():
+    from scoring import NO_SWIM, SWIM_MAX_KM
+    by_sea, reasons = score_detail(home(0.5))
+    assert "somewhere to swim 0.5 km away (the sea)" in reasons
+    lake, reasons = score_detail({**home(30), "climate": {"water_km": 1.2}})
+    assert "somewhere to swim 1.2 km away (lake or river)" in reasons
+    dry, reasons = score_detail({**home(8), "climate": {}})
+    assert f"nowhere to swim within {SWIM_MAX_KM:g} km (nearest: the sea 8.0 km)" in reasons
+    assert dry < lake and dry < by_sea
+    stream = {**home(8), "climate": {}, "raw_json": '{"water_check": {"radius_m": 300, "found": [{"kind": "stream"}]}}'}
+    assert any(r.startswith("nowhere to swim") for r in score_detail(stream)[1])     # a stream is not a swim

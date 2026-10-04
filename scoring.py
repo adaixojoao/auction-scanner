@@ -595,7 +595,8 @@ def buyer_priorities(targets: dict | None = None) -> str:
     """The goal in words, for the AI check: the same rules as score()."""
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
     return (
-        "Homes (houses or flats) and plots at very low prices. Prefer western continental Europe "
+        "Homes (houses or flats) and plots at very low prices. A MUST: somewhere to swim (the sea, a lake "
+        "or a real river, not a stream) within 1.5 km. Prefer western continental Europe "
         "(mainland Portugal, Spain, France, Benelux, Germany, Austria, Switzerland, Italy); "
         "islands (Azores, Madeira, Canaries, Balearics, Corsica, Sicily, Sardinia) and "
         "Central/Eastern Europe sit a flat step below an otherwise equal listing. In order of "
@@ -1030,6 +1031,32 @@ TOWN_DISTANCE_POINTS = [(0.3, 15), (1, 13), (3, 8), (6, 3), (10, -2), (20, -14),
 # town-level pin it counts BEACH_APPROX_SHARE of that.
 BEACH_POINTS = [(0.5, 25), (1, 22), (2, 18), (5, 12), (10, 6), (20, 2), (30, 0)]
 BEACH_APPROX_SHARE = 0.6
+# The owner's must (2026-10-04): somewhere to swim within 1.5 km — the sea, a lake
+# or reservoir, or a river big enough to show from space. A stream does not count.
+SWIM_MAX_KM = 1.5
+SWIM_POINTS = [(0.3, 25), (0.8, 20), (1.5, 14)]
+NO_SWIM = -30
+_SWIM_KINDS = {"river", "lake", "reservoir"}
+
+
+def swim_spot(item: dict) -> tuple[float, str] | None:
+    """(km, what) of the nearest place to swim that is known: the beach, permanent
+    water on the satellite map (lakes, reservoirs, wide rivers), or a river or lake
+    found on the map around the listing. None when nothing is known."""
+    spots = []
+    beach = item.get("beach")
+    if beach and beach.get("km") is not None:
+        spots.append((beach["km"], "the sea"))
+    wet = (item.get("climate") or {}).get("water_km")
+    if wet is not None:
+        spots.append((wet, "lake or river"))
+    if '"water_check"' in (item.get("raw_json") or ""):
+        check = _raw(item).get("water_check") or {}
+        for found in check.get("found") or []:
+            if found.get("kind") in _SWIM_KINDS:
+                spots.append((check.get("radius_m", 300) / 1000, found["kind"]))
+                break
+    return min(spots) if spots else None
 # Easy to reach: an airport with scheduled flights and a station on the
 # long-distance trains, smaller bonuses that fade with the distance.
 AIRPORT_POINTS = [(15, 8), (30, 7), (50, 5), (80, 2), (120, 0)]
@@ -1554,6 +1581,15 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     elif water:
         s += (3 if water.endswith("(approx.)") else 6) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
+
+    swim = swim_spot(item)
+    if swim and swim[0] <= SWIM_MAX_KM:
+        s += curve(swim[0], SWIM_POINTS) * w("beach")
+        reasons.append(f"somewhere to swim {swim[0]:.1f} km away ({swim[1]})")
+    elif swim or item.get("climate"):          # placed on the map, and nothing within reach
+        s += NO_SWIM * w("beach")
+        reasons.append(f"nowhere to swim within {SWIM_MAX_KM:g} km"
+                       + (f" (nearest: {swim[1]} {swim[0]:.1f} km)" if swim else ""))
 
     for key, points in (("beach", BEACH_POINTS), ("airport", AIRPORT_POINTS), ("station", STATION_POINTS)):
         near = item.get(key)
