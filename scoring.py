@@ -157,10 +157,10 @@ PLOT_MIN_ABROAD_M2 = 25000
 GUARDA = (40.5373, -7.2676)
 GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer scored (2026-09-26)
 # Mainland western Europe (Iberia, France, Benelux, DACH, Italy). Islands and
-# Central/Eastern Europe (HR, PL, …) sit a flat −10 below an otherwise equal listing.
+# Central/Eastern Europe (HR, PL, …) sit a flat −20 below an otherwise equal listing.
 WESTERN_CONTINENTAL_COUNTRIES = frozenset(
     {"PT", "ES", "FR", "DE", "BE", "NL", "LU", "AT", "CH", "IT"})
-OFF_WESTERN_CONTINENTAL = -10
+OFF_WESTERN_CONTINENTAL = -20
 # Rough boxes for Atlantic/Mediterranean islands that share those country codes.
 _ISLAND_BOXES = (
     (36.5, 40.0, -32.0, -24.5, "Azores"),
@@ -206,6 +206,8 @@ def w(name: str) -> float:
 
 UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
 DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
+BANK_PORTALS = {"aliseda", "altamira", "servihabitat"}
+DOUBTFUL_BANK_HOME_EUR = 10000   # banks never sell a whole, free home this cheap
 SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
@@ -367,6 +369,9 @@ HEAVY_WORK = [
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
     "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
     "reforma integra", "para rehabilitación", "requiere rehabilitación", "a restaurar",
+    "reformarla por completo", "reformar por completo", "reformarla completamente", "reforma completa",
+    "necesita restauración", "necesita restauracion", "necesita ser restaurad*", "necesita ser reformad*",
+    "restauración completa", "restauracion completa", "para restarurar", "para restarura",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
     "à réhabiliter", "da ristrutturare", "da ristrutturare integralmente",
     "ristrutturazione integrale", "ristrutturazione totale", "necessita di ristrutturazione",
@@ -1122,7 +1127,8 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(f"title names {item['place_conflict']['town']}, "
                        f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
     if (kind == "home" and item.get("source") in SALE_PORTALS
-            and pay and pay < DOUBTFUL_HOME_EUR and area >= 40):     # court sales do start this low
+            and pay and area >= 40                                  # court sales do start this low
+            and pay < (DOUBTFUL_BANK_HOME_EUR if item.get("source") in BANK_PORTALS else DOUBTFUL_HOME_EUR)):
         caps.append(UNCHECKED_CAP)
         reasons.append(f"price doubtful (€{pay:,.0f} for a home) — probably a rent or a typo")
     if kind in ("urban_plot", "rural_plot") and pay and area and pay / area < DOUBTFUL_LAND_EUR_M2:
