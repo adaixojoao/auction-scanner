@@ -345,15 +345,16 @@ def test_off_western_continental_europe_costs_a_flat_ten():
     base, _ = score_detail(plain)
     island, reasons = score_detail(azores)
     abroad, abroad_reasons = score_detail(croatia)
-    assert island == pytest.approx(base + OFF_WESTERN_CONTINENTAL)
-    assert abroad == pytest.approx(base + OFF_WESTERN_CONTINENTAL)
+    from scoring import MAINLAND_PORTUGAL      # the plain one is in mainland Portugal
+    assert island == pytest.approx(base - MAINLAND_PORTUGAL + OFF_WESTERN_CONTINENTAL)
+    assert abroad == pytest.approx(base - MAINLAND_PORTUGAL + OFF_WESTERN_CONTINENTAL)
     assert "not western continental Europe (Azores)" in reasons
     assert "not western continental Europe (HR)" in abroad_reasons
 
 
 def test_listings_that_all_reach_100_are_still_ordered():
     from scoring import score_detail
-    court = dict(source="citius", description="venda por propostas em carta fechada, em bom estado")
+    court = dict(source="citius", description="venda por propostas em carta fechada")
     better = item(title="Moradia", concelho="Guarda", price=4000, area_m2=90, **court)
     good = item(title="Moradia", concelho="Guarda", price=25000, area_m2=90, **court)
     assert 100 > score(better)[0] > score(good)[0] >= 85       # the top is squeezed, not clamped
@@ -761,3 +762,12 @@ def test_spanish_subsidised_housing_is_skipped():
     sc, reasons = score(item(source="aliseda", country="ES", title="Vivienda en Narón", price=29750,
                              area_m2=89, description="Vivienda protegida en venta en Narón (La Coruña)."))
     assert sc == 0 and "subsidised" in reasons[0]
+
+
+def test_mainland_portugal_gets_a_step_up_but_not_the_islands():
+    from scoring import MAINLAND_PORTUGAL, score_detail
+    pt = item(title="Moradia T2", price=20000, area_m2=80, description="Casa em bom estado")
+    es = {**pt, "country": "ES", "source": "fotocasa"}
+    azores = {**pt, "description": "Casa em bom estado. Comarca dos Açores"}
+    assert "mainland Portugal" in score_detail(pt)[1]
+    assert "mainland Portugal" not in score_detail(azores)[1] and "mainland Portugal" not in score_detail(es)[1]

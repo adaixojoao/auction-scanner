@@ -161,6 +161,7 @@ GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer 
 WESTERN_CONTINENTAL_COUNTRIES = frozenset(
     {"PT", "ES", "FR", "DE", "BE", "NL", "LU", "AT", "CH", "IT"})
 OFF_WESTERN_CONTINENTAL = -20
+MAINLAND_PORTUGAL = 10   # the owner's home country: language, paperwork, near Guarda (2026-10-04)
 # Rough boxes for Atlantic/Mediterranean islands that share those country codes.
 _ISLAND_BOXES = (
     (36.5, 40.0, -32.0, -24.5, "Azores"),
@@ -1215,6 +1216,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if away:
         s += OFF_WESTERN_CONTINENTAL
         reasons.append(f"not western continental Europe ({away})")
+    elif (item.get("country") or "PT").upper() == "PT":
+        s += MAINLAND_PORTUGAL
+        reasons.append("mainland Portugal")
 
     occupation = _occupation(item)   # read from the sale's detail page (ES, FR)
     if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
