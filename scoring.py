@@ -706,7 +706,7 @@ _DESC_OPENS_AS_OUTBUILDING = re.compile(
     r"|^\W*(?:se vende |vendo )?(?:una |la )?finca con cuadra\b")
 _DESC_OPENS_AS_FINCA = re.compile(
     r"^\W*(?:se vende |vendo )?(?:una |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela)\b"
-    r"|^\W*(?:\W*\w+\W*){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
+    r"|^\W*(?:\w+\W+){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
 _SELLS_A_PLOT = re.compile(r"\bse vende (?:una )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica)\b")
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
 
