@@ -1115,6 +1115,19 @@ def pisos_detail(html: str) -> dict:
     return out
 
 
+_PISOS_TOWN_CENTRE = {"casco urbano", "centro urbano", "centro", "capital", "nucleo urbano"}
+
+
+def pisos_municipality(town: str | None) -> str | None:
+    """pisos.com writes "Baldedo (Allande)": the village, then its municipality in
+    brackets, or "Ourol (Casco Urbano)": the town centre. The municipality is what
+    the other portals call the place."""
+    m = re.fullmatch(r"\s*(.+?)\s*\((.+?)\)\s*", town or "")
+    if not m:
+        return town
+    return m.group(1) if normalize(m.group(2)).strip() in _PISOS_TOWN_CENTRE else m.group(2)
+
+
 def parse_pisos(card: dict, tipo: str, province: str, detail: dict | None = None) -> dict:
     detail = detail or {}
     raw = {"geo": detail["geo"]} if detail.get("geo") else {}
@@ -1122,7 +1135,7 @@ def parse_pisos(card: dict, tipo: str, province: str, detail: dict | None = None
         "pisos", card["id"], "ES", title=card["title"], tipo=tipo,
         description=(detail.get("description") or card["excerpt"] or "")[:3000] or None,
         area_m2=card["area"], price=card["price"], min_price=card["price"],
-        district=PISOS_PROVINCES.get(province, province), concelho=card["town"],
+        district=PISOS_PROVINCES.get(province, province), concelho=pisos_municipality(card["town"]),
         url=f"{PISOS}{card['path']}", image_url=card["image"],
         raw_json=json.dumps(raw) if raw else None,
     )
@@ -1137,6 +1150,7 @@ def scrape_pisos(db, max_price: float = 50000, **_):
     read = {r[0] for r in db.execute(
         """SELECT external_id FROM listings WHERE source = 'pisos' AND raw_json LIKE '%"geo"%'""")}
     budget, total = PISOS_DETAILS_PER_SCAN, 0
+    seen: set[str] = set()   # a thin province's pages are padded with houses from elsewhere
     for province in PISOS_PROVINCES:
         for slug, tipo in PISOS_SEARCHES:
             for page in range(1, PISOS_MAX_PAGES + 1):
@@ -1151,8 +1165,9 @@ def scrape_pisos(db, max_price: float = 50000, **_):
                     break
                 cards = pisos_cards(resp.text)
                 for card in cards:
-                    if card["price"] > max_price:
+                    if card["price"] > max_price or card["id"] in seen:
                         continue
+                    seen.add(card["id"])
                     detail = None
                     if card["id"] not in read and budget > 0:
                         budget -= 1

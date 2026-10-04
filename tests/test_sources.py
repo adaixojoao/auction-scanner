@@ -832,6 +832,25 @@ PISOS_DETAIL = """<a data-src="/mapa?latitude=43.688&amp;longitude=-7.82411&amp;
 <div class="description__content">Gran oportunidad en Barbos, Ortigueira. Casa de 187 metros con parcela de 297 m.</div>"""
 
 
+def test_pisos_town_is_the_municipality():
+    from sources.es import pisos_municipality
+    assert pisos_municipality("Baldedo (Allande)") == "Allande"
+    assert pisos_municipality("Ourol (Casco Urbano)") == "Ourol"
+    assert pisos_municipality("Ortigueira") == "Ortigueira"
+
+
+def test_the_same_house_on_two_portals_shows_once(db):
+    from common import make_listing
+    from db import mark_duplicates, upsert_listing
+    from sources.es import pisos_municipality
+    upsert_listing(db, make_listing("fotocasa", "1", "ES", title="Casa en Ourol", price=22000, area_m2=294,
+                                    concelho="Ourol", district="Lugo"))
+    upsert_listing(db, make_listing("pisos", "2", "ES", title="Casa en Ourol", price=22000, area_m2=294,
+                                    concelho=pisos_municipality("Ourol (Casco Urbano)"), district="Lugo"))
+    db.commit()
+    assert mark_duplicates(db) == 1
+
+
 def test_pisos_reads_cards_and_the_detail_page():
     from sources.es import parse_pisos, pisos_cards, pisos_detail
     cards = pisos_cards(PISOS_CARD)
