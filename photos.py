@@ -36,6 +36,7 @@ PHOTOS_CATCHUP = {"ollama": 18, "anthropic": 60}
 PHOTOS_CATCHUP_HARD = {"ollama": 24, "anthropic": 80}
 PHOTOS_CATCHUP_WHEN = 40            # pending homes that trigger catch-up
 PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
+PHOTO_FAILURES_IN_A_ROW = 2         # then the looker is down (Ollama out of memory, …)
 MAX_PHOTOS = {"ollama": 2, "anthropic": 4}
 MAX_PHOTO_BYTES = 3_000_000
 # Gallery keys scrapers have used (and a few common alternate spellings).
@@ -236,7 +237,7 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
         return 0
     if limit is None:
         limit = photos_budget(items, looker.name, ai.get("photos_per_scan") or None)
-    done = 0
+    done = failed = 0
     for item in items:
         if done >= limit:
             break
@@ -246,7 +247,12 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
             found = check_photos(looker, item)
         except Exception as e:  # noqa: BLE001: a photo check must never fail the scan
             LOG.info(f"Photo check of {item['id']} failed ({type(e).__name__}); trying next scan")
+            failed += 1
+            if failed >= PHOTO_FAILURES_IN_A_ROW:   # the looker is down: don't wait out every home
+                LOG.info("Photo check: stopped after repeated failures; trying next scan")
+                break
             continue
+        failed = 0
         if not found:
             continue
         try:

@@ -155,3 +155,20 @@ def test_check_pending_says_when_homes_wait_without_a_looker(db, monkeypatch, ca
     with caplog.at_level(logging.INFO):
         assert photos.check_pending(db, {}, load_listings(db, apply_min_score=False)) == 0
     assert any("homes waiting" in r.message for r in caplog.records)
+
+
+def test_a_looker_that_keeps_failing_is_given_up_on(db):
+    for n in range(6):
+        upsert_listing(db, make_listing("eleiloes", str(n), **HOUSE))
+    db.commit()
+
+    class DownLooker:
+        name, calls = "ollama", 0
+
+        def look(self, urls, prompt):
+            DownLooker.calls += 1
+            raise ConnectionError("Ollama went away")
+
+    looker = DownLooker()
+    assert photos.check_pending(db, {}, load_listings(db, apply_min_score=False), looker=looker) == 0
+    assert DownLooker.calls == photos.PHOTO_FAILURES_IN_A_ROW      # not one 15-minute wait per home
