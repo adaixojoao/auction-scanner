@@ -172,3 +172,14 @@ def test_a_looker_that_keeps_failing_is_given_up_on(db):
     looker = DownLooker()
     assert photos.check_pending(db, {}, load_listings(db, apply_min_score=False), looker=looker) == 0
     assert DownLooker.calls == photos.PHOTO_FAILURES_IN_A_ROW      # not one 15-minute wait per home
+
+
+def test_photos_are_shrunk_for_the_local_model():
+    import io
+    import pytest
+    Image = pytest.importorskip("PIL.Image")
+    buf = io.BytesIO()
+    Image.new("RGB", (2000, 1500), "white").save(buf, "JPEG")
+    small = Image.open(io.BytesIO(photos.shrink(buf.getvalue())))
+    assert max(small.size) == photos.OLLAMA_PHOTO_SIDE
+    assert photos.shrink(b"not an image") == b"not an image"

@@ -154,6 +154,27 @@ class ClaudeLooker:
         return json.loads(next((b.text for b in resp.content if b.type == "text"), ""))
 
 
+OLLAMA_PHOTO_SIDE = 448   # px: enough to see a roof or damp; a full photo is ~10x the work on a CPU
+
+
+def shrink(data: bytes, side: int = OLLAMA_PHOTO_SIDE) -> bytes:
+    """The photo scaled down to `side` px, as JPEG (unchanged without Pillow or when unreadable)."""
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+        img = Image.open(BytesIO(data))
+        if max(img.size) <= side:
+            return data
+        img = img.convert("RGB")
+        img.thumbnail((side, side))
+        out = BytesIO()
+        img.save(out, "JPEG", quality=85)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001: Pillow missing or not an image: send it as it is
+        return data
+
+
 class OllamaLooker:
     """An open model on this PC (Ollama) looks at the photos: they are fetched
     here and sent as images; the answer is held to the same JSON schema."""
@@ -176,11 +197,13 @@ class OllamaLooker:
             resp = self.session.get(u, timeout=30)
             resp.raise_for_status()
             if len(resp.content) <= MAX_PHOTO_BYTES:
-                images.append(base64.b64encode(resp.content).decode("ascii"))
+                images.append(base64.b64encode(shrink(resp.content)).decode("ascii"))
         if not images:
             raise ValueError("no photo could be fetched")
         resp = self.session.post(f"{self.url}/api/chat", json={
             "model": self.model, "stream": False, "format": PHOTO_SCHEMA, "options": {"temperature": 0},
+            "keep_alive": "30m",               # loading the model takes minutes on a laptop
+
             "messages": [{"role": "user", "content": prompt, "images": images}],
         }, timeout=900)                        # a CPU takes its time
         resp.raise_for_status()
