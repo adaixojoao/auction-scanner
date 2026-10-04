@@ -1036,27 +1036,41 @@ BEACH_APPROX_SHARE = 0.6
 SWIM_MAX_KM = 1.5
 SWIM_POINTS = [(0.3, 25), (0.8, 20), (1.5, 14)]
 NO_SWIM = -30
-_SWIM_KINDS = {"river", "lake", "reservoir"}
+# The owner: sea > lakes > rivers. The satellite map cannot tell a lake from a
+# river, so its water counts as a river unless the map names a lake or reservoir.
+SWIM_SHARE = {"the sea": 1.0, "lake": 0.75, "reservoir": 0.75, "river": 0.5}
 
 
-def swim_spot(item: dict) -> tuple[float, str] | None:
-    """(km, what) of the nearest place to swim that is known: the beach, permanent
-    water on the satellite map (lakes, reservoirs, wide rivers), or a river or lake
-    found on the map around the listing. None when nothing is known."""
+def swim_spots(item: dict) -> list[tuple[float, str]]:
+    """(km, what) of every known place to swim: the sea beach, permanent water on
+    the satellite map (wide rivers, lakes), or a river or lake on the map around it."""
     spots = []
     beach = item.get("beach")
     if beach and beach.get("km") is not None:
         spots.append((beach["km"], "the sea"))
     wet = (item.get("climate") or {}).get("water_km")
     if wet is not None:
-        spots.append((wet, "lake or river"))
+        spots.append((wet, "river"))
     if '"water_check"' in (item.get("raw_json") or ""):
         check = _raw(item).get("water_check") or {}
         for found in check.get("found") or []:
-            if found.get("kind") in _SWIM_KINDS:
+            if found.get("kind") in SWIM_SHARE:
                 spots.append((check.get("radius_m", 300) / 1000, found["kind"]))
-                break
-    return min(spots) if spots else None
+    return spots
+
+
+def swim_points(spot: tuple[float, str]) -> float:
+    km, what = spot
+    return curve(km, SWIM_POINTS) * SWIM_SHARE[what] if km <= SWIM_MAX_KM else 0.0
+
+
+def swim_spot(item: dict) -> tuple[float, str] | None:
+    """The best place to swim (most points; the nearest when none is in reach), or None."""
+    spots = swim_spots(item)
+    if not spots:
+        return None
+    best = max(spots, key=lambda sp: (swim_points(sp), -sp[0]))
+    return best if swim_points(best) > 0 else min(spots)
 # Easy to reach: an airport with scheduled flights and a station on the
 # long-distance trains, smaller bonuses that fade with the distance.
 AIRPORT_POINTS = [(15, 8), (30, 7), (50, 5), (80, 2), (120, 0)]
@@ -1584,7 +1598,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
 
     swim = swim_spot(item)
     if swim and swim[0] <= SWIM_MAX_KM:
-        s += curve(swim[0], SWIM_POINTS) * w("beach")
+        s += swim_points(swim) * w("beach")
         reasons.append(f"somewhere to swim {swim[0]:.1f} km away ({swim[1]})")
     elif swim or item.get("climate"):          # placed on the map, and nothing within reach
         s += NO_SWIM * w("beach")
