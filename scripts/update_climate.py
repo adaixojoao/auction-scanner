@@ -325,6 +325,174 @@ def build_hot_days(data_dir: str, out_dir: str) -> None:
         print(f"hot35_{name}: {len(per_model)} models")
 
 
+AMOC_ZIP = "https://zenodo.org/records/14586440"   # van Westen & Baatsen 2025, CC-BY 4.0
+AMOC_RUNS = {"on": "CESM_0600_RCP45", "off": "CESM_1500_RCP45"}   # AMOC 15 Sv vs collapsed (6 Sv), both ~2 °C warmer
+
+
+COLD_VAR = "monthly_minimum_of_daily_minimum_temperature"
+COLD_BASE = (1976, 2005)
+
+
+def _cold10(path: str, y0: int, y1: int) -> tuple:
+    """(grid, lats, lons): each member's 10th percentile of the yearly coldest
+    night over y0-y1 (the 1-in-10-year cold), median over members, °C."""
+    import numpy as np
+    import xarray as xr
+    west, south, east, north = EUROPE
+    ds = xr.open_dataset(path, mask_and_scale=True)
+    var = next(v for v in ds.data_vars if v.lower().startswith("tnn"))
+    lat = "lat" if "lat" in ds.dims else "latitude"
+    lon = "lon" if "lon" in ds.dims else "longitude"
+    da = ds[var].sel(time=slice(f"{y0}-01-01", f"{y1}-12-31"), **{lat: slice(south, north), lon: slice(west, east)})
+    members = range(da.sizes["member"]) if "member" in da.dims else [None]
+    per_model = []
+    for m in members:
+        one = da if m is None else da.isel(member=m)
+        yearly = one.groupby("time.year").min("time").values.astype("float32")
+        if np.isnan(yearly).all():
+            continue
+        if np.nanmax(yearly) > 100:          # Kelvin
+            yearly -= 273.15
+        per_model.append(np.nanpercentile(yearly, 10, axis=0))
+    grid = np.nanmedian(np.stack(per_model), axis=0).astype("float32")
+    return grid, da[lat].values, da[lon].values
+
+
+def _cold_download(folder: str, name: str, request: dict) -> str:
+    import zipfile
+    global CDS_DATASET
+    target = os.path.join(folder, f"{name}.zip")
+    if not os.path.exists(target):
+        CDS_DATASET, keep = "multi-origin-c3s-atlas", CDS_DATASET
+        try:
+            cds_retrieve(request, target)
+        finally:
+            CDS_DATASET = keep
+    with zipfile.ZipFile(target) as z:
+        nc = next(n for n in z.namelist() if n.endswith(".nc"))
+        path = os.path.join(folder, "nc", name, nc)
+        if not os.path.exists(path):
+            z.extract(nc, os.path.join(folder, "nc", name))
+    return path
+
+
+def _write_grid(path: str, grid, lats, lons) -> None:
+    import numpy as np
+    import rasterio
+    from rasterio.transform import from_origin
+    if lats[0] > lats[-1]:
+        lats, grid = lats[::-1], grid[::-1]
+    res = float(lons[1] - lons[0])
+    with rasterio.open(path, "w", driver="GTiff", height=grid.shape[0], width=grid.shape[1], count=1,
+                       dtype="float32", crs="EPSG:4326", nodata=np.nan, compress="deflate",
+                       transform=from_origin(lons[0] - res / 2, lats[-1] + res / 2, res, res)) as dst:
+        dst.write(grid[::-1], 1)
+
+
+def build_cold(data_dir: str, out_dir: str) -> None:
+    """The local 1-in-10-year coldest night, which knows valleys from mountains:
+    cold10_today.tif  measured, E-OBS 1976-2005 (~11 km, from weather stations);
+    cold10_change.tif how much milder by 2071-2100 under RCP4.5, EURO-CORDEX
+                      12 km (the atlas has this variable only without bias
+                      adjustment, so only the models' change is used)."""
+    folder = os.path.join(data_dir, "cold")
+    os.makedirs(folder, exist_ok=True)
+    y0, y1 = COLD_BASE
+    obs = _cold_download(folder, "e_obs", {"origin": "e_obs", "domain": "europe", "period": "1950-2024",
+                                           "variable": COLD_VAR})
+    grid, lats, lons = _cold10(obs, y0, y1)
+    _write_grid(os.path.join(out_dir, "cold10_today.tif"), grid, lats, lons)
+    print("cold10_today: E-OBS")
+    base = {"origin": "cordex_eur_11", "domain": "euro_cordex", "variable": COLD_VAR,
+            "bias_adjustment": "no_bias_adjustment"}
+    hist = _cold_download(folder, "cordex_historical", {**base, "experiment": "historical", "period": "1970-2005"})
+    fut = _cold_download(folder, "cordex_rcp45", {**base, "experiment": "rcp_4_5", "period": "2006-2100"})
+    then, lats, lons = _cold10(hist, y0, y1)
+    later, _, _ = _cold10(fut, 2071, 2100)
+    _write_grid(os.path.join(out_dir, "cold10_change.tif"), later - then, lats, lons)
+    print("cold10_change: EURO-CORDEX RCP4.5 2071-2100 minus 1976-2005")
+
+
+def build_amoc(data_dir: str, out_dir: str) -> None:
+    """amoc_cold10_{on,off}.tif: the 1-in-10-year coldest day (°C) in a 2 °C
+    warmer world with the AMOC as now and collapsed (CESM, 2° grid, GRL 2025).
+    One coarse model: only the difference off - on is used, added to the local
+    12 km cold of build_cold() (the delta method)."""
+    import zipfile
+
+    import numpy as np
+    import rasterio
+    import xarray as xr
+    from rasterio.transform import from_origin
+    from scipy.interpolate import RegularGridInterpolator
+
+    archive = os.path.join(data_dir, "amoc", "amoc.zip")
+    if not os.path.exists(archive):
+        raise SystemExit(f"Download the archive from {AMOC_ZIP} to {archive} first")
+    res, lats, lons = 0.25, np.arange(27, 72.01, 0.25), np.arange(-32, 45.01, 0.25)
+    with zipfile.ZipFile(archive) as z:
+        for name, run in AMOC_RUNS.items():
+            member = next(n for n in z.namelist()
+                          if n.endswith(f"Data/{run}/Atmosphere/TEMP_2m_extremes_GEV_fit_minima.nc"))
+            target = os.path.join(data_dir, "amoc", f"{run}_minima.nc")
+            with open(target, "wb") as f:
+                f.write(z.read(member))
+            d = xr.open_dataset(target)
+            # The 10-year return level of the yearly minimum, as the paper's ReturnValue().
+            p = 0.1
+            level = d["loc"] - (d["scale"] / d["shape"]) * (1 - (-np.log(1 - p)) ** (-d["shape"]))
+            level = level.assign_coords(lon=((level.lon + 180) % 360) - 180).sortby("lon")
+            interp = RegularGridInterpolator((level.lat.values, level.lon.values), level.values.astype("float64"))
+            yy, xx = np.meshgrid(lats, lons, indexing="ij")
+            grid = interp(np.stack([yy, xx], axis=-1)).astype("float32")
+            with rasterio.open(os.path.join(out_dir, f"amoc_cold10_{name}.tif"), "w", driver="GTiff",
+                               height=grid.shape[0], width=grid.shape[1], count=1, dtype="float32",
+                               crs="EPSG:4326", nodata=np.nan, compress="deflate",
+                               transform=from_origin(lons[0] - res / 2, lats[-1] + res / 2, res, res)) as dst:
+                dst.write(grid[::-1], 1)
+            print(f"amoc_cold10_{name}: {run}")
+
+
+AMOC_HYDRO_ZIP = "https://zenodo.org/records/16905376"   # van Westen et al. 2025, HESS, CC-BY 4.0
+
+
+def build_amoc_dry(data_dir: str, out_dir: str) -> None:
+    """amoc_dry_change.tif: how the April-September water balance (rain minus
+    potential evaporation, mm) changes if the AMOC collapses, in a 2 °C warmer
+    world (CESM, 2° grid, HESS 2025). Negative = drier. Only the change is
+    used: the model's own rain is too low in Galicia."""
+    import zipfile
+
+    import numpy as np
+    import rasterio
+    import xarray as xr
+    from rasterio.transform import from_origin
+    from scipy.interpolate import RegularGridInterpolator
+
+    archive = os.path.join(data_dir, "amoc_hydro", "AMOC-Hydroclimate.zip")
+    if not os.path.exists(archive):
+        raise SystemExit(f"Download AMOC-Hydroclimate.zip from {AMOC_HYDRO_ZIP} to {archive} first")
+    balance = {}
+    with zipfile.ZipFile(archive) as z:
+        for name, run in AMOC_RUNS.items():
+            target = os.path.join(data_dir, "amoc_hydro", f"{run}_month_4-9.nc")
+            with open(target, "wb") as f:
+                f.write(z.read(f"Data/{run}/Atmosphere/PREC_POT_EVAP_fields_month_4-9.nc"))
+            d = xr.open_dataset(target).mean("time")
+            balance[name] = (d["PREC"] - d["POT_EVAP"]) * 183      # mm/day over April-September
+    change = (balance["off"] - balance["on"]).where(lambda v: abs(v) < 5000)   # ocean cells hold fill values
+    res, lats, lons = 0.25, np.arange(27, 72.01, 0.25), np.arange(-20, 45.01, 0.25)
+    interp = RegularGridInterpolator((change.lat.values, change.lon.values), change.values.astype("float64"))
+    yy, xx = np.meshgrid(lats, lons, indexing="ij")
+    grid = interp(np.stack([yy, xx], axis=-1)).astype("float32")
+    with rasterio.open(os.path.join(out_dir, "amoc_dry_change.tif"), "w", driver="GTiff",
+                       height=grid.shape[0], width=grid.shape[1], count=1, dtype="float32",
+                       crs="EPSG:4326", nodata=np.nan, compress="deflate",
+                       transform=from_origin(lons[0] - res / 2, lats[-1] + res / 2, res, res)) as dst:
+        dst.write(grid[::-1], 1)
+    print("amoc_dry_change: CESM RCP4.5 AMOC off minus on, April-September P - PET")
+
+
 def main(argv=None) -> int:
     parts = (argv if argv is not None else sys.argv[1:]) or ["heat", "fire", "water"]
     data_dir = climate.data_dir()
@@ -338,6 +506,10 @@ def main(argv=None) -> int:
         build_water(data_dir, out_dir)
     if "hotdays" in parts:
         build_hot_days(data_dir, out_dir)
+    if "amoc" in parts:
+        build_cold(data_dir, out_dir)
+        build_amoc(data_dir, out_dir)
+        build_amoc_dry(data_dir, out_dir)
     if "firefuture" in parts:
         build_fire_future(data_dir, out_dir)
     with open(os.path.join(out_dir, "built.json"), "w", encoding="utf-8") as f:

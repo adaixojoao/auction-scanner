@@ -1,7 +1,9 @@
 """Belgium: biddit.be notary auctions."""
 from __future__ import annotations
 
+import html
 import json
+import re
 import time
 
 from common import LOG, make_listing, make_session, to_number
@@ -74,3 +76,97 @@ def scrape_biddit(db, max_price: float = 50000, **_):
             break
         time.sleep(1)
     return total_scraped
+
+
+# ─── Immoweb ─────────────────────────────────────────────────────────
+# Belgium's main portal. The search page embeds its results as JSON in a
+# ":results" attribute, with map positions and surfaces. Most cheap houses there
+# are life annuities (a monthly payment, not a price) or already under option:
+# only plain sales and notary public sales are kept.
+
+IMMOWEB = "https://www.immoweb.be"
+IMMOWEB_SEARCHES = {"maison": "maison", "terrain-a-batir": "terrain"}
+IMMOWEB_MAX_PAGES = 15
+IMMOWEB_KINDS = {"HOUSE": "Maison", "VILLA": "Villa", "BUNGALOW": "Bungalow", "CHALET": "Chalet",
+                 "FARMHOUSE": "Ferme", "COUNTRY_COTTAGE": "Fermette", "TOWN_HOUSE": "Maison de ville",
+                 "MANSION": "Maison de maître", "MIXED_USE_BUILDING": "Immeuble mixte", "LAND": "Terrain",
+                 "BUILDING_LAND": "Terrain à bâtir"}
+IMMOWEB_SALE_TYPES = {"residential_sale", "first_session_with_reserve_price", "public_sale"}
+
+
+def immoweb_results(page_html: str) -> list[dict]:
+    m = re.search(r":results='([^']*)'", page_html)
+    if not m:
+        return []
+    try:
+        return json.loads(html.unescape(m.group(1)))
+    except ValueError:
+        return []
+
+
+def parse_immoweb(ad: dict, tipo: str) -> dict | None:
+    price = ad.get("price") or {}
+    flags = ad.get("flags") or {}
+    if (price.get("type") not in IMMOWEB_SALE_TYPES or not price.get("mainValue")
+            or flags.get("main") == "under_option" or "life_annuity" in (flags.get("secondary") or [])):
+        return None
+    prop = ad.get("property") or {}
+    loc = prop.get("location") or {}
+    town = loc.get("locality")
+    raw = {}
+    if loc.get("latitude") and loc.get("longitude"):
+        raw["geo"] = {"lat": loc["latitude"], "lon": loc["longitude"],
+                      "precision": "village" if loc.get("approximated") else "street"}
+    public = price.get("type") != "residential_sale"
+    land, built = prop.get("landSurface"), prop.get("netHabitableSurface")
+    pitch = prop.get("salesPitch")
+    if isinstance(pitch, dict):                  # one text per language
+        pitch = pitch.get("fr") or pitch.get("nl") or pitch.get("en") or next(iter(pitch.values()), None)
+    description = " · ".join(str(x) for x in (
+        prop.get("title"), pitch,
+        f"Surface habitable {built} m²" if built else None, f"Terrain {land} m²" if land else None,
+        "Vente publique (notaire)" if public else None,
+        f"PEB {ad['transaction']['certificate']}" if (ad.get("transaction") or {}).get("certificate") else None) if x)
+    kind = IMMOWEB_KINDS.get(prop.get("subtype") or prop.get("type") or "",
+                             (prop.get("subtype") or "").replace("_", " ").capitalize())
+    return make_listing(
+        "immoweb", ad["id"], "BE", title=f"{kind or 'Maison'} à {town} ({loc.get('postalCode') or ''})",
+        description=description, tipo=tipo, area_m2=(land if tipo == "terrain" else built) or land or built,
+        price=float(price["mainValue"]), min_price=float(price["mainValue"]),
+        district=loc.get("province"), concelho=town,
+        url=f"{IMMOWEB}/fr/annonce/{ad['id']}",
+        image_url=next((m.get("mediumUrl") or m.get("smallUrl") for m in (ad.get("media") or {}).get("pictures") or []
+                        if m.get("mediumUrl") or m.get("smallUrl")), None),
+        raw_json=json.dumps(raw) if raw else None,
+    )
+
+
+@register("immoweb", "BE", description="Immoweb — houses and building land in Belgium (no life annuities)")
+def scrape_immoweb(db, max_price: float = 50000, **_):
+    """Immoweb — houses and building land in Belgium, plain and notary public sales only."""
+    session = make_session(timeout=40)
+    total = 0
+    for slug, tipo in IMMOWEB_SEARCHES.items():
+        for page in range(1, IMMOWEB_MAX_PAGES + 1):
+            try:
+                resp = session.get(f"{IMMOWEB}/fr/recherche/{slug}/a-vendre",
+                                   params={"countries": "BE", "maxPrice": int(max_price), "orderBy": "cheapest",
+                                           "page": page})
+                resp.raise_for_status()
+            except Exception as e:  # noqa: BLE001 — one search failing is not the source failing
+                if total == 0 and page == 1 and slug == next(iter(IMMOWEB_SEARCHES)):
+                    raise
+                LOG.info(f"Immoweb {slug} p{page}: {type(e).__name__}")
+                break
+            ads = immoweb_results(resp.text)
+            for ad in ads:
+                row = parse_immoweb(ad, tipo)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            if len(ads) < 30:
+                break
+            time.sleep(2)
+    LOG.info(f"Immoweb: {total} listings")
+    return total

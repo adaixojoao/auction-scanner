@@ -198,6 +198,27 @@ def test_a_portal_relisting_is_a_duplicate_but_court_twin_lots_are_not(db, add):
     assert flagged.startswith("fotocasa:")
 
 
+def test_flats_of_one_building_show_once_cheapest_first(db, add):
+    # Three floors of one Cortenova building, one court case: one choice.
+    t = "Piena Proprietà. In Comune Amministrativo di CORTENOVA (LC),"
+    add("pvp_giustizia", "1", "IT", title=t, price=27717, area_m2=425, concelho="Cortenova")
+    add("pvp_giustizia", "2", "IT", title=t, price=27675, area_m2=425, concelho="Cortenova")
+    add("pvp_giustizia", "3", "IT", title=t, price=28835, area_m2=425, concelho="Cortenova")
+    add("pvp_giustizia", "4", "IT", title=t, price=60000, area_m2=425, concelho="Cortenova")
+    assert mark_duplicates(db) == 2
+    assert db.execute("SELECT COUNT(*) FROM listings").fetchone()[0] == 4
+    shown = {r[0] for r in db.execute("SELECT id FROM listings WHERE duplicate_of IS NULL")}
+    assert shown == {"pvp_giustizia:2", "pvp_giustizia:4"}
+
+
+def test_two_houses_in_one_village_are_not_twins(db, add):
+    add("fotocasa", "a", "ES", title="Casa en Castropodame", price=22000, area_m2=158, concelho="Castropodame",
+        description="Amplia casa en el centro de Calamocos para reforma integral")
+    add("fotocasa", "b", "ES", title="Casa en Castropodame", price=20000, area_m2=147, concelho="Castropodame",
+        description="Ubicada en una zona con encanto, esta casa adosada de dos plantas")
+    assert mark_duplicates(db) == 0
+
+
 def test_source_health_states(db):
     record_scrape(db, "good", count=5, status="ok")
     record_scrape(db, "was_good", count=3, status="ok", timestamp="2026-01-01T00:00:00+00:00")
