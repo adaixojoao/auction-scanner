@@ -462,8 +462,10 @@ def _is_cut_copy(new: str | None, old: str | None) -> bool:
     cut = re.search(r"\.{3,}|…", new)
     if not cut:
         return False
-    stem = new[:cut.start()].rstrip()
-    return len(stem) >= 20 and old.startswith(stem[:-3])
+    def loose(text: str) -> str:     # portals trim dots and spaces differently in the preview
+        return re.sub(r"[\s.…]+", " ", text).strip()
+    stem = loose(new[:cut.start()])
+    return len(stem) >= 20 and loose(old).startswith(stem[:-3])
 
 
 # What the app found out itself (geo.py, photos.py, links.py): a source's fresh

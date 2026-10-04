@@ -708,11 +708,14 @@ _DESC_OPENS_AS_OTHER = re.compile(
 _DESC_OPENS_AS_OUTBUILDING = re.compile(
     r"^\W*(?:se vende |vendo |a saisir \W*)?(?:une |una |un |ancienne |belle |grande |vieille )*"
     r"(?:grange|granges|panera|horreo|hangar|ecurie|cabanon|palheiro|curral)\b"
-    r"|^\W*(?:se vende |vendo )?(?:una |la )?finca con cuadra\b")
+    r"|^\W*(?:se vende |vendo |venta de )?(?:una |la )?(?:finca con )?cuadra\b")
 _DESC_OPENS_AS_FINCA = re.compile(
-    r"^\W*(?:se vende |vendo )?(?:una |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela)\b"
+    r"^\W*(?:se vende |vendo )?(?:una |un |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela"
+    r"|terreno(?: grande| rustico| agrario)?)\b"
     r"|^\W*(?:\w+\W+){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
-_SELLS_A_PLOT = re.compile(r"\bse vende (?:una )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica)\b")
+_SELLS_A_PLOT = re.compile(
+    r"\bse vende (?:una |un )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica|terreno)\b"
+    r"|\bactualmente es una parcela\b")
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
 
 

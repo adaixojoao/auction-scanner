@@ -100,3 +100,21 @@ def test_a_bank_home_for_a_few_thousand_is_doubtful():
     sc, reasons = score_detail(item(source="aliseda", title="Piso en Torrevieja", price=6270, area_m2=85,
                                     description="Piso en la 5a planta"))
     assert sc <= UNCHECKED_CAP and any("price doubtful" in r for r in reasons)
+
+
+def test_land_and_a_stable_filed_as_houses():
+    for desc in ("Se vende terreno rustico en Figares (Concejo de Salas) Asturias. Terreno llano",
+                 "Terreno grande agrario ideal para todo tipo de cultivo",
+                 "REF 438379 SE VENDE TERRENO EN FERROL San Xoan de Filgueira",
+                 "Chalet independiente de 118 m² a la venta en Langreo. Actualmente es una parcela de terreno."):
+        assert property_kind(item(title="Casa en X", tipo="house", area_m2=2000, description=desc)) == "rural_plot", desc
+    assert property_kind(item(title="Casa en Peñamellera Alta", tipo="house",
+                              description="Venta de cuadra de piedra en buen estado")) == "other"
+    assert property_kind(item(title="Casa en Neda", tipo="house", area_m2=251,
+                              description="Se vende terreno con casa de piedra")) == "home"
+
+
+def test_a_preview_line_never_replaces_the_full_text():
+    from db import _is_cut_copy
+    full = "Busca su lugar de escape, de retiro?, alejado pero cercano?.. Disponemos de esta propiedad. Una casa"
+    assert _is_cut_copy("Busca su lugar de escape, de retiro?, alejado pero cercano?. Disponemos de esta...", full)

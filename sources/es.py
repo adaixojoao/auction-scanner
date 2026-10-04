@@ -1148,7 +1148,8 @@ def scrape_pisos(db, max_price: float = 50000, **_):
     # Listings whose detail page was read (it holds the map position); the rest
     # are read as the budget allows, a few hundred a scan.
     read = {r[0] for r in db.execute(
-        """SELECT external_id FROM listings WHERE source = 'pisos' AND raw_json LIKE '%"geo"%'""")}
+        """SELECT external_id FROM listings WHERE source = 'pisos' AND raw_json LIKE '%"geo"%'
+           AND description NOT LIKE '%...'""")}           # only the preview line was kept: read again
     budget, total = PISOS_DETAILS_PER_SCAN, 0
     seen: set[str] = set()   # a thin province's pages are padded with houses from elsewhere
     for province in PISOS_PROVINCES:
