@@ -329,6 +329,26 @@ def test_the_ai_check_is_told_the_same_goal():
     from scoring import buyer_priorities
     text = buyer_priorities({"rural_min_m2": 20000, "rural_max_eur_m2": 0.3})
     assert "at least 20,000 m²" in text and "€0.30/m²" in text and "heavy work" in text
+    assert "western continental Europe" in text
+
+
+def test_off_western_continental_europe_costs_a_flat_ten():
+    from scoring import OFF_WESTERN_CONTINENTAL, off_western_continental, score_detail
+    plain = item(title="Moradia T2", price=20000, area_m2=80, description="Casa em bom estado")
+    azores = item(title="Moradia T2", price=20000, area_m2=80,
+                  description="Casa em bom estado. Comarca dos Açores, código postal 9680-011")
+    croatia = item(title="Moradia T2", price=20000, area_m2=80, description="Casa em bom estado",
+                   country="HR", source="fina")
+    assert off_western_continental(plain) is None
+    assert off_western_continental(azores) == "Azores"
+    assert off_western_continental(croatia) == "HR"
+    base, _ = score_detail(plain)
+    island, reasons = score_detail(azores)
+    abroad, abroad_reasons = score_detail(croatia)
+    assert island == pytest.approx(base + OFF_WESTERN_CONTINENTAL)
+    assert abroad == pytest.approx(base + OFF_WESTERN_CONTINENTAL)
+    assert "not western continental Europe (Azores)" in reasons
+    assert "not western continental Europe (HR)" in abroad_reasons
 
 
 def test_listings_that_all_reach_100_are_still_ordered():
