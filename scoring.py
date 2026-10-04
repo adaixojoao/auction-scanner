@@ -133,6 +133,28 @@ TARGET_DEFAULTS = {"rural_min_m2": 10000, "rural_max_eur_m2": 0.5}
 PLOT_MIN_ABROAD_M2 = 25000
 GUARDA = (40.5373, -7.2676)
 GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer scored (2026-09-26)
+# Mainland western Europe (Iberia, France, Benelux, DACH, Italy). Islands and
+# Central/Eastern Europe (HR, PL, …) sit a flat −10 below an otherwise equal listing.
+WESTERN_CONTINENTAL_COUNTRIES = frozenset(
+    {"PT", "ES", "FR", "DE", "BE", "NL", "LU", "AT", "CH", "IT"})
+OFF_WESTERN_CONTINENTAL = -10
+# Rough boxes for Atlantic/Mediterranean islands that share those country codes.
+_ISLAND_BOXES = (
+    (36.5, 40.0, -32.0, -24.5, "Azores"),
+    (32.0, 33.2, -17.5, -16.0, "Madeira"),
+    (27.0, 29.5, -18.5, -13.0, "Canaries"),
+    (38.5, 40.2, 1.0, 4.5, "Balearics"),
+    (41.2, 43.1, 8.3, 9.7, "Corsica"),
+    (36.4, 38.4, 12.0, 15.7, "Sicily"),
+    (38.8, 41.4, 8.0, 9.9, "Sardinia"),
+)
+_ISLAND_WORDS = (
+    "acores", "azores", "ilha de sao miguel", "vila franca do campo",
+    "ponta delgada", "ilha da madeira", "porto santo", "canarias", "canary",
+    "tenerife", "gran canaria", "lanzarote", "fuerteventura", "baleares",
+    "mallorca", "mayorca", "menorca", "ibiza", "eivissa", "corse", "corsica",
+    "sicilia", "sicily", "sardegna", "sardinia",
+)
 # ─── Weights (Settings → "How much each thing counts") ───────────────
 # The owner's own dial for each part of the score, 0 (ignore) to 2 (double).
 # Only the bonuses and penalties move: the rules (too hot, occupied, too
@@ -541,7 +563,11 @@ def buyer_priorities(targets: dict | None = None) -> str:
     """The goal in words, for the AI check: the same rules as score()."""
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
     return (
-        "Homes (houses or flats) and plots at very low prices. In order of preference: a house in "
+        "Homes (houses or flats) and plots at very low prices. Prefer western continental Europe "
+        "(mainland Portugal, Spain, France, Benelux, Germany, Austria, Switzerland, Italy); "
+        "islands (Azores, Madeira, Canaries, Balearics, Corsica, Sicily, Sardinia) and "
+        "Central/Eastern Europe sit a flat step below an otherwise equal listing. In order of "
+        "preference: a house in "
         "good condition in a great location well under market price; a large farm plot next to "
         "water (river, stream, lake, reservoir) that is very cheap; a house needing some repairs, "
         "dirt cheap, in a great location; a medium farm plot next to water, dirt cheap; a house "
@@ -557,6 +583,80 @@ def buyer_priorities(targets: dict | None = None) -> str:
         "cheapness and stays out of the top. Water is only a plus where the land does not flood; "
         "a home in a flood zone is a risk."
     )
+
+
+def off_western_continental(item: dict) -> str | None:
+    """Why a listing is not on western continental Europe, or None when it is.
+
+    Country first; then Azores/Madeira/Canaries/… by district, place name, postcode
+    or coordinates. Used for a flat score step, not a hard reject."""
+    country = (item.get("country") or "PT").upper()
+    if country not in WESTERN_CONTINENTAL_COUNTRIES:
+        return country
+
+    region = prices.region_of_place(item.get("district"))
+    if region in ("acores", "madeira"):
+        return "Azores" if region == "acores" else "Madeira"
+
+    blob = normalize(" ".join(str(item.get(k) or "") for k in
+                              ("title", "description", "district", "concelho", "freguesia", "location")))
+    if "sao joao da madeira" not in blob:
+        for word in _ISLAND_WORDS:
+            if word in blob:
+                if word in ("acores", "azores", "ilha de sao miguel", "vila franca do campo",
+                            "ponta delgada"):
+                    return "Azores"
+                if word in ("ilha da madeira", "porto santo"):
+                    return "Madeira"
+                if word in ("canarias", "canary", "tenerife", "gran canaria", "lanzarote",
+                            "fuerteventura"):
+                    return "Canaries"
+                if word in ("baleares", "mallorca", "mayorca", "menorca", "ibiza", "eivissa"):
+                    return "Balearics"
+                if word in ("corse", "corsica"):
+                    return "Corsica"
+                if word in ("sicilia", "sicily"):
+                    return "Sicily"
+                if word in ("sardegna", "sardinia"):
+                    return "Sardinia"
+                return word
+
+    # PT 9xxx = Azores/Madeira; ES 07 = Balearics, 35/38 = Canaries.
+    m = re.search(r"\b(\d{4,5})(?:-\d{3})?\b",
+                  f"{item.get('title') or ''} {item.get('description') or ''}")
+    if m:
+        code = m.group(1)
+        if country == "PT" and len(code) == 4 and code.startswith("9"):
+            return "Azores/Madeira"
+        if country == "ES" and len(code) == 5:
+            if code.startswith("07"):
+                return "Balearics"
+            if code.startswith(("35", "38")):
+                return "Canaries"
+
+    lat = lon = None
+    try:
+        raw = json.loads(item.get("raw_json") or "{}")
+    except (TypeError, ValueError):
+        raw = {}
+    if isinstance(raw, dict):
+        geo = raw.get("geo") if isinstance(raw.get("geo"), dict) else {}
+        lat = geo.get("lat") if geo.get("lat") is not None else raw.get("lat")
+        lon = geo.get("lon") if geo.get("lon") is not None else raw.get("lon")
+        at = (raw.get("climate") or {}).get("at") if isinstance(raw.get("climate"), dict) else None
+        if lat is None and isinstance(at, str) and "," in at:
+            try:
+                lat, lon = (float(x) for x in at.split(",", 1))
+            except ValueError:
+                lat = lon = None
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    for lat0, lat1, lon0, lon1, name in _ISLAND_BOXES:
+        if lat0 <= lat <= lat1 and lon0 <= lon <= lon1:
+            return name
+    return None
 
 
 # "Villa" before a capitalised name after a place marker is a place (Italian
@@ -990,6 +1090,11 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         # worth a look, but not above the ones that clearly are.
         s -= 10
         reasons.append("unclear what it is — check")
+
+    away = off_western_continental(item)
+    if away:
+        s += OFF_WESTERN_CONTINENTAL
+        reasons.append(f"not western continental Europe ({away})")
 
     occupation = _occupation(item)   # read from the sale's detail page (ES, FR)
     if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
