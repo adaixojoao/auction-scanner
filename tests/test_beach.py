@@ -118,7 +118,7 @@ def test_citius_land_names_its_municipality_under_localizacao():
 
 
 def test_somewhere_to_swim_within_1_5_km_is_a_must():
-    from scoring import NO_SWIM, SWIM_MAX_KM
+    from scoring import SWIM_MAX_KM
     by_sea, reasons = score_detail(home(0.5))
     assert "somewhere to swim 0.5 km away (the sea)" in reasons
     lake, reasons = score_detail({**home(30), "climate": {"water_km": 1.2}})

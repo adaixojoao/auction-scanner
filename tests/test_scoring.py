@@ -765,7 +765,7 @@ def test_spanish_subsidised_housing_is_skipped():
 
 
 def test_mainland_portugal_gets_a_step_up_but_not_the_islands():
-    from scoring import MAINLAND_PORTUGAL, score_detail
+    from scoring import score_detail
     pt = item(title="Moradia T2", price=20000, area_m2=80, description="Casa em bom estado")
     es = {**pt, "country": "ES", "source": "fotocasa"}
     azores = {**pt, "description": "Casa em bom estado. Comarca dos Açores"}
