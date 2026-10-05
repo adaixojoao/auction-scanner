@@ -81,3 +81,19 @@ def test_the_description_can_say_the_house_is_elsewhere():
     conflict = geo.title_town_conflict(house, towns)
     assert conflict and conflict["where"] == "description" and conflict["km"] > 200
     assert geo.stated_town({"description": "situada en el centro del pueblo"}) is None
+
+
+def test_the_photo_model_also_reads_the_description(monkeypatch):
+    import photos
+
+    class Looker:
+        name, model = "ollama", "test"
+
+        def look(self, urls, prompt):
+            self.prompt = prompt
+            return {"condition": "heavy", "confidence": "high", "notes": "", "shows_house": True}
+
+    monkeypatch.setattr(photos, "photo_urls", lambda item: ["http://x/1.jpg"])
+    looker = Looker()
+    photos.check_photos(looker, {"title": "Casa", "description": "tejado parte caida"})
+    assert "tejado parte caida" in looker.prompt

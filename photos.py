@@ -39,6 +39,7 @@ PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
 PHOTO_FAILURES_IN_A_ROW = 2         # then the looker is down (Ollama out of memory, …)
 MAX_PHOTOS = {"ollama": 2, "anthropic": 6}   # a 6 GB laptop swaps with more images in one Ollama call
 MAX_PHOTO_BYTES = 3_000_000
+DESCRIPTION_CHARS = 1200   # enough for the condition; more slows a small local model
 # Gallery keys scrapers have used (and a few common alternate spellings).
 _GALLERY_KEYS = ("fotos", "photos", "images", "imagens", "immagini", "gallery",
                  "slike", "media", "imagini")
@@ -56,11 +57,14 @@ PHOTO_SCHEMA = {
 }
 
 PROMPT = """These are the photos of a property for sale at auction: {title}.
-Judge only what the photos show about the building's condition:
+The seller's description (any language): {description}
+Judge the building's condition from the photos AND the description:
 - "good": lived in or ready to live in, roof and walls sound, maybe dated;
 - "some": needs work (old kitchen or bathroom, damp, worn finishes, windows) but sound;
 - "heavy": a ruin, no roof, collapsed or gutted, or unfinished construction;
 - "unknown": the photos do not show the building (a map, a document, a logo, only land).
+Sellers photograph the best parts: when the description admits damage the photos
+do not show ("tejado caído", "telhado em ruína", "needs renovation"), use the worse.
 "shows_house": true only if at least one photo shows the dwelling itself (outside or inside);
 false when they show only land, a barn, a granary, a shed, ruins of outbuildings or the view.
 Give a one-line reason in English in "notes"."""
@@ -218,7 +222,8 @@ def check_photos(looker, item: dict) -> dict | None:
     urls = photo_urls(item)[:MAX_PHOTOS.get(looker.name, 2)]
     if not urls:
         return None
-    found = looker.look(urls, PROMPT.format(title=(item.get("title") or "")[:150]))
+    found = looker.look(urls, PROMPT.format(title=(item.get("title") or "")[:150],
+                                           description=" ".join((item.get("description") or "none").split())[:DESCRIPTION_CHARS]))
     if found.get("condition") not in PHOTO_SCHEMA["properties"]["condition"]["enum"]:
         raise ValueError(f"unexpected answer {found!r:.80}")
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
