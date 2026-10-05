@@ -156,12 +156,13 @@ def open_window(url: str):
 
 def warm_up():
     """Score the list once in the background at start: the first page view then
-    finds every text check cached (cold, 18,000 listings took ~40 s)."""
+    finds every score kept (db.load_listings' score cache; cold, 15,000 listings take ~40-90 s)."""
     try:
         import db
+        from config import load_config
         conn = db.connect()
-        try:
-            db.load_listings(conn, apply_min_score=False)
+        try:   # the same filters as the list page: they are part of the score cache's key
+            db.load_listings(conn, filters=load_config().get("filters"), include_hidden=True)
         finally:
             conn.close()
         LOG.info("List warmed up")
