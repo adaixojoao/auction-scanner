@@ -46,3 +46,13 @@ def test_cheap_rustic_land_is_not_doubtful_for_forestry():
     assert not any("doubtful" in r for r in score_detail(cheap, mode="forest")[1])
     absurd = listing(title="Finca rústica", tipo="terreno", area_m2=130000, price=100)        # €8/ha
     assert any("doubtful" in r for r in score_detail(absurd, mode="forest")[1])
+
+
+def test_investment_does_not_believe_an_impossible_discount():
+    plausible = listing(concelho="Ourense", district="Ourense", area_m2=100, price=60000,
+                        description="Casa en buen estado")
+    absurd = listing(concelho="Ourense", district="Ourense", area_m2=1000, price=5000,
+                     description="Casa en buen estado")
+    reasons = score_detail(absurd, mode="invest")[1]
+    assert any("check why" in r for r in reasons)
+    assert not any("check why" in r for r in score_detail(plausible, mode="invest")[1])

@@ -1882,6 +1882,8 @@ INVEST_YIELD_POINTS = [(4, 0), (7, 8), (10, 16), (15, 24)]               # gross
 INVEST_BEACH_POINTS = [(0.5, 20), (1, 16), (3, 10), (10, 3), (20, 0)]    # km to the sea
 INVEST_FORCED_SALE = 8          # a court, tax or social-security sale
 INVEST_BANK_SALE = 4            # a bank selling what it repossessed
+INVEST_VALUE_MAX_M2 = 250       # m² of building valued at most: a bigger "area" is usually the plot
+INVEST_DISCOUNT_TRUST = 0.7     # beyond this share below the local price the gap is not believed
 
 
 def _occupied(item: dict, full: str) -> bool:
@@ -1907,15 +1909,19 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         caps.append(UNCHECKED_CAP)
         reasons.append("location unknown — check it")
 
-    mv = market_value_estimate(item)
-    if mv and pay:
+    found = local_price(item) if area else None
+    if found and pay:
+        # A listing's area is often the plot: value at most INVEST_VALUE_MAX_M2 of building.
         factor, why = local_value_factor(item)
-        mv *= factor
+        mv = found[0] * min(area, INVEST_VALUE_MAX_M2) * factor
         disc = (mv - pay) / mv
-        s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
+        s += curve(min(disc, INVEST_DISCOUNT_TRUST), INVEST_DISCOUNT_POINTS) * w("price")
         if disc > 0.1:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
-            reasons.append(f"{disc:.0%} below local prices ({local_price(item)[1]}{adjusted})")
+            reasons.append(f"{disc:.0%} below local prices ({found[1]}{adjusted})")
+        if disc > INVEST_DISCOUNT_TRUST + 0.15:
+            reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
+                           " — check why")
     import costs
     rent = costs.rent({**item, "kind": kind}, pay) if pay else None
     if rent:
