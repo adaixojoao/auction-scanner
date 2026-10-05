@@ -191,3 +191,11 @@ def test_french_forest_land_is_compared_with_the_official_regional_price():
     assert land_prices.forest_value({"country": "ES", "district": "Lugo"}) is None
     # 30 ha in the Landes for €50,000: worth ~€99,300, a ~€49k gain counted once
     assert round(forest_return(50000, 30, None, None, land_gain=49300), 3) == 0.099
+
+
+def test_placeholder_land_prices_and_dead_zones_drop_in_forestry():
+    from scoring import score_detail
+    plot = {"source": "fotocasa", "country": "ES", "tipo": "terreno", "title": "Finca rústica",
+            "description": "", "area_m2": 150000, "price": 999}
+    _, reasons = score_detail(plot, mode="forest")
+    assert any("price doubtful" in r for r in reasons)

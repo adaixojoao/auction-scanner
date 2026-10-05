@@ -1983,7 +1983,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
 
 
 FOREST_MIN_M2 = 100_000          # 10 ha: the owner's minimum for a forestry project
-FOREST_DOUBTFUL_EUR_M2 = 0.005   # €50/ha: rustic land in inland Spain or the east does sell for €150-500/ha
+FOREST_DOUBTFUL_EUR_M2 = 0.015   # under €150 a hectare: a placeholder price ("999 €") or a wrong area
 FOREST_EUR_HA_POINTS = [(200, 30), (500, 24), (1000, 16), (2000, 6), (4000, -10), (8000, -25)]
 FOREST_SIZE_POINTS = [(10, 0), (20, 6), (50, 12), (100, 16)]              # hectares
 FOREST_HOT_DAYS_POINTS = [(0, 8), (7, 0), (20, -15), (40, -30)]           # days above 35 °C by 2071-2100
@@ -1995,6 +1995,7 @@ BUILDING_LAND = -25
 
 
 # What the best crop earns a year, as a share of the land's price per hectare.
+FOREST_DEAD_ZONE = -25       # nothing worth planting will last: not forestry land
 FOREST_ROI_TARGET = 0.20    # the owner's goal: at least 20% on the money
 FOREST_ROI_YEARS = 10
 
@@ -2100,7 +2101,7 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         if pay:
             s += curve(best["eur_ha_year"] / (pay / ha), FOREST_RETURN_POINTS) * w("price")
     elif c:
-        s -= 10
+        s += FOREST_DEAD_ZONE
         reasons.append("no timber, cork, nut or carbon crop would still thrive here in 2100")
     import land_prices
     fair = land_prices.forest_value(item)
