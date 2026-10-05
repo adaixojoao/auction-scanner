@@ -162,7 +162,9 @@ def warm_up():
         from config import load_config
         conn = db.connect()
         try:   # the same filters as the list page: they are part of the score cache's key
-            db.load_listings(conn, filters=load_config().get("filters"), include_hidden=True)
+            from scoring import MODES
+            for mode in MODES:     # each goal has its own ranking (and its own kept scores)
+                db.load_listings(conn, filters=load_config().get("filters"), include_hidden=True, mode=mode)
         finally:
             conn.close()
         LOG.info("List warmed up")

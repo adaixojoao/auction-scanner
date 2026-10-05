@@ -908,7 +908,7 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
             "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
             "reasons", "wishes", "excellent", "category", "kind")
-_SCORED: dict[str, tuple[int, dict]] = {}
+_SCORED: dict[tuple[str, str], tuple[int, dict]] = {}     # (mode, listing id) → (row key, results)
 _UNSCORED = {"last_seen", "is_new"}
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
@@ -937,7 +937,7 @@ def forget_scores() -> None:
     _SHARED.update(key=None, value=None)
 
 
-def _score_one(item: dict, now, filters, first_price, cases, towns, closes, climate_on) -> float:
+def _score_one(item: dict, now, filters, first_price, cases, towns, closes, climate_on, mode="home") -> float:
     """Everything load_listings works out for one listing (kept in the score cache)."""
     import climate
     import geo
@@ -961,7 +961,7 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, clim
     item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
     item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
 
-    rank, reasons = score_detail(item, now=now, targets=filters)
+    rank, reasons = score_detail(item, now=now, targets=filters, mode=mode)
     sc = display_score(rank)
     item["score"] = sc
     item["rank"] = rank          # unclamped: orders listings that all reach 100
@@ -975,7 +975,7 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, clim
 
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
-                  where: str = "", params=(), apply_min_score: bool = True) -> list[dict]:
+                  where: str = "", params=(), apply_min_score: bool = True, mode: str = "home") -> list[dict]:
     """Every listing a view should consider, scored, with hidden ones removed.
 
     Each item gains: score, reasons, category, hidden_reason (None if visible),
@@ -1040,13 +1040,13 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             continue
 
         row_key = hash((tuple(r[i] for i in scored_cols), item["status"], item["offer_outcome"]))
-        kept = _SCORED.get(item["id"])
+        kept = _SCORED.get((mode, item["id"]))
         if kept and kept[0] == row_key:
             item.update(kept[1])
             sc = item["score"]
         else:
-            sc = _score_one(item, now, filters, first_price, cases, towns, closes, climate_on)
-            _SCORED[item["id"]] = (row_key, {k: item[k] for k in _DERIVED})
+            sc = _score_one(item, now, filters, first_price, cases, towns, closes, climate_on, mode)
+            _SCORED[(mode, item["id"])] = (row_key, {k: item[k] for k in _DERIVED})
 
         if reason is None and min_score and sc < min_score and item["status"] != "shortlisted":
             reason = f"score {sc:.0f} < filters.min_score {min_score}"

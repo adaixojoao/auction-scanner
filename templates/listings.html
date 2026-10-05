@@ -15,6 +15,13 @@
   </div>
 </div>
 
+<div class="tabs" id="modes" role="tablist" aria-label="What to rank for">
+  <button data-mode="home" role="tab">My home</button>
+  <button data-mode="invest" role="tab">Investment</button>
+  <button data-mode="forest" role="tab">Forestry</button>
+</div>
+<p class="small muted" id="mode-note"></p>
+
 <div class="stats" id="stats"></div>
 
 <div class="card filters">
@@ -81,6 +88,32 @@ const KIND_LABEL = {home: "home", urban_plot: "urban plot", rural_plot: "rural p
 const PER_PAGE = 50;
 const $ = id => document.getElementById(id);
 
+// Three goals, each ranked on its own (scoring.MODES).
+const MODE_NOTE = {
+  home: "A place to live: somewhere to swim within 1.5 km, your five wishes, mild winters if the Atlantic current fails.",
+  invest: "Homes to make money on: far below the local price, by the beach, a good rental yield, forced or bank sales.",
+  forest: "Land for forestry: rustic or forest land of 10 ha or more, cheapest per hectare, water on or by it, a climate trees will stand.",
+};
+let mode = "home";
+try { mode = localStorage.getItem("listings-mode") || "home"; } catch (e) { /* private window */ }
+if (!MODE_NOTE[mode]) mode = "home";
+function showMode() {
+  document.querySelectorAll("#modes button").forEach(b => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  $("mode-note").textContent = MODE_NOTE[mode];
+}
+document.querySelectorAll("#modes button").forEach(b => b.addEventListener("click", () => {
+  mode = b.dataset.mode;
+  try { localStorage.setItem("listings-mode", mode); } catch (e) { /* private window */ }
+  showMode();
+  page = 1;
+  load();
+}));
+showMode();
+
 async function load() {
   const status = $("f-status").value;
   const params = new URLSearchParams({
@@ -89,7 +122,7 @@ async function load() {
     search: $("f-search").value, properties: $("f-properties").checked ? 1 : 0,
     show_hidden: status === "hidden" ? 1 : 0, status: status === "shortlisted" ? "shortlisted" : "",
     climate: $("f-climate").value, climate_exact: $("f-climate-exact").checked ? 1 : 0,
-    sort, dir, page, per_page: PER_PAGE,
+    sort, dir, page, per_page: PER_PAGE, mode,
   });
   const data = await (await fetch("/api/listings?" + params)).json();
   lastFound = data.found ?? data.total; lastCap = data.cap ?? 100;
@@ -139,7 +172,7 @@ function renderRows(items, hiddenView) {
     return `<tr class="${it.hidden_reason ? "dim" : ""}">
       <td>${AS.scoreBadge(it.score, it.rank, it.excellent)}</td>
       <td>${AS.flag(it.country)}</td>
-      <td class="t-title">${titleLink}${badges}${AS.wishesHtml(it.wishes, true)}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
+      <td class="t-title">${titleLink}${badges}${mode === "home" ? AS.wishesHtml(it.wishes, true) : ""}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
       <td class="nowrap"><b>${AS.money(it.price)}</b></td>
       <td class="nowrap muted">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
       <td class="small muted">${AS.esc(loc)}</td>
@@ -154,7 +187,7 @@ function renderRows(items, hiddenView) {
 async function toggleDetails(el) {
   const row = el.closest("tr"), next = row.nextElementSibling;
   if (next && next.classList.contains("details-row")) { next.remove(); return; }
-  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id));
+  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id) + "&mode=" + mode);
   const tr = document.createElement("tr");
   tr.className = "details-row";
   tr.innerHTML = `<td colspan="9">${detailsHtml(d)}</td>`;
@@ -238,7 +271,7 @@ function locationHtml(d) {
 
 async function refreshDetails(el) {
   const tr = el.closest("tr.details-row");
-  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id));
+  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id) + "&mode=" + mode);
   tr.innerHTML = `<td colspan="9">${detailsHtml(d)}</td>`;
 }
 

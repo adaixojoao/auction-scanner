@@ -923,11 +923,11 @@ def _ha(m2: float) -> str:
 
 
 def score(item: dict, now: datetime | None = None,
-          targets: dict | None = None) -> tuple[float, list[str]]:
-    """0–100: how well a listing fits the goal (see "What we are looking for"),
-    with the reasons. `targets` are the config filters (rural_min_m2,
-    rural_max_eur_m2); missing values use TARGET_DEFAULTS."""
-    raw, reasons = score_detail(item, now, targets)
+          targets: dict | None = None, mode: str = "home") -> tuple[float, list[str]]:
+    """0–100: how well a listing fits the goal of `mode` (MODES), with the
+    reasons. `targets` are the config filters (rural_min_m2, rural_max_eur_m2);
+    missing values use TARGET_DEFAULTS."""
+    raw, reasons = score_detail(item, now, targets, mode)
     return display_score(raw), reasons
 
 
@@ -1114,14 +1114,60 @@ def _rejects_in(text: str) -> tuple:
 
 
 def score_detail(item: dict, now: datetime | None = None,
-                 targets: dict | None = None) -> tuple[float, list[str]]:
+                 targets: dict | None = None, mode: str = "home") -> tuple[float, list[str]]:
     """The score before it is clamped to 0–100: several listings can reach 100,
     and this still says which of them is best (used for sorting)."""
     token = _WEIGHTS.set((targets or {}).get("weights") or {})
     try:
+        if mode == "invest":
+            return _score_invest(item, now, targets)
+        if mode == "forest":
+            return _score_forest(item, now, targets)
         return _score_detail(item, now, targets)
     finally:
         _WEIGHTS.reset(token)
+
+
+def _skip_reason(item: dict, title: str, full: str) -> str | None:
+    """Never worth buying in any mode: a share, a caravan, a usufruct, subsidised
+    housing, a timeshare."""
+    if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
+        return "fractional share — skip"
+    if has_term(full, NOT_A_BUILDING, negations=False):
+        return "mobile home or caravan, not a house — skip"
+    if has_term(full, USUFRUCT_PATTERNS):
+        return "usufruct — skip"
+    if has_term(full, SUBSIDISED_HOUSING):
+        return "subsidised housing (buyer must qualify, resale price capped) — skip"
+    if is_timeshare(full):
+        return "timeshare (some weeks a year) — skip"
+    return None
+
+
+def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: list[str], caps: list[float],
+            land_floor: float = DOUBTFUL_LAND_EUR_M2):
+    """What must be checked by hand before the score can be trusted, in any mode:
+    each caps the score at UNCHECKED_CAP."""
+    if has_term(full, UNFINISHED_HOUSE, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("house still under construction — check what is built and licensed")
+    if has_term(full, NO_VIEWING, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("auction resold by a middleman: no viewing, cash only")
+    if item.get("place_conflict"):
+        # The title names a town far from where the listing is placed: the
+        # climate and distances belong to the wrong place.
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"title names {item['place_conflict']['town']}, "
+                       f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
+    if (kind == "home" and item.get("source") in SALE_PORTALS
+            and pay and area >= 40                                  # court sales do start this low
+            and pay < (DOUBTFUL_BANK_HOME_EUR if item.get("source") in BANK_PORTALS else DOUBTFUL_HOME_EUR)):
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"price doubtful (€{pay:,.0f} for a home) — probably a rent or a typo")
+    if kind in ("urban_plot", "rural_plot") and pay and area and pay / area < land_floor:
+        caps.append(UNCHECKED_CAP)
+        reasons.append(f"price doubtful (€{pay:,.0f} for {_ha(area)}) — check the price and area")
 
 
 def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
@@ -1148,20 +1194,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(likely["text"])
     kind    = property_kind(item)
 
-    if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
-        return 0.0, ["fractional share — skip"]
-
-    if has_term(full, NOT_A_BUILDING, negations=False):
-        return 0.0, ["mobile home or caravan, not a house — skip"]
-
-    if has_term(full, USUFRUCT_PATTERNS):
-        return 0.0, ["usufruct — skip"]
-
-    if has_term(full, SUBSIDISED_HOUSING):
-        return 0.0, ["subsidised housing (buyer must qualify, resale price capped) — skip"]
-
-    if is_timeshare(full):
-        return 0.0, ["timeshare (some weeks a year) — skip"]
+    skip = _skip_reason(item, title, full)
+    if skip:
+        return 0.0, [skip]
 
     # ── What it is ────────────────────────────────────────────────────
     # A ruin on a big farm: the value is the land, so it is scored as land.
@@ -1178,26 +1213,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         caps.append(UNCHECKED_CAP)
         reasons.append("location unknown — climate not checked")
 
-    if has_term(full, UNFINISHED_HOUSE, negations=False):
-        caps.append(UNCHECKED_CAP)
-        reasons.append("house still under construction — check what is built and licensed")
-    if has_term(full, NO_VIEWING, negations=False):
-        caps.append(UNCHECKED_CAP)
-        reasons.append("auction resold by a middleman: no viewing, cash only")
-    if item.get("place_conflict"):
-        # The title names a town far from where the listing is placed: the
-        # climate and distances belong to the wrong place.
-        caps.append(UNCHECKED_CAP)
-        reasons.append(f"title names {item['place_conflict']['town']}, "
-                       f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
-    if (kind == "home" and item.get("source") in SALE_PORTALS
-            and pay and area >= 40                                  # court sales do start this low
-            and pay < (DOUBTFUL_BANK_HOME_EUR if item.get("source") in BANK_PORTALS else DOUBTFUL_HOME_EUR)):
-        caps.append(UNCHECKED_CAP)
-        reasons.append(f"price doubtful (€{pay:,.0f} for a home) — probably a rent or a typo")
-    if kind in ("urban_plot", "rural_plot") and pay and area and pay / area < DOUBTFUL_LAND_EUR_M2:
-        caps.append(UNCHECKED_CAP)
-        reasons.append(f"price doubtful (€{pay:,.0f} for {_ha(area)}) — check the price and area")
+    _doubts(item, kind, pay, area, full, reasons, caps)
 
     # Land: too small is not wanted at all.
     if kind in ("urban_plot", "rural_plot"):
@@ -1843,3 +1859,181 @@ def wishes(item: dict) -> list[dict]:
     else:
         add("water", "Water on land", "no" if check else "unknown", "none found" if check else "?")
     return out
+
+
+# ─── Three goals (2026-10-05) ────────────────────────────────────────
+# The owner looks for three different things, each ranked on its own:
+#   home    — a place to live (the rules above: swim, five wishes, AMOC…);
+#   invest  — a home to make money on: far below the local price, by the beach,
+#             a good rental yield, a forced or auction sale;
+#   forest  — land for forestry: rustic or forest land of 10 ha or more,
+#             cheapest per hectare, water on or by it, a climate trees will stand.
+MODES = {"home": "My home", "invest": "Investment", "forest": "Forestry"}
+
+INVEST_DISCOUNT_POINTS = [(0.1, 0), (0.3, 12), (0.5, 25), (0.7, 35)]     # share below the local price
+INVEST_YIELD_POINTS = [(4, 0), (7, 8), (10, 16), (15, 24)]               # gross rent a year, % of the cost
+INVEST_BEACH_POINTS = [(0.5, 20), (1, 16), (3, 10), (10, 3), (20, 0)]    # km to the sea
+INVEST_FORCED_SALE = 8          # a court, tax or social-security sale
+INVEST_BANK_SALE = 4            # a bank selling what it repossessed
+
+
+def _occupied(item: dict, full: str) -> bool:
+    occupation = _occupation(item)
+    return occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS))
+
+
+def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
+    """A home to make money on: resale under the local price, holiday or long rent."""
+    title, desc = item.get("title") or "", item.get("description") or ""
+    full = f"{title} {desc}"
+    skip = _skip_reason(item, title, full)
+    if skip:
+        return 0.0, [skip]
+    kind = property_kind(item)
+    if kind != "home":
+        return 0.0, ["not a home — see Forestry for land"]
+    s, reasons, caps = 50.0, [], []
+    area = item.get("area_m2") or find_area(title) or find_area(desc) or 0
+    pay = _pay(item)
+    _doubts(item, kind, pay, area, full, reasons, caps)
+    if item.get("unlocated"):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("location unknown — check it")
+
+    mv = market_value_estimate(item)
+    if mv and pay:
+        disc = (mv - pay) / mv
+        s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
+        if disc > 0.1:
+            reasons.append(f"{disc:.0%} below local prices ({local_price(item)[1]})")
+    import costs
+    rent = costs.rent({**item, "kind": kind}, pay) if pay else None
+    if rent:
+        s += curve(rent["yield_pct"], INVEST_YIELD_POINTS)
+        reasons.append(f"rent about €{rent['monthly']:,.0f}/month: {rent['yield_pct']}% a year gross"
+                       + (" (a town average — check rents there)" if rent["yield_pct"] > 15 else ""))
+    beach = item.get("beach")
+    if beach and beach.get("km") is not None:
+        s += curve(beach["km"], INVEST_BEACH_POINTS) * (BEACH_APPROX_SHARE if beach.get("approx") else 1) * w("beach")
+        if beach["km"] <= 10:
+            reasons.append(beach.get("text") or f"{beach['km']:.1f} km from the beach")
+
+    import source_validation
+    kind_of_source = (source_validation.CATALOG.get(item.get("source")) or {}).get("kind")
+    if kind_of_source == "official":
+        s += INVEST_FORCED_SALE * w("sale")
+        reasons.append("forced sale (court, tax or social security)")
+    elif kind_of_source == "bank":
+        s += INVEST_BANK_SALE * w("sale")
+        reasons.append("bank sale")
+
+    state = condition(item)
+    s += {"good": 5, "some": -5, "heavy": -15}.get(state, -3)
+    reasons.append({"good": "good condition", "some": "needs some work", "heavy": "needs heavy work"}.get(
+        state, "condition not stated"))
+    if area and area < 30:
+        s -= 10
+        reasons.append(f"small ({area:.0f} m²)")
+    if _occupied(item, full):
+        s -= 25
+        reasons.append("occupied/tenanted — hard to resell or let")
+    c = item.get("climate") or {}
+    if floods(c):
+        s -= 15 * w("risks")
+        reasons.append(f"in the 100-year flood zone ({floods(c):.1f} m)")
+    future = (c.get("hot_days") or {}).get("rcp45_2071-2100")
+    if future is not None and future > REJECT_HOT_DAYS:
+        s -= 15 * w("heat")
+        reasons.append(f"{future:.0f} days a year above 35 °C by 2071-2100 — value at risk")
+    if pay:
+        reasons.append(f"€{pay:,.0f}")
+    if caps:
+        s = min(s, min(caps))
+    return max(s, 0.0), reasons
+
+
+FOREST_MIN_M2 = 100_000          # 10 ha: the owner's minimum for a forestry project
+FOREST_DOUBTFUL_EUR_M2 = 0.005   # €50/ha: rustic land in inland Spain or the east does sell for €150-500/ha
+FOREST_EUR_HA_POINTS = [(200, 30), (500, 24), (1000, 16), (2000, 6), (4000, -10), (8000, -25)]
+FOREST_SIZE_POINTS = [(10, 0), (20, 6), (50, 12), (100, 16)]              # hectares
+FOREST_HOT_DAYS_POINTS = [(0, 8), (7, 0), (20, -15), (40, -30)]           # days above 35 °C by 2071-2100
+FOREST_DRY_POINTS = [(-150, -12), (-50, 0)]                               # mm, summer water balance if AMOC stops
+FOREST_WORDS = ["floresta", "florestal", "pinhal", "montado", "souto", "carvalhal", "forestal", "bosque",
+                "arbolado", "forêt", "forestier", "boisé", "bosco", "boschivo", "wald",
+                "šuma", "гора", "lesný pozemok", "lesná pôda", "lesný"]
+BUILDING_LAND = -25
+
+
+def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
+    """Land for a forestry project: big, cheap per hectare, wet enough, fit for trees."""
+    title, desc = item.get("title") or "", item.get("description") or ""
+    full = f"{title} {desc}"
+    skip = _skip_reason(item, title, full)
+    if skip:
+        return 0.0, [skip]
+    kind = property_kind(item)
+    area = item.get("area_m2") or find_area(title) or find_area(desc) or 0
+    if kind == "home" and area >= FOREST_MIN_M2 and has_term(full, RURAL_WORDS, negations=False):
+        kind = "rural_plot"                        # a house on a big estate: the value is the land
+    if kind not in ("rural_plot", "urban_plot"):
+        return 0.0, ["not land"]
+    if area < FOREST_MIN_M2:
+        return 0.0, [f"{_ha(area) if area else 'size unknown'} — under 10 ha"]
+    s, reasons, caps = 50.0, [], []
+    pay = _pay(item)
+    _doubts(item, kind, pay, area, full, reasons, caps, land_floor=FOREST_DOUBTFUL_EUR_M2)
+    if item.get("unlocated"):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("location unknown — climate not checked")
+    ha = area / 10000
+    if pay:
+        per_ha = pay / ha
+        s += curve(per_ha, FOREST_EUR_HA_POINTS) * w("price")
+        reasons.append(f"€{per_ha:,.0f} a hectare")
+    s += curve(ha, FOREST_SIZE_POINTS)
+    reasons.append(_ha(area))
+    if kind == "urban_plot":
+        s += BUILDING_LAND
+        reasons.append("building land, not rustic — dearer to hold and to plant")
+    elif has_term(full, FOREST_WORDS, negations=False):
+        s += 5
+        reasons.append("forest or woodland")
+
+    water = water_nearby(full, item)
+    c = item.get("climate") or {}
+    if water:
+        s += (6 if water.endswith("(approx.)") else 12) * w("water")
+        reasons.append(f"water on or by the land ({water})")
+    elif c.get("water_km") is not None and c["water_km"] <= 1:
+        s += (10 if c["water_km"] <= 0.3 else 4) * w("water")
+        reasons.append(f"permanent water {c['water_km']:.1f} km away")
+    future = (c.get("hot_days") or {}).get("rcp45_2071-2100")
+    if future is not None:
+        s += curve(future, FOREST_HOT_DAYS_POINTS) * w("heat")
+        reasons.append(f"{future:.0f} days a year above 35 °C by 2071-2100")
+    stress = (c.get("stress") or {}).get("stress_2080")
+    if stress is not None and (stress >= 3 or stress == -1):
+        s -= (20 if stress in (4, -1) else 10) * w("water")
+        reasons.append("water stress " + ("arid" if stress == -1 else "extremely high" if stress == 4 else "high")
+                       + " by 2080")
+    fire = c.get("fire") or {}
+    if fire.get("burnt_here"):
+        s -= 15 * w("risks")
+        reasons.append(f"burnt since 2016 ({', '.join(map(str, fire.get('years') or []))})")
+    elif fire.get("count"):
+        s -= 6 * w("risks")
+        reasons.append("fires nearby since 2016")
+    danger = (c.get("fire_danger") or {}).get("high_days_2090")
+    if danger is not None and danger >= 30:
+        s -= 8 * w("risks")
+        reasons.append(f"{danger:.0f} days a year of high fire danger by 2090")
+    dry = c.get("amoc_dry_mm")
+    if dry is not None:
+        s += curve(dry, FOREST_DRY_POINTS) * w("amoc")
+        if dry <= AMOC_DRY_WARN_MM:
+            reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
+    if pay:
+        reasons.append(f"€{pay:,.0f}")
+    if caps:
+        s = min(s, min(caps))
+    return max(s, 0.0), reasons
