@@ -51,7 +51,7 @@ def test_access_is_estimated_from_slope_and_the_nearest_track():
 
 
 def test_the_stored_summary_keeps_what_the_score_needs():
-    report = {"hectares": 30.0, "exact": False,
+    report = {"hectares": 30.0, "exact": False, "lat": 45.3, "lon": 4.0, "satellite": "https://maps/x",
               "slope": {"min_m": 1, "max_m": 2, "mean_pct": 61, "p90_pct": 80,
                         "shares": {"wheeled machines": 0.1, "tracked or winch only": 0.4, "cable yarding only": 0.5}},
               "extraction": {"Inaccessible": 0.6, "Zone non exploitable (pente trop élevée)": 0.2,
@@ -60,5 +60,5 @@ def test_the_stored_summary_keeps_what_the_score_needs():
               "pt_cover": None, "eu_forest": None, "forest": {"Forêt fermée de sapin ou épicéa": 0.7}}
     s = site_check.summary(report)
     assert (s["cable_share"], s["inaccessible"], s["track_m"], s["forest_share"]) == (0.5, 0.8, 640.0, 0.7)
-    assert site_check._radius_for(300000) == 309.0 or abs(site_check._radius_for(300000) - 309.0) < 0.1
+    assert abs(site_check._radius_for(300000) - 309.0) < 0.1
     assert site_check._radius_for(1000) == 100.0
