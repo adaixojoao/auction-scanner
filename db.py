@@ -899,6 +899,80 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
     return first
 
 
+# ─── Score cache ─────────────────────────────────────────────────────
+# Scoring every listing takes ~30 s at 15,000 listings and grows with each new
+# country. A listing's score depends on its own row and on a few shared things,
+# so the result is kept per listing, keyed by its row, and thrown away when the
+# day, the filters (with the weights), the known towns or the auction results change.
+# The shared lookups are rebuilt only when their tables change.
+_DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
+            "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
+            "reasons", "wishes", "excellent", "category", "kind")
+_SCORED: dict[str, tuple[int, dict]] = {}
+_UNSCORED = {"last_seen", "is_new"}
+_SCORED_FOR: list = [None]
+_SHARED: dict = {"key": None, "value": None}
+
+
+def _shared_lookups(db, now):
+    """(first prices, rounds index, towns, auction results): rebuilt when the day,
+    the database or the row counts of the tables they come from change."""
+    import geo
+    import outcomes
+    import rounds
+    outcomes.ensure_table(db)
+    path = next((r[2] for r in db.execute("PRAGMA database_list") if r[1] == "main"), "")
+    counts = tuple(db.execute(
+        "SELECT (SELECT COUNT(*) FROM listings), (SELECT COUNT(*) FROM price_history), "
+        "(SELECT COUNT(*) FROM places WHERE lat IS NOT NULL), (SELECT COUNT(*) FROM auction_results)").fetchone())
+    key = (path or id(db), now.date(), counts)
+    if _SHARED["key"] != key:
+        _SHARED.update(key=key, value=(_first_prices(db), rounds.index(db), geo.town_index(db), outcomes.stats(db)))
+    return _SHARED["value"]
+
+
+def forget_scores() -> None:
+    """Drop every kept score (after a code or data change the cache cannot see)."""
+    _SCORED.clear()
+    _SHARED.update(key=None, value=None)
+
+
+def _score_one(item: dict, now, filters, first_price, cases, towns, closes, climate_on) -> float:
+    """Everything load_listings works out for one listing (kept in the score cache)."""
+    import climate
+    import geo
+    import outcomes
+    import rounds
+    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail, wishes
+    fp = first_price.get(item["id"])
+    if fp and item.get("price") and fp > 0 and item["price"] < fp:
+        item["price_drop_pct"] = round((fp - item["price"]) / fp * 100, 1)
+    else:
+        item["price_drop_pct"] = None
+    item["earlier_round"] = rounds.earlier_round(item, cases, now)
+    item["case_land"] = rounds.land_in_case(item, cases, now, property_kind)
+    item["town_distance"] = geo.distance_to_town(item, towns) if towns else None
+    item["place_conflict"] = geo.title_town_conflict(item, towns) if towns else None
+    item["beach"] = geo.nearest_beach(item, towns=towns)
+    item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
+    item["station"] = geo.nearest_hub(item, "station", towns=towns)
+    item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
+    item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
+    item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
+    item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
+
+    rank, reasons = score_detail(item, now=now, targets=filters)
+    sc = display_score(rank)
+    item["score"] = sc
+    item["rank"] = rank          # unclamped: orders listings that all reach 100
+    item["reasons"] = reasons
+    item["wishes"] = wishes(item)
+    item["excellent"] = excellent(item, sc, reasons)
+    item["category"] = categorize(item)
+    item["kind"] = property_kind(item) if item["category"] == "imoveis" else None
+    return sc
+
+
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
                   where: str = "", params=(), apply_min_score: bool = True) -> list[dict]:
@@ -914,27 +988,28 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     filters.min_score. A shortlisted listing ignores the last two: the user
     picked it on purpose.
     """
-    import geo
-    import rounds
-    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail, wishes  # scoring imports common, not db
-
     now = now or utcnow()
     sql = "SELECT * FROM listings"
     if where:
         sql += f" WHERE {where}"
     rows = db.execute(sql, params).fetchall()
+    # A scan touches last_seen on every listing it sees; the score never reads it.
+    scored_cols = [i for i, k in enumerate(rows[0].keys()) if k not in _UNSCORED] if rows else []
 
     last_ok = last_ok_by_source(db)
-    first_price = _first_prices(db)
     statuses = listing_statuses(db)
     offers = latest_offers(db)
-    cases = rounds.index(db)       # all listings, whatever `where` picks: rounds span sites and dates
-    towns = geo.town_index(db)     # where each municipality's town is, for "X km from town"
+    # first prices; rounds (all listings: they span sites and dates); where each
+    # municipality's town is; what ended sales closed at. Shared, rebuilt when their tables change.
+    first_price, cases, towns, closes = _shared_lookups(db, now)
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
-    import outcomes
     climate_on = climate.available()
-    closes = outcomes.stats(db)    # what ended sales closed at, for "likely to close around"
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
+    context = (now.date(), json.dumps(filters or {}, sort_keys=True, default=str), len(towns),   # weights: in filters
+               sum(len(v) for v in closes.values()), climate_on)
+    if _SCORED_FOR[0] != context:
+        _SCORED.clear()
+        _SCORED_FOR[0] = context
 
     items = []
     for r in rows:
@@ -964,32 +1039,14 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         if reason and not include_hidden:
             continue
 
-        fp = first_price.get(item["id"])
-        if fp and item.get("price") and fp > 0 and item["price"] < fp:
-            item["price_drop_pct"] = round((fp - item["price"]) / fp * 100, 1)
+        row_key = hash((tuple(r[i] for i in scored_cols), item["status"], item["offer_outcome"]))
+        kept = _SCORED.get(item["id"])
+        if kept and kept[0] == row_key:
+            item.update(kept[1])
+            sc = item["score"]
         else:
-            item["price_drop_pct"] = None
-        item["earlier_round"] = rounds.earlier_round(item, cases, now)
-        item["case_land"] = rounds.land_in_case(item, cases, now, property_kind)
-        item["town_distance"] = geo.distance_to_town(item, towns) if towns else None
-        item["place_conflict"] = geo.title_town_conflict(item, towns) if towns else None
-        item["beach"] = geo.nearest_beach(item, towns=towns)
-        item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
-        item["station"] = geo.nearest_hub(item, "station", towns=towns)
-        item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
-        item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
-        item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
-        item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
-
-        rank, reasons = score_detail(item, now=now, targets=filters)
-        sc = display_score(rank)
-        item["score"] = sc
-        item["rank"] = rank          # unclamped: orders listings that all reach 100
-        item["reasons"] = reasons
-        item["wishes"] = wishes(item)
-        item["excellent"] = excellent(item, sc, reasons)
-        item["category"] = categorize(item)
-        item["kind"] = property_kind(item) if item["category"] == "imoveis" else None
+            sc = _score_one(item, now, filters, first_price, cases, towns, closes, climate_on)
+            _SCORED[item["id"]] = (row_key, {k: item[k] for k in _DERIVED})
 
         if reason is None and min_score and sc < min_score and item["status"] != "shortlisted":
             reason = f"score {sc:.0f} < filters.min_score {min_score}"
