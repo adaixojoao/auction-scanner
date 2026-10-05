@@ -295,3 +295,23 @@ def test_a_stored_site_check_moves_the_forestry_score():
     assert s_steep <= s_base - 15 and any("cable yarding" in r for r in reasons)
     _, reasons = score_detail(montado, mode="forest")
     assert any("80% montado" in r for r in reasons)
+
+
+def test_generic_words_in_a_title_are_not_read_as_far_away_towns():
+    import geo
+    item = {"country": "ES", "concelho": "Gizaburuaga", "title": "Terreno en Gizaburuaga, Barrio Arteaga",
+            "raw_json": '{"lat": 43.33, "lon": -2.53}'}
+    towns = {"ES:gizaburuaga": {"name": "Gizaburuaga", "lat": 43.33, "lon": -2.53},
+             "ES:barrio": {"name": "Barrio (Vilarmaior)", "lat": 40.4, "lon": -7.4}}
+    assert geo.title_town_conflict(item, towns) is None
+
+
+def test_unreachable_land_gets_no_timber_return():
+    import json
+    from scoring import score_detail
+    plot = {"source": "bienici", "country": "FR", "district": "73", "tipo": "terreno", "title": "Forêt",
+            "description": "", "area_m2": 400000, "price": 50000,
+            "raw_json": json.dumps({"site_check": {"v": 1, "exact": False, "cable_share": 0.5, "winch_share": 0.4,
+                                                    "inaccessible": 0.88}})}
+    _, reasons = score_detail(plot, mode="forest")
+    assert not any("meets the 20% goal" in r for r in reasons)

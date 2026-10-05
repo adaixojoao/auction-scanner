@@ -2174,7 +2174,8 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         if dry <= AMOC_DRY_WARN_MM:
             reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
     import forestry
-    crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=existing,
+    on_land = bool(water) and not water.endswith("(approx.)")    # near the village is not by the land
+    crops = forestry.options(c, item.get("country"), ha, water_on_land=on_land, existing=existing,
                              trees=forestry.trees_for_item(item), wooded=wooded,
                              slope_pct=(site or {}).get("slope_mean"))
     timber = forestry.standing_timber(full, item.get("country"), ha)
@@ -2207,6 +2208,12 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
     costs, costs_label = buying_costs(item, full)
     if pay:
         reasons.append(f"buying costs ≈ €{pay * costs:,.0f} ({costs_label})")
+    unreachable = bool(site) and ((site.get("inaccessible") or 0) >= 0.5
+                                  or site.get("cable_share", 0) >= SITE_CABLE_SHARE)
+    if unreachable and crops and c:
+        # timber that cannot be brought out cannot be sold: only the carbon counts
+        crops = [{**crops[0], "eur_ha_year": crops[0]["carbon_eur_ha_year"]}] + crops[1:]
+        reasons.append("no timber income counted: machines cannot reach most of the land")
     roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, crops[0] if crops and c else None, timber,
                         land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay else 0.0)
     if roi is not None:

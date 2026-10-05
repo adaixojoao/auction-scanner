@@ -387,6 +387,10 @@ def locate_towns(db, session, items: list[dict], limit: int = TOWNS_PER_SCAN) ->
 
 
 TITLE_TOWN_CONFLICT_KM = 40
+# Words that are also somewhere's name: never read as a town in a title.
+GENERIC_PLACE_WORDS = {"barrio", "centro", "campo", "aldea", "pueblo", "lugar", "monte", "villa", "ciudad",
+                       "playa", "sierra", "valle", "puerto", "ribera", "quinta", "herdade", "bairro", "terreno",
+                       "finca", "parcela", "casal"}
 # "esta em Horcajo Medianero", "situada en Lugo", "nalazi se u Splitu": where the
 # seller says the property is, which may not be where the portal filed it.
 _STATED = re.compile(r"\b(?:est[aá] (?:em|en)|situad[ao] (?:em|en)|ubicad[ao] en|localizad[ao] em|"
@@ -410,7 +414,8 @@ def _town_pattern(towns: dict[str, dict], country: str):
         import prices
         names = {}
         for k, t in towns.items():
-            if k.startswith(f"{country}:") and len(t.get("name") or "") >= 5:
+            if (k.startswith(f"{country}:") and len(t.get("name") or "") >= 5
+                    and prices.place_key(t["name"]).split(" (")[0] not in GENERIC_PLACE_WORDS):
                 names[prices.place_key(t["name"])] = t
         alts = "|".join(sorted((re.escape(n) for n in names), key=len, reverse=True))
         _TOWN_PATTERNS.clear()
