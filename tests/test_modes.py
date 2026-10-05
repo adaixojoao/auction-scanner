@@ -275,6 +275,8 @@ def test_the_return_is_on_the_price_plus_buying_costs():
 def test_planting_costs_come_from_the_caof_matrix():
     import forestry
     assert forestry.planting_cost("conifer", 20) == (1464 + 2270) / 2 + 1100 * 0.40
+    assert forestry.planting_cost("conifer", 20, slope_pct=5) == 1464 + 1100 * 0.40      # flat: CAOF's easy cost
+    assert forestry.planting_cost("conifer", 20, slope_pct=40) == 2270 + 1100 * 0.40     # steep: the hard cost
     assert forestry.planting_cost("conifer", 5) > forestry.planting_cost("conifer", 20)   # +3% a hectare under 10
 
 

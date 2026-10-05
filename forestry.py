@@ -159,16 +159,24 @@ GROWTH_SOURCE = "growth {:.1f} m³/ha/yr, IGN Mémento 2025"
 # planting, weeding and earthing up, fertilising — the midpoint between easy
 # ground (flat, light scrub) and hard (over 25% slope, rocky, dense scrub). The
 # plants and tree guards themselves are not in the matrix: PROVISIONAL.
-CAOF_WORK = {"conifer": (1464 + 2270) / 2,        # 1,100 container plants a hectare
-             "broadleaf": (1231 + 1880) / 2}      # 500 plants a hectare, guards fitted
+CAOF_WORK = {"conifer": (1464, 2270),             # 1,100 container plants a hectare: easy, hard
+             "broadleaf": (1231, 1880)}           # 500 plants a hectare, guards fitted
+CAOF_EASY_SLOPE, CAOF_HARD_SLOPE = 10, 25         # CAOF's conditions: under 10% easy, over 25% hard
 PLANT_MATERIAL = {"conifer": 1100 * 0.40, "broadleaf": 500 * (1.0 + 1.5)}   # PROVISIONAL
 CAOF_SOURCE = "planting work CAOF 2024"
 CAOF_SMALL_PLOT = 0.03    # CAOF: +3% for each hectare under 10
 
 
-def planting_cost(kind: str, hectares: float) -> float:
+def planting_cost(kind: str, hectares: float, slope_pct: float | None = None) -> float:
+    """CAOF work at the measured slope (the midpoint when unknown), plus the plants."""
+    easy, hard = CAOF_WORK[kind]
+    if slope_pct is None:
+        work = (easy + hard) / 2
+    else:
+        t = min(1.0, max(0.0, (slope_pct - CAOF_EASY_SLOPE) / (CAOF_HARD_SLOPE - CAOF_EASY_SLOPE)))
+        work = easy + t * (hard - easy)
     small = max(0.0, 10 - hectares) * CAOF_SMALL_PLOT if hectares else 0.0
-    return CAOF_WORK[kind] * (1 + small) + PLANT_MATERIAL[kind]
+    return work * (1 + small) + PLANT_MATERIAL[kind]
 
 
 def _annuity(npv: float) -> float:
@@ -204,7 +212,8 @@ def growing(text: str) -> set[str]:
 
 
 def options(climate: dict | None, country: str | None, hectares: float, water_on_land: bool = False,
-            existing: set[str] | None = None, trees: dict | None = None, wooded: bool = False) -> list[dict]:
+            existing: set[str] | None = None, trees: dict | None = None, wooded: bool = False,
+            slope_pct: float | None = None) -> list[dict]:
     """Every crop that still thrives here in 2100, best first:
     {"crop", "eur_ha_year", "carbon_eur_ha_year", "note", "limits"}."""
     c = climate or {}
@@ -253,7 +262,7 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
         established = name in (existing or ())
         plant = crop["plant"]
         if isinstance(plant, str):
-            plant = planting_cost(plant, hectares)
+            plant = planting_cost(plant, hectares, slope_pct)
             sources.add(CAOF_SOURCE)
         flows = {0: 0 if established else -plant}
         income = crop["income"]

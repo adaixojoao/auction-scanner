@@ -2175,7 +2175,8 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
             reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
     import forestry
     crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=existing,
-                             trees=forestry.trees_for_item(item), wooded=wooded)
+                             trees=forestry.trees_for_item(item), wooded=wooded,
+                             slope_pct=(site or {}).get("slope_mean"))
     timber = forestry.standing_timber(full, item.get("country"), ha)
     if timber and pay:
         share = timber["eur"] / pay
