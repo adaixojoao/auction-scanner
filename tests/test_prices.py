@@ -175,7 +175,8 @@ def test_simef_prices_are_weighted_by_volume_over_the_last_years():
             "<tr><td>2024</td><td>40</td><td>Pinheiro-bravo</td><td>1T</td><td>10</td><td>60</td><td>40</td><td>3.000</td></tr>"
             "<tr><td>2019</td><td>9</td><td>Pinheiro-bravo</td><td>1T</td><td>10</td><td>60</td><td>99</td><td>9.000</td></tr>"
             "</table>")
-    [pine] = simef_prices(simef_rows(page))
+    mixed, pine = simef_prices(simef_rows(page))
+    assert mixed["crop"] == "mixed" and mixed["eur_m3"] == 42.5
     assert (pine["crop"], pine["eur_m3"], pine["period"]) == ("maritime pine", 42.5, "2023-2025")
 
 

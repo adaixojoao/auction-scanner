@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import functools
 import os
+import re
 
 DISCOUNT_RATE = 0.03
 FOREST_YEARS = 60
@@ -212,3 +213,36 @@ def describe(option: dict) -> str:
     else:
         limits += "; provisional prices"
     return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (estimate{limits})"
+
+
+# "Kopējais mežaudzes krājas apjoms ir 1632 m³", "volume sur pied 1 200 m3",
+# "1.500 m3 de madera", "2400 kubikmetri": timber already standing on the land.
+_VOLUME = re.compile(
+    r"(?:kr[āa]ja|krājas apjoms|volume (?:sur pied|de bois)|cubicaje|volume de madeira|madera en pie|"
+    r"timber volume|standing (?:volume|timber))[^.\d]{0,40}?(\d[\d .,]*)\s*(?:m3|m³|kubikmetr|metros c[uú]bicos)"
+    r"|(\d[\d .,]*)\s*(?:m3|m³|kubikmetr\w*|metros c[uú]bicos)\s+(?:de madera|de madeira|de bois|sur pied|krāj|koksnes)",
+    re.I)
+
+
+def standing_volume(text: str) -> float | None:
+    """The m³ of timber the ad says stand on the land, if it says."""
+    m = _VOLUME.search(text or "")
+    if not m:
+        return None
+    digits = re.sub(r"[ .](?=\d{3}\b)", "", (m.group(1) or m.group(2)).strip()).replace(",", ".")
+    try:
+        value = float(digits.rstrip("."))
+    except ValueError:
+        return None
+    return value if 10 <= value <= 200000 else None
+
+
+def standing_timber(text: str, country: str | None, hectares: float) -> dict | None:
+    """{"m3", "eur", "label"}: what the stated standing timber is worth at the
+    official average price. None when the ad states no volume, the country has
+    no official price, or the volume is beyond any forest (over 1,000 m³ a ha)."""
+    m3 = standing_volume(text)
+    price = timber_price(country, "mixed")
+    if not m3 or not price or (hectares and m3 / hectares > 1000):
+        return None
+    return {"m3": m3, "eur": m3 * price["eur_m3"], "label": price["label"]}

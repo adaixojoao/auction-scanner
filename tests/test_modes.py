@@ -138,3 +138,17 @@ def test_a_crop_stops_earning_when_the_climate_passes_its_limit_and_fire_adds_up
     assert pine(burning)["eur_ha_year"] < pine(calm)["eur_ha_year"]
     assert any("chance of losing it" in x for x in pine(burning)["limits"])
     assert "maritime pine" not in [o["crop"] for o in forestry.options({"heat": warming}, "PT", 20)]
+
+
+def test_standing_timber_worth_more_than_the_price_is_flagged():
+    import forestry
+    assert forestry.standing_volume("Forêt de 20 ha, volume sur pied estimé à 2 400 m3") == 2400
+    assert forestry.standing_volume("Finca con 1.500 metros cúbicos de madera") == 1500
+    assert forestry.standing_volume("casa de 120 m3 de volumen") is None
+    timber = forestry.standing_timber("Kopējais mežaudzes krājas apjoms ir 1632 m³.", "LV", 12.35)
+    assert timber and 75000 < timber["eur"] < 80000 and "LVM" in timber["label"]
+    from scoring import score_detail
+    plot = {"source": "sslv", "country": "LV", "tipo": "terreno", "title": "Mežs 20 ha",
+            "description": "Mežs. Kopējais krājas apjoms ir 2000 m³.", "area_m2": 200000, "price": 60000}
+    _, reasons = score_detail(plot, mode="forest")
+    assert any("land comes free" in r for r in reasons)

@@ -1995,6 +1995,9 @@ BUILDING_LAND = -25
 
 
 # What the best crop earns a year, as a share of the land's price per hectare.
+FOREST_ROI_TARGET = 0.20    # the owner's goal: at least 20% on the money
+# Standing timber's value as a share of the price: above 1 the land comes free.
+FOREST_TIMBER_POINTS = [(0.3, 0), (0.8, 6), (1.0, 10), (1.2, 18), (1.6, 25)]
 FOREST_RETURN_POINTS = [(-0.01, -10), (0, -4), (0.02, 0), (0.05, 8), (0.10, 15)]
 
 
@@ -2068,6 +2071,14 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
             reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
     import forestry
     crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=forestry.growing(full))
+    timber = forestry.standing_timber(full, item.get("country"), ha)
+    if timber and pay:
+        share = timber["eur"] / pay
+        s += curve(share, FOREST_TIMBER_POINTS) * w("price")
+        reasons.append(f"standing timber {timber['m3']:,.0f} m³ ≈ €{timber['eur']:,.0f} "
+                       f"({share:.0%} of the price, at {timber['label']})")
+        if share >= 1 + FOREST_ROI_TARGET:
+            reasons.append(f"timber alone is worth {share - 1:.0%} more than the price — the land comes free")
     if crops and c:
         best = crops[0]
         reasons.append(forestry.describe(best))

@@ -38,6 +38,15 @@ FR_FBF_SOURCE = ("France Bois Forêt indicator 2025, private-forest sawlog sales
                  "https://franceboisforet.fr/wp-content/uploads/2025/04/FBF_PRIX_PIED_2025-2404_VF.pdf")
 
 
+# The average over all species, to value timber an ad states only in m³ ("mixed").
+# Latvia: LVM, the state forest company, average standing-timber sale price
+# (annual report 2024, published by the Ministry of Agriculture).
+MIXED = [{"country": "LV", "crop": "mixed", "eur_m3": 47.77, "m3": "", "period": "2024",
+          "source": "LVM annual report, state standing-timber sales"},
+         {"country": "FR", "crop": "mixed", "eur_m3": 90, "m3": "", "period": "2024",
+          "source": "France Bois Forêt indicator 2025, all species"}]
+
+
 def _state(page: str) -> dict:
     return {k: html.unescape(v) for k, v in re.findall(r'id="(__[A-Z]+)" value="([^"]*)"', page)}
 
@@ -65,7 +74,10 @@ def simef_prices(rows: list[list[str]], years: int = YEARS) -> list[dict]:
         if int(year) > last - years and species in PT_SPECIES and _num(m3) > 0:
             total[species][0] += _num(avg) * _num(m3)
             total[species][1] += _num(m3)
-    return [{"country": "PT", "crop": PT_SPECIES[sp], "eur_m3": round(v / q, 1), "m3": round(q),
+    every = [(_num(r[6]), _num(r[7])) for r in rows if int(r[0]) > last - years and _num(r[7]) > 0]
+    mixed = sum(a * q for a, q in every) / sum(q for _, q in every)
+    return [{"country": "PT", "crop": "mixed", "eur_m3": round(mixed, 1), "m3": round(sum(q for _, q in every)),
+             "period": f"{last - years + 1}-{last}", "source": "ICNF SIMeF, public-forest sales, all species"}] +         [{"country": "PT", "crop": PT_SPECIES[sp], "eur_m3": round(v / q, 1), "m3": round(q),
              "period": f"{last - years + 1}-{last}", "source": "ICNF SIMeF, public-forest sales"}
             for sp, (v, q) in sorted(total.items())]
 
@@ -90,6 +102,7 @@ def main() -> int:
     session = requests.Session()
     session.headers["User-Agent"] = "Mozilla/5.0 (auction-scanner)"
     prices = simef_prices(fetch_simef(session))
+    prices += MIXED
     prices += [{"country": "FR", "crop": crop, "eur_m3": eur, "m3": "", "period": FR_FBF_SOURCE[1],
                 "source": FR_FBF_SOURCE[0]} for crop, eur in FR_FBF.items()]
     if len(prices) < 4:
