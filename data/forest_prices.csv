@@ -1,0 +1,10 @@
+country,crop,eur_m3,m3,period,source
+PT,oak,95.0,1559,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,chestnut,28.5,185,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,poplar,45.1,16705,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,eucalyptus,37.3,875239,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,maritime pine,44.0,367336,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,stone pine,22.9,17796,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,Scots pine,44.9,8807,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,Douglas fir,26.6,26402,2023-2025,"ICNF SIMeF, public-forest sales"
+PT,cork oak,43.6,72424,2023-2025,"ICNF SIMeF, public-forest sales"

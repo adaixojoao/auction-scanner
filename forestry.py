@@ -14,6 +14,10 @@ Grants for planting (PEPAC/CAP) are left out.
 """
 from __future__ import annotations
 
+import csv
+import functools
+import os
+
 DISCOUNT_RATE = 0.03
 FOREST_YEARS = 60
 
@@ -27,7 +31,8 @@ CARBON_FEE = 0.15          # the aggregator's share of every credit sold
 #   heat_max: warmest-month mean maximum (°C) it still grows well in by 2081-2100
 #   cold_min: the 1-in-10-year coldest day (°C) it survives
 #   wet: needs low water stress; river: needs water on or by the land
-#   income: list of (first year, every N years, € per ha) — net of harvesting
+#   income: list of (first year, every N years, € per ha[, m³ per ha]) — net of harvesting;
+#   with m³, the € is replaced by m³ × the official standing price where one is known
 #   carbon: t CO2 per ha per year it stores and keeps (only crops not clear-felled)
 CROPS = {
     "cork oak": dict(heat_max=38, cold_min=-8, countries={"PT", "ES", "FR", "IT"},
@@ -36,14 +41,14 @@ CROPS = {
     "stone pine": dict(heat_max=38, cold_min=-12, plant=2000, income=[(15, 1, 250)], carbon=3.0,
                        note="grafted, pine nuts from ~15 years"),
     "maritime pine": dict(heat_max=33, cold_min=-12, plant=1800, fire_prone=True,
-                          income=[(20, 1, 120), (20, 10, 1200), (40, 40, 11000)], carbon=0,
+                          income=[(20, 1, 120), (20, 10, 1200, 30), (40, 40, 11000, 260)], carbon=0,
                           note="resin, thinnings, clear-fell at ~40 years (~8 m³/ha/yr)"),
     "Douglas fir": dict(heat_max=30, cold_min=-20, wet=True, plant=3500,
-                        income=[(25, 10, 2500), (50, 50, 45000)], carbon=0,
+                        income=[(25, 10, 2500, 40), (50, 50, 45000, 600)], carbon=0,
                         note="~14 m³/ha/yr, clear-fell at ~50 years"),
     "chestnut": dict(heat_max=32, cold_min=-15, wet=True, plant=5000, income=[(10, 1, 900)], carbon=2.0,
                      note="grafted nut orchard, ~1.2 t/ha a year"),
-    "poplar": dict(heat_max=34, cold_min=-20, river=True, plant=2500, income=[(14, 14, 12000)], carbon=0,
+    "poplar": dict(heat_max=34, cold_min=-20, river=True, plant=2500, income=[(14, 14, 12000, 280)], carbon=0,
                    note="by water only, ~20 m³/ha/yr, felled every ~14 years"),
     "native mixed forest": dict(heat_max=40, cold_min=-25, plant=2500, income=[], carbon=None,
                                 note="carbon credits only; nothing felled"),
@@ -79,6 +84,26 @@ def heat_limit_year(heat: dict, heat_max: float) -> int | None:
         if t2 > heat_max >= t1:
             return max(START_YEAR, round(y1 + (heat_max - t1) / (t2 - t1) * (y2 - y1)))
     return None
+
+
+PRICES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "forest_prices.csv")
+
+
+@functools.lru_cache(maxsize=4)
+def _prices(path: str, mtime: float) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return {(r["country"], r["crop"]): {"eur_m3": float(r["eur_m3"]),
+                                            "label": f"€{float(r['eur_m3']):.0f}/m³ {r['source']} {r['period']}"}
+                for r in csv.DictReader(f)}
+
+
+def timber_price(country: str | None, crop: str) -> dict | None:
+    """The official standing price per m³ of a crop's wood in a country, if known."""
+    try:
+        table = _prices(PRICES_FILE, os.path.getmtime(PRICES_FILE))
+    except OSError:
+        return None
+    return table.get(((country or "").upper(), crop))
 
 
 def _annuity(npv: float) -> float:
@@ -149,14 +174,20 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
         p = burn * FIRE_SENSITIVITY.get(name, 1.0)      # yearly chance the stand burns
         if burn >= FIRE_BASE + FIRE_DANGER:
             limits.append(f"fire: {1 - (1 - p) ** 40:.0%} chance of losing it within 40 years")
+        sources: set[str] = set()
         established = name in (existing or ())
         flows = {0: 0 if established else -crop["plant"]}
         income = crop["income"]
         if established:          # already growing: the mature income from now (felling at half a rotation)
-            income = [(1 if every < 20 else every // 2, every, eur) for first, every, eur in income
-                      if every == 1 or (first, every, eur) == income[-1]]
+            income = [(1 if t[1] < 20 else t[1] // 2,) + tuple(t[1:]) for t in income
+                      if t[1] == 1 or t == income[-1]]
             limits.append("already on the land")
-        for first, every, eur in income:
+        price = timber_price(country, name)
+        if price and any(len(t) > 3 for t in income):
+            sources.add(price["label"])
+        for first, every, eur, *m3 in income:
+            if m3 and price:
+                eur = m3[0] * price["eur_m3"]
             for y in range(first, last + 1, every):
                 flows[y] = flows.get(y, 0) + eur * growth * (1 - p) ** y
         rate = _carbon_rate(crop, heat.get("today")) * growth
@@ -166,7 +197,7 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             carbon = _annuity(_npv({y: yearly * (1 - p) ** y for y in range(1, last + 1)}) - CARBON_SETUP_EUR_HA)
         crop_value = _annuity(_npv(flows))
         out.append({"crop": name, "eur_ha_year": round(crop_value + max(carbon, 0)),
-                    "carbon_eur_ha_year": round(max(carbon, 0)), "note": crop["note"], "limits": limits,
+                    "carbon_eur_ha_year": round(max(carbon, 0)), "note": crop["note"], "limits": limits, "sources": sorted(sources),
                     "until": ends})
     return sorted(out, key=lambda o: -o["eur_ha_year"])
 
@@ -176,4 +207,8 @@ def describe(option: dict) -> str:
     limits = f"; {', '.join(option['limits'])}" if option["limits"] else ""
     if option.get("until"):
         extra += f", only until ~{option['until']}"
-    return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (provisional estimate{limits})"
+    if option.get("sources"):
+        limits += "; timber at " + ", ".join(option["sources"])
+    else:
+        limits += "; provisional prices"
+    return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (estimate{limits})"

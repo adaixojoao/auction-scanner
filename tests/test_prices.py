@@ -166,3 +166,23 @@ def test_germany_reads_an_immoportal_town_page():
     from update_prices import de_town_price
     html = "<p>Was kostet eine Immobilie in Achern?</p><div>∅ Median Kaufpreis Haus <b>2.940 €/m²</b></div>"
     assert de_town_price(html) == ("Achern", 2940)
+
+
+def test_simef_prices_are_weighted_by_volume_over_the_last_years():
+    from update_forest_prices import simef_prices, simef_rows
+    page = ('<table id="MainContent_GV_TBLPRECOS_SP"><tr><th>Ano</th></tr>'
+            "<tr><td>2025</td><td>53</td><td>Pinheiro-bravo</td><td>2T</td><td>15</td><td>63</td><td>50</td><td>1.000</td></tr>"
+            "<tr><td>2024</td><td>40</td><td>Pinheiro-bravo</td><td>1T</td><td>10</td><td>60</td><td>40</td><td>3.000</td></tr>"
+            "<tr><td>2019</td><td>9</td><td>Pinheiro-bravo</td><td>1T</td><td>10</td><td>60</td><td>99</td><td>9.000</td></tr>"
+            "</table>")
+    [pine] = simef_prices(simef_rows(page))
+    assert (pine["crop"], pine["eur_m3"], pine["period"]) == ("maritime pine", 42.5, "2023-2025")
+
+
+def test_the_forestry_model_uses_the_official_timber_price():
+    import forestry
+    price = forestry.timber_price("PT", "maritime pine")
+    assert price and "SIMeF" in price["label"]
+    atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
+    pine = next(o for o in forestry.options(atlantic, "PT", 20) if o["crop"] == "maritime pine")
+    assert pine["sources"] and "SIMeF" in forestry.describe(pine)
