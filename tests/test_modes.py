@@ -181,3 +181,13 @@ def test_forest_return_counts_timber_once_and_the_crop_every_year():
     assert forest_return(100000, 20, {"eur_ha_year": 100}, None) == 0.02
     assert round(forest_return(100000, 20, {"eur_ha_year": 100}, {"eur": 150000}), 3) == 0.17
     assert forest_return(0, 20, {"eur_ha_year": 100}, None) is None
+
+
+def test_french_forest_land_is_compared_with_the_official_regional_price():
+    import land_prices
+    from scoring import forest_return
+    landes = {"country": "FR", "district": "40"}
+    assert land_prices.forest_value(landes)["eur_ha"] == 3310
+    assert land_prices.forest_value({"country": "ES", "district": "Lugo"}) is None
+    # 30 ha in the Landes for €50,000: worth ~€99,300, a ~€49k gain counted once
+    assert round(forest_return(50000, 30, None, None, land_gain=49300), 3) == 0.099

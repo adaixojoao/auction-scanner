@@ -1999,13 +1999,16 @@ FOREST_ROI_TARGET = 0.20    # the owner's goal: at least 20% on the money
 FOREST_ROI_YEARS = 10
 
 
-def forest_return(pay: float, ha: float, best: dict | None, timber: dict | None) -> float | None:
-    """The average yearly return on the price over FOREST_ROI_YEARS: the standing
-    timber the ad states (sold once) plus the best crop's equivalent yearly value.
-    The land itself is kept and not counted. None without a price or any income."""
-    if not pay or (not best and not timber):
+def forest_return(pay: float, ha: float, best: dict | None, timber: dict | None,
+                  land_gain: float = 0.0) -> float | None:
+    """The average yearly return on the price over FOREST_ROI_YEARS: a one-off
+    gain — the standing timber the ad states, or buying below the official forest
+    price, whichever is larger (a forest's price already includes its timber) —
+    plus the best crop's equivalent yearly value. None without a price or income."""
+    if not pay or (not best and not timber and not land_gain):
         return None
-    earned = (timber["eur"] if timber else 0) + (best["eur_ha_year"] * ha * FOREST_ROI_YEARS if best else 0)
+    once = max(timber["eur"] if timber else 0.0, land_gain)
+    earned = once + (best["eur_ha_year"] * ha * FOREST_ROI_YEARS if best else 0)
     return earned / pay / FOREST_ROI_YEARS
 # Standing timber's value as a share of the price: above 1 the land comes free.
 FOREST_TIMBER_POINTS = [(0.3, 0), (0.8, 6), (1.0, 10), (1.2, 18), (1.6, 25)]
@@ -2099,7 +2102,14 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
     elif c:
         s -= 10
         reasons.append("no timber, cork, nut or carbon crop would still thrive here in 2100")
-    roi = forest_return(pay, ha, crops[0] if crops and c else None, timber)
+    import land_prices
+    fair = land_prices.forest_value(item)
+    if fair and pay:
+        worth = fair["eur_ha"] * ha
+        reasons.append(f"forest land here sells for €{fair['eur_ha']:,}/ha ({fair['label']}): "
+                       f"{'%d%% below' % round((1 - pay / worth) * 100) if pay < worth else 'not below'} that")
+    roi = forest_return(pay, ha, crops[0] if crops and c else None, timber,
+                        land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay else 0.0)
     if roi is not None:
         reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years (timber now + best crop, "
                        f"on the price)" + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))
