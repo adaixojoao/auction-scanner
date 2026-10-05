@@ -218,7 +218,7 @@ DOUBTFUL_BANK_HOME_EUR = 10000   # banks never sell a whole, free home this chea
 DOUBTFUL_HR_COAST_HOME_EUR = 25000
 HR_COAST_COUNTIES = {"istarska", "primorsko-goranska", "ličko-senjska", "zadarska", "šibensko-kninska",
                      "splitsko-dalmatinska", "dubrovačko-neretvanska"}
-SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia", "imot", "indexoglasi", "nehnutelnosti", "sslv"}
+SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia", "imot", "indexoglasi", "nehnutelnosti", "sslv", "safer"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 

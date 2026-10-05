@@ -17,3 +17,15 @@ def test_ss_lv_reads_the_forest_table_and_the_ad():
     assert ad["description"] == "Mežs ar priedēm, ceļš līdz zemei."
     assert (ad["lat"], ad["lon"], ad["district"]) == (56.73016, 26.54564, "Madona un raj.")
     assert ad["photos"] == ["https://i.ss.lv/gallery/8/1/2/wood-77398688.800.jpg"]
+
+
+def test_safer_reads_a_forest_card():
+    from sources import fr
+    block = ('<h2 itemprop="name"><a href="/immobilier/vente-foret-landes-fr_VN32211.htm" title="x">Forêt de pins</a></h2>'
+             '<p itemprop="description"><strong>Vocations :</strong> Forêt</p>'
+             '<a class="safer_region_link" href="/vente-propriete-agricole/nouvelle-aquitaine/landes,40">Landes</a>'
+             "<b class='safer_land_value'>23 ha 66 a 25 ca</b><div itemprop=\"price\" content=\"79830\">79 830 €</div>")
+    row = fr.parse_safer("VN32211", block)
+    assert (row["id"], row["area_m2"], row["price"], row["district"], row["concelho"]) == \
+        ("safer:VN32211", 236625.0, 79830.0, "40", "Landes")
+    assert fr.parse_safer("VN1", block.replace('content="79830"', 'content="0"')) is None   # "Nous consulter"

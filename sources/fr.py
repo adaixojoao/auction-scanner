@@ -1,6 +1,7 @@
 """France: licitor.com, encheres-publiques.com."""
 from __future__ import annotations
 
+import html
 import json
 import re
 import time
@@ -395,4 +396,66 @@ def scrape_notaires(db, max_price: float = 50000, config: dict | None = None, **
             if page >= (data.get("nbPages") or 1):
                 break
     LOG.info(f"Notaires: {total} listings")
+    return total
+
+
+# ─── SAFER (proprietes-rurales.com) ─────────────────────────────────
+# The rural land agencies' own sale site: forests all over France. The list
+# loads 30 at a time (prod_list.php?start=…). Ads name only the département,
+# never the commune, so the land is placed at the département's middle.
+SAFER = "https://www.proprietes-rurales.com"
+SAFER_FOREST = "vente-propriete-agricole/foret,11"
+SAFER_MAX = 3000
+
+_SAFER_AD = re.compile(r'<div class="res_div1" id="res_div_(VN\d+)">(.*?)(?=<div class="res_div1"|\Z)', re.S)
+
+
+def safer_hectares(text: str) -> float | None:
+    """"23 ha 66 a 25 ca" → 23.6625."""
+    m = re.search(r"(\d+)\s*ha(?:\s+(\d+)\s*a)?(?:\s+(\d+)\s*ca)?", text or "")
+    if not m:
+        return None
+    return int(m.group(1)) + int(m.group(2) or 0) / 100 + int(m.group(3) or 0) / 10000
+
+
+def parse_safer(block_id: str, block: str) -> dict | None:
+    price = re.search(r'itemprop="price" content="(\d+)"', block)
+    ha = safer_hectares(" ".join(re.findall(r"safer_land_value'>([^<]+)<", block)))
+    if not price or int(price.group(1)) <= 0 or not ha:
+        return None                                     # "Nous consulter": no price
+    link = re.search(r'<h2 itemprop="name"><a href="([^"]+)"[^>]*>([^<]+)</a>', block)
+    dept = re.search(r'class="safer_region_link" href="[^"]*/([a-z-]+),(\d+[AB]?)">', block)
+    text = re.search(r'<p itemprop="description">(.*?)</p>', block, re.S)
+    image = re.search(r"background-image:url\(([^)]+)\)", block)
+    name = dept.group(1).replace("-", " ").title().replace(" Et ", "-et-") if dept else None
+    return make_listing(
+        "safer", block_id, "FR", title=html.unescape(link.group(2)) if link else "Forêt",
+        description=html.unescape(re.sub(r"<[^>]+>", " ", text.group(1))).strip() if text else None,
+        tipo="terreno", area_m2=ha * 10000, price=float(price.group(1)), min_price=float(price.group(1)),
+        district=dept.group(2) if dept else None, concelho=name,
+        url=SAFER + link.group(1) if link else None, image_url=image.group(1) if image else None)
+
+
+@register("safer", "FR", description="SAFER (proprietes-rurales.com) — forests for sale all over France")
+def scrape_safer(db, max_price: float = 50000, config: dict | None = None, **_):
+    """SAFER (proprietes-rurales.com) — forests for sale all over France."""
+    session = make_session(timeout=30)
+    limit = land_max_price(config, max_price)
+    total = 0
+    for start in range(0, SAFER_MAX, 30):
+        resp = session.get(f"{SAFER}/prod_list.php", params={
+            "type_prod": "prog", "type_offer": 1, "safer_voc": "Array", "lang": "fr", "ajax_list": 1,
+            "start": start, "ajax_prod_list_url": SAFER_FOREST})
+        resp.raise_for_status()
+        blocks = _SAFER_AD.findall(resp.text)
+        for block_id, block in blocks:
+            row = parse_safer(block_id, block)
+            if row and row["price"] <= limit:
+                upsert_listing(db, row)
+                total += 1
+        db.commit()
+        if not blocks:
+            break
+        time.sleep(1)
+    LOG.info(f"SAFER: {total} forests")
     return total
