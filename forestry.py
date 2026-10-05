@@ -5,13 +5,12 @@ place's climate (today and 2081-2100, from climate.py) suits it, then values the
 crop's cash flows over FOREST_YEARS at DISCOUNT_RATE and turns them into one
 "equivalent € per hectare per year" that can be set against the price of the land.
 
-Figures are mid-range European values from 2024-2026, net of harvesting cost
-(the stumpage a buyer pays standing): cork from APCOR and Portuguese DGT
-price series; pine, Douglas and poplar stumpage from French ONF/FIBOIS and
-Spanish regional sale results; yields from the national forest inventories
-(IFN, IFN-ES); carbon from voluntary afforestation (ARR) removal credits and
-the EU carbon-removal certification (Regulation 2024/3012). Grants for
-planting (PEPAC/CAP, 50-80% in PT/ES/FR) are left out: they only make it better.
+PROVISIONAL: the yields, prices, costs and climate limits below are rough
+mid-range European figures, not yet taken from a published table. They are
+being replaced by sourced ones (EU-Trees4F for where each species can live in
+2095; national inventories for yields; SIMeF/ICNF, ONF, LVM and APCOR for
+prices). Until then, compare listings with them; do not plan with them.
+Grants for planting (PEPAC/CAP) are left out.
 """
 from __future__ import annotations
 
@@ -177,4 +176,4 @@ def describe(option: dict) -> str:
     limits = f"; {', '.join(option['limits'])}" if option["limits"] else ""
     if option.get("until"):
         extra += f", only until ~{option['until']}"
-    return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (estimate{limits})"
+    return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (provisional estimate{limits})"
