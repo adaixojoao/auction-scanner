@@ -37,34 +37,34 @@ CARBON_FEE = 0.15          # the aggregator's share of every credit sold
 #   carbon: t CO2 per ha per year it stores and keeps (only crops not clear-felled)
 CROPS = {
     "cork oak": dict(heat_max=38, cold_min=-8, countries={"PT", "ES", "FR", "IT"},
-                     plant=3000, income=[(30, 9, 900), (39, 9, 2700, None, 1080)], carbon=2.5,
+                     plant="broadleaf", income=[(30, 9, 900), (39, 9, 2700, None, 1080)], carbon=2.5,
                      note="first cork at ~30 years, then every 9; protected species, ~€2.5/kg"),
-    "stone pine": dict(heat_max=38, cold_min=-12, plant=2000, income=[], harvest=(15, 600, "pine cones"),
+    "stone pine": dict(heat_max=38, cold_min=-12, plant="broadleaf", income=[], harvest=(15, 600, "pine cones"),
                        carbon=3.0, note="grafted, pine cones from ~15 years, ~600 kg/ha"),
-    "maritime pine": dict(heat_max=33, cold_min=-12, plant=1800, fire_prone=True,
-                          income=[(20, 1, 120), (20, 10, 1200, 30), (40, 40, 11000, 260)], carbon=0,
-                          note="resin, thinnings, clear-fell at ~40 years (~8 m³/ha/yr)"),
-    "Douglas fir": dict(heat_max=30, cold_min=-20, wet=True, plant=3500,
-                        income=[(25, 10, 2500, 40), (50, 50, 45000, 600)], carbon=0,
-                        note="~14 m³/ha/yr, clear-fell at ~50 years"),
+    "maritime pine": dict(heat_max=33, cold_min=-12, plant="conifer", fire_prone=True,
+                          income=[(20, 1, 120), (20, 10, 1200, 30), (40, 40, 11000, 324)], carbon=0,
+                          note="resin, thinnings, clear-fell at ~40 years"),
+    "Douglas fir": dict(heat_max=30, cold_min=-20, wet=True, plant="conifer",
+                        income=[(25, 10, 2500, 40), (50, 50, 45000, 565)], carbon=0,
+                        note="thinnings, clear-fell at ~50 years"),
     "chestnut": dict(heat_max=32, cold_min=-15, wet=True, plant=5000, income=[], harvest=(10, 1200, "chestnuts"),
                      carbon=2.0, note="grafted nut orchard, ~1.2 t/ha a year"),
     "walnut": dict(heat_max=33, cold_min=-20, wet=True, river=True, plant=6000, income=[], harvest=(8, 2000, "walnuts"),
                    carbon=2.0, note="grafted nut orchard, ~2 t/ha a year from ~8 years; only by water (irrigated)"),
-    "carob": dict(heat_max=42, cold_min=-4, plant=3000, income=[], harvest=(8, 2000, "carob"), carbon=2.5,
+    "carob": dict(heat_max=42, cold_min=-4, plant="broadleaf", income=[], harvest=(8, 2000, "carob"), carbon=2.5,
                   countries={"PT", "ES", "IT", "GR", "CY", "HR", "FR"},
                   note="dry-farmed pods, ~2 t/ha a year from ~8 years; tolerates heat, not frost"),
     "poplar": dict(heat_max=34, cold_min=-20, river=True, plant=2500, income=[(14, 14, 12000, 280)], carbon=0,
                    note="by water only, ~20 m³/ha/yr, felled every ~14 years"),
     # Northern and central Europe (Latvia, Germany, Poland…): yields are provisional.
-    "Scots pine": dict(heat_max=30, cold_min=-40, plant=1500, income=[(30, 10, 600, 25), (60, 60, 9000, 300)],
+    "Scots pine": dict(heat_max=30, cold_min=-40, plant="conifer", income=[(30, 10, 600, 25), (60, 60, 9000, 171)],
                        carbon=0, note="thinnings, clear-fell at ~60 years on good soil"),
-    "Norway spruce": dict(heat_max=28, cold_min=-40, wet=True, plant=1800,
-                          income=[(25, 10, 700, 30), (55, 55, 16000, 380)], carbon=0,
+    "Norway spruce": dict(heat_max=28, cold_min=-40, wet=True, plant="conifer",
+                          income=[(25, 10, 700, 30), (55, 55, 16000, 531)], carbon=0,
                           note="clear-fell at ~55 years; bark beetle in droughts"),
     "birch": dict(heat_max=29, cold_min=-40, plant=1500, income=[(20, 10, 300, 15), (50, 50, 8000, 220)],
                   carbon=0, note="plywood and pulp, clear-fell at ~50 years"),
-    "native mixed forest": dict(heat_max=40, cold_min=-25, plant=2500, income=[], carbon=None,
+    "native mixed forest": dict(heat_max=40, cold_min=-25, plant="broadleaf", income=[], carbon=None,
                                 note="carbon credits only; nothing felled"),
 }
 
@@ -144,6 +144,31 @@ def cork_net_eur_kg() -> float:
 # Clearing woodland for another use needs an authorisation (FR: défrichement,
 # Code forestier L341-3; PT/ES: regional forest services).
 CLEARING_PERMIT = {"FR", "PT", "ES"}
+
+
+# Growth, m³ a hectare a year: IGN Mémento 2025 (national forest inventory, 2015-2023),
+# each species' yearly production divided by the area where it is the main species.
+# The clear-fell volumes above are growth × rotation less the thinnings. French
+# averages, used elsewhere too until the Spanish and Portuguese inventories are read.
+GROWTH_IGN = {"maritime pine": 9.6, "Douglas fir": 13.7, "Norway spruce": 11.3, "Scots pine": 4.1}
+GROWTH_SOURCE = "growth {:.1f} m³/ha/yr, IGN Mémento 2025"
+
+
+# Planting cost a hectare: the work from CAOF's 2024 reference matrix (Portugal,
+# Comissão de Acompanhamento das Operações Florestais) — scrub clearing, ripping,
+# planting, weeding and earthing up, fertilising — the midpoint between easy
+# ground (flat, light scrub) and hard (over 25% slope, rocky, dense scrub). The
+# plants and tree guards themselves are not in the matrix: PROVISIONAL.
+CAOF_WORK = {"conifer": (1464 + 2270) / 2,        # 1,100 container plants a hectare
+             "broadleaf": (1231 + 1880) / 2}      # 500 plants a hectare, guards fitted
+PLANT_MATERIAL = {"conifer": 1100 * 0.40, "broadleaf": 500 * (1.0 + 1.5)}   # PROVISIONAL
+CAOF_SOURCE = "planting work CAOF 2024"
+CAOF_SMALL_PLOT = 0.03    # CAOF: +3% for each hectare under 10
+
+
+def planting_cost(kind: str, hectares: float) -> float:
+    small = max(0.0, 10 - hectares) * CAOF_SMALL_PLOT if hectares else 0.0
+    return CAOF_WORK[kind] * (1 + small) + PLANT_MATERIAL[kind]
 
 
 def _annuity(npv: float) -> float:
@@ -226,12 +251,18 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             limits.append(f"fire: {1 - (1 - p) ** 40:.0%} chance of losing it within 40 years")
         sources: set[str] = set()
         established = name in (existing or ())
-        flows = {0: 0 if established else -crop["plant"]}
+        plant = crop["plant"]
+        if isinstance(plant, str):
+            plant = planting_cost(plant, hectares)
+            sources.add(CAOF_SOURCE)
+        flows = {0: 0 if established else -plant}
         income = crop["income"]
         if established:          # already growing: the mature income from now (felling at half a rotation)
             income = [(1 if t[1] < 20 else t[1] // 2,) + tuple(t[1:]) for t in income
                       if t[1] == 1 or t == income[-1]]
             limits.append("already on the land")
+        if name in GROWTH_IGN:
+            sources.add(GROWTH_SOURCE.format(GROWTH_IGN[name]))
         price = timber_price(country, name) or timber_price(country, "mixed")
         if price and any(len(t) > 3 and t[3] for t in income):
             sources.add(price["label"])

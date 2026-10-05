@@ -2030,6 +2030,29 @@ def forest_return(pay: float, ha: float, best: dict | None, timber: dict | None,
     once = max(timber["eur"] if timber else 0.0, land_gain)
     earned = once + (best["eur_ha_year"] * ha * FOREST_ROI_YEARS if best else 0)
     return earned / pay / FOREST_ROI_YEARS
+
+
+# What buying costs on top of the price, as a share of it. PT: IMT 5% on rustic
+# land + 0.8% stamp duty (Código do IMT art. 17, Tabela Geral do Imposto do Selo
+# 1.1). ES and FR: PROVISIONAL — transfer tax varies by region (ES ITP 6-10%), and
+# notary fees; FR notary costs on older property are commonly 7-8%.
+BUYING_COSTS = {"PT": 0.058, "ES": 0.08, "FR": 0.075}
+_BUYER_FEE = re.compile(r"(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:d'honoraires|de honorarios|de honorários)?[^.%]{0,40}?"
+                        r"(?:charge de l'acqu[ée]reur|a cargo del comprador|a cargo do comprador)", re.I)
+
+
+def buying_costs(item: dict, text: str) -> tuple[float, str]:
+    """(share of the price, label): taxes and notary, plus a buyer-paid agent fee the ad states."""
+    share = BUYING_COSTS.get((item.get("country") or "").upper(), 0.08)
+    label = f"taxes and notary ~{share:.0%}"
+    fee = _BUYER_FEE.search(text or "")
+    if fee:
+        pct = float(fee.group(1).replace(",", ".")) / 100
+        share += pct
+        label += f" + {pct:.2%} agent fee paid by the buyer"
+    return share, label
+
+
 # Standing timber's value as a share of the price: above 1 the land comes free.
 FOREST_TIMBER_POINTS = [(0.3, 0), (0.8, 6), (1.0, 10), (1.2, 18), (1.6, 25)]
 FOREST_RETURN_POINTS = [(-0.01, -10), (0, -4), (0.02, 0), (0.05, 8), (0.10, 15)]
@@ -2144,7 +2167,10 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         worth = fair["eur_ha"] * ha
         reasons.append(f"forest land here sells for €{fair['eur_ha']:,}/ha ({fair['label']}): "
                        f"{'%d%% below' % round((1 - pay / worth) * 100) if pay < worth else 'not below'} that")
-    roi = None if caps else forest_return(pay, ha, crops[0] if crops and c else None, timber,
+    costs, costs_label = buying_costs(item, full)
+    if pay:
+        reasons.append(f"buying costs ≈ €{pay * costs:,.0f} ({costs_label})")
+    roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, crops[0] if crops and c else None, timber,
                         land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay else 0.0)
     if roi is not None:
         reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years (timber now + best crop, "

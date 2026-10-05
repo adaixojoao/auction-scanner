@@ -263,3 +263,16 @@ def test_an_orchard_is_not_proposed_where_a_wood_would_have_to_be_cleared():
     atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}, "water_km": 0.2}
     assert "chestnut" in [o["crop"] for o in forestry.options(atlantic, "FR", 20)]
     assert "chestnut" not in [o["crop"] for o in forestry.options(atlantic, "FR", 20, wooded=True)]
+
+
+def test_the_return_is_on_the_price_plus_buying_costs():
+    from scoring import buying_costs
+    share, label = buying_costs({"country": "FR"}, "Magnifique terrain (9.24 % d'honoraires TTC à la charge de l'acquéreur.)")
+    assert abs(share - (0.075 + 0.0924)) < 1e-9 and "agent fee paid by the buyer" in label
+    assert buying_costs({"country": "PT"}, "")[0] == 0.058
+
+
+def test_planting_costs_come_from_the_caof_matrix():
+    import forestry
+    assert forestry.planting_cost("conifer", 20) == (1464 + 2270) / 2 + 1100 * 0.40
+    assert forestry.planting_cost("conifer", 5) > forestry.planting_cost("conifer", 20)   # +3% a hectare under 10
