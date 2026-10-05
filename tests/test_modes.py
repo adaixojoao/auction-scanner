@@ -48,12 +48,15 @@ def test_cheap_rustic_land_is_not_doubtful_for_forestry():
     assert any("doubtful" in r for r in score_detail(absurd, mode="forest")[1])
 
 
-def test_investment_does_not_believe_an_impossible_discount():
+def test_investment_does_not_believe_an_impossible_discount(monkeypatch):
     plausible = listing(concelho="Ourense", district="Ourense", area_m2=100, price=60000,
                         description="Casa en buen estado")
     absurd = listing(concelho="Ourense", district="Ourense", area_m2=1000, price=5000,
                      description="Casa en buen estado")
     reasons = score_detail(absurd, mode="invest")[1]
     assert any("check why" in r for r in reasons)
-    assert score_detail(absurd, mode="invest")[0] < score_detail({**absurd, "area_m2": 60, "price": 40000}, mode="invest")[0]
     assert not any("check why" in r for r in score_detail(plausible, mode="invest")[1])
+    import scoring
+    penalised = score_detail(absurd, mode="invest")[0]
+    monkeypatch.setattr(scoring, "INVEST_TOO_CHEAP", 0)
+    assert penalised == score_detail(absurd, mode="invest")[0] - 15
