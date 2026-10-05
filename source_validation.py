@@ -95,6 +95,7 @@ CATALOG: dict[str, dict] = {
     "tgss": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "pisos": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     "solvia": {"kind": "bank", "access": "public_api", "listing_type": "property"},
+    "imot": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     "thinkspain": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     # France / Italy / NL / …
     "france": {"kind": "official", "access": "public_html", "listing_type": "property"},

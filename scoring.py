@@ -390,6 +390,7 @@ HEAVY_WORK = [
     "sanierungsbedürftig", "renovierungsbedürftig", "abrissreif", "baufällig", "ruine",
     "opknapper", "bouwvallig", "renovatie nodig",
     "ruševina*", "rušev*", "dotrajal*", "zapušten*",
+    "основен ремонт", "цялостен ремонт", "руина", "порутен*", "срутен*", "без покрив", "груб строеж",
     # Abandoned: empty for years, falling apart ("devoluta" alone is only empty).
     "abandonad*", "ao abandono", "em abandono", "estado de abandono", "votad* ao abandono",
     "abbandonat*", "in stato di abbandono", "à l'abandon", "verwaerloosd", "verlaten",
@@ -411,6 +412,7 @@ SOME_WORK = [
     "modernisierungsbedürftig", "renovierungsbedarf",
     "kluswoning", "kluswoningen",          # Dutch: sold as a renovation project
     "potrebno renoviranje", "za renoviranje", "potrebno uređenje", "za uređenje",
+    "за ремонт", "нуждае се от ремонт", "нужда от ремонт", "частичен ремонт",      # Bulgarian
 ]
 GOOD_CONDITION = [
     "bom estado", "excelente estado", "ótimo estado", "estado novo", "estado: novo", "em estado novo",
@@ -425,6 +427,7 @@ GOOD_CONDITION = [
     "renoviert", "saniert", "modernisiert", "gepflegt", "bezugsfertig", "neuwertig",
     "goede staat", "gerenoveerd", "instapklaar",
     "dobrom stanju", "odličnom stanju",
+    "след ремонт", "ремонтиран*", "реновиран*", "добро състояние", "отлично състояние", "готова за живеене",
 ]
 GOOD_LOCATION = [
     "centro da cidade", "centro da vila", "centro da localidade", "centro histórico", "no centro",
@@ -438,6 +441,7 @@ GOOD_LOCATION = [
     "bord de mer", "vue mer", "proche plage", "proche de la plage", "primera línea de playa",
     "aan zee", "zeezicht", "strandnah", "meerblick", "meeresnähe",
     "blizu mora", "pogled na more", "uz more", "blizu plaže",
+    "до морето", "до плажа", "морска гледка", "първа линия",
     "innenstadt", "stadtmitte", "zentrale lage", "zentrumsnah", "centrum",
 ]
 # Water next to a plot. Place names ("Rio Maior", "Albufeira", "Lagoa", "Ribeira
@@ -458,7 +462,8 @@ WATER_RE = re.compile(
     r"(?:fiume|lago|torrente|mare|canale)|fronte (?:lago|mare|fiume)|sulle rive del)\b"
     r"|\b(?:aan (?:het|de) (?:water|rivier|vaart|plas|meer|zee)|vaarwater|aan het ijsselmeer)\b"
     r"|\b(?:am (?:see|fluss|bach|ufer|meer)|seeufer|flussufer|wassergrundstück|seegrundstück)\b"
-    r"|\b(?:uz (?:rijeku|more|jezero)|blizu (?:rijeke|mora|jezera)|na obali)\b",
+    r"|\b(?:uz (?:rijeku|more|jezero)|blizu (?:rijeke|mora|jezera)|na obali)\b"
+    r"|\b(?:(?:до|край|на брега на) (?:река|реката|язовир|язовира|езеро|езерото|морето))\b",   # Bulgarian
     re.I)
 
 

@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 52
+    assert len(REGISTRY) == 53
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -894,3 +894,22 @@ def test_solvia_reads_its_search_api():
     assert "inmueble ocupado" in row["description"] and "Para reformar" in row["description"]
     assert row["url"] == "https://www.solvia.es/es/propiedades/comprar/vivienda-192413-155113"
     assert parse_solvia({**item, "categoriaTipoVivienda": {"nombre": "Garajes"}}) is None
+
+
+IMOT_CARD = """<div class="item  " id="ida1j1"><div class="photo"><a class="image"><img
+src="//cdn3.focus.bg/imot/1j1_Je.jpg" class="pic"></a></div><div class="text"><div class="zaglavie">
+<a href="//www.imot.bg/obiava-1j164942254773629-prodava-kashta-oblast-gabrovo-s-slaveykovo" class="title">Продава
+КЪЩА<location>с. Славейково, област Габрово</location></a><div class="price"><div>30 000 €</div></div></div>
+<div class="info">71 кв.м, двор 1550 кв.м, Продава къща до река Янтра ..., тел.: 0886 123 456</div></div></div>"""
+
+
+def test_imot_reads_a_card_without_the_phone_number():
+    from sources.bg import imot_cards, parse_imot
+    cards, ads = imot_cards(IMOT_CARD)
+    assert ads == 1 and len(cards) == 1
+    row = parse_imot(cards[0], "house")
+    assert row["id"] == "imot:1j164942254773629" and row["country"] == "BG" and row["price"] == 30000
+    assert row["area_m2"] == 71 and row["concelho"] == "Славейково" and row["district"] == "Габрово"
+    assert "0886" not in row["description"] and "тел" not in row["description"]
+    assert row["image_url"] == "https://cdn3.focus.bg/imot/1j1_Je.jpg"
+    assert parse_imot(cards[0], "terreno")["area_m2"] == 1550
