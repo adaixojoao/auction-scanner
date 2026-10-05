@@ -30,6 +30,14 @@ PT_SPECIES = {"Pinheiro-bravo": "maritime pine", "Pinheiro-manso": "stone pine",
               "Carvalho-roble": "oak", "Eucalipto": "eucalyptus", "Pinheiro-silvestre": "Scots pine"}
 
 
+# France: France Bois Forêt's yearly indicator of standing prices in private
+# forest (grouped sales by the Experts Forestiers de France). Published as a PDF
+# only, so its figures are copied here by hand — check the new edition each April.
+FR_FBF = {"Douglas fir": 89, "maritime pine": 56, "poplar": 73, "Scots pine": 36, "oak": 228, "chestnut": 119}
+FR_FBF_SOURCE = ("France Bois Forêt indicator 2025, private-forest sawlog sales", "2024",
+                 "https://franceboisforet.fr/wp-content/uploads/2025/04/FBF_PRIX_PIED_2025-2404_VF.pdf")
+
+
 def _state(page: str) -> dict:
     return {k: html.unescape(v) for k, v in re.findall(r'id="(__[A-Z]+)" value="([^"]*)"', page)}
 
@@ -82,6 +90,8 @@ def main() -> int:
     session = requests.Session()
     session.headers["User-Agent"] = "Mozilla/5.0 (auction-scanner)"
     prices = simef_prices(fetch_simef(session))
+    prices += [{"country": "FR", "crop": crop, "eur_m3": eur, "m3": "", "period": FR_FBF_SOURCE[1],
+                "source": FR_FBF_SOURCE[0]} for crop, eur in FR_FBF.items()]
     if len(prices) < 4:
         print("SIMeF: too few species — the site changed. Nothing written.")
         return 1
