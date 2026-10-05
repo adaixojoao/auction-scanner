@@ -771,3 +771,16 @@ def test_mainland_portugal_gets_a_step_up_but_not_the_islands():
     azores = {**pt, "description": "Casa em bom estado. Comarca dos Açores"}
     assert "mainland Portugal" in score_detail(pt)[1]
     assert "mainland Portugal" not in score_detail(azores)[1] and "mainland Portugal" not in score_detail(es)[1]
+
+
+def test_the_five_wishes_at_a_glance():
+    from scoring import wishes
+    home = item(country="ES", source="fotocasa", title="Casa en Poio", price=15000, area_m2=300,
+                description="Casa en buen estado junto al río", airport={"km": 24}, beach={"km": 0.5},
+                climate={"water_km": 0.3})
+    got = {w["key"]: (w["state"], w["text"]) for w in wishes(home)}
+    assert got["airport"] == ("yes", "24 km") and got["space"] == ("yes", "300 m²")
+    assert got["swim"] == ("yes", "sea 0.5 km") and got["condition"] == ("yes", "good")
+    assert got["water"][0] == "yes"
+    far = {w["key"]: w["state"] for w in wishes(item(title="Moradia", price=20000, area_m2=60, climate={"hot_days": {}}))}
+    assert far["swim"] == "no" and far["space"] == "no" and far["condition"] == "unknown"

@@ -189,6 +189,13 @@ def api_heartbeat():
 
 # ─── Listings ────────────────────────────────────────────────────────
 
+def _mode(args) -> str:
+    """Which goal the list is ranked for: home, invest or forest (scoring.MODES)."""
+    from scoring import MODES
+    mode = args.get("mode", "home")
+    return mode if mode in MODES else "home"
+
+
 def _public(item: dict) -> dict:
     """What the browser gets: no raw_json, a short description."""
     out = {k: v for k, v in item.items() if k != "raw_json"}
@@ -243,6 +250,10 @@ def api_listings():
     climate_grade = args.get("climate", "")   # excellent / good / caution: at least; poor / unknown: exactly
     climate_exact = args.get("climate_exact", "0") == "1"
     sort = args.get("sort", "score")
+    mode = _mode(args)
+    if mode == "forest" and max_price:      # land is searched up to its own, higher limit
+        from common import land_max_price
+        max_price = max(max_price, land_max_price(_config(), _config().get("max_price") or max_price))
     direction = args.get("dir", "desc")
     page = max(1, _num(args.get("page"), 1, int))
     per_page = min(1000, max(1, _num(args.get("per_page"), 50, int)))
@@ -266,7 +277,7 @@ def api_listings():
     db = get_db()
     try:
         loaded = load_listings(db, filters=_config().get("filters"), include_hidden=True,
-                               where=" AND ".join(conditions), params=params)
+                               where=" AND ".join(conditions), params=params, mode=mode)
         loaded = [it for it in loaded
                   if it["score"] >= min_score and (not properties_only or it["category"] == "imoveis")
                   and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
@@ -326,7 +337,7 @@ def api_listing_detail():
     db = get_db()
     try:
         found = load_listings(db, filters=_config().get("filters"), include_hidden=True,
-                              where="id = ?", params=(listing_id,))
+                              where="id = ?", params=(listing_id,), mode=_mode(request.args))
         if not found:
             return jsonify({"error": "no such listing"}), 404
         it = found[0]
@@ -340,7 +351,7 @@ def api_listing_detail():
         "id": it["id"], "title": it.get("title"), "source": it.get("source"),
         "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
         "description": (it.get("description") or "")[:4000],
-        "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [],
+        "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [], "wishes": it.get("wishes") or [],
         "excellent": it.get("excellent"),
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),

@@ -1,6 +1,7 @@
 """France: licitor.com, encheres-publiques.com."""
 from __future__ import annotations
 
+import html
 import json
 import re
 import time
@@ -8,7 +9,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_price, make_listing, make_session, normalize, parse_price
+from common import LOG, find_price, land_max_price, make_listing, make_session, normalize, parse_price
 from db import upsert_listing
 from sources import register
 from sources._cards import CardSite, scrape_cards
@@ -280,14 +281,15 @@ def parse_bienici(ad: dict) -> dict | None:
 
 
 @register("bienici", "FR")
-def scrape_bienici(db, max_price: float = 50000, **_):
+def scrape_bienici(db, max_price: float = 50000, config: dict | None = None, **_):
     """bienici — houses and land (1 ha+) from agents across France, with map positions."""
     session = make_session(timeout=30)
     total = 0
     # The service stops at 2,400 results a search: houses are asked in price bands.
     bands = [(0, max_price / 2), (max_price / 2, max_price * 0.75), (max_price * 0.75, max_price)]
     for kind, min_area in BIENICI_SEARCHES:
-        for low, high in bands if kind == "house" else [(0, max_price)]:
+        limit = max_price if kind == "house" else land_max_price(config, max_price)
+        for low, high in bands if kind == "house" else [(0, limit)]:
             for page in range(BIENICI_MAX_PAGES):
                 filters = {"size": BIENICI_PAGE, "from": page * BIENICI_PAGE, "filterType": "buy",
                            "propertyType": [kind], "minPrice": int(low), "maxPrice": int(high),
@@ -303,7 +305,7 @@ def scrape_bienici(db, max_price: float = 50000, **_):
                 ads = data.get("realEstateAds") or []
                 for ad in ads:
                     row = parse_bienici(ad)
-                    if row and row["price"] <= max_price:
+                    if row and row["price"] <= limit:
                         upsert_listing(db, row)
                         total += 1
                 db.commit()
@@ -318,16 +320,13 @@ def scrape_bienici(db, max_price: float = 50000, **_):
 # Houses and land sold through notaries, including their online auctions
 # (36h-immo / VNI) and notarial auctions (VAE). A public JSON service behind the
 # listing page; its robots.txt asks for 10 s between requests, so one request
-# of up to 100 listings per department and type, then a pause.
+# of up to 100 listings per type, all of France, then a pause.
 
 NOTAIRES = "https://www.immobilier.notaires.fr"
 NOTAIRES_API = NOTAIRES + "/pub-services/inotr-www-annonces/v1/annonces"
-# The west and north-west: Brittany, Normandy, Pays de la Loire, Poitou and Limousin.
-NOTAIRES_DEPARTMENTS = ["29", "22", "56", "35", "50", "14", "61", "27", "76", "44", "49", "53", "72", "85",
-                        "79", "86", "16", "17", "87", "23", "19", "24"]
 NOTAIRES_TYPES = {"MAI": "maison", "TER": "terrain"}
 NOTAIRES_PAUSE = 10
-NOTAIRES_MAX_PAGES = 5
+NOTAIRES_MAX_PAGES = 60   # all of France in one search: ~8 pages of houses, ~31 of land
 NOTAIRES_SALE = {"VENTE": "sale", "VNI": "online auction (36h-immo)", "VAE": "notarial auction"}
 
 
@@ -365,37 +364,98 @@ def parse_notaires(ad: dict) -> dict | None:
     )
 
 
-@register("notaires", "FR", description="Notaires de France — houses, land and notary auctions in the west")
-def scrape_notaires(db, max_price: float = 50000, **_):
-    """Notaires de France — houses and land (and notary auctions) in the west of France."""
+@register("notaires", "FR", description="Notaires de France — houses, land and notary auctions all over France")
+def scrape_notaires(db, max_price: float = 50000, config: dict | None = None, **_):
+    """Notaires de France — houses and land (and notary auctions) all over France."""
     session = make_session(timeout=40)
     session.headers["Accept"] = "application/json"
     total, first = 0, True
-    for department in NOTAIRES_DEPARTMENTS:
-        for code in NOTAIRES_TYPES:
-            for page in range(1, NOTAIRES_MAX_PAGES + 1):
-                if not first:
-                    time.sleep(NOTAIRES_PAUSE)
-                first = False
-                params = {"offset": (page - 1) * 100, "page": page, "parPage": 100,
-                          "typeTransactions": "VENTE,VNI,VAE", "typeBiens": code, "prixMax": int(max_price),
-                          "departements": department}
-                try:
-                    resp = session.get(NOTAIRES_API, params=params)
-                    resp.raise_for_status()
-                    data = resp.json()
-                except Exception as e:  # noqa: BLE001 — one department failing is not the source failing
-                    if total == 0 and department == NOTAIRES_DEPARTMENTS[0]:
-                        raise
-                    LOG.info(f"Notaires {department} {code} p{page}: {type(e).__name__}")
-                    break
-                for ad in data.get("annonceResumeDto") or []:
-                    row = parse_notaires(ad)
-                    if row and row["price"] <= max_price:
-                        upsert_listing(db, row)
-                        total += 1
-                db.commit()
-                if page >= (data.get("nbPages") or 1):
-                    break
+    for code in NOTAIRES_TYPES:          # all of France: the score decides, not the region (owner, 2026-10-05)
+        limit = land_max_price(config, max_price) if NOTAIRES_TYPES[code] == "terrain" else max_price
+        for page in range(1, NOTAIRES_MAX_PAGES + 1):
+            if not first:
+                time.sleep(NOTAIRES_PAUSE)
+            first = False
+            params = {"offset": (page - 1) * 100, "page": page, "parPage": 100,
+                      "typeTransactions": "VENTE,VNI,VAE", "typeBiens": code, "prixMax": int(limit)}
+            try:
+                resp = session.get(NOTAIRES_API, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:  # noqa: BLE001 — one page failing is not the source failing
+                if total == 0 and page == 1 and code == next(iter(NOTAIRES_TYPES)):
+                    raise
+                LOG.info(f"Notaires {code} p{page}: {type(e).__name__}")
+                break
+            for ad in data.get("annonceResumeDto") or []:
+                row = parse_notaires(ad)
+                if row and row["price"] <= limit:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            if page >= (data.get("nbPages") or 1):
+                break
     LOG.info(f"Notaires: {total} listings")
+    return total
+
+
+# ─── SAFER (proprietes-rurales.com) ─────────────────────────────────
+# The rural land agencies' own sale site: forests all over France. The list
+# loads 30 at a time (prod_list.php?start=…). Ads name only the département,
+# never the commune, so the land is placed at the département's middle.
+SAFER = "https://www.proprietes-rurales.com"
+SAFER_FOREST = "vente-propriete-agricole/foret,11"
+SAFER_MAX = 3000
+
+_SAFER_AD = re.compile(r'<div class="res_div1" id="res_div_(VN\d+)">(.*?)(?=<div class="res_div1"|\Z)', re.S)
+
+
+def safer_hectares(text: str) -> float | None:
+    """"23 ha 66 a 25 ca" → 23.6625."""
+    m = re.search(r"(\d+)\s*ha(?:\s+(\d+)\s*a)?(?:\s+(\d+)\s*ca)?", text or "")
+    if not m:
+        return None
+    return int(m.group(1)) + int(m.group(2) or 0) / 100 + int(m.group(3) or 0) / 10000
+
+
+def parse_safer(block_id: str, block: str) -> dict | None:
+    price = re.search(r'itemprop="price" content="(\d+)"', block)
+    ha = safer_hectares(" ".join(re.findall(r"safer_land_value'>([^<]+)<", block)))
+    if not price or int(price.group(1)) <= 0 or not ha:
+        return None                                     # "Nous consulter": no price
+    link = re.search(r'<h2 itemprop="name"><a href="([^"]+)"[^>]*>([^<]+)</a>', block)
+    dept = re.search(r'class="safer_region_link" href="[^"]*/([a-z-]+),(\d+[AB]?)">', block)
+    text = re.search(r'<p itemprop="description">(.*?)</p>', block, re.S)
+    image = re.search(r"background-image:url\(([^)]+)\)", block)
+    name = dept.group(1).replace("-", " ").title().replace(" Et ", "-et-") if dept else None
+    return make_listing(
+        "safer", block_id, "FR", title=html.unescape(link.group(2)) if link else "Forêt",
+        description=html.unescape(re.sub(r"<[^>]+>", " ", text.group(1))).strip() if text else None,
+        tipo="terreno", area_m2=ha * 10000, price=float(price.group(1)), min_price=float(price.group(1)),
+        district=dept.group(2) if dept else None, concelho=name,
+        url=SAFER + link.group(1) if link else None, image_url=image.group(1) if image else None)
+
+
+@register("safer", "FR", description="SAFER (proprietes-rurales.com) — forests for sale all over France")
+def scrape_safer(db, max_price: float = 50000, config: dict | None = None, **_):
+    """SAFER (proprietes-rurales.com) — forests for sale all over France."""
+    session = make_session(timeout=30)
+    limit = land_max_price(config, max_price)
+    total = 0
+    for start in range(0, SAFER_MAX, 30):
+        resp = session.get(f"{SAFER}/prod_list.php", params={
+            "type_prod": "prog", "type_offer": 1, "safer_voc": "Array", "lang": "fr", "ajax_list": 1,
+            "start": start, "ajax_prod_list_url": SAFER_FOREST})
+        resp.raise_for_status()
+        blocks = _SAFER_AD.findall(resp.text)
+        for block_id, block in blocks:
+            row = parse_safer(block_id, block)
+            if row and row["price"] <= limit:
+                upsert_listing(db, row)
+                total += 1
+        db.commit()
+        if not blocks:
+            break
+        time.sleep(1)
+    LOG.info(f"SAFER: {total} forests")
     return total

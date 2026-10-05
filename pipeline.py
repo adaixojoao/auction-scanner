@@ -103,6 +103,22 @@ def send_alerts(db, cfg: dict):
     alert_last_calls(db, cfg)
 
 
+def enrich_order(db, cfg: dict) -> list[dict]:
+    """The listings to locate and assess first: the best of each tab in turn
+    (home, forestry, investment), so land for forestry is not left until last."""
+    from db import load_listings
+    from scoring import MODES
+    ranked = [sorted(load_listings(db, filters=cfg.get("filters"), mode=m),
+                     key=lambda it: -it.get("rank", it["score"])) for m in MODES]
+    order, seen = [], set()
+    for row in zip(*[r + [None] * (max(map(len, ranked)) - len(r)) for r in ranked]):
+        for it in row:
+            if it and it["id"] not in seen:
+                seen.add(it["id"])
+                order.append(it)
+    return order
+
+
 def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
              max_price: float | None = None, label: str | None = None,
              report: bool = True, alerts: bool = True, db=None) -> dict:
@@ -168,9 +184,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                 _set_state(db, current="map positions")
                 try:
                     import geo
-                    from db import load_listings
-                    best = sorted(load_listings(db, filters=cfg.get("filters")),
-                                  key=lambda it: -it.get("rank", it["score"]))
+                    best = enrich_order(db, cfg)
                     session = make_session()
                     geo.locate_towns(db, session, best)
                     geo.geocode_pending(db, session, best, towns=geo.town_index(db))

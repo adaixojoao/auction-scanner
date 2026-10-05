@@ -249,3 +249,36 @@ def test_the_same_house_at_a_different_price_on_another_portal(db):
     assert mark_duplicates(db) == 1
     dup = dict(db.execute("SELECT id, duplicate_of FROM listings WHERE duplicate_of IS NOT NULL").fetchone())
     assert dup == {"id": "fotocasa:1", "duplicate_of": "pisos:2"}           # the cheaper one stays
+
+
+def test_scores_are_kept_but_a_changed_listing_or_weight_is_scored_again(db):
+    from common import make_listing
+    from db import load_listings, upsert_listing
+    upsert_listing(db, make_listing("eleiloes", "1", title="Moradia T3", price=20000, area_m2=120,
+                                    description="Casa em bom estado"))
+    db.commit()
+    first = load_listings(db, apply_min_score=False)[0]
+    again = load_listings(db, apply_min_score=False)[0]
+    assert again["score"] == first["score"] and again["reasons"] == first["reasons"]
+    lighter = load_listings(db, filters={"weights": {"price": 0}}, apply_min_score=False)[0]
+    assert lighter["rank"] < first["rank"]                     # a new weight (Settings) is scored again
+    db.execute("UPDATE listings SET description = 'Casa em ruínas, sem telhado' WHERE id = 'eleiloes:1'")
+    db.commit()
+    ruin = load_listings(db, apply_min_score=False)[0]
+    assert ruin["score"] < first["score"]                      # the changed row was scored again
+
+
+def test_a_scan_that_only_sees_a_listing_again_keeps_its_score(db, monkeypatch):
+    import db as dbmod
+    from common import make_listing
+    from db import load_listings, upsert_listing
+    upsert_listing(db, make_listing("eleiloes", "1", title="Moradia T3", price=20000, area_m2=120))
+    db.commit()
+    load_listings(db, apply_min_score=False)
+    calls = []
+    real = dbmod._score_one
+    monkeypatch.setattr(dbmod, "_score_one", lambda *a, **k: calls.append(1) or real(*a, **k))
+    db.execute("UPDATE listings SET last_seen = '2030-01-01T00:00:00+00:00' WHERE id = 'eleiloes:1'")
+    db.commit()
+    load_listings(db, apply_min_score=False)
+    assert calls == []

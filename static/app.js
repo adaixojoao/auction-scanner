@@ -23,6 +23,15 @@ const AS = (() => {
   }
   // The Climate panel (scoring.climate_score via listing_info.climate_panel),
   // the same on Listings and Offers.
+  // The owner's five wishes (scoring.wishes): airport, space, swim, condition, water on the land.
+  const WISH_MARK = {yes: "✓", part: "~", no: "✗", unknown: "?"};
+  function wishesHtml(ws, compact) {
+    if (!ws || !ws.length) return "";
+    return `<div class="wishes${compact ? " compact" : ""}">${ws.map(w =>
+      `<span class="wish w-${esc(w.state)}" title="${esc(w.label)}: ${esc(w.text)}">${compact
+        ? `${esc(w.label.split(" ")[0])} ${WISH_MARK[w.state] || "?"}`
+        : `<b>${esc(w.label)}</b> ${WISH_MARK[w.state] || "?"} <span class="small">${esc(w.text)}</span>`}</span>`).join("")}</div>`;
+  }
   function climateBadge(grade) {
     return grade && grade !== "unknown" ? `<span class="badge c-${esc(grade)}" title="Climate grade">climate ${esc(grade)}</span>` : "";
   }
@@ -181,5 +190,5 @@ const AS = (() => {
     announceUpdate();
   });
 
-  return {esc, money, scoreBadge, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, pollScan};
+  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, pollScan};
 })();

@@ -56,10 +56,10 @@ def pt_prices(tmp_path, monkeypatch):
 
 
 def test_every_municipality_has_a_local_price(pt_prices):
-    fallback = {"ES": {"sevilla": 1900}}
+    fallback = {"GR": {"athina": 1900}}
     assert prices.local_price("PT", "SABUGAL", fallback) == (310, "INE 2.º Trimestre de 2026")
     assert prices.local_price("PT", "Guarda (Sé)", fallback)[0] == 742
-    assert prices.local_price("ES", "Sevilla", fallback) == (1900, "city estimate")
+    assert prices.local_price("GR", "Athina", fallback) == (1900, "city estimate")      # no official table there
     assert prices.local_price("PT", "Nowhere", fallback) is None and prices.local_price("PT", "", fallback) is None
 
 
@@ -137,3 +137,53 @@ def test_ine_answer_gives_the_parishes_under_their_municipality():
     assert update_prices.parse_ine_parishes(answer) == [
         {"municipality": "Sabugal", "parish": "União das freguesias de Sortelha e Malcata", "eur_m2": 150,
          "period": "2.º Trimestre de 2026", "source": "INE"}]
+
+
+def test_spain_and_france_use_their_official_tables_and_the_province_for_villages():
+    town = prices.local_price("ES", "Ourense", {}, district="Ourense")
+    assert town and "MIVAU" in town[1] and "province" not in town[1]
+    village = prices.local_price("ES", "Ourol", {}, district="Lugo")
+    assert village and village[1].endswith("province average")
+    assert "DVF" in prices.local_price("FR", "Brest", {}, district="29")[1]
+
+
+def test_italy_reads_table_8_of_an_omi_regional_report():
+    import sys
+    sys.path.insert(0, "scripts")
+    from update_prices import it_table8
+    text = ("Nella Tabella 8 sono indicate le quotazioni medie.\nTabella 8: Quotazione media e variazione annua\n"
+            "Provincia\nCapoluogo\nResto provincia\nBIELLA\n805\n-0,4%\n498\n0,0%\n"
+            "REGGIO CALABRIA\n1.120\n1,0%\n640\n0,5%\nPIEMONTE\n1.827\n1,2%\n988\n-0,1%\n")
+    rows = {r["municipality"]: r["eur_m2"] for r in it_table8(text, "2025")}
+    assert rows["Biella"] == 805 and rows["prov:Biella"] == 498
+    assert rows["prov:Reggio di Calabria"] == 640 and rows["Reggio Calabria"] == 1120
+    assert "Piemonte" not in rows                                  # the region's total is not a province
+
+
+def test_germany_reads_an_immoportal_town_page():
+    import sys
+    sys.path.insert(0, "scripts")
+    from update_prices import de_town_price
+    html = "<p>Was kostet eine Immobilie in Achern?</p><div>∅ Median Kaufpreis Haus <b>2.940 €/m²</b></div>"
+    assert de_town_price(html) == ("Achern", 2940)
+
+
+def test_simef_prices_are_weighted_by_volume_over_the_last_years():
+    from update_forest_prices import simef_prices, simef_rows
+    page = ('<table id="MainContent_GV_TBLPRECOS_SP"><tr><th>Ano</th></tr>'
+            "<tr><td>2025</td><td>53</td><td>Pinheiro-bravo</td><td>2T</td><td>15</td><td>63</td><td>50</td><td>1.000</td></tr>"
+            "<tr><td>2024</td><td>40</td><td>Pinheiro-bravo</td><td>1T</td><td>10</td><td>60</td><td>40</td><td>3.000</td></tr>"
+            "<tr><td>2019</td><td>9</td><td>Pinheiro-bravo</td><td>1T</td><td>10</td><td>60</td><td>99</td><td>9.000</td></tr>"
+            "</table>")
+    mixed, pine = simef_prices(simef_rows(page))
+    assert mixed["crop"] == "mixed" and mixed["eur_m3"] == 42.5
+    assert (pine["crop"], pine["eur_m3"], pine["period"]) == ("maritime pine", 42.5, "2023-2025")
+
+
+def test_the_forestry_model_uses_the_official_timber_price():
+    import forestry
+    price = forestry.timber_price("PT", "maritime pine")
+    assert price and "SIMeF" in price["label"]
+    atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
+    pine = next(o for o in forestry.options(atlantic, "PT", 20) if o["crop"] == "maritime pine")
+    assert pine["sources"] and "SIMeF" in forestry.describe(pine)

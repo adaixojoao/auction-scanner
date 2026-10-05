@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 51
+    assert len(REGISTRY) == 57
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -642,7 +642,7 @@ def test_aliseda_gives_price_position_and_possession(db, fake_http):
     assert json.loads(taken["raw_json"])["occupation"] == "occupied"
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"data": [ALISEDA_ITEM], "last_page": 1}))
     assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
-    assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000"}
+    assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000", "0-100000"}      # homes; land up to the land limit
     item = next(i for i in load_listings(db, include_hidden=True))
     assert geo.position(item)["precision"] == "street"
 
@@ -732,7 +732,7 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     session = fake_http(lambda m, url, kw: FakeResponse(pages[2 if url.endswith("/l/2") else 1]))
     assert scrape_fotocasa(db, max_price=50000) == 4 * len(FOTOCASA_PROVINCES)
     land = [c for c in session.calls if "/terrenos/" in c[1]]
-    assert all(c[2]["params"] == {"maxPrice": 50000, "minSurface": 10000} for c in land)
+    assert all(c[2]["params"] == {"maxPrice": 100000, "minSurface": 10000} for c in land)
 
 
 BIENICI_AD = {"id": "ag1-2", "propertyType": "house", "price": 42000, "city": "Huelgoat", "postalCode": "29690",
@@ -880,3 +880,78 @@ def test_thinkspain_reads_the_item_list():
     row = parse_thinkspain(items[0], "lugo", text)
     assert row["id"] == "thinkspain:10009160" and row["district"] == "Lugo" and row["tipo"] == "vivienda"
     assert row["title"] == "1 bedroom Townhouse in Monforte de Lemos" and row["area_m2"] == 94
+
+
+def test_solvia_reads_its_search_api():
+    from sources.es import parse_solvia
+    item = {"id": "192413-155113-O", "idVivienda": 192413, "precio": 22000.0, "m2": 120.0, "mostrarPrecio": True,
+            "categoriaTipoVivienda": {"nombre": "Viviendas"}, "tipoVivienda": {"nombre": "Casa Planta Baja"},
+            "poblacion": {"nombre": "Foz"}, "provincia": {"nombre": "Lugo"}, "tituloFicha": "Casa en Foz",
+            "sinPosesion": True, "reformar": True, "enCosta": True, "enSubasta": False,
+            "listaImagenesInmueble_vPC": ["https://cdnsolvproep.solvia.es/uploaded/x.jpg"]}
+    row = parse_solvia(item)
+    assert row["id"] == "solvia:192413-155113" and row["price"] == 22000 and row["concelho"] == "Foz"
+    assert "inmueble ocupado" in row["description"] and "Para reformar" in row["description"]
+    assert row["url"] == "https://www.solvia.es/es/propiedades/comprar/vivienda-192413-155113"
+    assert parse_solvia({**item, "categoriaTipoVivienda": {"nombre": "Garajes"}}) is None
+
+
+IMOT_CARD = """<div class="item  " id="ida1j1"><div class="photo"><a class="image"><img
+src="//cdn3.focus.bg/imot/1j1_Je.jpg" class="pic"></a></div><div class="text"><div class="zaglavie">
+<a href="//www.imot.bg/obiava-1j164942254773629-prodava-kashta-oblast-gabrovo-s-slaveykovo" class="title">Продава
+КЪЩА<location>с. Славейково, област Габрово</location></a><div class="price"><div>30 000 €</div></div></div>
+<div class="info">71 кв.м, двор 1550 кв.м, Продава къща до река Янтра ..., тел.: 0886 123 456</div></div></div>"""
+
+
+def test_imot_reads_a_card_without_the_phone_number():
+    from sources.bg import imot_cards, parse_imot
+    cards, ads = imot_cards(IMOT_CARD)
+    assert ads == 1 and len(cards) == 1
+    row = parse_imot(cards[0], "house")
+    assert row["id"] == "imot:1j164942254773629" and row["country"] == "BG" and row["price"] == 30000
+    assert row["area_m2"] == 71 and row["concelho"] == "Славейково" and row["district"] == "Габрово"
+    assert "0886" not in row["description"] and "тел" not in row["description"]
+    assert row["image_url"] == "https://cdn3.focus.bg/imot/1j1_Je.jpg"
+    assert parse_imot(cards[0], "terreno")["area_m2"] == 1550
+
+
+def test_index_oglasi_reads_the_list_and_the_full_ad():
+    from sources.hr import parse_index_ad
+    ad = {"id": "ade74a32", "code": 7403059, "price": 22000, "title": "Prodaje se kuća – Potok Kalnički",
+          "smartLink": "prodaje-se-kuca", "countyName": "Koprivničko-križevačka", "cityName": "Kalnik",
+          "settlementName": "Potok Kalnički", "summary": {"area": 72}, "images": ["a/b.jpg"]}
+    detail = {"description": "Kuća za potpunu adaptaciju podno Kalnika.", "latitude": 46.11, "longitude": 16.48,
+              "isPreciseLocation": False, "cityWaterSupply": True, "yearBuilt": "1968-01-01T00:00:00Z", "area": 72}
+    row = parse_index_ad(ad, "house", "prodaja-kuca", detail)
+    assert row["id"] == "indexoglasi:ade74a32" and row["country"] == "HR" and row["price"] == 22000
+    assert row["concelho"] == "Kalnik" and row["area_m2"] == 72 and "Gradski vodovod" in row["description"]
+    assert '"precision": "village"' in row["raw_json"]
+    assert row["image_url"] == "https://www.index.hr/oglasi/api/image/direct/a/b.jpg"
+    assert parse_index_ad({**ad, "price": 0}, "house", "prodaja-kuca") is None       # price on request
+
+
+def test_nehnutelnosti_reads_the_next_stream():
+    import json as _json
+    from sources.sk import nehnutelnosti_ads, nehnutelnosti_stream, parse_nehnutelnosti
+    ad = {"advertisement": {"id": "Ju1", "title": "Rodinný dom Banská Štiavnica", "sefName": "rodinny-dom",
+                            "description": "$2d", "location": {"county": "Banskobystrický kraj",
+                                                              "district": "okres Banská Štiavnica",
+                                                              "city": "Banská Štiavnica"},
+                            "price": {"priceNum": 38000}, "parameters": {"area": 120, "realEstateState": "Pôvodný stav"},
+                            "photos": [{"url": "https://img.example/1.jpg"}]}}
+    flight = "2d:T" + format(len("Dom pri rieke".encode()), "x") + ",Dom pri rieke" + _json.dumps(ad, separators=(",", ":"))
+    html = 'self.__next_f.push([1,' + _json.dumps(flight) + '])'
+    stream = nehnutelnosti_stream(html)
+    ads = nehnutelnosti_ads(stream)
+    row = parse_nehnutelnosti(ads[0], "house", stream)
+    assert row["id"] == "nehnutelnosti:Ju1" and row["country"] == "SK" and row["price"] == 38000
+    assert row["concelho"] == "Banská Štiavnica" and row["description"].startswith("Dom pri rieke")
+    assert row["url"] == "https://www.nehnutelnosti.sk/detail/Ju1/rodinny-dom"
+    assert parse_nehnutelnosti({**ads[0], "price": {"priceNum": 1}}, "house") is None    # "on request"
+
+
+def test_land_searches_go_up_to_the_land_limit():
+    from common import LAND_MAX_PRICE, land_max_price
+    assert land_max_price({}, 30000) == LAND_MAX_PRICE == 100000
+    assert land_max_price({"land_max_price": 80000}, 30000) == 80000
+    assert land_max_price({"land_max_price": 10000}, 30000) == 30000          # never below the house limit

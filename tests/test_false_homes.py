@@ -118,3 +118,11 @@ def test_a_preview_line_never_replaces_the_full_text():
     from db import _is_cut_copy
     full = "Busca su lugar de escape, de retiro?, alejado pero cercano?.. Disponemos de esta propiedad. Una casa"
     assert _is_cut_copy("Busca su lugar de escape, de retiro?, alejado pero cercano?. Disponemos de esta...", full)
+
+
+def test_a_share_named_in_words_is_skipped():
+    for desc in ("Predmetom dražby je spoluvlastnícky podiel na rodinnom dome",
+                 "Prodaje se suvlasnički dio kuće u Gvozdu", "Продава идеална част от къща"):
+        sc, reasons = score_detail(item(country="SK", source="nehnutelnosti", title="Rodinný dom", price=3780,
+                                        area_m2=124, description=desc))
+        assert sc == 0 and "fractional" in reasons[0], desc

@@ -30,7 +30,8 @@ USER_AGENT = (
 COUNTRY_NAMES = {
     "PT": "Portugal", "ES": "Spain", "FR": "France", "IT": "Italy",
     "DE": "Germany", "NL": "Netherlands", "BE": "Belgium", "HR": "Croatia",
-    "GR": "Greece", "RO": "Romania", "PL": "Poland", "CY": "Cyprus",
+    "GR": "Greece", "RO": "Romania", "PL": "Poland", "CY": "Cyprus", "BG": "Bulgaria", "SK": "Slovakia",
+    "LV": "Latvia",
 }
 # Display order everywhere (report, console, dashboard): Portugal first.
 COUNTRY_ORDER = list(COUNTRY_NAMES)
@@ -39,6 +40,19 @@ FLAGS = {
     code: "".join(chr(0x1F1E6 + ord(ch) - ord("A")) for ch in code)
     for code in COUNTRY_NAMES
 }
+
+
+# Land for forestry costs more than a cheap house: land searches go up to this
+# (config "land_max_price"), houses stay at "max_price" (owner, 2026-10-05).
+LAND_MAX_PRICE = 100_000
+
+
+def land_max_price(config: dict | None, max_price: float) -> float:
+    """The price limit for land searches: never below the house limit."""
+    try:
+        return max(float(max_price), float((config or {}).get("land_max_price") or LAND_MAX_PRICE))
+    except (TypeError, ValueError):
+        return max(float(max_price), LAND_MAX_PRICE)
 
 
 def utcnow() -> datetime:

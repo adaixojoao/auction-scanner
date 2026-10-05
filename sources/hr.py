@@ -9,7 +9,7 @@ import re
 import time
 from datetime import datetime
 
-from common import LOG, make_listing, make_session, parse_price
+from common import LOG, land_max_price, make_listing, make_session, parse_price
 from db import upsert_listing
 from sources import register
 
@@ -172,3 +172,93 @@ def scrape_fina_csv(db, max_price: float = 50000, **_):
         _clear_court_district(db, listing)
         total_scraped += 1
     return total_scraped
+
+
+# ─── Index Oglasi (index.hr) ─────────────────────────────────────────
+# Croatia's private sales (owners and agents), all over the country. The site's
+# own JSON service, behind an ordinary session cookie: the search page is opened
+# first. Houses and land between €1,000 and the budget (price 0 means "on request").
+# The full ad (text, map position, mains water) is read once per listing, a few
+# hundred a scan.
+
+INDEX_OGLASI = "https://www.index.hr/oglasi"
+INDEX_CATEGORIES = {"houses-for-sale": ("house", "prodaja-kuca"), "lands-for-sale": ("terreno", "prodaja-zemljista")}
+INDEX_PAGE = 50
+INDEX_MAX_PAGES = 60
+INDEX_DETAILS_PER_SCAN = 400
+
+
+def parse_index_ad(ad: dict, tipo: str, path: str, detail: dict | None = None) -> dict | None:
+    if not ad.get("price") or (ad.get("priceCurrency") or "EUR") != "EUR":
+        return None
+    detail = detail or {}
+    raw = {}
+    if detail.get("latitude") and detail.get("longitude"):
+        raw["geo"] = {"lat": detail["latitude"], "lon": detail["longitude"],
+                      "precision": "street" if detail.get("isPreciseLocation") else "village"}
+    notes = [detail.get("description"),
+             "Gradski vodovod" if detail.get("cityWaterSupply") else None,
+             "Gradska kanalizacija" if detail.get("citySewerage") else None,
+             f"Godina izgradnje {detail['yearBuilt'][:4]}" if detail.get("yearBuilt") else None]
+    area = (detail.get("area") or (ad.get("summary") or {}).get("area"))
+    images = ad.get("images") or detail.get("images") or []
+    return make_listing(
+        "indexoglasi", ad["id"], "HR", title=ad.get("title"), tipo=tipo,
+        description=" · ".join(n for n in notes if n)[:3000] or ad.get("title"),
+        area_m2=area, price=float(ad["price"]), min_price=float(ad["price"]),
+        district=ad.get("countyName"), concelho=ad.get("cityName"), freguesia=ad.get("settlementName"),
+        url=f"{INDEX_OGLASI}/nekretnine/{path}/oglas/{ad.get('smartLink') or 'oglas'}/{ad['id']}",
+        image_url=f"{INDEX_OGLASI}/api/image/direct/{images[0]}" if images else None,
+        raw_json=json.dumps(raw) if raw else None,
+    )
+
+
+@register("indexoglasi", "HR", description="Index Oglasi — private houses and land all over Croatia")
+def scrape_index_oglasi(db, max_price: float = 50000, config: dict | None = None, **_):
+    """Index Oglasi (index.hr) — private houses and land all over Croatia."""
+    session = make_session(timeout=30)
+    session.get(f"{INDEX_OGLASI}/nekretnine/prodaja-kuca/pretraga").raise_for_status()   # the session cookie
+    headers = {"Accept": "application/json"}
+    read = {r[0] for r in db.execute(
+        """SELECT external_id FROM listings WHERE source = 'indexoglasi' AND raw_json LIKE '%"geo"%'""")}
+    budget, total = INDEX_DETAILS_PER_SCAN, 0
+    for category, (tipo, path) in INDEX_CATEGORIES.items():
+        limit = land_max_price(config, max_price) if tipo == "terreno" else max_price
+        for page in range(1, INDEX_MAX_PAGES + 1):
+            try:
+                resp = session.get(f"{INDEX_OGLASI}/api/aditem", headers=headers, params={
+                    "category": category, "module": "real-estate", "sortOption": 1, "itemPerPage": INDEX_PAGE,
+                    "page": page, "priceFrom": 1000, "priceTo": int(limit)})
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:  # noqa: BLE001 — one page failing is not the source failing
+                if total == 0 and page == 1 and category == next(iter(INDEX_CATEGORIES)):
+                    raise
+                LOG.info(f"Index Oglasi {category} p{page}: {type(e).__name__}")
+                break
+            ads = data.get("data") or []
+            for ad in ads:
+                detail = None
+                if ad.get("id") not in read and budget > 0 and ad.get("code"):
+                    budget -= 1
+                    try:
+                        got = session.get(f"{INDEX_OGLASI}/api/aditem/single-ad", headers=headers,
+                                          params={"code": ad["code"]})
+                        detail = (got.json().get("data") or [None])[0] if got.ok else None
+                    except Exception:  # noqa: BLE001 — the list entry alone is still worth keeping
+                        detail = None
+                    time.sleep(0.5)
+                row = parse_index_ad(ad, tipo, path, detail)
+                if not row or row["price"] > limit:
+                    continue
+                if detail is None:
+                    row.pop("raw_json", None)             # never drop a position read earlier
+                    row.pop("description", None)          # nor the full text
+                upsert_listing(db, row)
+                total += 1
+            db.commit()
+            if not ads or (data.get("nextPage") or -1) < 0:
+                break
+            time.sleep(1)
+    LOG.info(f"Index Oglasi: {total} listings")
+    return total

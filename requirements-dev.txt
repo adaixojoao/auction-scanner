@@ -2,3 +2,4 @@
 -r requirements-climate.txt
 pytest>=8
 pyflakes>=3
+xlrd>=2.0          # scripts/update_prices.py --prices-es (Spain's .XLS tables)
