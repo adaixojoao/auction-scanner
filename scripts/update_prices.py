@@ -337,6 +337,115 @@ def update_prices_es(requests) -> int:
     return _write(PRICE_FILES["ES"], rows)
 
 
+IT_REPORTS = ("https://www.agenziaentrate.gov.it/portale/web/guest/schede/fabbricatiterreni/omi/"
+              "pubblicazioni/statistiche-regionali")
+# The report's province names where the listings write them differently.
+IT_ALIASES = {"REGGIO CALABRIA": ["Reggio di Calabria"], "VERBANIA": ["Verbano-Cusio-Ossola"],
+              "BOLZANO": ["Bolzano/Bozen", "Bozen"], "AOSTA": ["Valle d'Aosta"], "MASSA": ["Massa-Carrara"],
+              "PESARO": ["Pesaro e Urbino"], "FORLI'": ["Forlì-Cesena", "Forli-Cesena"],
+              "MONZA": ["Monza e della Brianza"], "BARLETTA": ["Barletta-Andria-Trani"],
+              "CARBONIA": ["Sud Sardegna"], "REGGIO EMILIA": ["Reggio nell'Emilia"]}
+
+
+def it_table8(text: str, year: str) -> list[dict]:
+    """Table 8 of an OMI regional report: per province, the capital's average
+    €/m² and the rest of the province's ("prov:<name>")."""
+    import re
+    found = re.search(r"Tabella\s*8\s*:", text)          # the table, not "Nella Tabella 8 sono…" in the prose
+    if not found:
+        return []
+    start = found.start()
+    lines = [x.strip() for x in text[start:start + 4000].splitlines() if x.strip()]
+    rows, i = [], 0
+    number = re.compile(r"^\d{1,2}(?:\.\d{3})*$|^\d{3,4}$")
+    while i + 4 < len(lines):
+        name, capital, _, rest, _ = lines[i:i + 5]
+        if re.fullmatch(r"[A-Z' .\-]+", name) and number.match(capital) and number.match(rest):
+            if name.strip() in IT_REGIONS:
+                break                                   # the region's total closes the table
+            for label in [name.title()] + IT_ALIASES.get(name.strip(), []):
+                rows.append({"municipality": label, "eur_m2": int(capital.replace(".", "")), "period": year,
+                             "source": "OMI (Agenzia Entrate)"})
+                rows.append({"municipality": "prov:" + label, "eur_m2": int(rest.replace(".", "")), "period": year,
+                             "source": "OMI (Agenzia Entrate), rest of province"})
+            i += 5
+        else:
+            i += 1
+    return rows
+
+
+IT_REGIONS = {"PIEMONTE", "VALLE D'AOSTA", "LOMBARDIA", "LIGURIA", "VENETO", "FRIULI VENEZIA GIULIA",
+              "EMILIA ROMAGNA", "EMILIA-ROMAGNA", "TOSCANA", "UMBRIA", "MARCHE", "LAZIO", "ABRUZZO", "MOLISE",
+              "CAMPANIA", "PUGLIA", "BASILICATA", "CALABRIA", "SICILIA", "SARDEGNA", "TRENTO", "BOLZANO"}
+
+
+def update_prices_it(requests) -> int:
+    """OMI regional reports (one PDF per region): Table 8, per province."""
+    import re
+    import pymupdf
+    page = requests.get(IT_REPORTS, timeout=60).text
+    urls = sorted(set(re.findall(r'href="([^"]+/SR(20\d\d)_[A-Z_]+\.pdf[^"]*)"', page)))
+    if not urls:
+        print("No OMI regional reports found. Nothing written.")
+        return 1
+    rows = []
+    for url, year in urls:
+        doc = pymupdf.open(stream=requests.get(url, timeout=120).content, filetype="pdf")
+        text = "\n".join(doc[i].get_text() for i in range(doc.page_count))
+        found = it_table8(text, str(int(year) - 1))           # the 2026 report has 2025's figures
+        print(f"  {url.split('/')[-2]}: {len(found) // 2} rows")
+        rows += found
+    rows = list({r["municipality"]: r for r in rows}.values())
+    print(f"OMI: {len(rows)} rows")
+    if len(rows) < 150:
+        print("Fewer than 150 rows: the reports changed. Nothing written.")
+        return 1
+    return _write(PRICE_FILES["IT"], rows)
+
+
+DE_INDEX = "https://www.immoportal.com/immobilienpreise"
+DE_PAUSE = 1.0              # one town a second: ~2,000 towns take about 35 minutes
+
+
+def de_town_price(page_html: str) -> tuple[str, int] | None:
+    """(town, median asking €/m² of houses) from an immoportal town page."""
+    import re
+    from bs4 import BeautifulSoup
+    text = BeautifulSoup(page_html, "html.parser").get_text(" ", strip=True)
+    town = re.search(r"Was kostet eine Immobilie in ([^?]+)\?", text)
+    house = re.search(r"Median Kaufpreis Haus\s*([\d.]+)\s*€\s*/\s*m", text)
+    if not town or not house:
+        return None
+    return town.group(1).strip(), int(house.group(1).replace(".", ""))
+
+
+def update_prices_de(requests) -> int:
+    """immoportal.com: the median asking price per m² of houses in each German town
+    it covers (about 2,000; villages have none). No national open table exists."""
+    import re
+    import time
+    index = requests.get(DE_INDEX, timeout=60).text
+    towns = sorted(set(re.findall(r'href="https://www\.immoportal\.com/immobilienpreise/([a-z0-9-]+)"', index)))
+    print(f"immoportal: {len(towns)} towns")
+    rows = []
+    for n, slug in enumerate(towns, 1):
+        try:
+            r = requests.get(f"{DE_INDEX}/{slug}", timeout=60)
+            found = de_town_price(r.text) if r.ok else None
+        except Exception:  # noqa: BLE001 — one town failing is not the table failing
+            found = None
+        if found:
+            rows.append({"municipality": found[0], "eur_m2": found[1], "period": time.strftime("%Y"),
+                         "source": "immoportal (asking, houses)"})
+        if n % 200 == 0:
+            print(f"  {n}/{len(towns)}: {len(rows)} prices")
+        time.sleep(DE_PAUSE)
+    if len(rows) < 500:
+        print("Fewer than 500 towns: the site changed. Nothing written.")
+        return 1
+    return _write(PRICE_FILES["DE"], rows)
+
+
 def _write(path: str, rows: list[dict]) -> int:
     rows.sort(key=lambda row: row["municipality"])
     with open(path, "w", encoding="utf-8", newline="") as f:
@@ -401,6 +510,8 @@ def main(argv=None) -> int:
     ap.add_argument("--prices-nl", action="store_true", help="the Netherlands' prices per gemeente (CBS) → data/nl_home_prices.csv")
     ap.add_argument("--prices-lu", action="store_true", help="Luxembourg's asking €/m² per commune → data/lu_home_prices.csv")
     ap.add_argument("--prices-es", action="store_true", help="Spain's appraised €/m² (MIVAU; needs xlrd) → data/es_home_prices.csv")
+    ap.add_argument("--prices-it", action="store_true", help="Italy's OMI averages per province (needs pymupdf) → data/it_home_prices.csv")
+    ap.add_argument("--prices-de", action="store_true", help="Germany's asking €/m² of houses per town (immoportal) → data/de_home_prices.csv")
     args = ap.parse_args(argv)
     if args.rents:
         return update_rents(requests)
@@ -416,6 +527,10 @@ def main(argv=None) -> int:
         return update_prices_lu(requests)
     if args.prices_es:
         return update_prices_es(requests)
+    if args.prices_it:
+        return update_prices_it(requests)
+    if args.prices_de:
+        return update_prices_de(requests)
 
     r = requests.get(API, params={"op": "2", "varcd": args.indicator, "lang": "PT"}, timeout=60)
     r.raise_for_status()

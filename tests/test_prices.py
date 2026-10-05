@@ -145,3 +145,24 @@ def test_spain_and_france_use_their_official_tables_and_the_province_for_village
     village = prices.local_price("ES", "Ourol", {}, district="Lugo")
     assert village and village[1].endswith("province average")
     assert "DVF" in prices.local_price("FR", "Brest", {}, district="29")[1]
+
+
+def test_italy_reads_table_8_of_an_omi_regional_report():
+    import sys
+    sys.path.insert(0, "scripts")
+    from update_prices import it_table8
+    text = ("Nella Tabella 8 sono indicate le quotazioni medie.\nTabella 8: Quotazione media e variazione annua\n"
+            "Provincia\nCapoluogo\nResto provincia\nBIELLA\n805\n-0,4%\n498\n0,0%\n"
+            "REGGIO CALABRIA\n1.120\n1,0%\n640\n0,5%\nPIEMONTE\n1.827\n1,2%\n988\n-0,1%\n")
+    rows = {r["municipality"]: r["eur_m2"] for r in it_table8(text, "2025")}
+    assert rows["Biella"] == 805 and rows["prov:Biella"] == 498
+    assert rows["prov:Reggio di Calabria"] == 640 and rows["Reggio Calabria"] == 1120
+    assert "Piemonte" not in rows                                  # the region's total is not a province
+
+
+def test_germany_reads_an_immoportal_town_page():
+    import sys
+    sys.path.insert(0, "scripts")
+    from update_prices import de_town_price
+    html = "<p>Was kostet eine Immobilie in Achern?</p><div>∅ Median Kaufpreis Haus <b>2.940 €/m²</b></div>"
+    assert de_town_price(html) == ("Achern", 2940)

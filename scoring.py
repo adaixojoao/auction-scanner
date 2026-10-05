@@ -884,7 +884,7 @@ def local_value_factor(item: dict, state: str | None = None) -> tuple[float, lis
             factor *= town
             why.append(f"{near['km']:.0f} km from town")
     found = local_price(item)
-    if found and "province average" in found[1]:
+    if found and "province average" in found[1] and "rest of province" not in found[1]:
         factor *= PROVINCE_AVERAGE_VALUE          # the province's figure includes its cities
         why.append("province average")
     return factor, why
