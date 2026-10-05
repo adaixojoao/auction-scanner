@@ -112,3 +112,31 @@ def test_forestry_values_the_crops_the_climate_allows():
     owned = forestry.options(hot, "PT", 20, existing={"cork oak"})
     value = lambda opts: next(o["eur_ha_year"] for o in opts if o["crop"] == "cork oak")  # noqa: E731
     assert value(owned) > value(planted)
+
+
+def test_a_crop_stops_earning_when_the_climate_passes_its_limit_and_fire_adds_up():
+    import forestry
+    warming = {"today": 29, "ssp245_2061-2080": 33, "ssp245_2081-2100": 35}
+    assert 2030 <= forestry.heat_limit_year(warming, 31) <= 2035
+    assert forestry.heat_limit_year({"today": 24, "ssp245_2081-2100": 27}, 30) is None
+    pine = lambda c: next(o for o in forestry.options(c, "PT", 20) if o["crop"] == "maritime pine")  # noqa: E731
+    calm = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
+    burning = {**calm, "fire_danger": {"high_days_2090": 70}, "fire": {"count": 3}}
+    assert pine(burning)["eur_ha_year"] < pine(calm)["eur_ha_year"]
+    assert any("chance of losing it" in x for x in pine(burning)["limits"])
+    hot = pine({"heat": warming})
+    assert hot["until"] and hot["eur_ha_year"] < pine(calm)["eur_ha_year"]
+
+
+def test_a_crop_stops_earning_when_the_climate_passes_its_limit_and_fire_adds_up():
+    import forestry
+    warming = {"today": 29, "ssp245_2061-2080": 33, "ssp245_2081-2100": 35}
+    assert 2030 <= forestry.heat_limit_year(warming, 31) <= 2035
+    assert forestry.heat_limit_year({"today": 24, "ssp245_2081-2100": 27}, 30) is None
+    pine = lambda c: next(o for o in forestry.options(c, "PT", 20) if o["crop"] == "maritime pine")  # noqa: E731
+    calm = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
+    burning = {**calm, "fire_danger": {"high_days_2090": 70}, "fire": {"count": 3}}
+    assert pine(burning)["eur_ha_year"] < pine(calm)["eur_ha_year"]
+    assert any("chance of losing it" in x for x in pine(burning)["limits"])
+    hot = pine({"heat": warming})
+    assert hot["until"] and hot["eur_ha_year"] < pine(calm)["eur_ha_year"]

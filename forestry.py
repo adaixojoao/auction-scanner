@@ -51,6 +51,36 @@ CROPS = {
 }
 
 
+START_YEAR = 2026
+DRY_FAIL_YEAR = 2060      # water-hungry trees where water stress turns high or extreme by 2080
+# Yearly chance a stand burns: a base everywhere, more where high fire danger
+# days are many by 2090 (30+, 60+), more again where fires burnt nearby since 2016.
+FIRE_BASE, FIRE_DANGER, FIRE_HISTORY = 0.002, 0.005, 0.005
+# How easily each crop is lost to a fire: cork bark protects the tree; resinous pines burn.
+FIRE_SENSITIVITY = {"cork oak": 0.3, "stone pine": 0.8, "maritime pine": 2.0, "Douglas fir": 1.0,
+                    "chestnut": 0.7, "poplar": 0.6, "native mixed forest": 0.7}
+
+
+def heat_limit_year(heat: dict, heat_max: float) -> int | None:
+    """The year the warmest month's mean maximum passes the crop's limit, along
+    today (~1995) → 2061-2080 (~2070) → 2081-2100 (~2090), then on at the same
+    pace. None when it stays under the limit to the end of the horizon."""
+    points = [(y, heat.get(k)) for y, k in ((1995, "today"), (2070, "ssp245_2061-2080"),
+                                            (2090, "ssp245_2081-2100")) if heat.get(k) is not None]
+    if not points:
+        return None
+    if points[0][1] > heat_max:
+        return START_YEAR
+    end = START_YEAR + FOREST_YEARS
+    if len(points) >= 2:
+        (y1, t1), (y2, t2) = points[-2], points[-1]
+        points.append((end, t2 + (t2 - t1) / (y2 - y1) * (end - y2)))
+    for (y1, t1), (y2, t2) in zip(points, points[1:]):
+        if t2 > heat_max >= t1:
+            return max(START_YEAR, round(y1 + (heat_max - t1) / (t2 - t1) * (y2 - y1)))
+    return None
+
+
 def _annuity(npv: float) -> float:
     r, n = DISCOUNT_RATE, FOREST_YEARS
     return npv * r / (1 - (1 + r) ** -n)
@@ -89,36 +119,38 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
     {"crop", "eur_ha_year", "carbon_eur_ha_year", "note", "limits"}."""
     c = climate or {}
     heat = c.get("heat") or {}
-    hot_future = heat.get("ssp245_2081-2100")
     cold = (c.get("amoc_cold10") or {}).get("off")      # the cold if the Atlantic current fails
     stress = (c.get("stress") or {}).get("stress_2080")
     dry_stress = stress is not None and (stress >= 3 or stress == -1)
     fire_days = (c.get("fire_danger") or {}).get("high_days_2090") or 0
     by_water = water_on_land or (c.get("water_km") is not None and c["water_km"] <= 0.3)
+    fire = c.get("fire") or {}
+    burn = FIRE_BASE + (FIRE_DANGER if fire_days >= 30 else 0) + (FIRE_DANGER if fire_days >= 60 else 0)         + (FIRE_HISTORY if fire.get("burnt_here") or fire.get("count") else 0)
     out = []
     for name, crop in CROPS.items():
         limits = []
         if crop.get("countries") and (country or "").upper() not in crop["countries"]:
             continue
-        if hot_future is not None and hot_future > crop["heat_max"]:
-            continue
         if cold is not None and cold < crop["cold_min"]:
             continue
         if crop.get("river") and not by_water:
             continue
-        growth = 1.0
+        # The year the place gets too hot (or, for thirsty trees, too dry) for it:
+        # nothing is earned after that, and a stand not yet felled is lost.
+        ends = heat_limit_year(heat, crop["heat_max"])
+        if dry_stress and crop.get("wet"):
+            ends = min(ends or DRY_FAIL_YEAR, DRY_FAIL_YEAR)
+        last = FOREST_YEARS if ends is None else ends - START_YEAR
+        if last <= 0:
+            continue
+        if ends is not None and last < FOREST_YEARS:
+            limits.append(f"too {'dry' if dry_stress and crop.get('wet') else 'hot'} for it from ~{ends}")
+        growth = 0.7 if dry_stress else 1.0
         if dry_stress:
-            if crop.get("wet"):
-                continue
-            growth *= 0.7
             limits.append("dry: lower yield")
-        if hot_future is not None and hot_future > crop["heat_max"] - 2:
-            growth *= 0.8
-            limits.append("near its heat limit by 2090")
-        survive = 1.0
-        if fire_days >= 30:
-            survive = 0.75 if crop.get("fire_prone") else 0.9
-            limits.append("high fire danger")
+        p = burn * FIRE_SENSITIVITY.get(name, 1.0)      # yearly chance the stand burns
+        if burn >= FIRE_BASE + FIRE_DANGER:
+            limits.append(f"fire: {1 - (1 - p) ** 40:.0%} chance of losing it within 40 years")
         established = name in (existing or ())
         flows = {0: 0 if established else -crop["plant"]}
         income = crop["income"]
@@ -127,20 +159,23 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
                       if every == 1 or (first, every, eur) == income[-1]]
             limits.append("already on the land")
         for first, every, eur in income:
-            for y in range(first, FOREST_YEARS + 1, every):
-                flows[y] = flows.get(y, 0) + eur * growth * survive
+            for y in range(first, last + 1, every):
+                flows[y] = flows.get(y, 0) + eur * growth * (1 - p) ** y
         rate = _carbon_rate(crop, heat.get("today")) * growth
         carbon = 0.0
         if rate:
             yearly = rate * (1 - CARBON_BUFFER) * (1 - CARBON_FEE) * CARBON_EUR_T
-            carbon = _annuity(_npv({y: yearly for y in range(1, FOREST_YEARS + 1)}) - CARBON_SETUP_EUR_HA)
+            carbon = _annuity(_npv({y: yearly * (1 - p) ** y for y in range(1, last + 1)}) - CARBON_SETUP_EUR_HA)
         crop_value = _annuity(_npv(flows))
         out.append({"crop": name, "eur_ha_year": round(crop_value + max(carbon, 0)),
-                    "carbon_eur_ha_year": round(max(carbon, 0)), "note": crop["note"], "limits": limits})
+                    "carbon_eur_ha_year": round(max(carbon, 0)), "note": crop["note"], "limits": limits,
+                    "until": ends})
     return sorted(out, key=lambda o: -o["eur_ha_year"])
 
 
 def describe(option: dict) -> str:
     extra = f" incl. €{option['carbon_eur_ha_year']} carbon" if option["carbon_eur_ha_year"] else ""
     limits = f"; {', '.join(option['limits'])}" if option["limits"] else ""
+    if option.get("until"):
+        extra += f", only until ~{option['until']}"
     return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (estimate{limits})"
