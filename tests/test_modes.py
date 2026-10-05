@@ -97,3 +97,18 @@ def test_the_photo_model_also_reads_the_description(monkeypatch):
     looker = Looker()
     photos.check_photos(looker, {"title": "Casa", "description": "tejado parte caida"})
     assert "tejado parte caida" in looker.prompt
+
+
+def test_forestry_values_the_crops_the_climate_allows():
+    import forestry
+    atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}, "water_km": 0.2}
+    crops = [o["crop"] for o in forestry.options(atlantic, "FR", 20)]
+    assert crops[0] == "poplar" and "Douglas fir" in crops
+    hot = {"heat": {"today": 33, "ssp245_2081-2100": 37}, "stress": {"stress_2080": 4}}
+    names = [o["crop"] for o in forestry.options(hot, "ES", 20)]
+    assert "Douglas fir" not in names and "chestnut" not in names
+    assert forestry.growing("Herdade com montado de sobro") == {"cork oak"}
+    planted = forestry.options(hot, "PT", 20)
+    owned = forestry.options(hot, "PT", 20, existing={"cork oak"})
+    value = lambda opts: next(o["eur_ha_year"] for o in opts if o["crop"] == "cork oak")  # noqa: E731
+    assert value(owned) > value(planted)

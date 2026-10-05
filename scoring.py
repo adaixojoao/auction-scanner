@@ -1994,6 +1994,10 @@ FOREST_WORDS = ["floresta", "florestal", "pinhal", "montado", "souto", "carvalha
 BUILDING_LAND = -25
 
 
+# What the best crop earns a year, as a share of the land's price per hectare.
+FOREST_RETURN_POINTS = [(-0.01, -10), (0, -4), (0.02, 0), (0.05, 8), (0.10, 15)]
+
+
 def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     """Land for a forestry project: big, cheap per hectare, wet enough, fit for trees."""
     title, desc = item.get("title") or "", item.get("description") or ""
@@ -2062,6 +2066,16 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         s += curve(dry, FOREST_DRY_POINTS) * w("amoc")
         if dry <= AMOC_DRY_WARN_MM:
             reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
+    import forestry
+    crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=forestry.growing(full))
+    if crops and c:
+        best = crops[0]
+        reasons.append(forestry.describe(best))
+        if pay:
+            s += curve(best["eur_ha_year"] / (pay / ha), FOREST_RETURN_POINTS) * w("price")
+    elif c:
+        s -= 10
+        reasons.append("no timber, cork, nut or carbon crop suits this climate by 2090")
     if pay:
         reasons.append(f"€{pay:,.0f}")
     if caps:
