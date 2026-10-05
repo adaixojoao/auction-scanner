@@ -60,3 +60,12 @@ def test_investment_does_not_believe_an_impossible_discount(monkeypatch):
     penalised = score_detail(absurd, mode="invest")[0]
     monkeypatch.setattr(scoring, "INVEST_TOO_CHEAP", 0)
     assert penalised == score_detail(absurd, mode="invest")[0] - 15
+
+
+def test_a_cheap_home_on_the_croatian_coast_is_doubtful():
+    from scoring import score
+    villa = {"source": "indexoglasi", "country": "HR", "district": "Dubrovačko-neretvanska", "tipo": "house",
+             "title": "Vila prvi red uz more", "description": "", "area_m2": 200, "price": 10000}
+    assert any("price doubtful" in r for r in score(villa)[1])
+    inland = {**villa, "district": "Osječko-baranjska", "title": "Kuća"}
+    assert not any("price doubtful" in r for r in score(inland)[1])

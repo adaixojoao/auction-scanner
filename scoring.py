@@ -214,6 +214,10 @@ UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until chec
 DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
 BANK_PORTALS = {"aliseda", "altamira", "servihabitat", "solvia"}
 DOUBTFUL_BANK_HOME_EUR = 10000   # banks never sell a whole, free home this cheap
+# The Croatian coast: a home there under this is a placeholder price ("1.000 €") or bait.
+DOUBTFUL_HR_COAST_HOME_EUR = 25000
+HR_COAST_COUNTIES = {"istarska", "primorsko-goranska", "ličko-senjska", "zadarska", "šibensko-kninska",
+                     "splitsko-dalmatinska", "dubrovačko-neretvanska"}
 SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia", "imot", "indexoglasi", "nehnutelnosti"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
@@ -1151,6 +1155,14 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
     return None
 
 
+def _doubtful_home_eur(item: dict) -> float:
+    if item.get("source") in BANK_PORTALS:
+        return DOUBTFUL_BANK_HOME_EUR
+    if item.get("country") == "HR" and (item.get("district") or "").lower() in HR_COAST_COUNTIES:
+        return DOUBTFUL_HR_COAST_HOME_EUR
+    return DOUBTFUL_HOME_EUR
+
+
 def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: list[str], caps: list[float],
             land_floor: float = DOUBTFUL_LAND_EUR_M2):
     """What must be checked by hand before the score can be trusted, in any mode:
@@ -1169,7 +1181,7 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
                        f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
     if (kind == "home" and item.get("source") in SALE_PORTALS
             and pay and area >= 40                                  # court sales do start this low
-            and pay < (DOUBTFUL_BANK_HOME_EUR if item.get("source") in BANK_PORTALS else DOUBTFUL_HOME_EUR)):
+            and pay < _doubtful_home_eur(item)):
         caps.append(UNCHECKED_CAP)
         reasons.append(f"price doubtful (€{pay:,.0f} for a home) — probably a rent or a typo")
     if kind in ("urban_plot", "rural_plot") and pay and area and pay / area < land_floor:
