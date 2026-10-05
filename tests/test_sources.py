@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 53
+    assert len(REGISTRY) == 54
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -913,3 +913,18 @@ def test_imot_reads_a_card_without_the_phone_number():
     assert "0886" not in row["description"] and "тел" not in row["description"]
     assert row["image_url"] == "https://cdn3.focus.bg/imot/1j1_Je.jpg"
     assert parse_imot(cards[0], "terreno")["area_m2"] == 1550
+
+
+def test_index_oglasi_reads_the_list_and_the_full_ad():
+    from sources.hr import parse_index_ad
+    ad = {"id": "ade74a32", "code": 7403059, "price": 22000, "title": "Prodaje se kuća – Potok Kalnički",
+          "smartLink": "prodaje-se-kuca", "countyName": "Koprivničko-križevačka", "cityName": "Kalnik",
+          "settlementName": "Potok Kalnički", "summary": {"area": 72}, "images": ["a/b.jpg"]}
+    detail = {"description": "Kuća za potpunu adaptaciju podno Kalnika.", "latitude": 46.11, "longitude": 16.48,
+              "isPreciseLocation": False, "cityWaterSupply": True, "yearBuilt": "1968-01-01T00:00:00Z", "area": 72}
+    row = parse_index_ad(ad, "house", "prodaja-kuca", detail)
+    assert row["id"] == "indexoglasi:ade74a32" and row["country"] == "HR" and row["price"] == 22000
+    assert row["concelho"] == "Kalnik" and row["area_m2"] == 72 and "Gradski vodovod" in row["description"]
+    assert '"precision": "village"' in row["raw_json"]
+    assert row["image_url"] == "https://www.index.hr/oglasi/api/image/direct/a/b.jpg"
+    assert parse_index_ad({**ad, "price": 0}, "house", "prodaja-kuca") is None       # price on request

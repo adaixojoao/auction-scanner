@@ -209,7 +209,7 @@ UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until chec
 DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
 BANK_PORTALS = {"aliseda", "altamira", "servihabitat", "solvia"}
 DOUBTFUL_BANK_HOME_EUR = 10000   # banks never sell a whole, free home this cheap
-SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia"}
+SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia", "imot", "indexoglasi"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 
