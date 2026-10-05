@@ -862,13 +862,18 @@ def scrape_altamira(db, max_price: float = 50000, **_):
 
 
 # ─── Fotocasa: Spain's big private portal ───────────────────────────
-# Not auctions: owners' and agents' asking prices, in the green north where
-# summers stay mild (Galicia, Asturias, Cantabria, the Basque Country, León,
-# Navarra). The results page carries its data as JSON, 30 a page, with the
+# Not auctions: owners' and agents' asking prices, all over Spain (the score
+# judges heat, cold and water, not the source). The results page carries its data as JSON, 30 a page, with the
 # text, the map position and whether it is occupied.
 FOTOCASA = "https://www.fotocasa.es"
-FOTOCASA_PROVINCES = ("a-coruna", "lugo", "pontevedra", "asturias", "cantabria", "bizkaia", "gipuzkoa",
-                      "leon", "navarra")
+FOTOCASA_PROVINCES = (   # all of Spain: the score decides, not the region (owner, 2026-10-05)
+    "a-coruna", "albacete", "alicante", "almeria", "asturias", "badajoz", "barcelona", "bizkaia", "burgos",
+    "cantabria", "castellon", "ceuta", "ciudad-real", "cuenca", "caceres", "cadiz", "cordoba", "gipuzkoa",
+    "girona", "granada", "guadalajara", "huelva", "huesca", "illes-balears", "jaen", "la-rioja",
+    "las-palmas", "leon", "lleida", "lugo", "madrid", "melilla", "murcia", "malaga", "navarra", "ourense",
+    "palencia", "pontevedra", "salamanca", "santa-cruz-de-tenerife", "segovia", "sevilla", "soria",
+    "tarragona", "teruel", "toledo", "valencia", "valladolid", "zamora", "zaragoza", "araba-alava", "avila",
+)
 FOTOCASA_SEARCHES = (("viviendas", None), ("terrenos", 10000))     # homes; land from 1 ha
 FOTOCASA_MAX_PAGES = 25
 
@@ -913,7 +918,7 @@ def parse_fotocasa(ad: dict, tipo: str) -> dict | None:
 
 @register("fotocasa", "ES")
 def scrape_fotocasa(db, max_price: float = 50000, **_):
-    """fotocasa — private homes and land (1 ha+) in the green north of Spain."""
+    """fotocasa — private homes and land (1 ha+) all over Spain."""
     session = make_session(timeout=30)
     total = 0
     for province in FOTOCASA_PROVINCES:
@@ -1066,15 +1071,28 @@ def scrape_tgss(db, max_price: float = 50000, **_):
 
 
 # ─── pisos.com ───────────────────────────────────────────────────────
-# Private sales in the green north, like fotocasa. The search page has price,
+# Private sales all over Spain, like fotocasa. The search page has price,
 # size, town and the start of the text; the full text and the map position are
 # on the detail page, read once for listings not seen before.
 
 PISOS = "https://www.pisos.com"
 # Coolest and wettest first: they get the detail budget before the hot inland.
-PISOS_PROVINCES = {"a_coruna": "A Coruña", "lugo": "Lugo", "asturias": "Asturias", "cantabria": "Cantabria",
-                   "pontevedra": "Pontevedra", "vizcaya_bizkaia": "Bizkaia", "guipuzcoa_gipuzkoa": "Gipuzkoa",
-                   "navarra": "Navarra", "leon": "León", "ourense": "Ourense"}
+PISOS_PROVINCES = {   # all of Spain
+    "a_coruna": "A Coruña", "albacete": "Albacete", "alicante": "Alicante", "almeria": "Almería",
+    "asturias": "Asturias", "badajoz": "Badajoz", "barcelona": "Barcelona", "vizcaya_bizkaia": "Bizkaia",
+    "burgos": "Burgos", "cantabria": "Cantabria", "castellon_castello": "Castellón", "ceuta": "Ceuta",
+    "ciudad_real": "Ciudad Real", "cuenca": "Cuenca", "caceres": "Cáceres", "cadiz": "Cádiz",
+    "cordoba": "Córdoba", "guipuzcoa_gipuzkoa": "Gipuzkoa", "girona": "Girona", "granada": "Granada",
+    "guadalajara": "Guadalajara", "huelva": "Huelva", "huesca": "Huesca",
+    "islas_baleares_illes_balears": "Illes Balears", "jaen": "Jaén", "la_rioja": "La Rioja",
+    "las_palmas": "Las Palmas", "leon": "León", "lleida": "Lleida", "lugo": "Lugo", "madrid": "Madrid",
+    "melilla": "Melilla", "murcia": "Murcia", "malaga": "Málaga", "navarra": "Navarra", "ourense": "Ourense",
+    "palencia": "Palencia", "pontevedra": "Pontevedra", "salamanca": "Salamanca",
+    "santa_cruz_de_tenerife": "Santa Cruz de Tenerife", "segovia": "Segovia", "sevilla": "Sevilla",
+    "soria": "Soria", "tarragona": "Tarragona", "teruel": "Teruel", "toledo": "Toledo",
+    "valencia": "Valencia", "valladolid": "Valladolid", "zamora": "Zamora", "zaragoza": "Zaragoza",
+    "alava_araba": "Álava", "avila": "Ávila",
+}
 PISOS_SEARCHES = [("casas", "vivienda"), ("fincas_rusticas", "terreno")]
 PISOS_MAX_PAGES = 15
 PISOS_DETAILS_PER_SCAN = 400
@@ -1141,9 +1159,9 @@ def parse_pisos(card: dict, tipo: str, province: str, detail: dict | None = None
     )
 
 
-@register("pisos", "ES", description="pisos.com — private homes and rural land in the green north of Spain")
+@register("pisos", "ES", description="pisos.com — private homes and rural land all over Spain")
 def scrape_pisos(db, max_price: float = 50000, **_):
-    """pisos.com — private homes and rural land in the green north of Spain."""
+    """pisos.com — private homes and rural land all over Spain."""
     session = make_session(timeout=30)
     # Listings whose detail page was read (it holds the map position); the rest
     # are read as the budget allows, a few hundred a scan.
@@ -1200,8 +1218,20 @@ def scrape_pisos(db, max_price: float = 50000, **_):
 # the full text is read from the detail page for new listings.
 
 THINKSPAIN = "https://www.thinkspain.com"
-THINKSPAIN_PROVINCES = {"a-coruna": "A Coruña", "lugo": "Lugo", "asturias": "Asturias", "cantabria": "Cantabria",
-                        "pontevedra": "Pontevedra", "leon": "León", "orense": "Ourense"}
+THINKSPAIN_PROVINCES = {   # all of Spain (the Canaries as one)
+    "a-coruna": "A Coruña", "albacete": "Albacete", "alicante": "Alicante", "almeria": "Almería",
+    "asturias": "Asturias", "badajoz": "Badajoz", "barcelona": "Barcelona", "vizcaya": "Bizkaia",
+    "burgos": "Burgos", "cantabria": "Cantabria", "castellon": "Castellón", "ciudad-real": "Ciudad Real",
+    "cuenca": "Cuenca", "caceres": "Cáceres", "cadiz": "Cádiz", "cordoba": "Córdoba",
+    "guipuzcoa": "Gipuzkoa", "girona": "Girona", "granada": "Granada", "guadalajara": "Guadalajara",
+    "huelva": "Huelva", "huesca": "Huesca", "balearic-islands": "Illes Balears", "jaen": "Jaén",
+    "la-rioja": "La Rioja", "canary-islands": "Canarias", "leon": "León", "lleida": "Lleida", "lugo": "Lugo",
+    "madrid": "Madrid", "murcia": "Murcia", "malaga": "Málaga", "navarra": "Navarra", "orense": "Ourense",
+    "palencia": "Palencia", "pontevedra": "Pontevedra", "salamanca": "Salamanca", "segovia": "Segovia",
+    "seville": "Sevilla", "soria": "Soria", "tarragona": "Tarragona", "teruel": "Teruel", "toledo": "Toledo",
+    "valencia": "Valencia", "valladolid": "Valladolid", "zamora": "Zamora", "zaragoza": "Zaragoza",
+    "alava": "Álava", "avila": "Ávila",
+}
 THINKSPAIN_MAX_PAGES = 10
 THINKSPAIN_DETAILS_PER_SCAN = 150
 _TS_NAME = re.compile(r"^(?P<what>.+?) for sale in (?P<town>.+?)(?: with .+?)? - € [\d,]+", re.I)
@@ -1263,7 +1293,7 @@ def parse_thinkspain(item: dict, province: str, description: str | None = None) 
 
 @register("thinkspain", "ES", description="thinkSPAIN — agency listings in Galicia, Asturias, Cantabria and León")
 def scrape_thinkspain(db, max_price: float = 50000, **_):
-    """thinkSPAIN — agency listings for buyers from abroad in the green north of Spain."""
+    """thinkSPAIN — agency listings for buyers from abroad all over Spain."""
     session = make_session(timeout=40)
     full = {r[0] for r in db.execute(
         "SELECT external_id FROM listings WHERE source = 'thinkspain' AND length(description) > 400")}
@@ -1314,8 +1344,17 @@ def scrape_thinkspain(db, max_price: float = 50000, **_):
 # possession ("sinPosesion": occupied) and whether it needs work.
 
 SOLVIA = "https://www.solvia.es"
-SOLVIA_PROVINCES = {"15": "A Coruña", "27": "Lugo", "33": "Asturias", "36": "Pontevedra", "39": "Cantabria",
-                    "32": "Ourense", "24": "León", "48": "Bizkaia", "20": "Gipuzkoa", "31": "Navarra"}
+SOLVIA_PROVINCES = {   # all of Spain, by INE code
+    "15": "A Coruña", "02": "Albacete", "03": "Alicante", "04": "Almería", "33": "Asturias", "06": "Badajoz",
+    "08": "Barcelona", "48": "Bizkaia", "09": "Burgos", "39": "Cantabria", "12": "Castellón", "51": "Ceuta",
+    "13": "Ciudad Real", "16": "Cuenca", "10": "Cáceres", "11": "Cádiz", "14": "Córdoba", "20": "Gipuzkoa",
+    "17": "Girona", "18": "Granada", "19": "Guadalajara", "21": "Huelva", "22": "Huesca",
+    "07": "Illes Balears", "23": "Jaén", "26": "La Rioja", "35": "Las Palmas", "24": "León", "25": "Lleida",
+    "27": "Lugo", "28": "Madrid", "52": "Melilla", "30": "Murcia", "29": "Málaga", "31": "Navarra",
+    "32": "Ourense", "34": "Palencia", "36": "Pontevedra", "37": "Salamanca", "38": "Santa Cruz de Tenerife",
+    "40": "Segovia", "41": "Sevilla", "42": "Soria", "43": "Tarragona", "44": "Teruel", "45": "Toledo",
+    "46": "Valencia", "47": "Valladolid", "49": "Zamora", "50": "Zaragoza", "01": "Álava", "05": "Ávila",
+}
 SOLVIA_KINDS = {"Viviendas": "vivienda", "Suelos": "terreno"}
 SOLVIA_PAGE = 50
 SOLVIA_MAX_PAGES = 20
@@ -1343,9 +1382,9 @@ def parse_solvia(item: dict) -> dict | None:
     )
 
 
-@register("solvia", "ES", description="Solvia — bank homes and land in the north of Spain (Sabadell / Haya stock)")
+@register("solvia", "ES", description="Solvia — bank homes and land all over Spain (Sabadell / Haya stock)")
 def scrape_solvia(db, max_price: float = 50000, **_):
-    """Solvia — bank homes and land in the north of Spain, from the site's own search API."""
+    """Solvia — bank homes and land all over Spain, from the site's own search API."""
     session = make_session(timeout=40)
     headers = {"Accept": "application/json", "Origin": SOLVIA}
     total = 0

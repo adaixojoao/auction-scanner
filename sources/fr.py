@@ -318,16 +318,13 @@ def scrape_bienici(db, max_price: float = 50000, **_):
 # Houses and land sold through notaries, including their online auctions
 # (36h-immo / VNI) and notarial auctions (VAE). A public JSON service behind the
 # listing page; its robots.txt asks for 10 s between requests, so one request
-# of up to 100 listings per department and type, then a pause.
+# of up to 100 listings per type, all of France, then a pause.
 
 NOTAIRES = "https://www.immobilier.notaires.fr"
 NOTAIRES_API = NOTAIRES + "/pub-services/inotr-www-annonces/v1/annonces"
-# The west and north-west: Brittany, Normandy, Pays de la Loire, Poitou and Limousin.
-NOTAIRES_DEPARTMENTS = ["29", "22", "56", "35", "50", "14", "61", "27", "76", "44", "49", "53", "72", "85",
-                        "79", "86", "16", "17", "87", "23", "19", "24"]
 NOTAIRES_TYPES = {"MAI": "maison", "TER": "terrain"}
 NOTAIRES_PAUSE = 10
-NOTAIRES_MAX_PAGES = 5
+NOTAIRES_MAX_PAGES = 60   # all of France in one search: ~8 pages of houses, ~31 of land
 NOTAIRES_SALE = {"VENTE": "sale", "VNI": "online auction (36h-immo)", "VAE": "notarial auction"}
 
 
@@ -365,37 +362,35 @@ def parse_notaires(ad: dict) -> dict | None:
     )
 
 
-@register("notaires", "FR", description="Notaires de France — houses, land and notary auctions in the west")
+@register("notaires", "FR", description="Notaires de France — houses, land and notary auctions all over France")
 def scrape_notaires(db, max_price: float = 50000, **_):
-    """Notaires de France — houses and land (and notary auctions) in the west of France."""
+    """Notaires de France — houses and land (and notary auctions) all over France."""
     session = make_session(timeout=40)
     session.headers["Accept"] = "application/json"
     total, first = 0, True
-    for department in NOTAIRES_DEPARTMENTS:
-        for code in NOTAIRES_TYPES:
-            for page in range(1, NOTAIRES_MAX_PAGES + 1):
-                if not first:
-                    time.sleep(NOTAIRES_PAUSE)
-                first = False
-                params = {"offset": (page - 1) * 100, "page": page, "parPage": 100,
-                          "typeTransactions": "VENTE,VNI,VAE", "typeBiens": code, "prixMax": int(max_price),
-                          "departements": department}
-                try:
-                    resp = session.get(NOTAIRES_API, params=params)
-                    resp.raise_for_status()
-                    data = resp.json()
-                except Exception as e:  # noqa: BLE001 — one department failing is not the source failing
-                    if total == 0 and department == NOTAIRES_DEPARTMENTS[0]:
-                        raise
-                    LOG.info(f"Notaires {department} {code} p{page}: {type(e).__name__}")
-                    break
-                for ad in data.get("annonceResumeDto") or []:
-                    row = parse_notaires(ad)
-                    if row and row["price"] <= max_price:
-                        upsert_listing(db, row)
-                        total += 1
-                db.commit()
-                if page >= (data.get("nbPages") or 1):
-                    break
+    for code in NOTAIRES_TYPES:          # all of France: the score decides, not the region (owner, 2026-10-05)
+        for page in range(1, NOTAIRES_MAX_PAGES + 1):
+            if not first:
+                time.sleep(NOTAIRES_PAUSE)
+            first = False
+            params = {"offset": (page - 1) * 100, "page": page, "parPage": 100,
+                      "typeTransactions": "VENTE,VNI,VAE", "typeBiens": code, "prixMax": int(max_price)}
+            try:
+                resp = session.get(NOTAIRES_API, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:  # noqa: BLE001 — one page failing is not the source failing
+                if total == 0 and page == 1 and code == next(iter(NOTAIRES_TYPES)):
+                    raise
+                LOG.info(f"Notaires {code} p{page}: {type(e).__name__}")
+                break
+            for ad in data.get("annonceResumeDto") or []:
+                row = parse_notaires(ad)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            if page >= (data.get("nbPages") or 1):
+                break
     LOG.info(f"Notaires: {total} listings")
     return total
