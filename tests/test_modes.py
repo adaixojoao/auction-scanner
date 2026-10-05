@@ -55,4 +55,5 @@ def test_investment_does_not_believe_an_impossible_discount():
                      description="Casa en buen estado")
     reasons = score_detail(absurd, mode="invest")[1]
     assert any("check why" in r for r in reasons)
+    assert score_detail(absurd, mode="invest")[0] < score_detail({**absurd, "area_m2": 60, "price": 40000}, mode="invest")[0]
     assert not any("check why" in r for r in score_detail(plausible, mode="invest")[1])

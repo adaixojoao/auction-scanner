@@ -1884,6 +1884,7 @@ INVEST_FORCED_SALE = 8          # a court, tax or social-security sale
 INVEST_BANK_SALE = 4            # a bank selling what it repossessed
 INVEST_VALUE_MAX_M2 = 250       # m² of building valued at most: a bigger "area" is usually the plot
 INVEST_DISCOUNT_TRUST = 0.7     # beyond this share below the local price the gap is not believed
+INVEST_TOO_CHEAP = -15          # and 15 points beyond it, it costs: something is wrong until checked
 
 
 def _occupied(item: dict, full: str) -> bool:
@@ -1920,6 +1921,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
             reasons.append(f"{disc:.0%} below local prices ({found[1]}{adjusted})")
         if disc > INVEST_DISCOUNT_TRUST + 0.15:
+            s += INVEST_TOO_CHEAP
             reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
                            " — check why")
     import costs
