@@ -69,3 +69,15 @@ def test_a_cheap_home_on_the_croatian_coast_is_doubtful():
     assert any("price doubtful" in r for r in score(villa)[1])
     inland = {**villa, "district": "Osječko-baranjska", "title": "Kuća"}
     assert not any("price doubtful" in r for r in score(inland)[1])
+
+
+def test_the_description_can_say_the_house_is_elsewhere():
+    import geo
+    house = {"country": "ES", "concelho": "Grado", "district": "Asturias", "title": "Casa en Grado",
+             "description": "tejado parte caida, buena oportunidad esta em horcajo medianero"}
+    assert geo.stated_town(house) == "Horcajo Medianero"
+    towns = {"ES:grado": {"name": "Grado", "lat": 43.39, "lon": -6.07},
+             "ES:horcajo medianero": {"name": "Horcajo Medianero", "lat": 40.62, "lon": -5.41}}
+    conflict = geo.title_town_conflict(house, towns)
+    assert conflict and conflict["where"] == "description" and conflict["km"] > 200
+    assert geo.stated_town({"description": "situada en el centro del pueblo"}) is None

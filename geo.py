@@ -363,13 +363,10 @@ def locate_towns(db, session, items: list[dict], limit: int = TOWNS_PER_SCAN) ->
     known = {r[0] for r in db.execute("SELECT key FROM places")}
     wanted: dict[str, tuple[str, str]] = {}
     for item in items:
-        name = municipality(item)
-        if not name:
-            continue
         country = (item.get("country") or "PT").upper()
-        key = town_key(country, name)
-        if key not in known:
-            wanted.setdefault(key, (country, name))
+        for name in (municipality(item), stated_town(item)):
+            if name and town_key(country, name) not in known:
+                wanted.setdefault(town_key(country, name), (country, name))
     done = 0
     for key, (country, name) in list(wanted.items())[:limit]:
         try:
@@ -389,6 +386,19 @@ def locate_towns(db, session, items: list[dict], limit: int = TOWNS_PER_SCAN) ->
 
 
 TITLE_TOWN_CONFLICT_KM = 40
+# "esta em Horcajo Medianero", "situada en Lugo", "nalazi se u Splitu": where the
+# seller says the property is, which may not be where the portal filed it.
+_STATED = re.compile(r"\b(?:est[aá] (?:em|en)|situad[ao] (?:em|en)|ubicad[ao] en|localizad[ao] em|"
+                     r"se (?:encuentra|encontra) en|située? à|located in|nalazi se u)\s+"
+                     r"((?:[A-ZÁÉÍÓÚÑÇ][\w'-]+)(?:\s+(?:de |del |da |do |la )?[A-ZÁÉÍÓÚÑÇ][\w'-]+){0,3})")
+
+
+def stated_town(item: dict) -> str | None:
+    """The town the description says the property is in, if it says so."""
+    text = item.get("description") or ""
+    m = _STATED.search(re.sub(r"\b(est[aá] e[mn]) ([a-zà-ÿ]+(?: [a-zà-ÿ]{4,}){0,2})\s*(?=[.,;!]|$)",
+                                  lambda x: f"{x.group(1)} {x.group(2).title()}", text))
+    return m.group(1).strip() if m and len(m.group(1)) >= 4 else None
 _TOWN_PATTERNS: dict = {}
 
 
@@ -411,20 +421,24 @@ def title_town_conflict(item: dict, towns: dict[str, dict] | None) -> dict | Non
     """{"town", "km"} when the title names a known town far from where the listing
     is placed (a portal that files a Covilhã house under the agency's town)."""
     pos = _place(item, towns) if towns else None
-    if not pos or not item.get("title"):
+    if not pos:
         return None
     import prices
     pattern, names = _town_pattern(towns, (item.get("country") or "PT").upper())
-    if not pattern:
-        return None
     own = prices.place_key(municipality(item) or "")
-    for m in pattern.finditer(normalize(item["title"])):
+    for m in (pattern.finditer(normalize(item.get("title") or "")) if pattern else ()):
         town = names[m.group(0)]
         if m.group(0) == own:
             continue
         km = distance_km(pos["lat"], pos["lon"], town["lat"], town["lon"])
         if km > TITLE_TOWN_CONFLICT_KM:
             return {"town": town["name"], "km": km}
+    stated = stated_town(item)
+    town = towns.get(town_key(item.get("country") or "PT", stated)) if stated else None
+    if town and prices.place_key(stated) != own:
+        km = distance_km(pos["lat"], pos["lon"], town["lat"], town["lon"])
+        if km > TITLE_TOWN_CONFLICT_KM:
+            return {"town": town["name"], "km": km, "where": "description"}
     return None
 
 

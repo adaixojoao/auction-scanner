@@ -1177,7 +1177,7 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
         # The title names a town far from where the listing is placed: the
         # climate and distances belong to the wrong place.
         caps.append(UNCHECKED_CAP)
-        reasons.append(f"title names {item['place_conflict']['town']}, "
+        reasons.append(f"{item['place_conflict'].get('where', 'title')} names {item['place_conflict']['town']}, "
                        f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
     if (kind == "home" and item.get("source") in SALE_PORTALS
             and pay and area >= 40                                  # court sales do start this low
