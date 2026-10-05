@@ -32,6 +32,11 @@ PT_RENT_FILE = os.path.join(HERE, "data", "pt_rents.csv")
 # for villages too small to have a figure).
 RENT_FILES = {"FR": os.path.join(HERE, "data", "fr_rents.csv"),
               "ES": os.path.join(HERE, "data", "es_rents.csv")}
+# Prices of homes per m² outside Portugal (scripts/update_prices.py), same
+# columns: a municipality's figure under "Name" and "Name|<province code>", and
+# each province's average under "prov:<code>" for villages too small to have one.
+PRICE_FILES = {cc: os.path.join(HERE, "data", f"{cc.lower()}_home_prices.csv")
+               for cc in ("FR", "ES", "BE", "NL", "LU", "DE", "IT")}
 
 
 # Court and bank texts often write "S. João da Pesqueira" / "Sta. Maria"; the
@@ -201,6 +206,15 @@ def local_price(country: str, place: str | None, fallback: dict[str, dict[str, f
         table = pt_table()
         region = region_of_place(district)
         found = (table.get(f"{key}|{region}") if region else None) or table.get(key)
+        if found:
+            return found
+    path = PRICE_FILES.get(country)
+    if path and os.path.exists(path):
+        table = pt_table(path)
+        found = (table.get(f"{key}|{place_key(district)}") if district else None) or table.get(key)
+        if not found and district:
+            found = table.get("prov:" + place_key(district))
+            found = (found[0], found[1] + ", province average") if found else None
         if found:
             return found
     value = fallback.get(country, {}).get(key)

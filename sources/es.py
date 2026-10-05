@@ -8,7 +8,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
+from common import (LOG, find_area, find_price, land_max_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number)
 from db import upsert_listing
 from sources import SourceUnavailable, register
@@ -770,18 +770,19 @@ def parse_aliseda(item: dict, tipo: str) -> dict | None:
 
 
 @register("aliseda", "ES")
-def scrape_aliseda(db, max_price: float = 50000, **_):
+def scrape_aliseda(db, max_price: float = 50000, config: dict | None = None, **_):
     """aliseda — Santander's repossessed homes and land, with map positions."""
     session = make_session(timeout=30)
     total = 0
     for code, tipo in ALISEDA_TYPES.items():
+        limit = land_max_price(config, max_price) if tipo == "terreno" else max_price
         for page in range(1, ALISEDA_MAX_PAGES + 1):
-            resp = session.get(ALISEDA_API, params={"tipo": code, "precio": f"0-{int(max_price)}", "page": page})
+            resp = session.get(ALISEDA_API, params={"tipo": code, "precio": f"0-{int(limit)}", "page": page})
             resp.raise_for_status()
             data = resp.json()
             for item in data.get("data") or []:
                 row = parse_aliseda(item, tipo)
-                if row and row["price"] <= max_price:
+                if row and row["price"] <= limit:
                     upsert_listing(db, row)
                     total += 1
             db.commit()
@@ -830,15 +831,16 @@ def parse_altamira(card: dict, tipo: str) -> dict | None:
 
 
 @register("altamira", "ES")
-def scrape_altamira(db, max_price: float = 50000, **_):
+def scrape_altamira(db, max_price: float = 50000, config: dict | None = None, **_):
     """altamira — bank and fund repossessions (homes and land) with map positions."""
     session = make_session(timeout=30)
     total = 0
     for code, tipo in ALTAMIRA_TYPES.items():
+        limit = land_max_price(config, max_price) if tipo == "terreno" else max_price
         page, seen = 1, 0
         while True:
             body = {"buscador": {"idGestion": 1, "idTipologia": code, "idProvincia": None, "idPoblacion": None},
-                    "filtros": {"precioMaximo": int(max_price), "order": 1, "pagina": page,
+                    "filtros": {"precioMaximo": int(limit), "order": 1, "pagina": page,
                                 "limite": str(ALTAMIRA_PAGE), "cntxParamSubastasActivo": "1",
                                 "cntxParamSubastasSarebActivo": "1", "cntxParamSubastasCodSocsAAM": "1,2,7",
                                 "modoVisualizacion": "L"}, "user": None}
@@ -848,7 +850,7 @@ def scrape_altamira(db, max_price: float = 50000, **_):
             cards = data.get("minifichas") or []
             for card in cards:
                 row = parse_altamira(card, tipo)
-                if row and row["price"] <= max_price:
+                if row and row["price"] <= limit:
                     upsert_listing(db, row)
                     total += 1
             db.commit()
@@ -917,13 +919,14 @@ def parse_fotocasa(ad: dict, tipo: str) -> dict | None:
 
 
 @register("fotocasa", "ES")
-def scrape_fotocasa(db, max_price: float = 50000, **_):
+def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **_):
     """fotocasa — private homes and land (1 ha+) all over Spain."""
     session = make_session(timeout=30)
     total = 0
     for province in FOTOCASA_PROVINCES:
         for kind, min_surface in FOTOCASA_SEARCHES:
-            params = {"maxPrice": int(max_price)}
+            limit = land_max_price(config, max_price) if kind == "terrenos" else max_price
+            params = {"maxPrice": int(limit)}
             if min_surface:
                 params["minSurface"] = min_surface
             seen = 0
@@ -941,7 +944,7 @@ def scrape_fotocasa(db, max_price: float = 50000, **_):
                 ads, count = fotocasa_page(resp.text)
                 for ad in ads:
                     row = parse_fotocasa(ad, "terreno" if kind == "terrenos" else "vivienda")
-                    if row and row["price"] <= max_price:
+                    if row and row["price"] <= limit:
                         upsert_listing(db, row)
                         total += 1
                 db.commit()
@@ -1160,7 +1163,7 @@ def parse_pisos(card: dict, tipo: str, province: str, detail: dict | None = None
 
 
 @register("pisos", "ES", description="pisos.com — private homes and rural land all over Spain")
-def scrape_pisos(db, max_price: float = 50000, **_):
+def scrape_pisos(db, max_price: float = 50000, config: dict | None = None, **_):
     """pisos.com — private homes and rural land all over Spain."""
     session = make_session(timeout=30)
     # Listings whose detail page was read (it holds the map position); the rest
@@ -1172,8 +1175,9 @@ def scrape_pisos(db, max_price: float = 50000, **_):
     seen: set[str] = set()   # a thin province's pages are padded with houses from elsewhere
     for province in PISOS_PROVINCES:
         for slug, tipo in PISOS_SEARCHES:
+            limit = land_max_price(config, max_price) if tipo == "terreno" else max_price
             for page in range(1, PISOS_MAX_PAGES + 1):
-                url = f"{PISOS}/venta/{slug}-{province}/hasta-{int(max_price)}/" + (f"{page}/" if page > 1 else "")
+                url = f"{PISOS}/venta/{slug}-{province}/hasta-{int(limit)}/" + (f"{page}/" if page > 1 else "")
                 try:
                     resp = session.get(url)
                     resp.raise_for_status()
@@ -1184,7 +1188,7 @@ def scrape_pisos(db, max_price: float = 50000, **_):
                     break
                 cards = pisos_cards(resp.text)
                 for card in cards:
-                    if card["price"] > max_price or card["id"] in seen:
+                    if card["price"] > limit or card["id"] in seen:
                         continue
                     seen.add(card["id"])
                     detail = None
@@ -1383,7 +1387,7 @@ def parse_solvia(item: dict) -> dict | None:
 
 
 @register("solvia", "ES", description="Solvia — bank homes and land all over Spain (Sabadell / Haya stock)")
-def scrape_solvia(db, max_price: float = 50000, **_):
+def scrape_solvia(db, max_price: float = 50000, config: dict | None = None, **_):
     """Solvia — bank homes and land all over Spain, from the site's own search API."""
     session = make_session(timeout=40)
     headers = {"Accept": "application/json", "Origin": SOLVIA}
@@ -1403,7 +1407,7 @@ def scrape_solvia(db, max_price: float = 50000, **_):
                 break
             for item in data.get("inmuebles") or []:
                 row = parse_solvia(item)
-                if row and row["price"] <= max_price:
+                if row and row["price"] <= (land_max_price(config, max_price) if row["tipo"] == "terreno" else max_price):
                     upsert_listing(db, row)
                     total += 1
             db.commit()

@@ -41,6 +41,19 @@ FLAGS = {
 }
 
 
+# Land for forestry costs more than a cheap house: land searches go up to this
+# (config "land_max_price"), houses stay at "max_price" (owner, 2026-10-05).
+LAND_MAX_PRICE = 100_000
+
+
+def land_max_price(config: dict | None, max_price: float) -> float:
+    """The price limit for land searches: never below the house limit."""
+    try:
+        return max(float(max_price), float((config or {}).get("land_max_price") or LAND_MAX_PRICE))
+    except (TypeError, ValueError):
+        return max(float(max_price), LAND_MAX_PRICE)
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 

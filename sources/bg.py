@@ -6,7 +6,7 @@ import time
 
 from bs4 import BeautifulSoup
 
-from common import LOG, make_listing, make_session
+from common import LOG, land_max_price, make_listing, make_session
 from db import upsert_listing
 from sources import register
 
@@ -92,7 +92,7 @@ def parse_imot(card: dict, tipo: str) -> dict:
 
 
 @register("imot", "BG", description="imot.bg — houses, villas, plots and farmland all over Bulgaria")
-def scrape_imot(db, max_price: float = 50000, **_):
+def scrape_imot(db, max_price: float = 50000, config: dict | None = None, **_):
     """imot.bg — houses, villas, plots and farmland all over Bulgaria (owners and agents)."""
     session = make_session(timeout=30)
     total = 0
@@ -110,7 +110,8 @@ def scrape_imot(db, max_price: float = 50000, **_):
                     break
                 cards, ads = imot_cards(resp.content.decode("windows-1251", "replace"))
                 for card in cards:
-                    if card["price"] and card["price"] <= max_price:
+                    if card["price"] and card["price"] <= (land_max_price(config, max_price) if tipo == "terreno"
+                                                           else max_price):
                         upsert_listing(db, parse_imot(card, tipo))
                         total += 1
                 db.commit()

@@ -5,7 +5,7 @@ import json
 import re
 import time
 
-from common import LOG, make_listing, make_session
+from common import LOG, land_max_price, make_listing, make_session
 from db import upsert_listing
 from sources import register
 
@@ -70,12 +70,13 @@ def parse_nehnutelnosti(ad: dict, tipo: str, stream: str = "") -> dict | None:
 
 
 @register("nehnutelnosti", "SK", description="nehnutelnosti.sk — houses and land (1 ha+) all over Slovakia")
-def scrape_nehnutelnosti(db, max_price: float = 50000, **_):
+def scrape_nehnutelnosti(db, max_price: float = 50000, config: dict | None = None, **_):
     """nehnutelnosti.sk — houses and land (1 ha+) all over Slovakia."""
     session = make_session(timeout=30)
     total = 0
     for slug, (tipo, min_area) in NEHNUTELNOSTI_SEARCHES.items():
-        params = {"priceTo": int(max_price)}
+        limit = land_max_price(config, max_price) if tipo == "terreno" else max_price
+        params = {"priceTo": int(limit)}
         if min_area:
             params["areaFrom"] = min_area
         for page in range(1, NEHNUTELNOSTI_MAX_PAGES + 1):
@@ -92,7 +93,7 @@ def scrape_nehnutelnosti(db, max_price: float = 50000, **_):
             ads = nehnutelnosti_ads(stream)
             for ad in ads:
                 row = parse_nehnutelnosti(ad, tipo, stream)
-                if row and row["price"] <= max_price:
+                if row and row["price"] <= limit:
                     upsert_listing(db, row)
                     total += 1
             db.commit()

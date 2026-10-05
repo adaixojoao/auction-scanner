@@ -251,6 +251,9 @@ def api_listings():
     climate_exact = args.get("climate_exact", "0") == "1"
     sort = args.get("sort", "score")
     mode = _mode(args)
+    if mode == "forest" and max_price:      # land is searched up to its own, higher limit
+        from common import land_max_price
+        max_price = max(max_price, land_max_price(_config(), _config().get("max_price") or max_price))
     direction = args.get("dir", "desc")
     page = max(1, _num(args.get("page"), 1, int))
     per_page = min(1000, max(1, _num(args.get("per_page"), 50, int)))

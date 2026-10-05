@@ -9,7 +9,7 @@ import re
 import time
 from datetime import datetime
 
-from common import LOG, make_listing, make_session, parse_price
+from common import LOG, land_max_price, make_listing, make_session, parse_price
 from db import upsert_listing
 from sources import register
 
@@ -214,7 +214,7 @@ def parse_index_ad(ad: dict, tipo: str, path: str, detail: dict | None = None) -
 
 
 @register("indexoglasi", "HR", description="Index Oglasi — private houses and land all over Croatia")
-def scrape_index_oglasi(db, max_price: float = 50000, **_):
+def scrape_index_oglasi(db, max_price: float = 50000, config: dict | None = None, **_):
     """Index Oglasi (index.hr) — private houses and land all over Croatia."""
     session = make_session(timeout=30)
     session.get(f"{INDEX_OGLASI}/nekretnine/prodaja-kuca/pretraga").raise_for_status()   # the session cookie
@@ -223,11 +223,12 @@ def scrape_index_oglasi(db, max_price: float = 50000, **_):
         """SELECT external_id FROM listings WHERE source = 'indexoglasi' AND raw_json LIKE '%"geo"%'""")}
     budget, total = INDEX_DETAILS_PER_SCAN, 0
     for category, (tipo, path) in INDEX_CATEGORIES.items():
+        limit = land_max_price(config, max_price) if tipo == "terreno" else max_price
         for page in range(1, INDEX_MAX_PAGES + 1):
             try:
                 resp = session.get(f"{INDEX_OGLASI}/api/aditem", headers=headers, params={
                     "category": category, "module": "real-estate", "sortOption": 1, "itemPerPage": INDEX_PAGE,
-                    "page": page, "priceFrom": 1000, "priceTo": int(max_price)})
+                    "page": page, "priceFrom": 1000, "priceTo": int(limit)})
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:  # noqa: BLE001 — one page failing is not the source failing
@@ -248,7 +249,7 @@ def scrape_index_oglasi(db, max_price: float = 50000, **_):
                         detail = None
                     time.sleep(0.5)
                 row = parse_index_ad(ad, tipo, path, detail)
-                if not row or row["price"] > max_price:
+                if not row or row["price"] > limit:
                     continue
                 if detail is None:
                     row.pop("raw_json", None)             # never drop a position read earlier

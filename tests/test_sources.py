@@ -642,7 +642,7 @@ def test_aliseda_gives_price_position_and_possession(db, fake_http):
     assert json.loads(taken["raw_json"])["occupation"] == "occupied"
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"data": [ALISEDA_ITEM], "last_page": 1}))
     assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
-    assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000"}
+    assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000", "0-100000"}      # homes; land up to the land limit
     item = next(i for i in load_listings(db, include_hidden=True))
     assert geo.position(item)["precision"] == "street"
 
@@ -732,7 +732,7 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     session = fake_http(lambda m, url, kw: FakeResponse(pages[2 if url.endswith("/l/2") else 1]))
     assert scrape_fotocasa(db, max_price=50000) == 4 * len(FOTOCASA_PROVINCES)
     land = [c for c in session.calls if "/terrenos/" in c[1]]
-    assert all(c[2]["params"] == {"maxPrice": 50000, "minSurface": 10000} for c in land)
+    assert all(c[2]["params"] == {"maxPrice": 100000, "minSurface": 10000} for c in land)
 
 
 BIENICI_AD = {"id": "ag1-2", "propertyType": "house", "price": 42000, "city": "Huelgoat", "postalCode": "29690",
@@ -948,3 +948,10 @@ def test_nehnutelnosti_reads_the_next_stream():
     assert row["concelho"] == "Banská Štiavnica" and row["description"].startswith("Dom pri rieke")
     assert row["url"] == "https://www.nehnutelnosti.sk/detail/Ju1/rodinny-dom"
     assert parse_nehnutelnosti({**ads[0], "price": {"priceNum": 1}}, "house") is None    # "on request"
+
+
+def test_land_searches_go_up_to_the_land_limit():
+    from common import LAND_MAX_PRICE, land_max_price
+    assert land_max_price({}, 30000) == LAND_MAX_PRICE == 100000
+    assert land_max_price({"land_max_price": 80000}, 30000) == 80000
+    assert land_max_price({"land_max_price": 10000}, 30000) == 30000          # never below the house limit

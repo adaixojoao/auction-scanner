@@ -8,7 +8,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_price, make_listing, make_session, normalize, parse_price
+from common import LOG, find_price, land_max_price, make_listing, make_session, normalize, parse_price
 from db import upsert_listing
 from sources import register
 from sources._cards import CardSite, scrape_cards
@@ -280,14 +280,15 @@ def parse_bienici(ad: dict) -> dict | None:
 
 
 @register("bienici", "FR")
-def scrape_bienici(db, max_price: float = 50000, **_):
+def scrape_bienici(db, max_price: float = 50000, config: dict | None = None, **_):
     """bienici — houses and land (1 ha+) from agents across France, with map positions."""
     session = make_session(timeout=30)
     total = 0
     # The service stops at 2,400 results a search: houses are asked in price bands.
     bands = [(0, max_price / 2), (max_price / 2, max_price * 0.75), (max_price * 0.75, max_price)]
     for kind, min_area in BIENICI_SEARCHES:
-        for low, high in bands if kind == "house" else [(0, max_price)]:
+        limit = max_price if kind == "house" else land_max_price(config, max_price)
+        for low, high in bands if kind == "house" else [(0, limit)]:
             for page in range(BIENICI_MAX_PAGES):
                 filters = {"size": BIENICI_PAGE, "from": page * BIENICI_PAGE, "filterType": "buy",
                            "propertyType": [kind], "minPrice": int(low), "maxPrice": int(high),
@@ -303,7 +304,7 @@ def scrape_bienici(db, max_price: float = 50000, **_):
                 ads = data.get("realEstateAds") or []
                 for ad in ads:
                     row = parse_bienici(ad)
-                    if row and row["price"] <= max_price:
+                    if row and row["price"] <= limit:
                         upsert_listing(db, row)
                         total += 1
                 db.commit()
@@ -363,18 +364,19 @@ def parse_notaires(ad: dict) -> dict | None:
 
 
 @register("notaires", "FR", description="Notaires de France — houses, land and notary auctions all over France")
-def scrape_notaires(db, max_price: float = 50000, **_):
+def scrape_notaires(db, max_price: float = 50000, config: dict | None = None, **_):
     """Notaires de France — houses and land (and notary auctions) all over France."""
     session = make_session(timeout=40)
     session.headers["Accept"] = "application/json"
     total, first = 0, True
     for code in NOTAIRES_TYPES:          # all of France: the score decides, not the region (owner, 2026-10-05)
+        limit = land_max_price(config, max_price) if NOTAIRES_TYPES[code] == "terrain" else max_price
         for page in range(1, NOTAIRES_MAX_PAGES + 1):
             if not first:
                 time.sleep(NOTAIRES_PAUSE)
             first = False
             params = {"offset": (page - 1) * 100, "page": page, "parPage": 100,
-                      "typeTransactions": "VENTE,VNI,VAE", "typeBiens": code, "prixMax": int(max_price)}
+                      "typeTransactions": "VENTE,VNI,VAE", "typeBiens": code, "prixMax": int(limit)}
             try:
                 resp = session.get(NOTAIRES_API, params=params)
                 resp.raise_for_status()
@@ -386,7 +388,7 @@ def scrape_notaires(db, max_price: float = 50000, **_):
                 break
             for ad in data.get("annonceResumeDto") or []:
                 row = parse_notaires(ad)
-                if row and row["price"] <= max_price:
+                if row and row["price"] <= limit:
                     upsert_listing(db, row)
                     total += 1
             db.commit()

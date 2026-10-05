@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import time
 
-from common import LOG, make_listing, make_session, stable_id, to_number
+from common import LOG, land_max_price, make_listing, make_session, stable_id, to_number
 from db import upsert_listing
 from sources import register
 
@@ -149,7 +149,7 @@ def greenacres_detail(html: str) -> dict:
 
 
 @register("greenacres", "EU")
-def scrape_greenacres(db, max_price: float = 50000, **_):
+def scrape_greenacres(db, max_price: float = 50000, config: dict | None = None, **_):
     """green-acres — rural homes and land (1 ha+) from agents in FR, PT, ES and IT."""
     session = make_session(timeout=30)
     total = 0
@@ -157,7 +157,8 @@ def scrape_greenacres(db, max_price: float = 50000, **_):
         details_left = GREENACRES_DETAILS_PER_SCAN // len(GREENACRES_SITES)   # each country gets its share
         found: list[dict] = []
         for kind, min_land in GREENACRES_SEARCHES:
-            query = greenacres_query(kind, max_price, min_land)
+            limit = land_max_price(config, max_price) if min_land else max_price
+            query = greenacres_query(kind, limit, min_land)
             for page in range(1, GREENACRES_MAX_PAGES + 1):
                 try:
                     resp = session.get(f"{site}/maison-a-vendre", params={"searchQuery": query, "p_n": page})
@@ -170,7 +171,7 @@ def scrape_greenacres(db, max_price: float = 50000, **_):
                 rows = parse_greenacres_page(resp.text, country)
                 if not rows:
                     break
-                found += [r for r in rows if r["price"] and r["price"] <= max_price]
+                found += [r for r in rows if r["price"] and r["price"] <= limit]
                 time.sleep(0.5)
         found = list({row["id"]: row for row in found}.values())      # a card can match both searches
         found.sort(key=lambda r: (r["tipo"] != "terreno", r["price"]))  # details for land first, then cheapest
