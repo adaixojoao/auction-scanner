@@ -183,3 +183,11 @@ def test_photos_are_shrunk_for_the_local_model():
     small = Image.open(io.BytesIO(photos.shrink(buf.getvalue())))
     assert max(small.size) == photos.OLLAMA_PHOTO_SIDE
     assert photos.shrink(b"not an image") == b"not an image"
+
+
+def test_photos_of_only_a_barn_are_flagged_and_not_used_for_condition():
+    raw = json.dumps({"photo_check": {"condition": "heavy", "confidence": "high", "notes": "old barn",
+                                      "photos": 1, "shows_house": False}})
+    it = {**make_listing("eleiloes", "9", **HOUSE), "raw_json": raw}
+    assert condition(it) == "unknown"
+    assert "the photos don't show the house itself — ask the seller for photos" in score_detail(it)[1]

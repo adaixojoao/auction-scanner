@@ -37,7 +37,7 @@ PHOTOS_CATCHUP_HARD = {"ollama": 24, "anthropic": 80}
 PHOTOS_CATCHUP_WHEN = 40            # pending homes that trigger catch-up
 PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
 PHOTO_FAILURES_IN_A_ROW = 2         # then the looker is down (Ollama out of memory, …)
-MAX_PHOTOS = {"ollama": 2, "anthropic": 4}
+MAX_PHOTOS = {"ollama": 4, "anthropic": 6}   # shrunk to 448 px for Ollama: 4 is affordable
 MAX_PHOTO_BYTES = 3_000_000
 # Gallery keys scrapers have used (and a few common alternate spellings).
 _GALLERY_KEYS = ("fotos", "photos", "images", "imagens", "immagini", "gallery",
@@ -49,8 +49,9 @@ PHOTO_SCHEMA = {
         "condition": {"type": "string", "enum": ["good", "some", "heavy", "unknown"]},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         "notes": {"type": "string"},
+        "shows_house": {"type": "boolean"},
     },
-    "required": ["condition", "confidence", "notes"],
+    "required": ["condition", "confidence", "notes", "shows_house"],
     "additionalProperties": False,
 }
 
@@ -60,6 +61,8 @@ Judge only what the photos show about the building's condition:
 - "some": needs work (old kitchen or bathroom, damp, worn finishes, windows) but sound;
 - "heavy": a ruin, no roof, collapsed or gutted, or unfinished construction;
 - "unknown": the photos do not show the building (a map, a document, a logo, only land).
+"shows_house": true only if at least one photo shows the dwelling itself (outside or inside);
+false when they show only land, a barn, a granary, a shed, ruins of outbuildings or the view.
 Give a one-line reason in English in "notes"."""
 
 
@@ -220,6 +223,7 @@ def check_photos(looker, item: dict) -> dict | None:
         raise ValueError(f"unexpected answer {found!r:.80}")
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
             "notes": str(found.get("notes") or "")[:200], "photos": len(urls),
+            "shows_house": found.get("shows_house") is not False,
             "by": getattr(looker, "model", looker.name), "at": utcnow_iso()}
 
 

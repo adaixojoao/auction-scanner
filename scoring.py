@@ -824,6 +824,8 @@ def photo_condition(item: dict) -> dict | None:
     if '"photo_check"' not in (item.get("raw_json") or ""):
         return None
     seen = _raw(item).get("photo_check") or {}
+    if seen.get("shows_house") is False:           # a barn's state says nothing about the house
+        return None
     if seen.get("condition") in ("good", "some", "heavy") and seen.get("confidence") in ("high", "medium"):
         return seen
     return None
@@ -1037,6 +1039,7 @@ BEACH_APPROX_SHARE = 0.6
 SWIM_MAX_KM = 1.5
 SWIM_POINTS = [(0.3, 25), (0.8, 20), (1.5, 14)]
 NO_SWIM = -30
+PHOTOS_MISS_THE_HOUSE = -5   # only a barn, land or the view: the house is unseen
 # The owner: sea > lakes > rivers. The satellite map cannot tell a lake from a
 # river, so its water counts as a river unless the map names a lake or reservoir.
 SWIM_SHARE = {"the sea": 1.0, "sea inlet (ría)": 0.9, "lake": 0.75, "reservoir": 0.75, "river": 0.5}
@@ -1601,6 +1604,10 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     elif water:
         s += (3 if water.endswith("(approx.)") else 6) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
+
+    if (_raw(item).get("photo_check") or {}).get("shows_house") is False:
+        s += PHOTOS_MISS_THE_HOUSE
+        reasons.append("the photos don't show the house itself — ask the seller for photos")
 
     swim = swim_spot(item)
     if swim and swim[0] <= SWIM_MAX_KM:
