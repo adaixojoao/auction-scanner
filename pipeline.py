@@ -195,6 +195,14 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     climate.assess_pending(db, best, geo.town_index(db))
                 except Exception:  # noqa: BLE001 — a map position must never fail the scan
                     LOG.exception("Locating listings failed")
+                try:
+                    import site_check                 # slope, forest type, access: the Forestry shortlist
+                    from db import load_listings
+                    forest = sorted(load_listings(db, filters=cfg.get("filters"), mode="forest"),
+                                    key=lambda it: -it["score"])
+                    site_check.check_pending(db, forest)
+                except Exception:  # noqa: BLE001
+                    LOG.exception("Site check failed")
                 _set_state(db, current="photo check")
                 try:
                     import photos                    # the photos of the best homes (needs an API key)

@@ -276,3 +276,20 @@ def test_planting_costs_come_from_the_caof_matrix():
     import forestry
     assert forestry.planting_cost("conifer", 20) == (1464 + 2270) / 2 + 1100 * 0.40
     assert forestry.planting_cost("conifer", 5) > forestry.planting_cost("conifer", 20)   # +3% a hectare under 10
+
+
+def test_a_stored_site_check_moves_the_forestry_score():
+    import json
+    from scoring import score_detail
+    base = {"source": "fotocasa", "country": "PT", "tipo": "terreno", "title": "Terreno rústico", "description": "",
+            "area_m2": 300000, "price": 60000}
+    steep = {**base, "raw_json": json.dumps({"site_check": {"v": 1, "exact": False, "cable_share": 0.5,
+                                                             "winch_share": 0.3, "track_m": 900}})}
+    montado = {**base, "raw_json": json.dumps({"site_check": {"v": 1, "exact": False, "cable_share": 0.0,
+                                                               "winch_share": 0.0, "montado": 0.8,
+                                                               "forest_share": 0.9}})}
+    s_base, _ = score_detail(base, mode="forest")
+    s_steep, reasons = score_detail(steep, mode="forest")
+    assert s_steep <= s_base - 15 and any("cable yarding" in r for r in reasons)
+    _, reasons = score_detail(montado, mode="forest")
+    assert any("80% montado" in r for r in reasons)

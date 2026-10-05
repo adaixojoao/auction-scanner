@@ -2010,6 +2010,20 @@ FOREST_FLAGS = [
 _SLOPE = re.compile(r"(?:pente|pendiente|declive|inclinaci[oó]n)\s+(?:de\s+|del\s+)?(?:\d{1,2}\s*(?:à|a|-)\s*)?(\d{2})\s*%",
                     re.I)
 FOREST_STEEP_PCT = 40
+SITE_CABLE_SHARE = 0.4      # this much of the land over 60% slope: cable yarding only
+SITE_TRACK_M = 500          # further than this from a track a timber lorry can use
+SITE_MONTADO = 0.3          # this much montado: the cork is already growing
+
+
+def forestry_growing(text: str) -> set[str]:
+    import forestry
+    return forestry.growing(text)
+
+
+def _site_check(item: dict) -> dict | None:
+    """The site check stored for a listing by the scan (site_check.py), if any."""
+    import geo
+    return geo._raw(item).get("site_check")
 
 
 # What the best crop earns a year, as a share of the land's price per hectare.
@@ -2103,6 +2117,28 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         s -= 10
         reasons.append(f"steep ({slope.group(1)}% slope) — costly or impossible to log")
     wooded = has_term(full, FOREST_WORDS, negations=False)
+    existing = forestry_growing(full)
+    site = _site_check(item)
+    if site:
+        where = "" if site.get("exact") else " around it"
+        if site.get("cable_share", 0) >= SITE_CABLE_SHARE:
+            s -= 12
+            reasons.append(f"site check: {site['cable_share']:.0%} of the land{where} only by cable yarding (slope)")
+        elif site.get("cable_share", 0) + site.get("winch_share", 0) >= 0.5:
+            s -= 5
+            reasons.append(f"site check: mostly over 30% slope{where} — tracked or winch logging")
+        if (site.get("inaccessible") or 0) >= 0.5:
+            s -= 10
+            reasons.append(f"site check: IGN rates {site['inaccessible']:.0%}{where} inaccessible to timber machines")
+        if (site.get("track_m") or 0) > SITE_TRACK_M:
+            s -= 4
+            reasons.append(f"site check: nearest track {site['track_m']:,.0f} m away")
+        if (site.get("montado") or 0) >= SITE_MONTADO:
+            existing = existing | {"cork oak"}
+            reasons.append(f"site check: {site['montado']:.0%} montado (cork or holm oak){where}")
+        if site.get("forest_share") is not None:
+            wooded = wooded or site["forest_share"] >= 0.5
+            reasons.append(f"site check: {site['forest_share']:.0%} wooded{where}")
 
     water = water_nearby(full, item)
     c = item.get("climate") or {}
@@ -2138,7 +2174,7 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         if dry <= AMOC_DRY_WARN_MM:
             reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
     import forestry
-    crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=forestry.growing(full),
+    crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=existing,
                              trees=forestry.trees_for_item(item), wooded=wooded)
     timber = forestry.standing_timber(full, item.get("country"), ha)
     if timber and pay:

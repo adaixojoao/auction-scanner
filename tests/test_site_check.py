@@ -48,3 +48,17 @@ def test_access_is_estimated_from_slope_and_the_nearest_track():
     assert site_check.access_estimate(slope, 20).startswith("mostly wheeled machines ground, a track reaches")
     assert "843 m away — long haul" in site_check.access_estimate(slope, 843)
     assert site_check.access_estimate(None, 20) is None
+
+
+def test_the_stored_summary_keeps_what_the_score_needs():
+    report = {"hectares": 30.0, "exact": False,
+              "slope": {"min_m": 1, "max_m": 2, "mean_pct": 61, "p90_pct": 80,
+                        "shares": {"wheeled machines": 0.1, "tracked or winch only": 0.4, "cable yarding only": 0.5}},
+              "extraction": {"Inaccessible": 0.6, "Zone non exploitable (pente trop élevée)": 0.2,
+                             "Accessible - Classe de débardage 1 : 0 - 250 m": 0.2},
+              "tracks": {"track": 2, "_nearest_m": 640.0}, "natura2000": [], "znieff": ["ZNIEFF 1: X"],
+              "pt_cover": None, "eu_forest": None, "forest": {"Forêt fermée de sapin ou épicéa": 0.7}}
+    s = site_check.summary(report)
+    assert (s["cable_share"], s["inaccessible"], s["track_m"], s["forest_share"]) == (0.5, 0.8, 640.0, 0.7)
+    assert site_check._radius_for(300000) == 309.0 or abs(site_check._radius_for(300000) - 309.0) < 0.1
+    assert site_check._radius_for(1000) == 100.0

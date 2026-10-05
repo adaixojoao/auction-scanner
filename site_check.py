@@ -364,3 +364,70 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ─── After a scan: the Forestry shortlist ───────────────────────────
+# The best Forestry listings get a site check once, stored in raw["site_check"]
+# with the position it was made at. Without parcels it describes a circle of the
+# listing's own area around its position — approximate, and marked so.
+SHORTLIST = 20
+CHECK_COUNTRIES = {"PT", "ES", "FR"}
+VERSION = 1
+
+
+def _radius_for(area_m2: float | None) -> float:
+    return min(800.0, max(100.0, math.sqrt((area_m2 or 0) / math.pi)))
+
+
+def summary(r: dict) -> dict:
+    """What the score needs from a check, kept small for raw_json."""
+    s = r.get("slope") or {}
+    shares = s.get("shares") or {}
+    extraction = r.get("extraction") or {}
+    out = {"v": VERSION, "exact": r.get("exact", False), "hectares": round(r.get("hectares") or 0, 1),
+           "cable_share": round(shares.get("cable yarding only", 0), 2),
+           "winch_share": round(shares.get("tracked or winch only", 0), 2),
+           "slope_mean": round(s["mean_pct"]) if s else None,
+           "inaccessible": round(sum(v for k, v in extraction.items()
+                                     if k.lower().startswith(("inaccessible", "zone non exploitable"))), 2)
+           if extraction else None,
+           "track_m": (r.get("tracks") or {}).get("_nearest_m"),
+           "protected": (r.get("natura2000") or []) + (r.get("znieff") or []),
+           "lines": describe(r)}
+    if r.get("pt_cover"):
+        out["montado"] = round(montado_share(r["pt_cover"]), 2)
+    e = r.get("eu_forest")
+    if e:
+        out["forest_share"] = round(1 - e["no forest"], 2)
+    if r.get("forest") is not None:
+        out["forest_share"] = round(sum(v for k, v in r["forest"].items() if k.lower().startswith("forêt")), 2)
+    return out
+
+
+def check_pending(db, items: list[dict], limit: int = SHORTLIST) -> int:
+    """Site-check the first `limit` listings (already ranked) that have none yet."""
+    import json
+    import geo
+    from common import LOG
+    done = 0
+    for item in items[:limit]:
+        if (item.get("country") or "").upper() not in CHECK_COUNTRIES:
+            continue
+        raw = geo._raw(item)
+        at = (raw.get("climate") or {}).get("at")
+        kept = raw.get("site_check") or {}
+        if not at or (kept.get("at") == at and kept.get("v") == VERSION):
+            continue
+        lat, lon = (float(x) for x in at.split(","))
+        try:
+            result = check(lat, lon, _radius_for(item.get("area_m2")), country=item["country"])
+        except Exception as e:  # noqa: BLE001 — a service down: try at the next scan
+            LOG.info(f"Site check {item['id']}: {type(e).__name__}")
+            continue
+        raw["site_check"] = {**summary(result), "at": at}
+        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        db.commit()
+        done += 1
+    if done:
+        LOG.info(f"Site check: {done} forestry listings")
+    return done
