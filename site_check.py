@@ -4,10 +4,11 @@ For a shortlisted listing, given its cadastral parcels (France) or a position an
 a radius, this reports:
   - slope and altitude: Copernicus DEM GLO-30 (30 m, read tile by tile from the
     public AWS bucket, only the window needed);
-  - forest type (France): IGN BD Forêt v2 — closed/open forest, broadleaf/conifer;
-  - timber extraction (France): IGN forest accessibility map — how far a
-    forwarder must haul to a road;
-  - other countries: OpenStreetMap tracks and roads near the land;
+  - forest type: France, IGN BD Forêt v2; Portugal, DGT's COS 2025 land cover
+    (montados of cork and holm oak included); elsewhere Copernicus forest type
+    and tree cover (2018);
+  - timber extraction: France, IGN's forest accessibility map; elsewhere an
+    estimate from the slope and the nearest OpenStreetMap track;
   - protection: Natura 2000 (EEA, all EU), ZNIEFF (France);
   - a satellite view link.
 
@@ -31,6 +32,11 @@ DEM_TILE = ("https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_{
             "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif")
 IGN_WFS = "https://data.geopf.fr/wfs/ows"
 IGN_PARCEL = "https://apicarto.ign.fr/api/cadastre/parcelle"
+PT_COS = "https://geo2.dgterritorio.gov.pt/geoserver/COS-S2/wms"   # DGT land cover, COS 2025 (WMS only)
+PT_COS_LAYER = "cos2025v1-s2"
+EEA_HRL = "https://image.discomap.eea.europa.eu/arcgis/rest/services/GioLandPublic/{}/ImageServer/getSamples"
+SAMPLE_POINTS = 49          # about a 7 × 7 grid over the land
+MONTADO = ("sobreiro", "azinheira")
 NATURA = ("https://bio.discomap.eea.europa.eu/arcgis/rest/services/ProtectedSites/Natura2000Sites/"
           "MapServer/2/query")
 SLOPE_CLASSES = [(30, "wheeled machines"), (60, "tracked or winch only"), (1000, "cable yarding only")]
@@ -160,6 +166,76 @@ def znieff(session, shape_wgs84) -> list[str]:
     return names
 
 
+# ─── Portugal: land cover, montados included ────────────────────────
+def grid_points(shape_wgs84, n: int = SAMPLE_POINTS) -> list[tuple[float, float]]:
+    """About n (lon, lat) points spread evenly inside the land."""
+    from shapely.geometry import Point
+    minx, miny, maxx, maxy = shape_wgs84.bounds
+    side = max(2, round(math.sqrt(n * (maxx - minx) * (maxy - miny) / max(shape_wgs84.area, 1e-12))))
+    pts = [(minx + (i + 0.5) * (maxx - minx) / side, miny + (j + 0.5) * (maxy - miny) / side)
+           for i in range(side) for j in range(side)]
+    inside = [p for p in pts if shape_wgs84.contains(Point(p))]
+    return inside or [(shape_wgs84.centroid.x, shape_wgs84.centroid.y)]
+
+
+def pt_land_cover(session, shape_wgs84) -> dict[str, float]:
+    """Share of the land in each COS 2025 class (finest level), from a grid of points."""
+    import time
+    counts: dict[str, int] = {}
+    points = grid_points(shape_wgs84)
+    d = 0.0005
+    for lon, lat in points:
+        r = session.get(PT_COS, params={
+            "service": "WMS", "version": "1.3.0", "request": "GetFeatureInfo", "layers": PT_COS_LAYER,
+            "query_layers": PT_COS_LAYER, "crs": "EPSG:4326", "bbox": f"{lat - d},{lon - d},{lat + d},{lon + d}",
+            "width": 11, "height": 11, "i": 5, "j": 5, "info_format": "application/json", "feature_count": 1},
+            timeout=60)
+        r.raise_for_status()
+        feats = r.json().get("features") or []
+        props = feats[0]["properties"] if feats else {}
+        label = next((v for k, v in props.items() if k.endswith("_n4_l")), None) or "not mapped"
+        counts[label] = counts.get(label, 0) + 1
+        time.sleep(0.2)
+    return {k: v / len(points) for k, v in sorted(counts.items(), key=lambda kv: -kv[1])}
+
+
+def montado_share(cover: dict[str, float]) -> float:
+    """The share of cork-oak and holm-oak montado or forest in a COS breakdown."""
+    return sum(v for k, v in cover.items() if any(w in k.lower() for w in MONTADO))
+
+
+# ─── Everywhere: EU forest type and tree cover ─────────────────────
+def eu_forest(session, shape_wgs84) -> dict | None:
+    """{"broadleaf", "conifer", "no forest": share, "tree_cover_pct"} from the Copernicus
+    high-resolution layers (2018, 10-20 m), sampled over a grid of points."""
+    import json
+    pts = [list(p) for p in grid_points(shape_wgs84)]
+    geometry = json.dumps({"points": pts, "spatialReference": {"wkid": 4326}})
+    values = {}
+    for name in ("HRL_ForestType_2018", "HRL_TreeCoverDensity_2018"):
+        r = session.get(EEA_HRL.format(name), params={"geometry": geometry, "geometryType": "esriGeometryMultipoint",
+                                                      "returnFirstValueOnly": "true", "f": "json"}, timeout=60)
+        r.raise_for_status()
+        values[name] = [int(float(s["value"])) for s in r.json().get("samples", []) if s.get("value") not in (None, "")]
+    types = [v for v in values["HRL_ForestType_2018"] if v in (0, 1, 2)]
+    cover = [v for v in values["HRL_TreeCoverDensity_2018"] if 0 <= v <= 100]
+    if not types:
+        return None
+    return {"broadleaf": types.count(1) / len(types), "conifer": types.count(2) / len(types),
+            "no forest": types.count(0) / len(types), "tree_cover_pct": sum(cover) / len(cover) if cover else None}
+
+
+def access_estimate(slope: dict | None, track_m: float | None) -> str | None:
+    """Where there is no official access map: from the slope and the nearest track."""
+    if slope is None or track_m is None:
+        return None
+    machine = max(slope["shares"], key=slope["shares"].get)
+    reach = "a track reaches the land" if track_m <= 50 else f"nearest track {track_m:,.0f} m away"
+    if track_m > 500:
+        reach += " — long haul"
+    return f"mostly {machine} ground, {reach} (estimate from slope and OpenStreetMap)"
+
+
 # ─── Everywhere: protection and access ──────────────────────────────
 def natura2000(session, shape_wgs84) -> list[str]:
     import json
@@ -175,10 +251,11 @@ def natura2000(session, shape_wgs84) -> list[str]:
             for a in r.json().get("features", [])]
 
 
-def tracks_near(session, lat: float, lon: float, radius_m: int) -> dict[str, int]:
-    """OpenStreetMap ways a vehicle can use within radius_m: {kind: count}."""
+def tracks_near(session, lat: float, lon: float, radius_m: int, land=None) -> dict:
+    """OpenStreetMap ways a vehicle can use within radius_m: {kind: count}, plus
+    "_nearest_m": the distance from the land to the nearest of them."""
     q = (f'[out:json][timeout:30];way(around:{radius_m},{lat},{lon})'
-         f'["highway"~"^(track|unclassified|tertiary|secondary|service|residential)$"];out tags;')
+         f'["highway"~"^(track|unclassified|tertiary|secondary|service|residential)$"];out tags geom;')
     import time
     for attempt in range(3):
         r = session.post(OVERPASS, data={"data": q}, timeout=60)
@@ -186,11 +263,21 @@ def tracks_near(session, lat: float, lon: float, radius_m: int) -> dict[str, int
             break
         time.sleep(10 * (attempt + 1))                 # the public server is busy: wait and ask again
     r.raise_for_status()
-    out: dict[str, int] = {}
+    from pyproj import Transformer
+    from shapely.geometry import LineString
+    from shapely.ops import transform
+    to_m = Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True).transform
+    out: dict = {}
+    nearest = None
     for el in r.json().get("elements", []):
         tags = el.get("tags") or {}
         kind = tags["highway"] + (f" (grade {tags['tracktype'][-1]})" if tags.get("tracktype") else "")
         out[kind] = out.get(kind, 0) + 1
+        pts = [(g["lon"], g["lat"]) for g in el.get("geometry") or []]
+        if land is not None and len(pts) >= 2:
+            d = transform(to_m, LineString(pts)).distance(transform(to_m, land))
+            nearest = d if nearest is None else min(nearest, d)
+    out["_nearest_m"] = nearest
     return out
 
 
@@ -207,7 +294,11 @@ def check(lat: float | None = None, lon: float | None = None, radius_m: float = 
     if country.upper() == "FR":
         steps += [("forest", lambda: forest_types(session, land)), ("extraction", lambda: extraction(session, land)),
                   ("znieff", lambda: znieff(session, land))]
-    steps.append(("tracks", lambda: tracks_near(session, lat, lon, int(max(radius_m, 300)))))
+    else:
+        steps.append(("eu_forest", lambda: eu_forest(session, land)))
+    if country.upper() == "PT":
+        steps.append(("pt_cover", lambda: pt_land_cover(session, land)))
+    steps.append(("tracks", lambda: tracks_near(session, lat, lon, int(max(radius_m, 300)) + 1000, land)))
     for name, step in steps:
         try:
             out[name] = step()
@@ -228,6 +319,19 @@ def describe(r: dict) -> list[str]:
     if r.get("forest") is not None:
         lines.append("forest (IGN BD Forêt): " + (", ".join(f"{v:.0%} {k}" for k, v in r["forest"].items())
                                                   or "no forest mapped"))
+    e = r.get("eu_forest")
+    if e:
+        lines.append(f"forest (Copernicus 2018): {e['conifer']:.0%} conifer, {e['broadleaf']:.0%} broadleaf, "
+                     f"{e['no forest']:.0%} no forest"
+                     + (f"; tree cover {e['tree_cover_pct']:.0f}%" if e.get("tree_cover_pct") is not None else ""))
+    cover = r.get("pt_cover")
+    if cover:
+        lines.append("land cover (DGT COS 2025): " + ", ".join(f"{v:.0%} {k}" for k, v in list(cover.items())[:5]))
+        lines.append(f"montado (cork or holm oak): {montado_share(cover):.0%} of the land")
+    if r.get("extraction") is None and r.get("slope") and r.get("tracks") is not None:
+        est = access_estimate(r["slope"], r["tracks"].get("_nearest_m"))
+        if est:
+            lines.append("timber extraction: " + est)
     if r.get("extraction") is not None:
         lines.append("timber extraction (IGN): " + (", ".join(f"{v:.0%} {k}" for k, v in r["extraction"].items())
                                                     or "not mapped"))
@@ -235,7 +339,8 @@ def describe(r: dict) -> list[str]:
     lines.append("protection: " + ("; ".join(protected) if protected else "none found (Natura 2000"
                                    + (", ZNIEFF" if r.get("znieff") is not None else "") + ")"))
     if r.get("tracks") is not None:
-        lines.append("tracks and roads nearby (OSM): " + (", ".join(f"{n} {k}" for k, n in r["tracks"].items())
+        ways = {k: n for k, n in r["tracks"].items() if not k.startswith("_")}
+        lines.append("tracks and roads nearby (OSM): " + (", ".join(f"{n} {k}" for k, n in ways.items())
                                                           or "none mapped"))
     for e in r.get("errors", []):
         lines.append(f"not checked: {e}")
