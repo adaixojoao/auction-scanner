@@ -1306,3 +1306,71 @@ def scrape_thinkspain(db, max_price: float = 50000, **_):
             time.sleep(1.5)
     LOG.info(f"thinkSPAIN: {total} listings")
     return total
+
+
+# ─── Solvia ──────────────────────────────────────────────────────────
+# Banco Sabadell's servicer (stock now run by Haya). Its own site searches a JSON
+# API by province; pages count from 0. The API says whether the bank has
+# possession ("sinPosesion": occupied) and whether it needs work.
+
+SOLVIA = "https://www.solvia.es"
+SOLVIA_PROVINCES = {"15": "A Coruña", "27": "Lugo", "33": "Asturias", "36": "Pontevedra", "39": "Cantabria",
+                    "32": "Ourense", "24": "León", "48": "Bizkaia", "20": "Gipuzkoa", "31": "Navarra"}
+SOLVIA_KINDS = {"Viviendas": "vivienda", "Suelos": "terreno"}
+SOLVIA_PAGE = 50
+SOLVIA_MAX_PAGES = 20
+
+
+def parse_solvia(item: dict) -> dict | None:
+    kind = SOLVIA_KINDS.get((item.get("categoriaTipoVivienda") or {}).get("nombre"))
+    if not kind or not item.get("precio") or not item.get("mostrarPrecio", True):
+        return None
+    sub = (item.get("tipoVivienda") or {}).get("nombre") or ""
+    town = (item.get("poblacion") or {}).get("nombre")
+    province = (item.get("provincia") or {}).get("nombre")
+    notes = [item.get("tituloFicha"), sub,
+             "Sin posesión: inmueble ocupado" if item.get("sinPosesion") else None,
+             "Para reformar" if item.get("reformar") else None,
+             "En subasta" if item.get("enSubasta") else None,
+             "En la costa" if item.get("enCosta") else None]
+    ref = str(item["id"]).rsplit("-", 1)[0]           # "192413-155113-O" → "192413-155113"
+    images = item.get("listaImagenesInmueble_vPC") or []
+    return make_listing(
+        "solvia", ref, "ES", title=f"{sub or kind.title()} en {town}" if town else (item.get("tituloFicha") or sub),
+        description=" · ".join(n for n in notes if n), tipo=kind, area_m2=item.get("m2") or item.get("totalM2"),
+        price=float(item["precio"]), min_price=float(item["precio"]), district=province, concelho=town,
+        url=f"{SOLVIA}/es/propiedades/comprar/{kind}-{ref}", image_url=images[0] if images else None,
+    )
+
+
+@register("solvia", "ES", description="Solvia — bank homes and land in the north of Spain (Sabadell / Haya stock)")
+def scrape_solvia(db, max_price: float = 50000, **_):
+    """Solvia — bank homes and land in the north of Spain, from the site's own search API."""
+    session = make_session(timeout=40)
+    headers = {"Accept": "application/json", "Origin": SOLVIA}
+    total = 0
+    for pid, name in SOLVIA_PROVINCES.items():
+        for page in range(SOLVIA_MAX_PAGES):
+            try:
+                resp = session.post(f"{SOLVIA}/api/inmuebles/v2/buscarInmuebles", headers=headers,
+                                    json={"idProvincia": pid, "paginacion": {"numeroPagina": page,
+                                                                             "tamanoPagina": SOLVIA_PAGE}})
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
+                if total == 0 and page == 0 and pid == next(iter(SOLVIA_PROVINCES)):
+                    raise
+                LOG.info(f"Solvia {name} p{page}: {type(e).__name__}")
+                break
+            for item in data.get("inmuebles") or []:
+                row = parse_solvia(item)
+                if row and row["price"] <= max_price:
+                    upsert_listing(db, row)
+                    total += 1
+            db.commit()
+            if not (data.get("paginacion") or {}).get("hayPaginaSiguiente") or not data.get("inmuebles"):
+                break
+            time.sleep(1)
+        time.sleep(1)
+    LOG.info(f"Solvia: {total} listings")
+    return total

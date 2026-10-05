@@ -550,7 +550,7 @@ def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: st
 
 
 RELISTING_SOURCES = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira",
-                     "pisos", "thinkspain", "immoweb"}
+                     "pisos", "thinkspain", "immoweb", "solvia"}
 
 
 TWIN_UNIT_TOLERANCE = 0.10

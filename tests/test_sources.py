@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 51
+    assert len(REGISTRY) == 52
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -880,3 +880,17 @@ def test_thinkspain_reads_the_item_list():
     row = parse_thinkspain(items[0], "lugo", text)
     assert row["id"] == "thinkspain:10009160" and row["district"] == "Lugo" and row["tipo"] == "vivienda"
     assert row["title"] == "1 bedroom Townhouse in Monforte de Lemos" and row["area_m2"] == 94
+
+
+def test_solvia_reads_its_search_api():
+    from sources.es import parse_solvia
+    item = {"id": "192413-155113-O", "idVivienda": 192413, "precio": 22000.0, "m2": 120.0, "mostrarPrecio": True,
+            "categoriaTipoVivienda": {"nombre": "Viviendas"}, "tipoVivienda": {"nombre": "Casa Planta Baja"},
+            "poblacion": {"nombre": "Foz"}, "provincia": {"nombre": "Lugo"}, "tituloFicha": "Casa en Foz",
+            "sinPosesion": True, "reformar": True, "enCosta": True, "enSubasta": False,
+            "listaImagenesInmueble_vPC": ["https://cdnsolvproep.solvia.es/uploaded/x.jpg"]}
+    row = parse_solvia(item)
+    assert row["id"] == "solvia:192413-155113" and row["price"] == 22000 and row["concelho"] == "Foz"
+    assert "inmueble ocupado" in row["description"] and "Para reformar" in row["description"]
+    assert row["url"] == "https://www.solvia.es/es/propiedades/comprar/vivienda-192413-155113"
+    assert parse_solvia({**item, "categoriaTipoVivienda": {"nombre": "Garajes"}}) is None
