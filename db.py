@@ -916,7 +916,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """
     import geo
     import rounds
-    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail  # scoring imports common, not db
+    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail, wishes  # scoring imports common, not db
 
     now = now or utcnow()
     sql = "SELECT * FROM listings"
@@ -986,6 +986,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["score"] = sc
         item["rank"] = rank          # unclamped: orders listings that all reach 100
         item["reasons"] = reasons
+        item["wishes"] = wishes(item)
         item["excellent"] = excellent(item, sc, reasons)
         item["category"] = categorize(item)
         item["kind"] = property_kind(item) if item["category"] == "imoveis" else None

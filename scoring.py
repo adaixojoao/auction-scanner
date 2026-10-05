@@ -1774,3 +1774,58 @@ def categorize(item: dict) -> str:
     if property_sale:
         return "imoveis"
     return "outros"
+
+
+# ─── The owner's five wishes, at a glance (2026-10-05) ────────────────
+# Shown on each listing as ticks: near an airport, spacious, somewhere to swim
+# (the sea first), very good condition, water on the land itself.
+WISH_AIRPORT_KM = (30, 60)        # yes within the first, partly within the second
+WISH_SPACE_M2 = (150, 100)        # a home: yes from the first, partly from the second
+WISH_LAND_M2 = (10000, 5000)      # a plot
+
+
+def wishes(item: dict) -> list[dict]:
+    """[{"key", "label", "state": yes|part|no|unknown, "text"}] for the five wishes."""
+    out = []
+
+    def add(key, label, state, text):
+        out.append({"key": key, "label": label, "state": state, "text": text})
+
+    air = item.get("airport")
+    if air and air.get("km") is not None:
+        km = air["km"]
+        add("airport", "Airport", "yes" if km <= WISH_AIRPORT_KM[0] else "part" if km <= WISH_AIRPORT_KM[1] else "no",
+            f"{km:.0f} km")
+    else:
+        add("airport", "Airport", "no" if item.get("climate") else "unknown", "far" if item.get("climate") else "?")
+
+    area = item.get("area_m2") or 0
+    big, ok = WISH_LAND_M2 if property_kind(item) in ("rural_plot", "urban_plot") else WISH_SPACE_M2
+    add("space", "Space", "unknown" if not area else "yes" if area >= big else "part" if area >= ok else "no",
+        f"{area:,.0f} m²".replace(",", ".") if area else "?")
+
+    swim = swim_spot(item)
+    if swim and swim[0] <= SWIM_MAX_KM:
+        add("swim", "Swim", "yes" if swim[1] in ("the sea", "sea inlet (ría)") else "part",
+            f"{swim[1].replace('the sea', 'sea')} {swim[0]:.1f} km")
+    else:
+        add("swim", "Swim", "no" if (swim or item.get("climate")) else "unknown",
+            f"{swim[1].replace('the sea', 'sea')} {swim[0]:.0f} km" if swim else ("none" if item.get("climate") else "?"))
+
+    state = condition(item)
+    add("condition", "Condition", {"good": "yes", "some": "part", "heavy": "no"}.get(state, "unknown"),
+        {"good": "good", "some": "some work", "heavy": "full renovation"}.get(state, "not stated"))
+
+    words = _water_words(f"{item.get('title') or ''} {item.get('description') or ''}")
+    check = _raw(item).get("water_check") or {} if '"water_check"' in (item.get("raw_json") or "") else {}
+    found = [w for w in check.get("found") or [] if w.get("kind") != "canal"]
+    if words:
+        add("water", "Water on land", "yes", words)
+    elif found and not check.get("approx"):
+        add("water", "Water on land", "yes" if check.get("radius_m", 300) <= 300 else "part",
+            f"{found[0].get('kind', 'water')} within {check.get('radius_m', 300)} m")
+    elif found:
+        add("water", "Water on land", "part", f"{found[0].get('kind', 'water')} near the village")
+    else:
+        add("water", "Water on land", "no" if check else "unknown", "none found" if check else "?")
+    return out

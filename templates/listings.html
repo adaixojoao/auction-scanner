@@ -139,7 +139,7 @@ function renderRows(items, hiddenView) {
     return `<tr class="${it.hidden_reason ? "dim" : ""}">
       <td>${AS.scoreBadge(it.score, it.rank, it.excellent)}</td>
       <td>${AS.flag(it.country)}</td>
-      <td class="t-title">${titleLink}${badges}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
+      <td class="t-title">${titleLink}${badges}${AS.wishesHtml(it.wishes, true)}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
       <td class="nowrap"><b>${AS.money(it.price)}</b></td>
       <td class="nowrap muted">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
       <td class="small muted">${AS.esc(loc)}</td>
@@ -295,6 +295,7 @@ function detailsHtml(d) {
   return `<div class="details">
     ${d.image ? `<img class="d-img" src="${AS.esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
     <div class="d-main">
+      ${AS.wishesHtml(d.wishes)}
       ${guide}
       ${locationHtml(d)}
       ${streetView}
