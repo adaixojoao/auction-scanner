@@ -234,7 +234,7 @@ def describe(option: dict) -> str:
 # "Kopējais mežaudzes krājas apjoms ir 1632 m³", "volume sur pied 1 200 m3",
 # "1.500 m3 de madera", "2400 kubikmetri": timber already standing on the land.
 _VOLUME = re.compile(
-    r"(?:kr[āa]ja|krājas apjoms|volume (?:sur pied|de bois)|cubicaje|volume de madeira|madera en pie|"
+    r"(?:kr[āa]j\w*|volume (?:sur pied|de bois)|cubicaje|volume de madeira|madera en pie|"
     r"timber volume|standing (?:volume|timber))[^.\d]{0,40}?(\d[\d .,]*)\s*(?:m3|m³|kubikmetr|metros c[uú]bicos)"
     r"|(\d[\d .,]*)\s*(?:m3|m³|kubikmetr\w*|metros c[uú]bicos)\s+(?:de madera|de madeira|de bois|sur pied|krāj|koksnes)",
     re.I)
@@ -259,9 +259,17 @@ def standing_timber(text: str, country: str | None, hectares: float) -> dict | N
     no official price, or the volume is beyond any forest (over 1,000 m³ a ha)."""
     m3 = standing_volume(text)
     price = timber_price(country, "mixed")
+    s = stand(text)
+    estimated = False
+    if not m3 and s["mature"] and not s["young"] and (country or "").upper() == "LV" and hectares:
+        m3, estimated = hectares * LV_MATURE_M3_HA, True     # "mature stand", no volume given
     if not m3 or not price or (hectares and m3 / hectares > 1000):
         return None
-    return {"m3": m3, "eur": m3 * price["eur_m3"], "label": price["label"]}
+    eur = m3 * price["eur_m3"]
+    if s["young"] and not s["mature"]:
+        eur /= (1 + DISCOUNT_RATE) ** YOUNG_YEARS             # sold only when it has grown
+    return {"m3": m3, "eur": eur, "label": price["label"], "estimated": estimated,
+            "young": s["young"] and not s["mature"], "rights_only": s["rights_only"]}
 
 
 # ─── EU-Trees4F: where each species can live, now and in 2035/2065/2095 ────
@@ -329,3 +337,25 @@ def trees_for_item(item: dict) -> dict | None:
         return trees_at(round(lat, 2), round(lon, 2))
     except Exception:  # noqa: BLE001 — no rasterio or layers: the heat rule decides
         return None
+
+
+# ─── What an ad says about the stand (Latvian and English) ──────────────────
+STAND_WORDS = {
+    "young": ("jaunaudz", "izcirtum", "atjaunošan", "young stand", "clear-cut", "replanted"),
+    "mature": ("pieaugus", "briestaudz", "galvenā cirt", "galvenajai cirtei", "ciršanas vecum",
+               "mature stand", "ready for felling"),
+    "rights_only": ("pārdod cirsmu", "pārdodu cirsmu", "cirsmas pārdošana", "felling rights only",
+                    "tikai cirsmu"),
+}
+SPECIES_WORDS = {"pine": ("priede", "priež"), "spruce": ("egle", "egļu"), "birch": ("bērz",),
+                 "aspen": ("apse", "apšu"), "alder": ("alksn",), "oak": ("ozol",)}
+YOUNG_YEARS = 20          # a young stand's timber is sold about this far ahead
+LV_MATURE_M3_HA = 200     # PROVISIONAL growing stock of a mature Latvian stand, until the inventory is read
+
+
+def stand(text: str) -> dict:
+    """{"young", "mature", "rights_only": bool, "species": [...]} from the ad text."""
+    low = (text or "").lower()
+    out = {k: any(w in low for w in words) for k, words in STAND_WORDS.items()}
+    out["species"] = [sp for sp, words in SPECIES_WORDS.items() if any(w in low for w in words)]
+    return out

@@ -2091,8 +2091,13 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if timber and pay:
         share = timber["eur"] / pay
         s += curve(share, FOREST_TIMBER_POINTS) * w("price")
-        reasons.append(f"standing timber {timber['m3']:,.0f} m³ ≈ €{timber['eur']:,.0f} "
-                       f"({share:.0%} of the price, at {timber['label']})")
+        reasons.append(f"standing timber {'~' if timber['estimated'] else ''}{timber['m3']:,.0f} m³"
+                       f"{' (estimated: mature stand, no volume given)' if timber['estimated'] else ''}"
+                       f"{' (young stand: valued at its sale in ~20 years)' if timber['young'] else ''}"
+                       f" ≈ €{timber['eur']:,.0f} ({share:.0%} of the price, at {timber['label']})")
+        if timber["rights_only"]:
+            caps.append(UNCHECKED_CAP)
+            reasons.append("felling rights may be sold without the land — check")
         if share >= 1 + FOREST_ROI_TARGET:
             reasons.append(f"timber alone is worth {share - 1:.0%} more than the price — the land comes free")
     if crops and c:
