@@ -138,3 +138,10 @@ def test_sea_beats_lake_beats_river():
         return {**home(40), "climate": {}, "raw_json": raw}
     sea, lake, river = (score_detail(at(k))[0] for k in ("the sea", "lake", "river"))
     assert sea > lake > river
+
+
+def test_water_by_the_open_sea_is_a_ria_not_a_river():
+    ria = {**home(2.4), "climate": {"water_km": 0.4}}
+    inland = {**home(20), "climate": {"water_km": 0.4}}
+    assert "somewhere to swim 0.4 km away (sea inlet (ría))" in score_detail(ria)[1]
+    assert "somewhere to swim 0.4 km away (river)" in score_detail(inland)[1]

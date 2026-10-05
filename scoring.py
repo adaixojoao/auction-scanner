@@ -1039,7 +1039,8 @@ SWIM_POINTS = [(0.3, 25), (0.8, 20), (1.5, 14)]
 NO_SWIM = -30
 # The owner: sea > lakes > rivers. The satellite map cannot tell a lake from a
 # river, so its water counts as a river unless the map names a lake or reservoir.
-SWIM_SHARE = {"the sea": 1.0, "lake": 0.75, "reservoir": 0.75, "river": 0.5}
+SWIM_SHARE = {"the sea": 1.0, "sea inlet (ría)": 0.9, "lake": 0.75, "reservoir": 0.75, "river": 0.5}
+RIA_BEACH_KM = 3.0   # satellite water this close to the open sea is a ría or an estuary, not a river
 
 
 def swim_spots(item: dict) -> list[tuple[float, str]]:
@@ -1051,7 +1052,8 @@ def swim_spots(item: dict) -> list[tuple[float, str]]:
         spots.append((beach["km"], "the sea"))
     wet = (item.get("climate") or {}).get("water_km")
     if wet is not None:
-        spots.append((wet, "river"))
+        by_sea = beach and beach.get("km") is not None and beach["km"] <= RIA_BEACH_KM
+        spots.append((wet, "sea inlet (ría)" if by_sea else "river"))
     if '"water_check"' in (item.get("raw_json") or ""):
         check = _raw(item).get("water_check") or {}
         for found in check.get("found") or []:
