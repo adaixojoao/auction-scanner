@@ -52,6 +52,7 @@ CROPS = {
 
 
 START_YEAR = 2026
+THRIVE_UNTIL = 2100      # the owner plants only what still thrives here in 2100
 DRY_FAIL_YEAR = 2060      # water-hungry trees where water stress turns high or extreme by 2080
 # Yearly chance a stand burns: a base everywhere, more where high fire danger
 # days are many by 2090 (30+, 60+), more again where fires burnt nearby since 2016.
@@ -71,7 +72,7 @@ def heat_limit_year(heat: dict, heat_max: float) -> int | None:
         return None
     if points[0][1] > heat_max:
         return START_YEAR
-    end = START_YEAR + FOREST_YEARS
+    end = THRIVE_UNTIL
     if len(points) >= 2:
         (y1, t1), (y2, t2) = points[-2], points[-1]
         points.append((end, t2 + (t2 - t1) / (y2 - y1) * (end - y2)))
@@ -115,7 +116,7 @@ def growing(text: str) -> set[str]:
 
 def options(climate: dict | None, country: str | None, hectares: float, water_on_land: bool = False,
             existing: set[str] | None = None) -> list[dict]:
-    """Every crop that suits the place, best first:
+    """Every crop that still thrives here in 2100, best first:
     {"crop", "eur_ha_year", "carbon_eur_ha_year", "note", "limits"}."""
     c = climate or {}
     heat = c.get("heat") or {}
@@ -140,11 +141,9 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
         ends = heat_limit_year(heat, crop["heat_max"])
         if dry_stress and crop.get("wet"):
             ends = min(ends or DRY_FAIL_YEAR, DRY_FAIL_YEAR)
-        last = FOREST_YEARS if ends is None else ends - START_YEAR
-        if last <= 0:
-            continue
-        if ends is not None and last < FOREST_YEARS:
-            limits.append(f"too {'dry' if dry_stress and crop.get('wet') else 'hot'} for it from ~{ends}")
+        if ends is not None:
+            continue                       # it would not thrive here until 2100
+        last = FOREST_YEARS
         growth = 0.7 if dry_stress else 1.0
         if dry_stress:
             limits.append("dry: lower yield")

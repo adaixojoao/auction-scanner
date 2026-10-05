@@ -124,8 +124,7 @@ def test_a_crop_stops_earning_when_the_climate_passes_its_limit_and_fire_adds_up
     burning = {**calm, "fire_danger": {"high_days_2090": 70}, "fire": {"count": 3}}
     assert pine(burning)["eur_ha_year"] < pine(calm)["eur_ha_year"]
     assert any("chance of losing it" in x for x in pine(burning)["limits"])
-    hot = pine({"heat": warming})
-    assert hot["until"] and hot["eur_ha_year"] < pine(calm)["eur_ha_year"]
+    assert "maritime pine" not in [o["crop"] for o in forestry.options({"heat": warming}, "PT", 20)]
 
 
 def test_a_crop_stops_earning_when_the_climate_passes_its_limit_and_fire_adds_up():
@@ -138,5 +137,4 @@ def test_a_crop_stops_earning_when_the_climate_passes_its_limit_and_fire_adds_up
     burning = {**calm, "fire_danger": {"high_days_2090": 70}, "fire": {"count": 3}}
     assert pine(burning)["eur_ha_year"] < pine(calm)["eur_ha_year"]
     assert any("chance of losing it" in x for x in pine(burning)["limits"])
-    hot = pine({"heat": warming})
-    assert hot["until"] and hot["eur_ha_year"] < pine(calm)["eur_ha_year"]
+    assert "maritime pine" not in [o["crop"] for o in forestry.options({"heat": warming}, "PT", 20)]

@@ -2075,7 +2075,7 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
             s += curve(best["eur_ha_year"] / (pay / ha), FOREST_RETURN_POINTS) * w("price")
     elif c:
         s -= 10
-        reasons.append("no timber, cork, nut or carbon crop suits this climate by 2090")
+        reasons.append("no timber, cork, nut or carbon crop would still thrive here in 2100")
     if pay:
         reasons.append(f"€{pay:,.0f}")
     if caps:
