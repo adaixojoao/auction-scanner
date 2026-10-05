@@ -30,7 +30,7 @@ USER_AGENT = (
 COUNTRY_NAMES = {
     "PT": "Portugal", "ES": "Spain", "FR": "France", "IT": "Italy",
     "DE": "Germany", "NL": "Netherlands", "BE": "Belgium", "HR": "Croatia",
-    "GR": "Greece", "RO": "Romania", "PL": "Poland", "CY": "Cyprus", "BG": "Bulgaria",
+    "GR": "Greece", "RO": "Romania", "PL": "Poland", "CY": "Cyprus", "BG": "Bulgaria", "SK": "Slovakia",
 }
 # Display order everywhere (report, console, dashboard): Portugal first.
 COUNTRY_ORDER = list(COUNTRY_NAMES)

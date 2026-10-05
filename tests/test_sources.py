@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 54
+    assert len(REGISTRY) == 55
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -928,3 +928,23 @@ def test_index_oglasi_reads_the_list_and_the_full_ad():
     assert '"precision": "village"' in row["raw_json"]
     assert row["image_url"] == "https://www.index.hr/oglasi/api/image/direct/a/b.jpg"
     assert parse_index_ad({**ad, "price": 0}, "house", "prodaja-kuca") is None       # price on request
+
+
+def test_nehnutelnosti_reads_the_next_stream():
+    import json as _json
+    from sources.sk import nehnutelnosti_ads, nehnutelnosti_stream, parse_nehnutelnosti
+    ad = {"advertisement": {"id": "Ju1", "title": "Rodinný dom Banská Štiavnica", "sefName": "rodinny-dom",
+                            "description": "$2d", "location": {"county": "Banskobystrický kraj",
+                                                              "district": "okres Banská Štiavnica",
+                                                              "city": "Banská Štiavnica"},
+                            "price": {"priceNum": 38000}, "parameters": {"area": 120, "realEstateState": "Pôvodný stav"},
+                            "photos": [{"url": "https://img.example/1.jpg"}]}}
+    flight = "2d:T" + format(len("Dom pri rieke".encode()), "x") + ",Dom pri rieke" + _json.dumps(ad, separators=(",", ":"))
+    html = 'self.__next_f.push([1,' + _json.dumps(flight) + '])'
+    stream = nehnutelnosti_stream(html)
+    ads = nehnutelnosti_ads(stream)
+    row = parse_nehnutelnosti(ads[0], "house", stream)
+    assert row["id"] == "nehnutelnosti:Ju1" and row["country"] == "SK" and row["price"] == 38000
+    assert row["concelho"] == "Banská Štiavnica" and row["description"].startswith("Dom pri rieke")
+    assert row["url"] == "https://www.nehnutelnosti.sk/detail/Ju1/rodinny-dom"
+    assert parse_nehnutelnosti({**ads[0], "price": {"priceNum": 1}}, "house") is None    # "on request"

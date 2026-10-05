@@ -45,8 +45,13 @@ _PERCENT_SHARE = re.compile(
     r"|\bproindiviso\b|\bpro indiviso\b")
 
 
+# A share named in words in the text: Slovak/Czech, Croatian, Bulgarian court sales.
+SHARE_WORDS = ["spoluvlastnícky podiel", "spoluvlastnický podíl", "spoluvlastníckeho podielu",
+               "suvlasnički dio", "suvlasnički udio", "идеална част", "идеални части"]
+
+
 def is_percent_share(text: str) -> bool:
-    return bool(_PERCENT_SHARE.search(normalize(text or "")))
+    return bool(_PERCENT_SHARE.search(normalize(text or ""))) or has_term(text or "", SHARE_WORDS, negations=False)
 
 
 def is_fractional_share(title: str) -> bool:
@@ -209,7 +214,7 @@ UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until chec
 DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
 BANK_PORTALS = {"aliseda", "altamira", "servihabitat", "solvia"}
 DOUBTFUL_BANK_HOME_EUR = 10000   # banks never sell a whole, free home this cheap
-SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia", "imot", "indexoglasi"}
+SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia", "imot", "indexoglasi", "nehnutelnosti"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 
@@ -391,6 +396,7 @@ HEAVY_WORK = [
     "opknapper", "bouwvallig", "renovatie nodig",
     "ruševina*", "rušev*", "dotrajal*", "zapušten*",
     "основен ремонт", "цялостен ремонт", "руина", "порутен*", "срутен*", "без покрив", "груб строеж",
+    "kompletná rekonštrukcia", "celková rekonštrukcia", "schátran*", "ruina", "neobývateľn*",   # Slovak
     # Abandoned: empty for years, falling apart ("devoluta" alone is only empty).
     "abandonad*", "ao abandono", "em abandono", "estado de abandono", "votad* ao abandono",
     "abbandonat*", "in stato di abbandono", "à l'abandon", "verwaerloosd", "verlaten",
@@ -413,6 +419,7 @@ SOME_WORK = [
     "kluswoning", "kluswoningen",          # Dutch: sold as a renovation project
     "potrebno renoviranje", "za renoviranje", "potrebno uređenje", "za uređenje",
     "за ремонт", "нуждае се от ремонт", "нужда от ремонт", "частичен ремонт",      # Bulgarian
+    "na rekonštrukciu", "potrebná rekonštrukcia", "pôvodný stav", "čiastočná rekonštrukcia",   # Slovak
 ]
 GOOD_CONDITION = [
     "bom estado", "excelente estado", "ótimo estado", "estado novo", "estado: novo", "em estado novo",
@@ -428,6 +435,7 @@ GOOD_CONDITION = [
     "goede staat", "gerenoveerd", "instapklaar",
     "dobrom stanju", "odličnom stanju",
     "след ремонт", "ремонтиран*", "реновиран*", "добро състояние", "отлично състояние", "готова за живеене",
+    "po rekonštrukcii", "zrekonštruovan*", "novostavba", "dobrý stav", "výborný stav", "ihneď obývateľn*",
 ]
 GOOD_LOCATION = [
     "centro da cidade", "centro da vila", "centro da localidade", "centro histórico", "no centro",
@@ -463,7 +471,8 @@ WATER_RE = re.compile(
     r"|\b(?:aan (?:het|de) (?:water|rivier|vaart|plas|meer|zee)|vaarwater|aan het ijsselmeer)\b"
     r"|\b(?:am (?:see|fluss|bach|ufer|meer)|seeufer|flussufer|wassergrundstück|seegrundstück)\b"
     r"|\b(?:uz (?:rijeku|more|jezero)|blizu (?:rijeke|mora|jezera)|na obali)\b"
-    r"|\b(?:(?:до|край|на брега на) (?:река|реката|язовир|язовира|езеро|езерото|морето))\b",   # Bulgarian
+    r"|\b(?:(?:до|край|на брега на) (?:река|реката|язовир|язовира|езеро|езерото|морето))\b"   # Bulgarian
+    r"|\b(?:pri (?:rieke|jazere|vodnej nádrži|priehrade|Dunaji)|na brehu (?:rieky|jazera))\b",   # Slovak
     re.I)
 
 
