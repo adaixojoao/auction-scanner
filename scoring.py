@@ -1992,6 +1992,24 @@ FOREST_WORDS = ["floresta", "florestal", "pinhal", "montado", "souto", "carvalha
                 "arbolado", "forêt", "forestier", "boisé", "bosco", "boschivo", "wald",
                 "šuma", "гора", "lesný pozemok", "lesná pôda", "lesný"]
 BUILDING_LAND = -25
+# What makes forest land worth less than its hectares, from the ad's own words.
+FOREST_FLAGS = [
+    (["forte pente", "très pentu", "tres pentu", "pentes raides", "terrain pentu", "mucho desnivel", "gran desnivel",
+      "fuerte pendiente", "muy escarpad*", "muito declive", "declive acentuado", "muito inclinado"],
+     -10, "steep — costly or impossible to log"),
+    (["taillis", "bois de chauffage", "monte bajo", "matorral", "maquis", "garrigue", "lande", "mato", "matos",
+      "leña", "lenha"], -6, "coppice, scrub or firewood-grade wood — little timber value"),
+    (["sans accès", "sans acces", "enclavé", "sin acceso", "sem acesso", "piste de", "pista de tierra",
+      "acceso por pista", "caminho de terra"], -6, "poor access — check how timber trucks get in"),
+    (["natura 2000", "znieff", "zone protégée", "réserve naturelle", "espacio protegido", "espacio natural protegido",
+      "parque natural", "rede natura", "zona de protecção", "zona de proteção"], -5,
+     "protected area — planting and felling need permits"),
+    (["non délimitées", "non delimitees", "diferentes parajes", "varias parcelas", "várias parcelas",
+      "parcelles dispersées", "plusieurs îlots"], -4, "several separate plots — harder to manage"),
+]
+_SLOPE = re.compile(r"(?:pente|pendiente|declive|inclinaci[oó]n)\s+(?:de\s+|del\s+)?(?:\d{1,2}\s*(?:à|a|-)\s*)?(\d{2})\s*%",
+                    re.I)
+FOREST_STEEP_PCT = 40
 
 
 # What the best crop earns a year, as a share of the land's price per hectare.
@@ -2053,6 +2071,15 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
     elif has_term(full, FOREST_WORDS, negations=False):
         s += 5
         reasons.append("forest or woodland")
+    for words, points, why in FOREST_FLAGS:
+        if has_term(full, words, negations=False):
+            s += points
+            reasons.append(why)
+    slope = _SLOPE.search(full)
+    if slope and int(slope.group(1)) >= FOREST_STEEP_PCT and not any(r.startswith("steep") for r in reasons):
+        s -= 10
+        reasons.append(f"steep ({slope.group(1)}% slope) — costly or impossible to log")
+    wooded = has_term(full, FOREST_WORDS, negations=False)
 
     water = water_nearby(full, item)
     c = item.get("climate") or {}
@@ -2089,7 +2116,7 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
             reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
     import forestry
     crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=forestry.growing(full),
-                             trees=forestry.trees_for_item(item))
+                             trees=forestry.trees_for_item(item), wooded=wooded)
     timber = forestry.standing_timber(full, item.get("country"), ha)
     if timber and pay:
         share = timber["eur"] / pay

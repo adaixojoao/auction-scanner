@@ -242,3 +242,24 @@ def test_a_bank_selling_only_its_undivided_share_is_skipped():
             "description": "La parte vendedora es propietaria de una participación indivisa del Inmueble.",
             "area_m2": 2845361, "price": 99000}
     assert score_detail(plot, mode="forest")[0] == 0
+
+
+def test_the_ad_itself_says_what_forest_land_is_worth():
+    from scoring import score_detail
+    base = {"source": "bienici", "country": "FR", "district": "73", "tipo": "terreno", "title": "Terrain boisé – forêt",
+            "area_m2": 406000, "price": 50000}
+    good = {**base, "description": "40 hectares de forêt de résineux, desserte par route forestière."}
+    poor = {**base, "description": "Taillis de feuillus en qualité de bois de chauffage. Pente de 70 à 80 %. "
+                                   "Parcelles non délimitées, en zone Natura 2000."}
+    s_good, _ = score_detail(good, mode="forest")
+    s_poor, reasons = score_detail(poor, mode="forest")
+    assert s_poor < s_good - 20
+    assert any(r.startswith("steep (80% slope)") for r in reasons)
+    assert any("firewood" in r for r in reasons) and any("protected area" in r for r in reasons)
+
+
+def test_an_orchard_is_not_proposed_where_a_wood_would_have_to_be_cleared():
+    import forestry
+    atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}, "water_km": 0.2}
+    assert "chestnut" in [o["crop"] for o in forestry.options(atlantic, "FR", 20)]
+    assert "chestnut" not in [o["crop"] for o in forestry.options(atlantic, "FR", 20, wooded=True)]

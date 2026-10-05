@@ -26,6 +26,6 @@ def test_safer_reads_a_forest_card():
              '<a class="safer_region_link" href="/vente-propriete-agricole/nouvelle-aquitaine/landes,40">Landes</a>'
              "<b class='safer_land_value'>23 ha 66 a 25 ca</b><div itemprop=\"price\" content=\"79830\">79 830 €</div>")
     row = fr.parse_safer("VN32211", block)
-    assert (row["id"], row["area_m2"], row["price"], row["district"], row["concelho"]) == \
-        ("safer:VN32211", 236625.0, 79830.0, "40", "Landes")
+    assert (row["id"], row["area_m2"], row["price"], row["district"], row["concelho"], row["freguesia"]) == \
+        ("safer:VN32211", 236625.0, 79830.0, "40", "Mont-de-Marsan", "Landes")
     assert fr.parse_safer("VN1", block.replace('content="79830"', 'content="0"')) is None   # "Nous consulter"

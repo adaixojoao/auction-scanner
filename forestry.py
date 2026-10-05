@@ -141,6 +141,11 @@ def cork_net_eur_kg() -> float:
     return (CORK_EUR_ARROBA - CORK_EXTRACTION_EUR_ARROBA) / ARROBA_KG
 
 
+# Clearing woodland for another use needs an authorisation (FR: défrichement,
+# Code forestier L341-3; PT/ES: regional forest services).
+CLEARING_PERMIT = {"FR", "PT", "ES"}
+
+
 def _annuity(npv: float) -> float:
     r, n = DISCOUNT_RATE, FOREST_YEARS
     return npv * r / (1 - (1 + r) ** -n)
@@ -174,7 +179,7 @@ def growing(text: str) -> set[str]:
 
 
 def options(climate: dict | None, country: str | None, hectares: float, water_on_land: bool = False,
-            existing: set[str] | None = None, trees: dict | None = None) -> list[dict]:
+            existing: set[str] | None = None, trees: dict | None = None, wooded: bool = False) -> list[dict]:
     """Every crop that still thrives here in 2100, best first:
     {"crop", "eur_ha_year", "carbon_eur_ha_year", "note", "limits"}."""
     c = climate or {}
@@ -195,6 +200,8 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             continue
         if crop.get("river") and not by_water:
             continue
+        if wooded and crop.get("harvest") and (country or "").upper() in CLEARING_PERMIT:
+            continue          # an orchard would mean clearing the wood first: needs a permit, often refused
         fit = species_fit(trees, name) if trees else None
         if fit is not None:
             # EU-Trees4F (JRC): suitable here around 2065 and 2095 under moderate
