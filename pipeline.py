@@ -184,7 +184,6 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                 _set_state(db, current="map positions")
                 try:
                     import geo
-                    from db import load_listings
                     best = enrich_order(db, cfg)
                     session = make_session()
                     geo.locate_towns(db, session, best)
