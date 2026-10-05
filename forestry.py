@@ -51,6 +51,14 @@ CROPS = {
                      note="grafted nut orchard, ~1.2 t/ha a year"),
     "poplar": dict(heat_max=34, cold_min=-20, river=True, plant=2500, income=[(14, 14, 12000, 280)], carbon=0,
                    note="by water only, ~20 m³/ha/yr, felled every ~14 years"),
+    # Northern and central Europe (Latvia, Germany, Poland…): yields are provisional.
+    "Scots pine": dict(heat_max=30, cold_min=-40, plant=1500, income=[(30, 10, 600, 25), (60, 60, 9000, 300)],
+                       carbon=0, note="thinnings, clear-fell at ~60 years on good soil"),
+    "Norway spruce": dict(heat_max=28, cold_min=-40, wet=True, plant=1800,
+                          income=[(25, 10, 700, 30), (55, 55, 16000, 380)], carbon=0,
+                          note="clear-fell at ~55 years; bark beetle in droughts"),
+    "birch": dict(heat_max=29, cold_min=-40, plant=1500, income=[(20, 10, 300, 15), (50, 50, 8000, 220)],
+                  carbon=0, note="plywood and pulp, clear-fell at ~50 years"),
     "native mixed forest": dict(heat_max=40, cold_min=-25, plant=2500, income=[], carbon=None,
                                 note="carbon credits only; nothing felled"),
 }
@@ -140,7 +148,7 @@ def growing(text: str) -> set[str]:
 
 
 def options(climate: dict | None, country: str | None, hectares: float, water_on_land: bool = False,
-            existing: set[str] | None = None) -> list[dict]:
+            existing: set[str] | None = None, trees: dict | None = None) -> list[dict]:
     """Every crop that still thrives here in 2100, best first:
     {"crop", "eur_ha_year", "carbon_eur_ha_year", "note", "limits"}."""
     c = climate or {}
@@ -161,9 +169,17 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             continue
         if crop.get("river") and not by_water:
             continue
+        fit = species_fit(trees, name) if trees else None
+        if fit is not None:
+            # EU-Trees4F (JRC): suitable here around 2065 and 2095 under moderate
+            # emissions, or it is not an option. Its verdict replaces the heat rule.
+            if not (fit["rcp45_fut2065"] and fit["rcp45_fut2095"]):
+                continue
+            limits.append("suits this place until 2100 (EU-Trees4F)"
+                          + ("" if fit["rcp85_fut2095"] else "; not under high emissions"))
         # The year the place gets too hot (or, for thirsty trees, too dry) for it:
         # nothing is earned after that, and a stand not yet felled is lost.
-        ends = heat_limit_year(heat, crop["heat_max"])
+        ends = None if fit is not None else heat_limit_year(heat, crop["heat_max"])
         if dry_stress and crop.get("wet"):
             ends = min(ends or DRY_FAIL_YEAR, DRY_FAIL_YEAR)
         if ends is not None:
@@ -183,7 +199,7 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             income = [(1 if t[1] < 20 else t[1] // 2,) + tuple(t[1:]) for t in income
                       if t[1] == 1 or t == income[-1]]
             limits.append("already on the land")
-        price = timber_price(country, name)
+        price = timber_price(country, name) or timber_price(country, "mixed")
         if price and any(len(t) > 3 for t in income):
             sources.add(price["label"])
         for first, every, eur, *m3 in income:
@@ -246,3 +262,70 @@ def standing_timber(text: str, country: str | None, hectares: float) -> dict | N
     if not m3 or not price or (hectares and m3 / hectares > 1000):
         return None
     return {"m3": m3, "eur": m3 * price["eur_m3"], "label": price["label"]}
+
+
+# ─── EU-Trees4F: where each species can live, now and in 2035/2065/2095 ────
+# Mauri et al. 2022, Scientific Data (JRC): ensemble of species distribution
+# models over 11 regional climate models, binary "suitable" maps at 10 km
+# (EPSG:3035), RCP4.5 and RCP8.5. Unpacked into <climate data>/layers/eutrees4f.
+EUTREES = {"cork oak": ["Quercus_suber"], "stone pine": ["Pinus_pinea"], "maritime pine": ["Pinus_pinaster"],
+           "chestnut": ["Castanea_sativa"], "poplar": ["Populus_nigra", "Populus_alba"],
+           "Scots pine": ["Pinus_sylvestris"], "Norway spruce": ["Picea_abies"], "birch": ["Betula_pendula"],
+           "native mixed forest": ["Quercus_robur", "Quercus_petraea", "Quercus_pyrenaica", "Quercus_ilex",
+                                   "Quercus_faginea", "Quercus_pubescens", "Fagus_sylvatica", "Arbutus_unedo",
+                                   "Prunus_avium", "Juglans_regia"]}
+NATIVE_MIN = 2            # a mixed forest needs at least two native species that still suit the place
+PERIODS = ("cur2005", "rcp45_fut2035", "rcp45_fut2065", "rcp45_fut2095", "rcp85_fut2065", "rcp85_fut2095")
+
+
+def _tree_layer(species: str, period: str) -> str:
+    import climate
+    return os.path.join(climate.data_dir(), "layers", "eutrees4f", f"{species}_ens-sdms_{period}_bin_pot.tif")
+
+
+@functools.lru_cache(maxsize=4096)
+def trees_at(lat: float, lon: float) -> dict | None:
+    """{species: {period: True/False}} at a place; None without the layers."""
+    from rasterio.warp import transform
+    import climate
+    out = {}
+    xs, ys = transform("EPSG:4326", "EPSG:3035", [lon], [lat])
+    for species in sorted({s for names in EUTREES.values() for s in names}):
+        row = {}
+        for period in PERIODS:
+            path = _tree_layer(species, period)
+            src = climate._raster(path)
+            if src is None:
+                return None
+            r, c = src.index(xs[0], ys[0])
+            if not (0 <= r < src.height and 0 <= c < src.width):
+                return {}
+            import rasterio.windows
+            v = int(src.read(1, window=rasterio.windows.Window(c, r, 1, 1))[0, 0])
+            row[period] = v == 1
+        out[species] = row
+    return out
+
+
+def species_fit(trees: dict, crop: str) -> dict | None:
+    """{period: suitable} for a crop (any of its species; a mixed forest needs
+    NATIVE_MIN of them). None when EU-Trees4F does not cover the crop (Douglas fir)."""
+    names = [s for s in EUTREES.get(crop, []) if s in trees]
+    if not names:
+        return None
+    need = NATIVE_MIN if crop == "native mixed forest" else 1
+    return {p: sum(trees[s][p] for s in names) >= need for p in PERIODS}
+
+
+def trees_for_item(item: dict) -> dict | None:
+    """EU-Trees4F at the position the climate was read for."""
+    import geo
+    at = ((geo._raw(item).get("climate") or {}).get("at") or "")
+    try:
+        lat, lon = (float(x) for x in at.split(","))
+    except ValueError:
+        return None
+    try:
+        return trees_at(round(lat, 2), round(lon, 2))
+    except Exception:  # noqa: BLE001 — no rasterio or layers: the heat rule decides
+        return None

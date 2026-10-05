@@ -152,3 +152,15 @@ def test_standing_timber_worth_more_than_the_price_is_flagged():
             "description": "Mežs. Kopējais krājas apjoms ir 2000 m³.", "area_m2": 200000, "price": 60000}
     _, reasons = score_detail(plot, mode="forest")
     assert any("land comes free" in r for r in reasons)
+
+
+def test_eu_trees4f_decides_which_crops_still_suit_the_place():
+    import forestry
+    ok = {p: True for p in forestry.PERIODS}
+    lost = {**ok, "rcp45_fut2065": False, "rcp45_fut2095": False}
+    trees = {"Quercus_suber": lost, "Pinus_pinea": ok, "Quercus_robur": ok, "Quercus_ilex": lost}
+    hot = {"heat": {"today": 33, "ssp245_2081-2100": 37}}      # the heat rule alone would drop stone pine
+    crops = [o["crop"] for o in forestry.options(hot, "PT", 20, trees=trees)]
+    assert "stone pine" in crops and "cork oak" not in crops
+    assert "native mixed forest" not in crops                   # only one native species still suits it
+    assert forestry.species_fit(trees, "Douglas fir") is None    # not in EU-Trees4F: the heat rule decides

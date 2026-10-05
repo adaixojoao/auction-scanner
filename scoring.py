@@ -2070,7 +2070,8 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         if dry <= AMOC_DRY_WARN_MM:
             reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
     import forestry
-    crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=forestry.growing(full))
+    crops = forestry.options(c, item.get("country"), ha, water_on_land=bool(water), existing=forestry.growing(full),
+                             trees=forestry.trees_for_item(item))
     timber = forestry.standing_timber(full, item.get("country"), ha)
     if timber and pay:
         share = timber["eur"] / pay
