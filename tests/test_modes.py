@@ -164,3 +164,13 @@ def test_eu_trees4f_decides_which_crops_still_suit_the_place():
     assert "stone pine" in crops and "cork oak" not in crops
     assert "native mixed forest" not in crops                   # only one native species still suits it
     assert forestry.species_fit(trees, "Douglas fir") is None    # not in EU-Trees4F: the heat rule decides
+
+
+def test_map_and_climate_lookups_take_the_best_of_every_tab_in_turn(monkeypatch):
+    import db
+    import pipeline
+    lists = {"home": [{"id": "h1", "score": 90}, {"id": "both", "score": 80}],
+             "invest": [{"id": "both", "score": 70}],
+             "forest": [{"id": "f1", "score": 85}, {"id": "f2", "score": 60}]}
+    monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home": lists[mode])
+    assert [it["id"] for it in pipeline.enrich_order(None, {})] == ["h1", "both", "f1", "f2"]
