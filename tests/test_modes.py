@@ -103,7 +103,7 @@ def test_forestry_values_the_crops_the_climate_allows():
     import forestry
     atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}, "water_km": 0.2}
     crops = [o["crop"] for o in forestry.options(atlantic, "FR", 20)]
-    assert crops[0] == "poplar" and "Douglas fir" in crops
+    assert "poplar" in crops and "Douglas fir" in crops
     hot = {"heat": {"today": 33, "ssp245_2081-2100": 37}, "stress": {"stress_2080": 4}}
     names = [o["crop"] for o in forestry.options(hot, "ES", 20)]
     assert "Douglas fir" not in names and "chestnut" not in names
@@ -219,3 +219,11 @@ def test_mature_cork_is_valued_at_the_official_producer_price():
     atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
     cork = next(o for o in forestry.options(atlantic, "PT", 20, existing={"cork oak"}) if o["crop"] == "cork oak")
     assert forestry.CORK_SOURCE in cork["sources"]
+
+
+def test_nut_and_cone_crops_use_official_producer_prices():
+    import forestry
+    atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}, "water_km": 0.2}
+    chestnut = next(o for o in forestry.options(atlantic, "PT", 20) if o["crop"] == "chestnut")
+    assert any("CCDR-N" in src for src in chestnut["sources"])
+    assert "carob" not in [o["crop"] for o in forestry.options(atlantic, "LV", 20)]

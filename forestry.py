@@ -39,16 +39,21 @@ CROPS = {
     "cork oak": dict(heat_max=38, cold_min=-8, countries={"PT", "ES", "FR", "IT"},
                      plant=3000, income=[(30, 9, 900), (39, 9, 2700, None, 1080)], carbon=2.5,
                      note="first cork at ~30 years, then every 9; protected species, ~€2.5/kg"),
-    "stone pine": dict(heat_max=38, cold_min=-12, plant=2000, income=[(15, 1, 250)], carbon=3.0,
-                       note="grafted, pine nuts from ~15 years"),
+    "stone pine": dict(heat_max=38, cold_min=-12, plant=2000, income=[], harvest=(15, 600, "pine cones"),
+                       carbon=3.0, note="grafted, pine cones from ~15 years, ~600 kg/ha"),
     "maritime pine": dict(heat_max=33, cold_min=-12, plant=1800, fire_prone=True,
                           income=[(20, 1, 120), (20, 10, 1200, 30), (40, 40, 11000, 260)], carbon=0,
                           note="resin, thinnings, clear-fell at ~40 years (~8 m³/ha/yr)"),
     "Douglas fir": dict(heat_max=30, cold_min=-20, wet=True, plant=3500,
                         income=[(25, 10, 2500, 40), (50, 50, 45000, 600)], carbon=0,
                         note="~14 m³/ha/yr, clear-fell at ~50 years"),
-    "chestnut": dict(heat_max=32, cold_min=-15, wet=True, plant=5000, income=[(10, 1, 900)], carbon=2.0,
-                     note="grafted nut orchard, ~1.2 t/ha a year"),
+    "chestnut": dict(heat_max=32, cold_min=-15, wet=True, plant=5000, income=[], harvest=(10, 1200, "chestnuts"),
+                     carbon=2.0, note="grafted nut orchard, ~1.2 t/ha a year"),
+    "walnut": dict(heat_max=33, cold_min=-20, wet=True, plant=6000, income=[], harvest=(8, 2000, "walnuts"),
+                   carbon=2.0, note="grafted nut orchard, ~2 t/ha a year from ~8 years; needs water"),
+    "carob": dict(heat_max=42, cold_min=-4, plant=3000, income=[], harvest=(8, 2000, "carob"), carbon=2.5,
+                  countries={"PT", "ES", "IT", "GR", "CY", "HR", "FR"},
+                  note="dry-farmed pods, ~2 t/ha a year from ~8 years; tolerates heat, not frost"),
     "poplar": dict(heat_max=34, cold_min=-20, river=True, plant=2500, income=[(14, 14, 12000, 280)], carbon=0,
                    note="by water only, ~20 m³/ha/yr, felled every ~14 years"),
     # Northern and central Europe (Latvia, Germany, Poland…): yields are provisional.
@@ -114,6 +119,15 @@ def timber_price(country: str | None, crop: str) -> dict | None:
         return None
     return table.get(((country or "").upper(), crop))
 
+
+# Producer prices, € per kg: the midpoint of the official reference range of the
+# northern Portuguese government (CCDR-N, Tabela II - Produtos, 1 Mar 2024 - 28 Feb 2025).
+_CCDRN = "CCDR-N producer prices 2024-25"
+PRODUCE = {"chestnuts": ((1.81 + 3.01) / 2, f"chestnuts €2.41/kg, {_CCDRN}"),
+           "pine cones": ((0.76 + 1.22) / 2, f"pine cones €0.99/kg, {_CCDRN}"),
+           "walnuts": ((2.40 + 3.58) / 2, f"walnuts €2.99/kg, {_CCDRN}"),
+           "carob": ((0.31 + 0.64) / 2, f"carob €0.48/kg, {_CCDRN}")}
+HARVEST_COST_SHARE = 0.5   # PROVISIONAL: picking, pruning and orchard upkeep, until a cost survey is found
 
 # Cork (amadia): producers' average sale price and extraction cost, UNAC survey
 # "Boletim do Mercado da Cortiça 2019-2023" (Rede Rural Nacional). 2024-25 fell
@@ -214,6 +228,12 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
         price = timber_price(country, name) or timber_price(country, "mixed")
         if price and any(len(t) > 3 and t[3] for t in income):
             sources.add(price["label"])
+        if crop.get("harvest"):
+            first, kg, product = crop["harvest"]
+            eur_kg, label = PRODUCE[product]
+            sources.add(label)
+            for y in range(first, last + 1):
+                flows[y] = flows.get(y, 0) + kg * eur_kg * (1 - HARVEST_COST_SHARE) * growth * (1 - p) ** y
         for first, every, eur, *qty in income:
             if qty and qty[0] and price:
                 eur = qty[0] * price["eur_m3"]
@@ -292,11 +312,11 @@ def standing_timber(text: str, country: str | None, hectares: float) -> dict | N
 # models over 11 regional climate models, binary "suitable" maps at 10 km
 # (EPSG:3035), RCP4.5 and RCP8.5. Unpacked into <climate data>/layers/eutrees4f.
 EUTREES = {"cork oak": ["Quercus_suber"], "stone pine": ["Pinus_pinea"], "maritime pine": ["Pinus_pinaster"],
-           "chestnut": ["Castanea_sativa"], "poplar": ["Populus_nigra", "Populus_alba"],
+           "chestnut": ["Castanea_sativa"], "walnut": ["Juglans_regia"], "carob": ["Ceratonia_siliqua"], "poplar": ["Populus_nigra", "Populus_alba"],
            "Scots pine": ["Pinus_sylvestris"], "Norway spruce": ["Picea_abies"], "birch": ["Betula_pendula"],
            "native mixed forest": ["Quercus_robur", "Quercus_petraea", "Quercus_pyrenaica", "Quercus_ilex",
                                    "Quercus_faginea", "Quercus_pubescens", "Fagus_sylvatica", "Arbutus_unedo",
-                                   "Prunus_avium", "Juglans_regia"]}
+                                   "Prunus_avium"]}
 NATIVE_MIN = 2            # a mixed forest needs at least two native species that still suit the place
 PERIODS = ("cur2005", "rcp45_fut2035", "rcp45_fut2065", "rcp45_fut2095", "rcp85_fut2065", "rcp85_fut2095")
 
