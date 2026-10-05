@@ -234,3 +234,11 @@ def test_forestry_only_looks_at_portugal_spain_france_and_benelux():
     assert score == 0 and "outside the forestry countries" in reasons[0]
     score, _ = score_detail({**forest, "source": "safer", "country": "FR", "district": "40"}, mode="forest")
     assert score > 0
+
+
+def test_a_bank_selling_only_its_undivided_share_is_skipped():
+    from scoring import score_detail
+    plot = {"source": "fotocasa", "country": "ES", "tipo": "terreno", "title": "Suelo rústico",
+            "description": "La parte vendedora es propietaria de una participación indivisa del Inmueble.",
+            "area_m2": 2845361, "price": 99000}
+    assert score_detail(plot, mode="forest")[0] == 0
