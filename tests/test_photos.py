@@ -155,3 +155,39 @@ def test_check_pending_says_when_homes_wait_without_a_looker(db, monkeypatch, ca
     with caplog.at_level(logging.INFO):
         assert photos.check_pending(db, {}, load_listings(db, apply_min_score=False)) == 0
     assert any("homes waiting" in r.message for r in caplog.records)
+
+
+def test_a_looker_that_keeps_failing_is_given_up_on(db):
+    for n in range(6):
+        upsert_listing(db, make_listing("eleiloes", str(n), **HOUSE))
+    db.commit()
+
+    class DownLooker:
+        name, calls = "ollama", 0
+
+        def look(self, urls, prompt):
+            DownLooker.calls += 1
+            raise ConnectionError("Ollama went away")
+
+    looker = DownLooker()
+    assert photos.check_pending(db, {}, load_listings(db, apply_min_score=False), looker=looker) == 0
+    assert DownLooker.calls == photos.PHOTO_FAILURES_IN_A_ROW      # not one 15-minute wait per home
+
+
+def test_photos_are_shrunk_for_the_local_model():
+    import io
+    import pytest
+    Image = pytest.importorskip("PIL.Image")
+    buf = io.BytesIO()
+    Image.new("RGB", (2000, 1500), "white").save(buf, "JPEG")
+    small = Image.open(io.BytesIO(photos.shrink(buf.getvalue())))
+    assert max(small.size) == photos.OLLAMA_PHOTO_SIDE
+    assert photos.shrink(b"not an image") == b"not an image"
+
+
+def test_photos_of_only_a_barn_are_flagged_and_not_used_for_condition():
+    raw = json.dumps({"photo_check": {"condition": "heavy", "confidence": "high", "notes": "old barn",
+                                      "photos": 1, "shows_house": False}})
+    it = {**make_listing("eleiloes", "9", **HOUSE), "raw_json": raw}
+    assert condition(it) == "unknown"
+    assert "the photos don't show the house itself — ask the seller for photos" in score_detail(it)[1]

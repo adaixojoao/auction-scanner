@@ -12,7 +12,7 @@ PLOT = dict(source="eleiloes", country="PT", title="Prédio rústico", tipo="ter
 
 
 def with_climate(item, **c):
-    return {**item, "climate": c}
+    return {**item, "climate": {"water_km": 0.5, **c}}      # somewhere to swim: not what these test
 
 
 def test_summers_hotter_than_35_by_2090_are_not_wanted():
@@ -52,7 +52,7 @@ def test_permanent_water_fire_flood_and_stress():
     dry, reasons = score_detail(with_climate(PLOT, stress={"stress_2080": 4}))
     assert dry < base and "water stress extremely high by 2080 (WRI Aqueduct)" in reasons
     flooded, reasons = score_detail(with_climate(HOME, flood_m=0.8))
-    assert flooded < score_detail(HOME)[0] and "in the 100-year flood zone (0.8 m) — JRC" in reasons
+    assert flooded < score_detail(with_climate(HOME))[0] and "in the 100-year flood zone (0.8 m) — JRC" in reasons
 
 
 @pytest.fixture

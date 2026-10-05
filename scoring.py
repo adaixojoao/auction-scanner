@@ -157,10 +157,11 @@ PLOT_MIN_ABROAD_M2 = 25000
 GUARDA = (40.5373, -7.2676)
 GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer scored (2026-09-26)
 # Mainland western Europe (Iberia, France, Benelux, DACH, Italy). Islands and
-# Central/Eastern Europe (HR, PL, …) sit a flat −10 below an otherwise equal listing.
+# Central/Eastern Europe (HR, PL, …) sit a flat −20 below an otherwise equal listing.
 WESTERN_CONTINENTAL_COUNTRIES = frozenset(
     {"PT", "ES", "FR", "DE", "BE", "NL", "LU", "AT", "CH", "IT"})
-OFF_WESTERN_CONTINENTAL = -10
+OFF_WESTERN_CONTINENTAL = -20
+MAINLAND_PORTUGAL = 10   # the owner's home country: language, paperwork, near Guarda (2026-10-04)
 # Rough boxes for Atlantic/Mediterranean islands that share those country codes.
 _ISLAND_BOXES = (
     (36.5, 40.0, -32.0, -24.5, "Azores"),
@@ -206,6 +207,8 @@ def w(name: str) -> float:
 
 UNCHECKED_CAP = 65   # not located or size unknown: below the minimum until checked
 DOUBTFUL_HOME_EUR = 5000      # on a sale portal, a home cheaper than this is a rent, a deposit or a typo
+BANK_PORTALS = {"aliseda", "altamira", "servihabitat"}
+DOUBTFUL_BANK_HOME_EUR = 10000   # banks never sell a whole, free home this cheap
 SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
@@ -367,6 +370,9 @@ HEAVY_WORK = [
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
     "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
     "reforma integra", "para rehabilitación", "requiere rehabilitación", "a restaurar",
+    "reformarla por completo", "reformar por completo", "reformarla completamente", "reforma completa",
+    "necesita restauración", "necesita restauracion", "necesita ser restaurad*", "necesita ser reformad*",
+    "restauración completa", "restauracion completa", "para restarurar", "para restarura",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
     "à réhabiliter", "da ristrutturare", "da ristrutturare integralmente",
     "ristrutturazione integrale", "ristrutturazione totale", "necessita di ristrutturazione",
@@ -590,7 +596,8 @@ def buyer_priorities(targets: dict | None = None) -> str:
     """The goal in words, for the AI check: the same rules as score()."""
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
     return (
-        "Homes (houses or flats) and plots at very low prices. Prefer western continental Europe "
+        "Homes (houses or flats) and plots at very low prices. A MUST: somewhere to swim (the sea, a lake "
+        "or a real river, not a stream) within 1.5 km. Prefer western continental Europe "
         "(mainland Portugal, Spain, France, Benelux, Germany, Austria, Switzerland, Italy); "
         "islands (Azores, Madeira, Canaries, Balearics, Corsica, Sicily, Sardinia) and "
         "Central/Eastern Europe sit a flat step below an otherwise equal listing. In order of "
@@ -703,11 +710,14 @@ _DESC_OPENS_AS_OTHER = re.compile(
 _DESC_OPENS_AS_OUTBUILDING = re.compile(
     r"^\W*(?:se vende |vendo |a saisir \W*)?(?:une |una |un |ancienne |belle |grande |vieille )*"
     r"(?:grange|granges|panera|horreo|hangar|ecurie|cabanon|palheiro|curral)\b"
-    r"|^\W*(?:se vende |vendo )?(?:una |la )?finca con cuadra\b")
+    r"|^\W*(?:se vende |vendo |venta de )?(?:una |la )?(?:finca con )?cuadra\b")
 _DESC_OPENS_AS_FINCA = re.compile(
-    r"^\W*(?:se vende |vendo )?(?:una |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela)\b"
-    r"|^\W*(?:\W*\w+\W*){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
-_SELLS_A_PLOT = re.compile(r"\bse vende (?:una )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica)\b")
+    r"^\W*(?:se vende |vendo )?(?:una |un |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela"
+    r"|terreno(?: grande| rustico| agrario)?)\b"
+    r"|^\W*(?:\w+\W+){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
+_SELLS_A_PLOT = re.compile(
+    r"\bse vende (?:una |un )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica|terreno)\b"
+    r"|\bactualmente es una parcela\b")
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
 
 
@@ -814,6 +824,8 @@ def photo_condition(item: dict) -> dict | None:
     if '"photo_check"' not in (item.get("raw_json") or ""):
         return None
     seen = _raw(item).get("photo_check") or {}
+    if seen.get("shows_house") is False:           # a barn's state says nothing about the house
+        return None
     if seen.get("condition") in ("good", "some", "heavy") and seen.get("confidence") in ("high", "medium"):
         return seen
     return None
@@ -1022,6 +1034,49 @@ TOWN_DISTANCE_POINTS = [(0.3, 15), (1, 13), (3, 8), (6, 3), (10, -2), (20, -14),
 # town-level pin it counts BEACH_APPROX_SHARE of that.
 BEACH_POINTS = [(0.5, 25), (1, 22), (2, 18), (5, 12), (10, 6), (20, 2), (30, 0)]
 BEACH_APPROX_SHARE = 0.6
+# The owner's must (2026-10-04): somewhere to swim within 1.5 km — the sea, a lake
+# or reservoir, or a river big enough to show from space. A stream does not count.
+SWIM_MAX_KM = 1.5
+SWIM_POINTS = [(0.3, 25), (0.8, 20), (1.5, 14)]
+NO_SWIM = -30
+PHOTOS_MISS_THE_HOUSE = -5   # only a barn, land or the view: the house is unseen
+# The owner: sea > lakes > rivers. The satellite map cannot tell a lake from a
+# river, so its water counts as a river unless the map names a lake or reservoir.
+SWIM_SHARE = {"the sea": 1.0, "sea inlet (ría)": 0.9, "lake": 0.75, "reservoir": 0.75, "river": 0.5}
+RIA_BEACH_KM = 3.0   # satellite water this close to the open sea is a ría or an estuary, not a river
+
+
+def swim_spots(item: dict) -> list[tuple[float, str]]:
+    """(km, what) of every known place to swim: the sea beach, permanent water on
+    the satellite map (wide rivers, lakes), or a river or lake on the map around it."""
+    spots = []
+    beach = item.get("beach")
+    if beach and beach.get("km") is not None:
+        spots.append((beach["km"], "the sea"))
+    wet = (item.get("climate") or {}).get("water_km")
+    if wet is not None:
+        by_sea = beach and beach.get("km") is not None and beach["km"] <= RIA_BEACH_KM
+        spots.append((wet, "sea inlet (ría)" if by_sea else "river"))
+    if '"water_check"' in (item.get("raw_json") or ""):
+        check = _raw(item).get("water_check") or {}
+        for found in check.get("found") or []:
+            if found.get("kind") in SWIM_SHARE:
+                spots.append((check.get("radius_m", 300) / 1000, found["kind"]))
+    return spots
+
+
+def swim_points(spot: tuple[float, str]) -> float:
+    km, what = spot
+    return curve(km, SWIM_POINTS) * SWIM_SHARE[what] if km <= SWIM_MAX_KM else 0.0
+
+
+def swim_spot(item: dict) -> tuple[float, str] | None:
+    """The best place to swim (most points; the nearest when none is in reach), or None."""
+    spots = swim_spots(item)
+    if not spots:
+        return None
+    best = max(spots, key=lambda sp: (swim_points(sp), -sp[0]))
+    return best if swim_points(best) > 0 else min(spots)
 # Easy to reach: an airport with scheduled flights and a station on the
 # long-distance trains, smaller bonuses that fade with the distance.
 AIRPORT_POINTS = [(15, 8), (30, 7), (50, 5), (80, 2), (120, 0)]
@@ -1122,7 +1177,8 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(f"title names {item['place_conflict']['town']}, "
                        f"{item['place_conflict']['km']:.0f} km from where it is placed — check the location")
     if (kind == "home" and item.get("source") in SALE_PORTALS
-            and pay and pay < DOUBTFUL_HOME_EUR and area >= 40):     # court sales do start this low
+            and pay and area >= 40                                  # court sales do start this low
+            and pay < (DOUBTFUL_BANK_HOME_EUR if item.get("source") in BANK_PORTALS else DOUBTFUL_HOME_EUR)):
         caps.append(UNCHECKED_CAP)
         reasons.append(f"price doubtful (€{pay:,.0f} for a home) — probably a rent or a typo")
     if kind in ("urban_plot", "rural_plot") and pay and area and pay / area < DOUBTFUL_LAND_EUR_M2:
@@ -1165,6 +1221,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if away:
         s += OFF_WESTERN_CONTINENTAL
         reasons.append(f"not western continental Europe ({away})")
+    elif (item.get("country") or "PT").upper() == "PT":
+        s += MAINLAND_PORTUGAL
+        reasons.append("mainland Portugal")
 
     occupation = _occupation(item)   # read from the sale's detail page (ES, FR)
     if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
@@ -1545,6 +1604,19 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     elif water:
         s += (3 if water.endswith("(approx.)") else 6) * w("water")
         reasons.append(f"{'near' if water.endswith('(approx.)') else 'next to'} water ({water})")
+
+    if (_raw(item).get("photo_check") or {}).get("shows_house") is False:
+        s += PHOTOS_MISS_THE_HOUSE
+        reasons.append("the photos don't show the house itself — ask the seller for photos")
+
+    swim = swim_spot(item)
+    if swim and swim[0] <= SWIM_MAX_KM:
+        s += swim_points(swim) * w("beach")
+        reasons.append(f"somewhere to swim {swim[0]:.1f} km away ({swim[1]})")
+    elif swim or item.get("climate"):          # placed on the map, and nothing within reach
+        s += NO_SWIM * w("beach")
+        reasons.append(f"nowhere to swim within {SWIM_MAX_KM:g} km"
+                       + (f" (nearest: {swim[1]} {swim[0]:.1f} km)" if swim else ""))
 
     for key, points in (("beach", BEACH_POINTS), ("airport", AIRPORT_POINTS), ("station", STATION_POINTS)):
         near = item.get(key)

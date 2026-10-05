@@ -29,7 +29,7 @@ SCENARIOS = ("ssp245", "ssp585")
 PERIODS = ("2061-2080", "2081-2100")
 MAIN = ("ssp245", "2081-2100")               # the figure the score uses
 FIRE_KM = 2.0
-WATER_KM = 1.0
+WATER_KM = 1.5   # the owner swims within 1.5 km (scoring.SWIM_MAX_KM)
 
 
 def data_dir(cfg: dict | None = None) -> str:
@@ -331,7 +331,7 @@ def as_json(result: dict | None) -> str:
 # it was read at; load_listings only reads it back. A listing that moved
 # (a better position found later) or a rebuilt layer set is read again.
 
-VERSION = 2
+VERSION = 3   # 3: water searched to 1.5 km
 
 
 def _place_key(pos: dict) -> str:

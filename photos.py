@@ -36,7 +36,8 @@ PHOTOS_CATCHUP = {"ollama": 18, "anthropic": 60}
 PHOTOS_CATCHUP_HARD = {"ollama": 24, "anthropic": 80}
 PHOTOS_CATCHUP_WHEN = 40            # pending homes that trigger catch-up
 PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
-MAX_PHOTOS = {"ollama": 2, "anthropic": 4}
+PHOTO_FAILURES_IN_A_ROW = 2         # then the looker is down (Ollama out of memory, …)
+MAX_PHOTOS = {"ollama": 2, "anthropic": 6}   # a 6 GB laptop swaps with more images in one Ollama call
 MAX_PHOTO_BYTES = 3_000_000
 # Gallery keys scrapers have used (and a few common alternate spellings).
 _GALLERY_KEYS = ("fotos", "photos", "images", "imagens", "immagini", "gallery",
@@ -48,8 +49,9 @@ PHOTO_SCHEMA = {
         "condition": {"type": "string", "enum": ["good", "some", "heavy", "unknown"]},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         "notes": {"type": "string"},
+        "shows_house": {"type": "boolean"},
     },
-    "required": ["condition", "confidence", "notes"],
+    "required": ["condition", "confidence", "notes", "shows_house"],
     "additionalProperties": False,
 }
 
@@ -59,6 +61,8 @@ Judge only what the photos show about the building's condition:
 - "some": needs work (old kitchen or bathroom, damp, worn finishes, windows) but sound;
 - "heavy": a ruin, no roof, collapsed or gutted, or unfinished construction;
 - "unknown": the photos do not show the building (a map, a document, a logo, only land).
+"shows_house": true only if at least one photo shows the dwelling itself (outside or inside);
+false when they show only land, a barn, a granary, a shed, ruins of outbuildings or the view.
 Give a one-line reason in English in "notes"."""
 
 
@@ -153,6 +157,27 @@ class ClaudeLooker:
         return json.loads(next((b.text for b in resp.content if b.type == "text"), ""))
 
 
+OLLAMA_PHOTO_SIDE = 448   # px: enough to see a roof or damp; a full photo is ~10x the work on a CPU
+
+
+def shrink(data: bytes, side: int = OLLAMA_PHOTO_SIDE) -> bytes:
+    """The photo scaled down to `side` px, as JPEG (unchanged without Pillow or when unreadable)."""
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+        img = Image.open(BytesIO(data))
+        if max(img.size) <= side:
+            return data
+        img = img.convert("RGB")
+        img.thumbnail((side, side))
+        out = BytesIO()
+        img.save(out, "JPEG", quality=85)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001: Pillow missing or not an image: send it as it is
+        return data
+
+
 class OllamaLooker:
     """An open model on this PC (Ollama) looks at the photos: they are fetched
     here and sent as images; the answer is held to the same JSON schema."""
@@ -175,11 +200,13 @@ class OllamaLooker:
             resp = self.session.get(u, timeout=30)
             resp.raise_for_status()
             if len(resp.content) <= MAX_PHOTO_BYTES:
-                images.append(base64.b64encode(resp.content).decode("ascii"))
+                images.append(base64.b64encode(shrink(resp.content)).decode("ascii"))
         if not images:
             raise ValueError("no photo could be fetched")
         resp = self.session.post(f"{self.url}/api/chat", json={
             "model": self.model, "stream": False, "format": PHOTO_SCHEMA, "options": {"temperature": 0},
+            "keep_alive": "5m",                # held between houses; freed soon after (6 GB laptop)
+
             "messages": [{"role": "user", "content": prompt, "images": images}],
         }, timeout=900)                        # a CPU takes its time
         resp.raise_for_status()
@@ -196,6 +223,7 @@ def check_photos(looker, item: dict) -> dict | None:
         raise ValueError(f"unexpected answer {found!r:.80}")
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
             "notes": str(found.get("notes") or "")[:200], "photos": len(urls),
+            "shows_house": found.get("shows_house") is not False,
             "by": getattr(looker, "model", looker.name), "at": utcnow_iso()}
 
 
@@ -236,7 +264,7 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
         return 0
     if limit is None:
         limit = photos_budget(items, looker.name, ai.get("photos_per_scan") or None)
-    done = 0
+    done = failed = 0
     for item in items:
         if done >= limit:
             break
@@ -246,7 +274,12 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
             found = check_photos(looker, item)
         except Exception as e:  # noqa: BLE001: a photo check must never fail the scan
             LOG.info(f"Photo check of {item['id']} failed ({type(e).__name__}); trying next scan")
+            failed += 1
+            if failed >= PHOTO_FAILURES_IN_A_ROW:   # the looker is down: don't wait out every home
+                LOG.info("Photo check: stopped after repeated failures; trying next scan")
+                break
             continue
+        failed = 0
         if not found:
             continue
         try:

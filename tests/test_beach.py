@@ -115,3 +115,33 @@ def test_citius_land_names_its_municipality_under_localizacao():
     item = {"country": "PT", "description": "Prédio rústico localização : Rojanda, Freixedas, Pinhel ano de "
                                             "inscrição na matriz: 1969 área total: 4,6905 ha"}
     assert geo.municipality(item) == "Pinhel"
+
+
+def test_somewhere_to_swim_within_1_5_km_is_a_must():
+    from scoring import SWIM_MAX_KM
+    by_sea, reasons = score_detail(home(0.5))
+    assert "somewhere to swim 0.5 km away (the sea)" in reasons
+    lake, reasons = score_detail({**home(30), "climate": {"water_km": 1.2}})
+    assert "somewhere to swim 1.2 km away (river)" in reasons
+    dry, reasons = score_detail({**home(8), "climate": {}})
+    assert f"nowhere to swim within {SWIM_MAX_KM:g} km (nearest: the sea 8.0 km)" in reasons
+    assert dry < lake and dry < by_sea
+    stream = {**home(8), "climate": {}, "raw_json": '{"water_check": {"radius_m": 300, "found": [{"kind": "stream"}]}}'}
+    assert any(r.startswith("nowhere to swim") for r in score_detail(stream)[1])     # a stream is not a swim
+
+
+def test_sea_beats_lake_beats_river():
+    def at(kind):
+        if kind == "the sea":
+            return {**home(0.5), "climate": {}}
+        raw = '{"water_check": {"radius_m": 500, "found": [{"kind": "%s"}]}}' % kind
+        return {**home(40), "climate": {}, "raw_json": raw}
+    sea, lake, river = (score_detail(at(k))[0] for k in ("the sea", "lake", "river"))
+    assert sea > lake > river
+
+
+def test_water_by_the_open_sea_is_a_ria_not_a_river():
+    ria = {**home(2.4), "climate": {"water_km": 0.4}}
+    inland = {**home(20), "climate": {"water_km": 0.4}}
+    assert "somewhere to swim 0.4 km away (sea inlet (ría))" in score_detail(ria)[1]
+    assert "somewhere to swim 0.4 km away (river)" in score_detail(inland)[1]
