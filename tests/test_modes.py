@@ -135,8 +135,8 @@ def test_standing_timber_worth_more_than_the_price_is_flagged():
     timber = forestry.standing_timber("Kopējais mežaudzes krājas apjoms ir 1632 m³.", "LV", 12.35)
     assert timber and 75000 < timber["eur"] < 80000 and "LVM" in timber["label"]
     from scoring import score_detail
-    plot = {"source": "sslv", "country": "LV", "tipo": "terreno", "title": "Mežs 20 ha",
-            "description": "Mežs. Kopējais krājas apjoms ir 2000 m³.", "area_m2": 200000, "price": 60000}
+    plot = {"source": "safer", "country": "FR", "district": "40", "tipo": "terreno", "title": "Forêt 20 ha",
+            "description": "Forêt de pins, volume sur pied 2 000 m3.", "area_m2": 200000, "price": 60000}
     _, reasons = score_detail(plot, mode="forest")
     assert any("land comes free" in r for r in reasons)
 
@@ -224,3 +224,13 @@ def test_no_return_is_claimed_for_a_listing_that_must_be_checked_first():
     assert not any(r.startswith("return ≈") for r in reasons)
     import land_prices
     assert land_prices.forest_value({"country": "FR", "district": "2A"}) is None
+
+
+def test_forestry_only_looks_at_portugal_spain_france_and_benelux():
+    from scoring import score_detail
+    forest = {"source": "sslv", "country": "LV", "tipo": "terreno", "title": "Mežs", "description": "",
+              "area_m2": 300000, "price": 60000}
+    score, reasons = score_detail(forest, mode="forest")
+    assert score == 0 and "outside the forestry countries" in reasons[0]
+    score, _ = score_detail({**forest, "source": "safer", "country": "FR", "district": "40"}, mode="forest")
+    assert score > 0

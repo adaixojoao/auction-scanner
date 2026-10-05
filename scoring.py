@@ -1995,6 +1995,7 @@ BUILDING_LAND = -25
 
 
 # What the best crop earns a year, as a share of the land's price per hectare.
+FOREST_COUNTRIES = {"PT", "ES", "FR", "BE", "NL", "LU"}   # the owner's choice (2026-10-05)
 FOREST_DEAD_ZONE = -25       # nothing worth planting will last: not forestry land
 FOREST_ROI_TARGET = 0.20    # the owner's goal: at least 20% on the money
 FOREST_ROI_YEARS = 10
@@ -2023,6 +2024,8 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
     skip = _skip_reason(item, title, full)
     if skip:
         return 0.0, [skip]
+    if (item.get("country") or "").upper() not in FOREST_COUNTRIES:
+        return 0.0, ["outside the forestry countries (PT, ES, FR, Benelux)"]
     kind = property_kind(item)
     area = item.get("area_m2") or find_area(title) or find_area(desc) or 0
     if kind == "home" and area >= FOREST_MIN_M2 and has_term(full, RURAL_WORDS, negations=False):
