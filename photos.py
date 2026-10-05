@@ -37,7 +37,7 @@ PHOTOS_CATCHUP_HARD = {"ollama": 24, "anthropic": 80}
 PHOTOS_CATCHUP_WHEN = 40            # pending homes that trigger catch-up
 PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
 PHOTO_FAILURES_IN_A_ROW = 2         # then the looker is down (Ollama out of memory, …)
-MAX_PHOTOS = {"ollama": 4, "anthropic": 6}   # shrunk to 448 px for Ollama: 4 is affordable
+MAX_PHOTOS = {"ollama": 2, "anthropic": 6}   # a 6 GB laptop swaps with more images in one Ollama call
 MAX_PHOTO_BYTES = 3_000_000
 # Gallery keys scrapers have used (and a few common alternate spellings).
 _GALLERY_KEYS = ("fotos", "photos", "images", "imagens", "immagini", "gallery",
