@@ -98,6 +98,7 @@ CATALOG: dict[str, dict] = {
     "imot": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     "indexoglasi": {"kind": "aggregator", "access": "public_api", "listing_type": "property"},
     "nehnutelnosti": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
+    "sslv": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     "thinkspain": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
     # France / Italy / NL / …
     "france": {"kind": "official", "access": "public_html", "listing_type": "property"},

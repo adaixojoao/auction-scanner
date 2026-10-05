@@ -31,7 +31,8 @@ GEOCODE_PER_SCAN = 60
 GEOCODE_CATCHUP = 180
 GEOCODE_CATCHUP_WHEN = 120   # pending addressable listings that trigger catch-up
 COUNTRY_CODES = {"PT": "pt", "ES": "es", "FR": "fr", "IT": "it", "NL": "nl", "DE": "de", "BE": "be",
-                 "HR": "hr", "GR": "gr", "RO": "ro", "PL": "pl", "CY": "cy"}
+                 "HR": "hr", "GR": "gr", "RO": "ro", "PL": "pl", "CY": "cy",
+                 "BG": "bg", "SK": "sk", "LV": "lv"}
 _STREET = re.compile(r"\b((?:Rua|Travessa|Avenida|Av\.|Largo|Estrada|Caminho|Praceta|Beco|Canada|Calçada|Alameda|"
                      r"Praça|Quinta|Bairro|Urbaniza[çc][ãa]o)\s+[^,.;:()]{2,60})", re.I)
 _LUGAR = re.compile(r"\b(?:lugar|sitio|sítio)\s+(?:de|do|da|dos|das)\s+([^,.;:()]{2,40})", re.I)
