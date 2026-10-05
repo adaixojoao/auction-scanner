@@ -37,7 +37,7 @@ CARBON_FEE = 0.15          # the aggregator's share of every credit sold
 #   carbon: t CO2 per ha per year it stores and keeps (only crops not clear-felled)
 CROPS = {
     "cork oak": dict(heat_max=38, cold_min=-8, countries={"PT", "ES", "FR", "IT"},
-                     plant=3000, income=[(30, 9, 900), (39, 9, 2700)], carbon=2.5,
+                     plant=3000, income=[(30, 9, 900), (39, 9, 2700, None, 1080)], carbon=2.5,
                      note="first cork at ~30 years, then every 9; protected species, ~€2.5/kg"),
     "stone pine": dict(heat_max=38, cold_min=-12, plant=2000, income=[(15, 1, 250)], carbon=3.0,
                        note="grafted, pine nuts from ~15 years"),
@@ -113,6 +113,18 @@ def timber_price(country: str | None, crop: str) -> dict | None:
     except OSError:
         return None
     return table.get(((country or "").upper(), crop))
+
+
+# Cork (amadia): producers' average sale price and extraction cost, UNAC survey
+# "Boletim do Mercado da Cortiça 2019-2023" (Rede Rural Nacional). 2024-25 fell
+# 10-25% by press reports, not yet in an official series.
+CORK_EUR_ARROBA, CORK_EXTRACTION_EUR_ARROBA, ARROBA_KG = 42.50, 6.86, 15
+CORK_SOURCE = "cork €42.50/@ less €6.86 extraction, UNAC/Rede Rural 2023"
+CORK_COUNTRIES = {"PT", "ES"}
+
+
+def cork_net_eur_kg() -> float:
+    return (CORK_EUR_ARROBA - CORK_EXTRACTION_EUR_ARROBA) / ARROBA_KG
 
 
 def _annuity(npv: float) -> float:
@@ -200,11 +212,14 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
                       if t[1] == 1 or t == income[-1]]
             limits.append("already on the land")
         price = timber_price(country, name) or timber_price(country, "mixed")
-        if price and any(len(t) > 3 for t in income):
+        if price and any(len(t) > 3 and t[3] for t in income):
             sources.add(price["label"])
-        for first, every, eur, *m3 in income:
-            if m3 and price:
-                eur = m3[0] * price["eur_m3"]
+        for first, every, eur, *qty in income:
+            if qty and qty[0] and price:
+                eur = qty[0] * price["eur_m3"]
+            elif len(qty) > 1 and (country or "").upper() in CORK_COUNTRIES:
+                eur = qty[1] * cork_net_eur_kg()          # mature cork, kg a hectare a harvest
+                sources.add(CORK_SOURCE)
             for y in range(first, last + 1, every):
                 flows[y] = flows.get(y, 0) + eur * growth * (1 - p) ** y
         rate = _carbon_rate(crop, heat.get("today")) * growth

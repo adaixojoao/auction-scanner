@@ -211,3 +211,11 @@ def test_latvian_ads_say_how_old_the_forest_is():
     full = forestry.standing_timber("Krājums 500 m3.", "LV", 10)
     assert young["young"] and young["eur"] < full["eur"] * 0.6
     assert forestry.standing_timber("Pārdod cirsmu, krājums 800 m3", "LV", 5)["rights_only"]
+
+
+def test_mature_cork_is_valued_at_the_official_producer_price():
+    import forestry
+    assert round(forestry.cork_net_eur_kg(), 2) == 2.38
+    atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
+    cork = next(o for o in forestry.options(atlantic, "PT", 20, existing={"cork oak"}) if o["crop"] == "cork oak")
+    assert forestry.CORK_SOURCE in cork["sources"]
