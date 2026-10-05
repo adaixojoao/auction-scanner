@@ -231,3 +231,21 @@ def test_source_health_states(db):
     assert health["never"]["state"] == "never worked"
     assert health["boom"]["state"] == "error" and "ConnectionError" in health["boom"]["last_message"]
     assert health["unrun"]["state"] == "never run"
+
+
+def test_the_same_house_at_a_different_price_on_another_portal(db):
+    import json
+    from common import make_listing
+    from db import mark_duplicates, upsert_listing
+    geo_a = json.dumps({"geo": {"lat": 43.042, "lon": -9.2107, "precision": "street"}})
+    geo_b = json.dumps({"geo": {"lat": 43.037, "lon": -9.2422, "precision": "street"}})        # 2.6 km off
+    upsert_listing(db, make_listing("fotocasa", "1", "ES", title="Casa en Muxía", price=16950, area_m2=150,
+                                    concelho="Muxía", raw_json=geo_b))
+    upsert_listing(db, make_listing("pisos", "2", "ES", title="Casa rústica en Vilachán", price=15000, area_m2=150,
+                                    concelho="Muxía", raw_json=geo_a))
+    upsert_listing(db, make_listing("pisos", "3", "ES", title="Casa en Muxía", price=15500, area_m2=90,
+                                    concelho="Muxía", raw_json=geo_a))                          # another size
+    db.commit()
+    assert mark_duplicates(db) == 1
+    dup = dict(db.execute("SELECT id, duplicate_of FROM listings WHERE duplicate_of IS NOT NULL").fetchone())
+    assert dup == {"id": "fotocasa:1", "duplicate_of": "pisos:2"}           # the cheaper one stays

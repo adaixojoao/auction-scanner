@@ -587,6 +587,30 @@ def _twin_units(rows, dup_of: dict) -> list[list]:
     return groups
 
 
+CROSS_SITE_AREA = 0.02
+CROSS_SITE_PRICE = 0.15
+CROSS_SITE_KM = 3.0
+
+
+def _phrases(text: str | None) -> set[str]:
+    words = re.findall(r"[a-z]{3,}", normalize(text or ""))
+    return {" ".join(words[i:i + 3]) for i in range(len(words) - 2)}
+
+
+def _same_house_elsewhere(a, b) -> bool:
+    if not (a["area_m2"] >= 40 and b["area_m2"] >= 40):
+        return False
+    if abs(a["area_m2"] - b["area_m2"]) > CROSS_SITE_AREA * max(a["area_m2"], b["area_m2"]):
+        return False
+    if abs(a["price"] - b["price"]) > CROSS_SITE_PRICE * max(a["price"], b["price"]):
+        return False
+    import geo
+    pa, pb = geo.position(dict(a)), geo.position(dict(b))
+    if pa and pb and geo.distance_km(pa["lat"], pa["lon"], pb["lat"], pb["lon"]) <= CROSS_SITE_KM:
+        return True
+    return len(_phrases(a["description"]) & _phrases(b["description"])) >= 3
+
+
 def mark_duplicates(db: sqlite3.Connection) -> int:
     """Flag cross-source near-duplicates (same country + concelho, price within
     €500, area within 5 m²). The most complete row stays visible; the others get
@@ -625,6 +649,18 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                 if (abs(other["price"] - keeper["price"]) < 500
                         and abs(other["area_m2"] - keeper["area_m2"]) < 5):
                     dup_of[other["id"]] = keeper["id"]
+
+    # The same house on two portals at a different price: the same size to 2%,
+    # price within 15%, and pins within 3 km (portals blur them) or the same
+    # wording. The cheaper ad stays visible.
+    for group in buckets.values():
+        for i, a in enumerate(group):
+            for o in group[i + 1:]:
+                if a["id"] in dup_of or o["id"] in dup_of or a["source"] == o["source"]:
+                    continue
+                if _same_house_elsewhere(a, o):
+                    keep, drop = sorted((a, o), key=lambda r: (r["price"], r["id"]))
+                    dup_of[drop["id"]] = keep["id"]
 
     # Flats of one building or promotion (same source, same title, price and
     # size within 10%): one choice, so only the cheapest stays visible.
