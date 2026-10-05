@@ -4,8 +4,10 @@ prices.py — local prices of homes per m², for "X% below local prices".
 Portugal: the median price per m² of homes sold in each municipality, from
 Statistics Portugal (INE), in data/pt_home_prices.csv. The file is public data
 and is refreshed with `python scripts/update_prices.py` on a PC that can reach
-ine.pt (see that script). Other countries, and Portuguese places the file does
-not have: the city figures in scoring.MARKET_PRICE_PER_M2.
+ine.pt (see that script). Spain (MIVAU appraised values), France (DVF sales),
+the Netherlands (CBS) and Luxembourg (Observatoire de l'Habitat): one table each
+in data/<cc>_home_prices.csv, with province averages for villages. Elsewhere:
+the city figures in scoring.MARKET_PRICE_PER_M2.
 """
 from __future__ import annotations
 

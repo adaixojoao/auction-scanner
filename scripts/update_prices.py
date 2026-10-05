@@ -285,6 +285,58 @@ def update_prices_lu(requests) -> int:
     return _write(PRICE_FILES["LU"], rows)
 
 
+ES_TOWNS = "https://apps.fomento.gob.es/BoletinOnline2/sedal/35103500.XLS"      # towns over 25,000 people
+ES_PROVINCES = "https://apps.fomento.gob.es/BoletinOnline2/sedal/35101000.XLS"  # provinces, quarterly
+_ES_ARTICLES = {"a", "o", "el", "la", "los", "las", "les", "els", "illes", "l'"}
+
+
+def es_name(name: str) -> str:
+    """The ministry's "Coruña (A)" / "Ejido (El)" / "Balears (Illes)" → "A Coruña" / "El Ejido" /
+    "Illes Balears"; "Asturias (Principado de)" → "Asturias"."""
+    import re
+    name = " ".join(str(name).split())
+    m = re.fullmatch(r"(.+?)\s*\((.+?)\)", name)
+    if not m:
+        return name
+    return f"{m.group(2)} {m.group(1)}" if m.group(2).lower() in _ES_ARTICLES else m.group(1)
+
+
+def _number(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def update_prices_es(requests) -> int:
+    """MIVAU: the appraised value of homes per m² — per town (over 25,000 people),
+    and per province and region for everywhere else ("prov:<name>")."""
+    import xlrd
+    towns = xlrd.open_workbook(file_contents=requests.get(ES_TOWNS, timeout=180).content).sheets()[-1]
+    period = next((str(v).replace("(*)", "").strip() for r in range(towns.nrows) for v in towns.row_values(r)[1:2]
+                   if "trimestre" in str(v).lower()), towns.name)
+    rows = []
+    for r in range(towns.nrows):
+        values = towns.row_values(r)
+        town, total = (values[2], _number(values[5])) if len(values) > 5 else (None, None)
+        if isinstance(town, str) and town.strip() and total and total > 0:
+            rows.append({"municipality": es_name(town), "eur_m2": round(total), "period": period,
+                         "source": "MIVAU appraised"})
+    provinces = xlrd.open_workbook(file_contents=requests.get(ES_PROVINCES, timeout=180).content).sheets()[-1]
+    for r in range(provinces.nrows):
+        values = provinces.row_values(r)
+        name = values[1] if len(values) > 3 else None
+        figures = [v for v in (_number(x) for x in values[2:-2]) if v]
+        if isinstance(name, str) and name.strip() and figures and "total" not in name.lower():
+            rows.append({"municipality": "prov:" + es_name(name), "eur_m2": round(figures[-1]),
+                         "period": period, "source": "MIVAU appraised"})
+    print(f"MIVAU {period}: {len(rows)} towns, provinces and regions")
+    if len(rows) < 200:
+        print("Fewer than 200 rows: probably not the right files. Nothing written.")
+        return 1
+    return _write(PRICE_FILES["ES"], rows)
+
+
 def _write(path: str, rows: list[dict]) -> int:
     rows.sort(key=lambda row: row["municipality"])
     with open(path, "w", encoding="utf-8", newline="") as f:
@@ -348,6 +400,7 @@ def main(argv=None) -> int:
     ap.add_argument("--prices-fr", action="store_true", help="France's €/m² per commune (DVF) → data/fr_home_prices.csv")
     ap.add_argument("--prices-nl", action="store_true", help="the Netherlands' prices per gemeente (CBS) → data/nl_home_prices.csv")
     ap.add_argument("--prices-lu", action="store_true", help="Luxembourg's asking €/m² per commune → data/lu_home_prices.csv")
+    ap.add_argument("--prices-es", action="store_true", help="Spain's appraised €/m² (MIVAU; needs xlrd) → data/es_home_prices.csv")
     args = ap.parse_args(argv)
     if args.rents:
         return update_rents(requests)
@@ -361,6 +414,8 @@ def main(argv=None) -> int:
         return update_prices_nl(requests)
     if args.prices_lu:
         return update_prices_lu(requests)
+    if args.prices_es:
+        return update_prices_es(requests)
 
     r = requests.get(API, params={"op": "2", "varcd": args.indicator, "lang": "PT"}, timeout=60)
     r.raise_for_status()

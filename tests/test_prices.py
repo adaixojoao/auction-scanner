@@ -56,10 +56,10 @@ def pt_prices(tmp_path, monkeypatch):
 
 
 def test_every_municipality_has_a_local_price(pt_prices):
-    fallback = {"ES": {"sevilla": 1900}}
+    fallback = {"GR": {"athina": 1900}}
     assert prices.local_price("PT", "SABUGAL", fallback) == (310, "INE 2.º Trimestre de 2026")
     assert prices.local_price("PT", "Guarda (Sé)", fallback)[0] == 742
-    assert prices.local_price("ES", "Sevilla", fallback) == (1900, "city estimate")
+    assert prices.local_price("GR", "Athina", fallback) == (1900, "city estimate")      # no official table there
     assert prices.local_price("PT", "Nowhere", fallback) is None and prices.local_price("PT", "", fallback) is None
 
 
@@ -137,3 +137,11 @@ def test_ine_answer_gives_the_parishes_under_their_municipality():
     assert update_prices.parse_ine_parishes(answer) == [
         {"municipality": "Sabugal", "parish": "União das freguesias de Sortelha e Malcata", "eur_m2": 150,
          "period": "2.º Trimestre de 2026", "source": "INE"}]
+
+
+def test_spain_and_france_use_their_official_tables_and_the_province_for_villages():
+    town = prices.local_price("ES", "Ourense", {}, district="Ourense")
+    assert town and "MIVAU" in town[1] and "province" not in town[1]
+    village = prices.local_price("ES", "Ourol", {}, district="Lugo")
+    assert village and village[1].endswith("province average")
+    assert "DVF" in prices.local_price("FR", "Brest", {}, district="29")[1]

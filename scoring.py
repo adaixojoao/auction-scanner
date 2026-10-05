@@ -861,6 +861,9 @@ def built_year(item: dict) -> int | None:
     return year if 1700 <= year <= 2100 else None
 
 
+PROVINCE_AVERAGE_VALUE = 0.7   # a village home against its province's average (cities included)
+
+
 def local_value_factor(item: dict, state: str | None = None) -> tuple[float, list[str]]:
     """How much of the municipality's median price this home is worth before
     any discount, and why (condition, age, distance from town)."""
@@ -880,6 +883,10 @@ def local_value_factor(item: dict, state: str | None = None) -> tuple[float, lis
         if town < 1:
             factor *= town
             why.append(f"{near['km']:.0f} km from town")
+    found = local_price(item)
+    if found and "province average" in found[1]:
+        factor *= PROVINCE_AVERAGE_VALUE          # the province's figure includes its cities
+        why.append("province average")
     return factor, why
 
 
@@ -1902,10 +1909,13 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
 
     mv = market_value_estimate(item)
     if mv and pay:
+        factor, why = local_value_factor(item)
+        mv *= factor
         disc = (mv - pay) / mv
         s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
         if disc > 0.1:
-            reasons.append(f"{disc:.0%} below local prices ({local_price(item)[1]})")
+            adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
+            reasons.append(f"{disc:.0%} below local prices ({local_price(item)[1]}{adjusted})")
     import costs
     rent = costs.rent({**item, "kind": kind}, pay) if pay else None
     if rent:
