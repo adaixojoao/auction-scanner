@@ -174,3 +174,10 @@ def test_map_and_climate_lookups_take_the_best_of_every_tab_in_turn(monkeypatch)
              "forest": [{"id": "f1", "score": 85}, {"id": "f2", "score": 60}]}
     monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home": lists[mode])
     assert [it["id"] for it in pipeline.enrich_order(None, {})] == ["h1", "both", "f1", "f2"]
+
+
+def test_forest_return_counts_timber_once_and_the_crop_every_year():
+    from scoring import forest_return
+    assert forest_return(100000, 20, {"eur_ha_year": 100}, None) == 0.02
+    assert round(forest_return(100000, 20, {"eur_ha_year": 100}, {"eur": 150000}), 3) == 0.17
+    assert forest_return(0, 20, {"eur_ha_year": 100}, None) is None
