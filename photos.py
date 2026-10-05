@@ -205,7 +205,7 @@ class OllamaLooker:
             raise ValueError("no photo could be fetched")
         resp = self.session.post(f"{self.url}/api/chat", json={
             "model": self.model, "stream": False, "format": PHOTO_SCHEMA, "options": {"temperature": 0},
-            "keep_alive": "30m",               # loading the model takes minutes on a laptop
+            "keep_alive": "5m",                # held between houses; freed soon after (6 GB laptop)
 
             "messages": [{"role": "user", "content": prompt, "images": images}],
         }, timeout=900)                        # a CPU takes its time
