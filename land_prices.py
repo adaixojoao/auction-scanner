@@ -3,7 +3,7 @@
 France: forest prices per forest region (SAFER, Le prix des terres 2025, 2025
 figures), the only forest-to-forest comparison available; regions are IGN's
 groupings of ecological regions, matched here by département (approximate where
-a département spans two). Elsewhere no official forest price is published;
+a département spans two). SAFER leaves Corsica out of its forest prices. Elsewhere no official forest price is published;
 agricultural prices (Eurostat apri_lprc) are not used, because forest and scrub
 sell well below farmland and the "discount" would be false.
 """
@@ -20,7 +20,7 @@ _FR_REGION = {
     "Est": "01 21 25 39 52 54 55 57 67 68 70 71 88 90",
     "Sud-Ouest": "16 17 24 31 32 33 40 46 47 64 82 86",
     "Massif Central": "03 12 15 19 23 42 43 48 58 63 69 87",
-    "Alpes-Méditerranée-Pyrénées": "04 05 06 07 09 11 13 26 30 34 38 65 66 73 74 81 83 84 2A 2B",
+    "Alpes-Méditerranée-Pyrénées": "04 05 06 07 09 11 13 26 30 34 38 65 66 73 74 81 83 84",
 }
 FR_DEPT_REGION = {d: region for region, depts in _FR_REGION.items() for d in depts.split()}
 

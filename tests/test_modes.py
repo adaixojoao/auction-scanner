@@ -227,3 +227,13 @@ def test_nut_and_cone_crops_use_official_producer_prices():
     chestnut = next(o for o in forestry.options(atlantic, "PT", 20) if o["crop"] == "chestnut")
     assert any("CCDR-N" in src for src in chestnut["sources"])
     assert "carob" not in [o["crop"] for o in forestry.options(atlantic, "LV", 20)]
+
+
+def test_no_return_is_claimed_for_a_listing_that_must_be_checked_first():
+    from scoring import score_detail
+    plot = {"source": "fotocasa", "country": "ES", "tipo": "terreno", "title": "Terreno", "description": "",
+            "area_m2": 130000, "price": 100}
+    _, reasons = score_detail(plot, mode="forest")
+    assert not any(r.startswith("return ≈") for r in reasons)
+    import land_prices
+    assert land_prices.forest_value({"country": "FR", "district": "2A"}) is None

@@ -2114,7 +2114,7 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         worth = fair["eur_ha"] * ha
         reasons.append(f"forest land here sells for €{fair['eur_ha']:,}/ha ({fair['label']}): "
                        f"{'%d%% below' % round((1 - pay / worth) * 100) if pay < worth else 'not below'} that")
-    roi = forest_return(pay, ha, crops[0] if crops and c else None, timber,
+    roi = None if caps else forest_return(pay, ha, crops[0] if crops and c else None, timber,
                         land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay else 0.0)
     if roi is not None:
         reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years (timber now + best crop, "

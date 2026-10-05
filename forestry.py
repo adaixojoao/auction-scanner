@@ -49,8 +49,8 @@ CROPS = {
                         note="~14 m³/ha/yr, clear-fell at ~50 years"),
     "chestnut": dict(heat_max=32, cold_min=-15, wet=True, plant=5000, income=[], harvest=(10, 1200, "chestnuts"),
                      carbon=2.0, note="grafted nut orchard, ~1.2 t/ha a year"),
-    "walnut": dict(heat_max=33, cold_min=-20, wet=True, plant=6000, income=[], harvest=(8, 2000, "walnuts"),
-                   carbon=2.0, note="grafted nut orchard, ~2 t/ha a year from ~8 years; needs water"),
+    "walnut": dict(heat_max=33, cold_min=-20, wet=True, river=True, plant=6000, income=[], harvest=(8, 2000, "walnuts"),
+                   carbon=2.0, note="grafted nut orchard, ~2 t/ha a year from ~8 years; only by water (irrigated)"),
     "carob": dict(heat_max=42, cold_min=-4, plant=3000, income=[], harvest=(8, 2000, "carob"), carbon=2.5,
                   countries={"PT", "ES", "IT", "GR", "CY", "HR", "FR"},
                   note="dry-farmed pods, ~2 t/ha a year from ~8 years; tolerates heat, not frost"),
@@ -260,7 +260,7 @@ def describe(option: dict) -> str:
     if option.get("until"):
         extra += f", only until ~{option['until']}"
     if option.get("sources"):
-        limits += "; timber at " + ", ".join(option["sources"])
+        limits += "; prices: " + ", ".join(option["sources"])
     else:
         limits += "; provisional prices"
     return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (estimate{limits})"
