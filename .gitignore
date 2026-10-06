@@ -29,3 +29,4 @@ backups/
 .update-check.json
 .last-good
 .bad-update.json
+*.db.scores*

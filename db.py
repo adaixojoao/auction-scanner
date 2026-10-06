@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -955,10 +956,10 @@ def forget_scores(db: sqlite3.Connection | None = None) -> None:
     _SCORED.clear()
     _LOADED_MODES.clear()
     _SHARED.update(key=None, value=None)
-    if db is not None:
-        _score_table(db)
-        db.execute("DELETE FROM score_cache")
-        db.commit()
+    sdb = _score_db(db) if db is not None else None
+    if sdb is not None:
+        with _SCORE_LOCK, sdb:
+            sdb.execute("DELETE FROM score_cache")
 
 
 # Scores are also kept on disk, so a restart or a new window does not score
@@ -966,9 +967,24 @@ def forget_scores(db: sqlite3.Connection | None = None) -> None:
 _LOADED_MODES: set = set()
 
 
-def _score_table(db) -> None:
-    db.execute("CREATE TABLE IF NOT EXISTS score_cache (mode TEXT, id TEXT, key TEXT, inputs TEXT, "
-               "data BLOB, PRIMARY KEY (mode, id))")
+_SCORE_DBS: dict = {}
+_SCORE_LOCK = threading.Lock()     # one file, shared by the app's threads
+
+
+def _score_db(db) -> sqlite3.Connection | None:
+    """The kept scores live in their own file next to the database (auctions.db.scores),
+    so saving them never locks the listings a scan is writing. None for an in-memory database."""
+    path = next((r[2] for r in db.execute("PRAGMA database_list") if r[1] == "main"), "")
+    if not path:
+        return None
+    conn = _SCORE_DBS.get(path)
+    if conn is None:
+        conn = sqlite3.connect(path + ".scores", timeout=5, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE IF NOT EXISTS score_cache (mode TEXT, id TEXT, key TEXT, inputs TEXT, "
+                     "data BLOB, PRIMARY KEY (mode, id))")
+        _SCORE_DBS[path] = conn
+    return conn
 
 
 def _load_kept(db, mode: str) -> None:
@@ -977,9 +993,12 @@ def _load_kept(db, mode: str) -> None:
         return
     _LOADED_MODES.add(mode)
     try:
-        _score_table(db)
-        for lid, key, inputs, data in db.execute(
-                "SELECT id, key, inputs, data FROM score_cache WHERE mode = ?", (mode,)):
+        sdb = _score_db(db)
+        if sdb is None:
+            return
+        with _SCORE_LOCK:
+            rows = sdb.execute("SELECT id, key, inputs, data FROM score_cache WHERE mode = ?", (mode,)).fetchall()
+        for lid, key, inputs, data in rows:
             if (mode, lid) not in _SCORED:
                 _SCORED[(mode, lid)] = (key, pickle.loads(data), inputs)
     except (sqlite3.Error, pickle.PickleError, EOFError, AttributeError):
@@ -991,10 +1010,12 @@ def _save_kept(db, mode: str, new: list) -> None:
     if not new:
         return
     try:
-        _score_table(db)
-        db.executemany("INSERT OR REPLACE INTO score_cache VALUES (?, ?, ?, ?, ?)",
-                       [(mode, lid, key, inputs, pickle.dumps(data)) for lid, key, inputs, data in new])
-        db.commit()
+        sdb = _score_db(db)
+        if sdb is None:
+            return
+        with _SCORE_LOCK, sdb:
+            sdb.executemany("INSERT OR REPLACE INTO score_cache VALUES (?, ?, ?, ?, ?)",
+                            [(mode, lid, key, inputs, pickle.dumps(data)) for lid, key, inputs, data in new])
     except sqlite3.Error:
         pass                                 # busy (a scan is writing): kept in memory, saved next time
 
