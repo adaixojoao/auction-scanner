@@ -428,7 +428,7 @@ def parse_dt(value) -> datetime | None:
 def effective_end(date_end) -> datetime | None:
     """When a listing stops being biddable. A bare date (midnight) means that whole day."""
     dt = parse_dt(date_end)
-    if dt is not None and (dt.hour, dt.minute, dt.second, dt.microsecond) == (0, 0, 0, 0):
+    if dt is not None and (dt.hour, dt.minute, dt.second, dt.microsecond) == (0, 0, 0, 0)             and dt.year < 9999:          # Citius writes 9999-01-01 for "no date set"
         dt = dt + timedelta(days=1) - timedelta(seconds=1)
     return dt
 
