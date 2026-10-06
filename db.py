@@ -11,6 +11,7 @@ Rules this module enforces:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -916,7 +917,7 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
             "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
             "reasons", "wishes", "excellent", "category", "kind")
-_SCORED: dict[tuple[str, str], tuple[int, dict]] = {}     # (mode, listing id) → (row key, results)
+_SCORED: dict[tuple[str, str], tuple] = {}     # (mode, listing id) → (row key, results, inputs)
 _UNSCORED = {"last_seen", "is_new"}
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
@@ -949,10 +950,53 @@ def _shared_lookups(db, now):
     return _SHARED["value"]
 
 
-def forget_scores() -> None:
+def forget_scores(db: sqlite3.Connection | None = None) -> None:
     """Drop every kept score (after a code or data change the cache cannot see)."""
     _SCORED.clear()
+    _LOADED_MODES.clear()
     _SHARED.update(key=None, value=None)
+    if db is not None:
+        _score_table(db)
+        db.execute("DELETE FROM score_cache")
+        db.commit()
+
+
+# Scores are also kept on disk, so a restart or a new window does not score
+# 60,000 listings again: only listings whose row (or the day, or the filters) changed.
+_LOADED_MODES: set = set()
+
+
+def _score_table(db) -> None:
+    db.execute("CREATE TABLE IF NOT EXISTS score_cache (mode TEXT, id TEXT, key TEXT, inputs TEXT, "
+               "data BLOB, PRIMARY KEY (mode, id))")
+
+
+def _load_kept(db, mode: str) -> None:
+    import pickle
+    if mode in _LOADED_MODES:
+        return
+    _LOADED_MODES.add(mode)
+    try:
+        _score_table(db)
+        for lid, key, inputs, data in db.execute(
+                "SELECT id, key, inputs, data FROM score_cache WHERE mode = ?", (mode,)):
+            if (mode, lid) not in _SCORED:
+                _SCORED[(mode, lid)] = (key, pickle.loads(data), inputs)
+    except (sqlite3.Error, pickle.PickleError, EOFError, AttributeError):
+        pass                                 # only a speed-up
+
+
+def _save_kept(db, mode: str, new: list) -> None:
+    import pickle
+    if not new:
+        return
+    try:
+        _score_table(db)
+        db.executemany("INSERT OR REPLACE INTO score_cache VALUES (?, ?, ?, ?, ?)",
+                       [(mode, lid, key, inputs, pickle.dumps(data)) for lid, key, inputs, data in new])
+        db.commit()
+    except sqlite3.Error:
+        pass                                 # busy (a scan is writing): kept in memory, saved next time
 
 
 def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land_market,
@@ -995,7 +1039,8 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
 
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
-                  where: str = "", params=(), apply_min_score: bool = True, mode: str = "home") -> list[dict]:
+                  where: str = "", params=(), apply_min_score: bool = True, mode: str = "home",
+                  refresh: bool = False) -> list[dict]:
     """Every listing a view should consider, scored, with hidden ones removed.
 
     Each item gains: score, reasons, category, hidden_reason (None if visible),
@@ -1025,11 +1070,17 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     climate_on = climate.available()
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
-    context = (now.date(), json.dumps(filters or {}, sort_keys=True, default=str), len(towns),   # weights: in filters
-               sum(len(v) for v in closes.values()), len(land_market), climate_on)
+    # A new day or new filters (with the weights) score again; new towns, auction
+    # results or land prices (a scan adds some every few minutes) do not throw the
+    # scores away: the kept ones stay on show until refresh=True (after each scan).
+    context = (now.date().isoformat(), json.dumps(filters or {}, sort_keys=True, default=str), climate_on)
+    inputs = json.dumps([len(towns), sum(len(v) for v in closes.values()), len(land_market)])
     if _SCORED_FOR[0] != context:
         _SCORED.clear()
+        _LOADED_MODES.clear()
         _SCORED_FOR[0] = context
+    _load_kept(db, mode)
+    new_scores = []
 
     items = []
     for r in rows:
@@ -1059,15 +1110,18 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         if reason and not include_hidden:
             continue
 
-        row_key = hash((tuple(r[i] for i in scored_cols), item["status"], item["offer_outcome"]))
+        row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],
+                                     item["offer_outcome"], context)).encode()).hexdigest()
         kept = _SCORED.get((mode, item["id"]))
-        if kept and kept[0] == row_key:
+        if kept and kept[0] == row_key and not (refresh and kept[2] != inputs):
             item.update(kept[1])
             sc = item["score"]
         else:
             sc = _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
                             climate_on, mode)
-            _SCORED[(mode, item["id"])] = (row_key, {k: item[k] for k in _DERIVED})
+            data = {k: item[k] for k in _DERIVED}
+            _SCORED[(mode, item["id"])] = (row_key, data, inputs)
+            new_scores.append((item["id"], row_key, inputs, data))
 
         if reason is None and min_score and sc < min_score and item["status"] != "shortlisted":
             reason = f"score {sc:.0f} < filters.min_score {min_score}"
@@ -1078,6 +1132,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         seen_first = parse_dt(item.get("first_seen"))
         item["is_recent"] = bool(seen_first and now - seen_first <= RECENT)
         items.append(item)
+    _save_kept(db, mode, new_scores)
     return items
 
 

@@ -47,7 +47,7 @@ def _layers() -> str:
     return os.path.join(data_dir(), "layers")
 
 
-@functools.lru_cache(maxsize=16)
+@functools.lru_cache(maxsize=256)   # Forestry reads ~30 tree maps per place
 def _raster(path: str):
     import rasterio
     return rasterio.open(path) if os.path.exists(path) else None
