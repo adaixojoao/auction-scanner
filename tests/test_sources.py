@@ -640,6 +640,9 @@ def test_aliseda_gives_price_position_and_possession(db, fake_http):
     assert raw["occupation"] == "vacant" and raw["geo"]["lat"] == 43.298261614
     taken = parse_aliseda({**ALISEDA_ITEM, "posesion": "OCUPADO"}, "vivienda")
     assert json.loads(taken["raw_json"])["occupation"] == "occupied"
+    from scoring import _skip_reason
+    share = parse_aliseda({**ALISEDA_ITEM, "Proindiviso": 1}, "vivienda")     # Foz, 2026-10-06
+    assert _skip_reason({}, share["title"], share["description"]).endswith("skip")
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"data": [ALISEDA_ITEM], "last_page": 1}))
     assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
     assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000", "0-100000"}      # homes; land up to the land limit
