@@ -30,9 +30,10 @@ def test_water_that_floods_is_no_plus():
 
 
 def test_the_listing_score_gives_no_water_bonus_where_it_floods():
-    base, _ = score_detail({**PLOT, "climate": MILD})
-    wet, _ = score_detail({**PLOT, "climate": {**MILD, "water_km": 0.2}})
-    flooded, reasons = score_detail({**PLOT, "climate": {**MILD, "water_km": 0.2, "flood_m": 1.5}})
+    # A plot is ranked on the Investment land goal, not as somewhere to live.
+    base, _ = score_detail({**PLOT, "climate": MILD}, mode="land")
+    wet, _ = score_detail({**PLOT, "climate": {**MILD, "water_km": 0.2}}, mode="land")
+    flooded, reasons = score_detail({**PLOT, "climate": {**MILD, "water_km": 0.2, "flood_m": 1.5}}, mode="land")
     assert wet > base >= flooded
     assert not any(r.startswith("permanent water 0.2 km away") and "no water bonus" not in r for r in reasons)
 

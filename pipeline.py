@@ -105,7 +105,7 @@ def send_alerts(db, cfg: dict):
 
 def enrich_order(db, cfg: dict) -> list[dict]:
     """The listings to locate and assess first: the best of each tab in turn
-    (home, forestry, investment), so land for forestry is not left until last."""
+    (scoring.MODES), so land is not left until last behind the homes."""
     from db import load_listings
     from scoring import MODES
     ranked = [sorted(load_listings(db, filters=cfg.get("filters"), mode=m),
@@ -117,6 +117,18 @@ def enrich_order(db, cfg: dict) -> list[dict]:
                 seen.add(it["id"])
                 order.append(it)
     return order
+
+
+def _plots_for_site_check(db, cfg: dict) -> list[dict]:
+    """Forestry first, then the other investment plots, so Natura and eucalyptus
+    are read for land you might buy, not only for a 10 ha project."""
+    from db import load_listings
+    forest = sorted(load_listings(db, filters=cfg.get("filters"), mode="forest"),
+                    key=lambda it: -it.get("rank", it["score"]))
+    land = sorted(load_listings(db, filters=cfg.get("filters"), mode="land"),
+                  key=lambda it: -it.get("rank", it["score"]))
+    seen = {it["id"] for it in forest}
+    return forest + [it for it in land if it["id"] not in seen]
 
 
 def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
@@ -135,7 +147,9 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
     configure_http(cfg.get("proxies"))
     load_all()
     chosen = [REGISTRY[n] for n in source_names] if source_names else sources_for(countries)
-    max_price = max_price or cfg.get("max_price", 50000)
+    # Keep anything that could serve any goal; each tab caps its own budget.
+    from common import scrape_max_price
+    max_price = scrape_max_price(cfg, max_price or cfg.get("max_price", 50000))
     from common import COUNTRY_NAMES
     label = label or (", ".join(source_names) if source_names
                       else "all countries" if not countries
@@ -196,11 +210,9 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                 except Exception:  # noqa: BLE001 — a map position must never fail the scan
                     LOG.exception("Locating listings failed")
                 try:
-                    import site_check                 # slope, forest type, access: the Forestry shortlist
-                    from db import load_listings
-                    forest = sorted(load_listings(db, filters=cfg.get("filters"), mode="forest"),
-                                    key=lambda it: -it["score"])
-                    site_check.check_pending(db, forest)
+                    import site_check                 # slope, forest type, Natura: land and forestry
+                    plots = _plots_for_site_check(db, cfg)
+                    site_check.check_pending(db, plots)
                 except Exception:  # noqa: BLE001
                     LOG.exception("Site check failed")
                 _set_state(db, current="photo check")

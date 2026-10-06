@@ -441,3 +441,137 @@ def stand(text: str) -> dict:
     out = {k: any(w in low for w in words) for k, words in STAND_WORDS.items()}
     out["species"] = [sp for sp, words in SPECIES_WORDS.items() if any(w in low for w in words)]
     return out
+
+
+# ─── A project on the money set aside for land ──────────────────────────────
+PLAN_NOTE = (
+    "Estimate. The land budget is what Settings sets aside for a plot. Buying costs are the "
+    "usual transfer tax and notary for that country. Planting is the CAOF 2024 work plus a "
+    "provisional cost for the plants. Crop income is the screening model, not a forecast."
+)
+
+
+def _plant_eur_ha(name: str, hectares: float, slope_pct: float | None) -> float | None:
+    plant = CROPS[name]["plant"]
+    if isinstance(plant, str):
+        return planting_cost(plant, hectares, slope_pct)
+    if isinstance(plant, (int, float)):
+        return float(plant)
+    return None
+
+
+def _first_cash_year(name: str) -> int | None:
+    crop = CROPS[name]
+    years = [crop["harvest"][0]] if crop.get("harvest") else []
+    years += [row[0] for row in crop["income"]]
+    return min(years) if years else None
+
+
+def project_plan(item: dict, budget: float) -> dict | None:
+    """What a forestry project on this plot looks like on `budget` euros.
+
+    None when the listing is not land in the forestry countries. The money is
+    spent on acquiring the plot first; whatever is left is what can be planted.
+    Nothing here is a bid, a quote or a yield you can count on.
+    """
+    import scoring
+    country = (item.get("country") or "").upper()
+    if country not in scoring.FOREST_COUNTRIES:
+        return None
+    full = f"{item.get('title') or ''} {item.get('description') or ''}"
+    kind = item.get("kind") or scoring.property_kind(item)
+    area = item.get("area_m2") or 0
+    if kind not in ("rural_plot", "urban_plot") or area < scoring.FOREST_STARTER_M2:
+        return None
+    pay = scoring._pay(item)
+    ha = area / 10000
+    costs, costs_label = scoring.buying_costs(item, full)
+    acquire = pay * (1 + costs) if pay else 0
+    budget = float(budget or 0)
+    unknowns = []
+    if not pay:
+        unknowns.append("no price, so the acquisition cannot be planned")
+    if not item.get("climate"):
+        unknowns.append("climate layers not read, so no crop is chosen")
+    site = scoring._site_check(item) or {}
+    if site.get("slope_mean") is None:
+        unknowns.append("slope not measured, so planting cost is the midpoint of easy and hard ground")
+
+    left = budget - acquire if pay and budget else 0
+    fundable = bool(pay and budget and acquire <= budget)
+    existing = growing(full)
+    crops = []
+    if item.get("climate"):
+        water = scoring.water_nearby(full, item)
+        crops = options(item.get("climate"), country, ha,
+                        water_on_land=bool(water) and not str(water).endswith("(approx.)"),
+                        existing=existing, trees=trees_for_item(item),
+                        wooded=scoring.has_term(full, scoring.FOREST_WORDS, negations=False),
+                        slope_pct=site.get("slope_mean"))
+    best = crops[0] if crops else None
+    established = bool(best and best["crop"] in existing)
+    plant_ha = _plant_eur_ha(best["crop"], ha, site.get("slope_mean")) if best and not established else 0
+    if fundable and plant_ha:
+        hectares_now = min(ha, left / plant_ha)
+    elif fundable:
+        hectares_now = ha
+    else:
+        hectares_now = 0
+
+    def eur(n):
+        return f"€{n:,.0f}"
+
+    if not budget:
+        headline = "Set a land budget on Settings before this can be planned against money you have."
+    elif not pay:
+        headline = "This plot has no price, so it cannot be planned against the land budget."
+    elif fundable:
+        headline = (f"Land budget {eur(budget)}. Acquiring it is about {eur(acquire)} "
+                    f"({costs_label}), leaving about {eur(left)}.")
+        if best and plant_ha and hectares_now < ha - 0.05:
+            headline += (f" That plants about {hectares_now:.1f} ha of {best['crop']} "
+                         f"with the money left, of {ha:.1f} ha on the plot.")
+        elif best and not established:
+            headline += f" That covers planting the whole {ha:.1f} ha with {best['crop']}."
+        elif best and established:
+            headline += f" {best['crop'].capitalize()} is already on the land, so the leftover is not for planting it."
+    else:
+        headline = (f"Land budget {eur(budget)}. Acquiring it is about {eur(acquire)} "
+                    f"({costs_label}), {eur(acquire - budget)} over the money set aside for land.")
+
+    steps = []
+    if fundable:
+        steps.append(f"Buy the {ha:.1f} ha for about {eur(acquire)}, inside the {eur(budget)} land budget.")
+    elif pay and budget:
+        steps.append(f"Do not buy this one on the current land budget: it needs about {eur(acquire)}.")
+    if best and fundable and not established and hectares_now >= 0.5:
+        year = _first_cash_year(best["crop"])
+        steps.append(f"Plant about {hectares_now:.1f} ha of {best['crop']} with what is left"
+                     + (f" (about {eur(plant_ha)}/ha, {CAOF_SOURCE})." if plant_ha else "."))
+        if hectares_now < ha - 0.05:
+            steps.append(f"Leave the other {ha - hectares_now:.1f} ha until a later year. Do not borrow to plant it all at once.")
+        if year:
+            steps.append(f"The model has the first cash from new {best['crop']} around year {year}. "
+                         "That is a screening figure, not income you can spend.")
+    elif best and established:
+        steps.append(f"{best['crop'].capitalize()} is already growing. Plan the management, not a new planting, and check the volume the ad does not state.")
+    if scoring.has_term(full, scoring.EUCALYPTUS_WORDS, negations=False) or (site.get("eucalyptus") or 0) >= 0.3:
+        steps.append("Do not replant eucalyptus. New planting is normally restricted in Portugal (DL 96/2013); conversion to the crop above is the project.")
+    if not steps:
+        steps.append("Nothing to schedule until there is a price, a land budget and a crop the climate still supports.")
+
+    lines = [{"label": "Land budget", "value": eur(budget) if budget else "not set", "note": "Settings"}]
+    if pay:
+        lines.append({"label": "To acquire", "value": eur(acquire), "note": costs_label})
+        lines.append({"label": "Left for the work", "value": eur(max(left, 0)) if fundable else "€0",
+                      "note": "after buying" if fundable else "over budget"})
+    if best:
+        lines.append({"label": "Crop the climate still allows", "value": best["crop"],
+                      "note": f"about €{best['eur_ha_year']:,}/ha a year in the model"})
+    lines.append({"label": "Plant with what's left", "value": f"{hectares_now:.1f} ha" if fundable else "0 ha",
+                  "note": f"of {ha:.1f} ha advertised"})
+    return {"fundable": fundable, "headline": headline, "lines": lines, "steps": steps,
+            "unknowns": unknowns, "budget": budget, "acquire": round(acquire),
+            "left": round(max(left, 0)) if fundable else 0,
+            "hectares": round(ha, 2), "hectares_now": round(hectares_now, 2),
+            "crop": best["crop"] if best else None, "note": PLAN_NOTE}

@@ -150,6 +150,12 @@ def _other_lines(value: float, country: str) -> list[dict]:
 
 
 RENT_MAX_M2 = 200            # a bigger house does not rent for proportionally more
+# What a landlord keeps of the rent: the rest goes on the property tax (IMI and
+# its equivalents), insurance, repairs, the agent and the months it stands
+# empty. One planning figure, not a calculation of this landlord's tax.
+RENT_RUNNING_SHARE = 0.20    # property tax, insurance, repairs, management
+RENT_VACANCY_SHARE = 0.08    # about a month a year between tenants
+NET_RENT_SHARE = 1 - RENT_RUNNING_SHARE - RENT_VACANCY_SHARE
 
 
 # The fee lines are one figure; the bid calculator plans on this much more at
@@ -191,10 +197,13 @@ def rent(item: dict, cost: float) -> dict | None:
     monthly = round(used * eur_m2)
     if monthly <= 0:
         return None
+    gross = 1200 * monthly / cost
     return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
-            "yield_pct": round(1200 * monthly / cost, 1), "payback_years": round(cost / (12 * monthly), 1),
+            "yield_pct": round(gross, 1), "net_yield_pct": round(gross * NET_RENT_SHARE, 1),
+            "payback_years": round(cost / (12 * monthly), 1),
             "note": f"€{eur_m2:.2f}/m² a month in {place} ({source}), "
-                    f"over {used:.0f} m²; gross, before property tax, insurance and empty months"}
+                    f"over {used:.0f} m²; net of about {RENT_RUNNING_SHARE:.0%} running costs "
+                    f"and {RENT_VACANCY_SHARE:.0%} empty months, before income tax"}
 
 
 def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) -> dict | None:
@@ -248,7 +257,7 @@ def as_text(est: dict | None) -> str:
         rows.append(f"- All-in: €{est['all_in']['low']:,.0f}–{est['all_in']['high']:,.0f}")
     if est.get("rent"):
         r = est["rent"]
-        rows.append(f"- Rent: about €{r['monthly']:,.0f} a month, {r['yield_pct']}% a year gross, "
-                    f"paid back in {r['payback_years']} years ({r['note']})")
+        rows.append(f"- Rent: about €{r['monthly']:,.0f} a month, {r['yield_pct']}% a year gross and "
+                    f"{r['net_yield_pct']}% net, paid back in {r['payback_years']} years ({r['note']})")
     rows.append(f"- {est['note']}")
     return "\n".join(rows)

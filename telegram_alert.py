@@ -13,7 +13,7 @@ import logging
 import requests
 
 from common import FLAGS, days_left, effective_end, parse_dt, utcnow
-from db import alerted_at, load_listings, mark_alerted, not_yet_alerted
+from db import alerted_at, load_best, mark_alerted, not_yet_alerted
 
 LOG = logging.getLogger("telegram")
 
@@ -85,8 +85,9 @@ def format_listing(item: dict) -> str:
     flag = FLAGS.get(item.get("country") or "PT", "\U0001f30d")
     loc = ", ".join(filter(None, [item.get("concelho"), item.get("district")]))
     ends = (item.get("date_end") or "")[:10]
+    goal = f" · {item['mode_label']}" if item.get("mode_label") else ""
     return (
-        f"{flag} <b>New opportunity — Score {item['score']:.0f}/100</b>\n\n"
+        f"{flag} <b>New opportunity — Score {item['score']:.0f}/100{_esc(goal)}</b>\n\n"
         f"<b>{_esc((item.get('title') or '?')[:80])}</b>\n"
         f"\U0001f4cd {_esc(loc)}\n"
         f"\U0001f4b6 {_money(item.get('price'))}{f'  ·  Ends {_esc(ends)}' if ends else ''}"
@@ -117,7 +118,8 @@ def format_digest(items: list[dict], total: int, cfg: dict) -> str:
         flag = FLAGS.get(it.get("country") or "PT", "")
         link = (f"<a href=\"{_esc(it['url'])}\">{_esc((it.get('title') or '?')[:55])}</a>"
                 if it.get("url") else _esc((it.get("title") or "?")[:55]))
-        lines.append(f"{flag} <b>{it['score']:.0f}</b> · {_money(it.get('price'))} · {link}")
+        goal = f" · {_esc(it['mode_label'])}" if it.get("mode_label") else ""
+        lines.append(f"{flag} <b>{it['score']:.0f}</b> · {_money(it.get('price'))} · {link}{goal}")
     if total > len(items):
         lines.append(f"\n…and {total - len(items)} more.")
     lines.append(f"\nDashboard: {_dashboard_url(cfg)}")
@@ -131,10 +133,9 @@ def alert_new_listings(db, cfg: dict, score_fn=None):
     if not tg:
         return
     min_sc = tg.get("min_score", 75)
-    max_price = cfg.get("max_price", 100000)
-
-    candidates = [it for it in load_listings(db, filters=cfg.get("filters"))
-                  if it["score"] >= min_sc and (it.get("price") or 0) <= max_price]
+    # Each goal, at its own budget (db.load_best): a good let or a cheap plot
+    # used to be judged as somewhere to live, and never alerted.
+    candidates = [it for it in load_best(db, filters=cfg.get("filters")) if it["score"] >= min_sc]
     fresh_ids = not_yet_alerted(db, CHANNEL, [it["id"] for it in candidates])
     fresh = sorted((it for it in candidates if it["id"] in fresh_ids), key=lambda it: -it.get("rank", it["score"]))
     if not fresh:
@@ -178,7 +179,7 @@ def price_cuts(db, cfg: dict, *, min_pct: float = 5, min_score: float = 60, now=
     history = _price_history(db)
     told = alerted_at(db, CUT_CHANNEL)
     out = []
-    for it in load_listings(db, filters=cfg.get("filters"), now=now):
+    for it in load_best(db, filters=cfg.get("filters"), now=now):
         rows = history.get(it["id"]) or []
         if len(rows) < 2:
             continue
@@ -247,7 +248,7 @@ def upcoming_deadlines(db, cfg: dict, *, within_days: float = 4, min_score: floa
     now = now or utcnow()
     procs, ids = _sent_processes(db)
     out = []
-    for it in load_listings(db, filters=cfg.get("filters"), now=now):
+    for it in load_best(db, filters=cfg.get("filters"), now=now):
         left = days_left(it.get("date_end"), now)
         if left is None or not (0 < left <= within_days):
             continue
@@ -340,7 +341,7 @@ def shortlist_reminders(db, cfg: dict, now=None) -> list[tuple[dict, str, str]]:
     and have not had that reminder."""
     now = now or utcnow()
     due = []
-    for it in load_listings(db, filters=cfg.get("filters"), now=now, include_hidden=True, apply_min_score=False):
+    for it in load_best(db, filters=cfg.get("filters"), now=now, include_hidden=True, apply_min_score=False):
         if it.get("status") != "shortlisted":
             continue
         left = days_left(it.get("date_end"), now)
@@ -407,7 +408,7 @@ def last_calls(db, cfg: dict, now=None) -> list[dict]:
     floor = tg.get("lastcall_min_score", tg.get("min_score", 75))
     _, offered = _sent_processes(db)
     due = []
-    for it in load_listings(db, filters=cfg.get("filters"), now=now):
+    for it in load_best(db, filters=cfg.get("filters"), now=now):
         left = days_left(it.get("date_end"), now)
         if left is None or not (0 < left * 24 <= LAST_CALL_HOURS):
             continue

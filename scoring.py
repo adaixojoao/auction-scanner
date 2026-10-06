@@ -16,7 +16,7 @@ import math
 import re
 from datetime import datetime
 
-from common import (days_left, find_area, find_terms, has_term, normalize,
+from common import (days_left, effective_end, find_area, find_terms, has_term, normalize,
                     price_to_pay as _pay, term_regex, utcnow)
 import prices
 from prices import place_key as _place_key
@@ -90,7 +90,13 @@ VACANT_PATTERNS = [
 
 ACCESS_PATTERNS = [
     "sem acesso", "acesso condicionado", "sem servidão",
-    "encravado", "landlocked",
+    "encravado", "encravada", "landlocked",
+    # Land with no way in is worth little and cannot be logged or built on.
+    # Only Portuguese was matched, so Spanish and French plots never lost a point.
+    "sin acceso", "sin acceso rodado", "sin salida a camino", "enclavado", "enclavada",
+    "sans accès", "sans acces", "enclavé", "enclavée", "non desservi", "non desservie",
+    "senza accesso", "interclus*",
+    "zonder ontsluiting", "niet ontsloten",
 ]
 
 # Spanish social housing: only buyers who qualify, as their own home, at a capped resale price.
@@ -247,7 +253,9 @@ DEEP_FLOOD_M = 1.0
 # not the goal, so their score stays under the default minimum score (45) and
 # they are hidden unless you shortlist them.
 NOT_THE_GOAL_CAP = {"not a home or plot": 35, "unclear what it is": 40, "needs heavy work": 40,
-                    "isolated location": 40, "rejected:": 30}
+                    "isolated location": 40, "rejected:": 30,
+                    # …and what belongs to another goal: each tab ranks one thing.
+                    "a plot, not a place to live": 40, "a home, not land": 40}
 
 # Rejected outright, whatever else looks good (the owner's rules, Sept 2026).
 _REJECTS = [
@@ -610,31 +618,94 @@ def local_price(item: dict) -> tuple[float, str] | None:
                               parish=item.get("freguesia") if country == "PT" else None)
 
 
-def buyer_priorities(targets: dict | None = None) -> str:
-    """The goal in words, for the AI check: the same rules as score()."""
+def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
+    """One goal in words, for the AI check: the same rules as score(mode=…).
+
+    The check used to be told a single mixed wish, so it judged a buy-to-let
+    and a farm plot as if they had to be somewhere to live."""
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
+    if mode == "invest":
+        return _INVEST_PRIORITIES
+    if mode == "land":
+        return _LAND_PRIORITIES.format(min_m2=f"{t['rural_min_m2']:,.0f}",
+                                       max_eur_m2=f"{t['rural_max_eur_m2']:.2f}",
+                                       max_eur_ha=f"{t['rural_max_eur_m2'] * 10000:,.0f}")
+    if mode == "forest":
+        return _FOREST_PRIORITIES.format(min_ha=FOREST_MIN_M2 // 10000, roi=f"{FOREST_ROI_TARGET:.0%}",
+                                         years=FOREST_ROI_YEARS)
     return (
-        "Homes (houses or flats) and plots at very low prices. A MUST: somewhere to swim (the sea, a lake "
+        "A home (a house or a flat) to live in, at a very low price — not a plot, not a shop or a "
+        "garage. A MUST: somewhere to swim (the sea, a lake "
         "or a real river, not a stream) within 1.5 km. Prefer western continental Europe "
         "(mainland Portugal, Spain, France, Benelux, Germany, Austria, Switzerland, Italy); "
         "islands (Azores, Madeira, Canaries, Balearics, Corsica, Sicily, Sardinia) and "
         "Central/Eastern Europe sit a flat step below an otherwise equal listing. In order of "
         "preference: a house in "
-        "good condition in a great location well under market price; a large farm plot next to "
-        "water (river, stream, lake, reservoir) that is very cheap; a house needing some repairs, "
-        "dirt cheap, in a great location; a medium farm plot next to water, dirt cheap; a house "
-        "in good condition, dirt cheap, in an ordinary location. When the listing does not say "
-        "the condition, treat it as needing work (not as a sound home). Rural plots only if at least "
-        f"{t['rural_min_m2']:,.0f} m² and cheap (at most €{t['rural_max_eur_m2']:.2f}/m², about "
-        f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare). Not wanted: small or partial homes "
-        "or plots; homes needing heavy work (ruins, full rebuilds) unless they come with a big "
-        "farm plot that carries the value; expensive homes; isolated or bad locations; timeshares "
+        "good condition in a great location well under market price; a house needing some repairs, "
+        "dirt cheap, in a great location; a house in good condition, dirt cheap, in an ordinary "
+        "location. When the listing does not say "
+        "the condition, treat it as needing work (not as a sound home). A plot is judged on the "
+        "Investment land goal instead, where land of at least "
+        f"{t['rural_min_m2']:,.0f} m² at most €{t['rural_max_eur_m2']:.2f}/m² (about "
+        f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare) is what counts. Not wanted: small or partial homes; "
+        "homes needing heavy work (ruins, full rebuilds); expensive homes; isolated or bad "
+        "locations; timeshares "
         "(a few weeks a year); shops, garages, storage, offices and other commercial premises "
         "(bedrijfsruimte, lojas). Without a published price — unless it is a sealed-bid or "
         "private-negotiation sale where you name the offer — the listing cannot be judged for "
         "cheapness and stays out of the top. Water is only a plus where the land does not flood; "
         "a home in a flood zone is a risk."
     )
+
+
+_INVEST_PRIORITIES = (
+    "A home (a house or a flat) bought to make money on, not to live in: the gap between what it "
+    "costs all-in — the price plus the transfer tax, the notary and registry, and the work it "
+    "needs — and what homes sell for in that municipality, plus what it would let for. Wanted: far "
+    "below the local price per m² after those costs; a net rental yield (after running costs and "
+    "empty months) worth having; near the sea for a holiday let; a forced sale (court, tax or "
+    "social security) or a bank selling what it repossessed, because those must sell. A sitting "
+    "tenant is income from day one but makes it harder to resell and the rent may be below market: "
+    "say which it is here. Not wanted: a gap so wide it cannot be real (a share of the property, a "
+    "ruin sold as a home, an area that is really the plot) — say what to check; a flat too small "
+    "to let; somewhere the heat by 2071-2100 or a flood zone will take the value away. When the "
+    "listing does not say the condition, treat it as needing work. Judge the money, not whether "
+    "the buyer would enjoy living there."
+)
+
+_LAND_PRIORITIES = (
+    "A plot bought as an investment, not to live on and not to farm by hand. What matters is the "
+    "price per hectare against what land actually sells for in that district, so say if you think "
+    "the comparison is wrong. Wanted: at least {min_m2} m², at most €{max_eur_m2}/m² (about "
+    "€{max_eur_ha} per hectare); water on or beside it; a road a lorry can use; a town near "
+    "enough that somebody will buy it from you; building land (urban, with a licence) is worth "
+    "more than rustic land because anyone can buy it. Forestry — timber, cork, nuts, carbon — is "
+    "upside on top, not the reason to buy. Not wanted: a plot too small; one with no access or "
+    "landlocked; one sold only together with another lot; a share rather than the whole; a price "
+    "per hectare so far below the local one that something is wrong (check the area, the access "
+    "and the title); eucalyptus (fire-prone; new planting is normally restricted in Portugal); "
+    "land the notice or a site check places in Natura 2000, REN or RAN, because planting, felling "
+    "and building normally need permits. Land that floods is not land next to water."
+)
+
+_FOREST_PRIORITIES = (
+    "Land for a forestry project: rustic or forest land of at least {min_ha} ha, as cheap per "
+    "hectare as possible, with a climate trees will still stand in 2100 (summer heat, water "
+    "stress, fire danger, and the summer water balance if the Atlantic current collapses). What "
+    "pays is the standing timber the ad states plus the best crop the climate allows, over "
+    "{years} years; the goal is about {roi} a year on the price including the buying costs. "
+    "Wanted: already wooded or easily planted, a gentle slope, a forest track a timber lorry can "
+    "reach, water on or by the land, cork or holm oak already growing, and a sale that can be "
+    "closed sooner rather than later — there is no deadline of this year. The cheaper the "
+    "hectare, the better. A plot from 5 ha can be a first buy; 10 ha is the project. Portugal "
+    "comes first: you can visit it and the paperwork is in your language. Not wanted: steep ground "
+    "only loggable by cable; land machines cannot reach; scrub and firewood-grade coppice; "
+    "eucalyptus (fire-prone, and new planting is normally restricted in Portugal — converting to "
+    "natives is the habitat case, not a timber crop); protected areas (Natura 2000, REN, RAN) "
+    "where felling and planting need permits; several scattered parcels; felling "
+    "rights sold without the land. Say plainly when the ad does not give the volume or the age of "
+    "the stand, because then the timber figure is a guess."
+)
 
 
 def off_western_continental(item: dict) -> str | None:
@@ -1134,7 +1205,9 @@ def score_detail(item: dict, now: datetime | None = None,
             return _score_invest(item, now, targets)
         if mode == "forest":
             return _score_forest(item, now, targets)
-        return _score_detail(item, now, targets)
+        # "home" and "land" buy the same kinds of thing on the same sale terms,
+        # so they share a scorer; what each wants decides the rest.
+        return _score_detail(item, now, targets, "land" if mode == "land" else "home")
     finally:
         _WEIGHTS.reset(token)
 
@@ -1189,7 +1262,8 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
         reasons.append(f"price doubtful (€{pay:,.0f} for {_ha(area)}) — check the price and area")
 
 
-def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
+def _score_detail(item: dict, now: datetime | None, targets: dict | None,
+                  mode: str = "home") -> tuple[float, list[str]]:
     s = 50.0
     reasons: list[str] = []
     caps: list[float] = []
@@ -1245,9 +1319,16 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
             reasons.append("size unknown — confirm the area before it can rank")
 
     if kind == "home":
-        s += 10
-        reasons.append("home")
-        s += _home_points(item, full, area, pay, reasons, caps)
+        if mode == "land":
+            reasons.append("a home, not land — see My home or Investment home")
+        else:
+            s += 10
+            reasons.append("home")
+            s += _home_points(item, full, area, pay, reasons, caps)
+    elif kind in ("urban_plot", "rural_plot") and mode == "home":
+        # A plot is not somewhere to live. It is ranked on Investment land,
+        # where it is judged on what land costs there, not on its condition.
+        reasons.append("a plot, not a place to live — see Investment land")
     elif kind == "urban_plot":
         s += 8
         reasons.append("urban plot" + (f" ({_ha(area)})" if area else ""))
@@ -1255,8 +1336,10 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
             caps.append(curve(area, SMALL_URBAN_PLOT_CAP))
             if area < SMALL_URBAN_PLOT_M2:
                 reasons.append(f"small plot ({area:.0f} m²)")
+        s += _land_points(item, kind, area, pay, full, reasons, caps)
     elif kind == "rural_plot":
         s += _rural_points(area, pay, t, reasons, full, caps, item)
+        s += _land_points(item, kind, area, pay, full, reasons, caps)
     elif kind == "other":
         s -= 25
         reasons.append("not a home or plot")
@@ -1763,6 +1846,77 @@ def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: st
     return s
 
 
+# ─── A plot as an investment (the "land" goal) ───────────────────────
+# What you make on a plot is the gap between its price per hectare and what
+# land sells for there, so that gap carries the most points. Size, access and
+# a town within reach decide whether anyone will buy it from you.
+LAND_DISCOUNT_POINTS = [(0.1, 0), (0.3, 10), (0.5, 20), (0.7, 28)]   # share below the local land price
+LAND_DISCOUNT_TRUST = 0.8     # beyond this the gap is not believed: wrong area, a share, no access
+LAND_TOO_CHEAP = -12          # …and past it, it costs until someone checks why
+# Kilometres from the middle of the plot's own town: a buyer has to want it.
+LAND_TOWN_POINTS = [(2, 8), (10, 5), (25, 0), (50, -8)]
+LAND_BUILDING_PLOT = 6        # building land resells to anyone; rustic land only to a neighbour
+LAND_FORESTRY_UPSIDE = [(0.05, 0), (0.10, 4), (0.20, 8)]   # the forestry return, as an extra on top
+
+
+def _land_points(item: dict, kind: str, area: float, pay: float, full: str,
+                 reasons: list[str], caps: list[float]) -> float:
+    """What a plot is worth as an investment: cheap against what land sells for
+    there, reachable, and with whatever a forestry project would add on top."""
+    s = 0.0
+    import land_prices
+    fair = land_prices.land_value(item)
+    if fair and pay and area:
+        worth = fair["eur_ha"] * (area / 10000)
+        disc = (worth - pay) / worth
+        s += curve(min(disc, LAND_DISCOUNT_TRUST), LAND_DISCOUNT_POINTS) * w("price")
+        reasons.append(f"land here sells for €{fair['eur_ha']:,.0f}/ha ({fair['label']}): "
+                       + (f"{disc:.0%} below that" if disc >= 0.01 else "not below that"))
+        if disc > LAND_DISCOUNT_TRUST:
+            s += LAND_TOO_CHEAP
+            reasons.append("so far below what land sells for there usually means a share, no access or a "
+                           "wrong area — check why")
+    if kind == "urban_plot":
+        s += LAND_BUILDING_PLOT
+        reasons.append("building land — resells to anyone, not only to a neighbour")
+    near = item.get("town_distance")
+    if near and near.get("km") is not None:
+        s += curve(near["km"], LAND_TOWN_POINTS)
+        reasons.append(near["text"])
+
+    # Forestry is one use of the plot, not the only reason to buy it: whatever
+    # a project would return is an extra on top of the land's own price.
+    upside = _forestry_upside(item, area, pay, full)
+    if upside:
+        s += curve(upside["roi"], LAND_FORESTRY_UPSIDE)
+        reasons.append(upside["text"])
+    s += _habitat_points(item, full, reasons, forest=False)
+    return s
+
+
+def _forestry_upside(item: dict, area: float, pay: float, full: str) -> dict | None:
+    """{"roi", "text"}: what a forestry project on this plot would return a year
+    (the Forestry tab's own figures), when the plot is big enough for one."""
+    if not pay or area < FOREST_MIN_M2 or (item.get("country") or "").upper() not in FOREST_COUNTRIES:
+        return None
+    climate = item.get("climate") or {}
+    if not climate:
+        return None
+    import forestry
+    ha = area / 10000
+    crops = forestry.options(climate, item.get("country"), ha,
+                             water_on_land=bool(water_nearby(full, item)),
+                             existing=forestry.growing(full),
+                             trees=forestry.trees_for_item(item))
+    timber = forestry.standing_timber(full, item.get("country"), ha)
+    costs, _ = buying_costs(item, full)
+    roi = forest_return(pay * (1 + costs), ha, crops[0] if crops else None, timber)
+    if roi is None or roi <= 0:
+        return None
+    return {"roi": roi, "text": f"forestry on it would return about {roi:.1%} a year "
+                                f"over {FOREST_ROI_YEARS} years — see Forestry"}
+
+
 def _known_town(item: dict) -> str | None:
     """The listing's town, if it is one of the towns we have local prices for
     (district capitals and cities: places with services). In Portugal
@@ -1880,23 +2034,30 @@ def wishes(item: dict) -> list[dict]:
     return out
 
 
-# ─── Three goals (2026-10-05) ────────────────────────────────────────
-# The owner looks for three different things, each ranked on its own:
-#   home    — a place to live (the rules above: swim, five wishes, AMOC…);
-#   invest  — a home to make money on: far below the local price, by the beach,
-#             a good rental yield, a forced or auction sale;
-#   forest  — land for forestry: rustic or forest land of 10 ha or more,
-#             cheapest per hectare, water on or by it, a climate trees will stand.
-MODES = {"home": "My home", "invest": "Investment", "forest": "Forestry"}
+# ─── The owner's goals, each ranked on its own (2026-10-05) ──────────
+#   home    — a place to live: a home, not a plot (swim, five wishes, AMOC…);
+#   invest  — a home to make money on: far below the local price after the
+#             taxes and the work, a net rental yield, a forced or bank sale;
+#   land    — a plot as an investment: cheap per hectare against what land
+#             sells for there, big enough, reachable, with its forestry upside;
+#   forest  — a forestry project on that land: 10 ha or more, a climate trees
+#             will stand, timber and crops over FOREST_ROI_YEARS.
+MODES = {"home": "My home", "invest": "Investment home", "land": "Investment land",
+         "forest": "Forestry"}
 
 INVEST_DISCOUNT_POINTS = [(0.1, 0), (0.3, 12), (0.5, 25), (0.7, 35)]     # share below the local price
-INVEST_YIELD_POINTS = [(4, 0), (7, 8), (10, 16), (15, 24)]               # gross rent a year, % of the cost
+INVEST_YIELD_POINTS = [(3, 0), (5, 8), (7, 16), (11, 24)]                # net rent a year, % of the cost
 INVEST_BEACH_POINTS = [(0.5, 20), (1, 16), (3, 10), (10, 3), (20, 0)]    # km to the sea
 INVEST_FORCED_SALE = 8          # a court, tax or social-security sale
 INVEST_BANK_SALE = 4            # a bank selling what it repossessed
 INVEST_VALUE_MAX_M2 = 250       # m² of building valued at most: a bigger "area" is usually the plot
 INVEST_DISCOUNT_TRUST = 0.7     # beyond this share below the local price the gap is not believed
 INVEST_TOO_CHEAP = -15          # and 15 points beyond it, it costs: something is wrong until checked
+# A sitting tenant: income from the first day, but the flat cannot be shown, the
+# rent is often an old one and a buyer wants it empty. It costs less when the
+# rent is known than when nothing about the letting is.
+INVEST_TENANT_WITH_RENT = -8
+INVEST_TENANT_UNKNOWN = -25
 
 
 def _occupied(item: dict, full: str) -> bool:
@@ -1913,34 +2074,52 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         return 0.0, [skip]
     kind = property_kind(item)
     if kind != "home":
-        return 0.0, ["not a home — see Forestry for land"]
+        return 0.0, ["not a home — see Investment land"]
     s, reasons, caps = 50.0, [], []
     area = item.get("area_m2") or find_area(title) or find_area(desc) or 0
     pay = _pay(item)
+    likely = item.get("predicted_final")
+    if likely and likely["price"] > pay * 1.02:
+        pay = likely["price"]
+        reasons.append(likely["text"])
     _doubts(item, kind, pay, area, full, reasons, caps)
     if item.get("unlocated"):
         caps.append(UNCHECKED_CAP)
         reasons.append("location unknown — check it")
 
+    # What it really takes to own it: the price, the transfer tax, the notary
+    # and registry, and the work the condition implies (costs.py). A gap
+    # measured on the bare price is not a profit.
+    import costs
+    # Only INVEST_VALUE_MAX_M2 of building is valued, so only that much is
+    # taxed, renovated and let: a bigger "area" is the plot, not floor space.
+    building = {**item, "kind": kind, "area_m2": min(area, INVEST_VALUE_MAX_M2) if area else area}
+    est = costs.estimate(building, bid=pay) if pay else None
+    all_in = pay
+    if est:
+        all_in = (est["all_in"]["low"] + est["all_in"]["high"]) / 2 if est["all_in"] else est["total"]
+        reasons.append(f"€{all_in:,.0f} all-in (price, taxes and fees"
+                       + (", and the work it needs)" if est["all_in"] else ")"))
+
     found = local_price(item) if area else None
-    if found and pay:
+    if found and all_in:
         # A listing's area is often the plot: value at most INVEST_VALUE_MAX_M2 of building.
         factor, why = local_value_factor(item)
         mv = found[0] * min(area, INVEST_VALUE_MAX_M2) * factor
-        disc = (mv - pay) / mv
+        disc = (mv - all_in) / mv
         s += curve(min(disc, INVEST_DISCOUNT_TRUST), INVEST_DISCOUNT_POINTS) * w("price")
         if disc > 0.1:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
-            reasons.append(f"{disc:.0%} below local prices ({found[1]}{adjusted})")
+            reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
         if disc > INVEST_DISCOUNT_TRUST + 0.15:
             s += INVEST_TOO_CHEAP
             reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
                            " — check why")
-    import costs
-    rent = costs.rent({**item, "kind": kind}, pay) if pay else None
+    rent = (est or {}).get("rent")
     if rent:
-        s += curve(rent["yield_pct"], INVEST_YIELD_POINTS)
-        reasons.append(f"rent about €{rent['monthly']:,.0f}/month: {rent['yield_pct']}% a year gross"
+        s += curve(rent["net_yield_pct"], INVEST_YIELD_POINTS)
+        reasons.append(f"rent about €{rent['monthly']:,.0f}/month: {rent['net_yield_pct']}% a year net of "
+                       f"running costs and empty months ({rent['yield_pct']}% gross)"
                        + (" (a town average — check rents there)" if rent["yield_pct"] > 15 else ""))
     beach = item.get("beach")
     if beach and beach.get("km") is not None:
@@ -1965,8 +2144,11 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         s -= 10
         reasons.append(f"small ({area:.0f} m²)")
     if _occupied(item, full):
-        s -= 25
-        reasons.append("occupied/tenanted — hard to resell or let")
+        # Not only a penalty: letting it is the point, and a tenant is already paying.
+        s += INVEST_TENANT_WITH_RENT if rent else INVEST_TENANT_UNKNOWN
+        reasons.append("tenanted — rent from day one, but it cannot be shown, the rent may be an old "
+                       "one and a buyer will want it empty" if rent else
+                       "occupied/tenanted, and no rent can be worked out — check the lease")
     c = item.get("climate") or {}
     if floods(c):
         s -= 15 * w("risks")
@@ -1982,7 +2164,14 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     return max(s, 0.0), reasons
 
 
-FOREST_MIN_M2 = 100_000          # 10 ha: the owner's minimum for a forestry project
+FOREST_MIN_M2 = 100_000          # 10 ha: the project. 5 ha can still be a first plot.
+FOREST_STARTER_M2 = 50_000       # below this the forestry tab says nothing
+FOREST_STARTER_CAP = 64          # a first plot stays under a real 10 ha project
+FOREST_CLOSES_SOON = 10          # an auction ending within 60 days
+FOREST_CLOSES_NEAR = 6           # within half a year: still early, no calendar-year cutoff
+FOREST_CLOSES_LATER = 2          # a live sale further out still counts, just less
+FOREST_PRIVATE_SALE = 6          # no end date: an offer can go out now
+FOREST_HOME_COUNTRY = 8          # Portugal: a visit and the paperwork are actually possible
 FOREST_DOUBTFUL_EUR_M2 = 0.015   # under €150 a hectare: a placeholder price ("999 €") or a wrong area
 FOREST_EUR_HA_POINTS = [(200, 30), (500, 24), (1000, 16), (2000, 6), (4000, -10), (8000, -25)]
 FOREST_SIZE_POINTS = [(10, 0), (20, 6), (50, 12), (100, 16)]              # hectares
@@ -2001,11 +2190,26 @@ FOREST_FLAGS = [
       "leña", "lenha"], -6, "coppice, scrub or firewood-grade wood — little timber value"),
     (["sans accès", "sans acces", "enclavé", "sin acceso", "sem acesso", "piste de", "pista de tierra",
       "acceso por pista", "caminho de terra"], -6, "poor access — check how timber trucks get in"),
-    (["natura 2000", "znieff", "zone protégée", "réserve naturelle", "espacio protegido", "espacio natural protegido",
-      "parque natural", "rede natura", "zona de protecção", "zona de proteção"], -5,
-     "protected area — planting and felling need permits"),
     (["non délimitées", "non delimitees", "diferentes parajes", "varias parcelas", "várias parcelas",
       "parcelles dispersées", "plusieurs îlots"], -4, "several separate plots — harder to manage"),
+]
+# Habitat constraints from the notice and from a stored site_check (Natura 2000 /
+# ZNIEFF). Never invented: no map hit means nothing is claimed, not "not protected".
+# Eucalyptus is fire-prone and new planting is normally restricted in Portugal
+# (DL 96/2013 as amended); it is not scored as a timber crop.
+EUCALYPTUS_WORDS = ["eucalipt*", "eucalyp*"]
+PROTECTED_LAND_WORDS = [
+    "natura 2000", "znieff", "zone protégée", "réserve naturelle",
+    "espacio protegido", "espacio natural protegido", "parque natural",
+    "rede natura", "zona de protecção", "zona de proteção",
+    "reserva ecológica nacional", "reserva ecologica nacional",
+    "reserva agrícola nacional", "reserva agricola nacional",
+    "área da ren", "area da ren", "áreas da ren", "areas da ren",
+    "área da ran", "area da ran",
+    "rede nacional de áreas protegidas",
+    "sítio de importância comunitária", "sitio de importancia comunitaria",
+    "zona especial de conservação", "zona de proteção especial",
+    "zona de especial protección",
 ]
 _SLOPE = re.compile(r"(?:pente|pendiente|declive|inclinaci[oó]n)\s+(?:de\s+|del\s+)?(?:\d{1,2}\s*(?:à|a|-)\s*)?(\d{2})\s*%",
                     re.I)
@@ -2013,6 +2217,7 @@ FOREST_STEEP_PCT = 40
 SITE_CABLE_SHARE = 0.4      # this much of the land over 60% slope: cable yarding only
 SITE_TRACK_M = 500          # further than this from a track a timber lorry can use
 SITE_MONTADO = 0.3          # this much montado: the cork is already growing
+SITE_EUCALYPTUS = 0.3       # this much eucalyptus on the COS map: fire, not a timber crop
 
 
 def forestry_growing(text: str) -> set[str]:
@@ -2024,6 +2229,37 @@ def _site_check(item: dict) -> dict | None:
     """The site check stored for a listing by the scan (site_check.py), if any."""
     import geo
     return geo._raw(item).get("site_check")
+
+
+def _habitat_points(item: dict, full: str, reasons: list[str], *, forest: bool) -> float:
+    """Natura / REN / RAN / eucalyptus from the notice or a stored site check.
+
+    A map miss is not 'not protected': only a named hit or the ad's own words
+    move the score. Eucalyptus is a fire and legal constraint, not a crop.
+    """
+    s = 0.0
+    site = _site_check(item)
+    names = [n for n in ((site or {}).get("protected") or []) if n]
+    if names:
+        where = "" if site.get("exact") else " around it"
+        label = names[0] if len(names) == 1 else f"{len(names)} protected sites ({names[0]})"
+        s -= 10 if forest else 8
+        reasons.append(f"site check: {label}{where} — planting, felling and building normally need permits")
+    elif has_term(full, PROTECTED_LAND_WORDS, negations=False):
+        s -= 5 if forest else 8
+        reasons.append("protected area — planting, felling and building normally need permits")
+    if has_term(full, EUCALYPTUS_WORDS, negations=False) or (
+            site and (site.get("eucalyptus") or 0) >= SITE_EUCALYPTUS):
+        s -= 12 if forest else 8
+        if site and (site.get("eucalyptus") or 0) >= SITE_EUCALYPTUS:
+            where = "" if site.get("exact") else " around it"
+            reasons.append(f"site check: {site['eucalyptus']:.0%} eucalyptus{where} — fire-prone; "
+                           "new planting is normally restricted in Portugal (DL 96/2013) — "
+                           "converting to natives is the habitat case, not a timber crop")
+        else:
+            reasons.append("eucalyptus — fire-prone; new planting is normally restricted in Portugal "
+                           "(DL 96/2013) — converting to natives is the habitat case, not a timber crop")
+    return s
 
 
 # What the best crop earns a year, as a share of the land's price per hectare.
@@ -2072,6 +2308,41 @@ FOREST_TIMBER_POINTS = [(0.3, 0), (0.8, 6), (1.0, 10), (1.2, 18), (1.6, 25)]
 FOREST_RETURN_POINTS = [(-0.01, -10), (0, -4), (0.02, 0), (0.05, 8), (0.10, 15)]
 
 
+def _forest_sooner(item: dict, now: datetime | None, reasons: list[str]) -> float:
+    """Points for a plot that can be bought sooner. There is no year deadline.
+
+    An auction ending soon ranks above one ending later; a private sale with no
+    date can be offered on now. A date next year is still a live sale. Portugal
+    ranks above the same plot abroad because a visit and the paperwork are
+    possible from here. Cheap land is scored separately, and outweighs timing.
+    """
+    now = now or utcnow()
+    s = 0.0
+    end = effective_end(item.get("date_end"))
+    if end and end > now:
+        days = (end - now).total_seconds() / 86400
+        if days <= 60:
+            s += FOREST_CLOSES_SOON
+            reasons.append(f"closes {end:%Y-%m-%d} — soon")
+        elif days <= 180:
+            s += FOREST_CLOSES_NEAR
+            reasons.append(f"closes {end:%Y-%m-%d} — before long")
+        else:
+            s += FOREST_CLOSES_LATER
+            reasons.append(f"closes {end:%Y-%m-%d} — later")
+    elif end is None:
+        s += FOREST_PRIVATE_SALE
+        reasons.append("no closing date — a private sale; you can make an offer now")
+    if (item.get("country") or "").upper() == "PT" and off_western_continental(item) is None:
+        s += FOREST_HOME_COUNTRY
+        reasons.append("Portugal — you can visit it and the paperwork is in your language")
+    likely = item.get("predicted_final") or {}
+    ratio = likely.get("ratio")
+    if ratio and ratio < 0.9 and not (likely.get("price") and likely["price"] > _pay(item) * 1.02):
+        reasons.append(f"similar sales closed around {ratio:.0%} of the base — still budget for the minimum bid")
+    return s
+
+
 def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     """Land for a forestry project: big, cheap per hectare, wet enough, fit for trees."""
     title, desc = item.get("title") or "", item.get("description") or ""
@@ -2087,10 +2358,15 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         kind = "rural_plot"                        # a house on a big estate: the value is the land
     if kind not in ("rural_plot", "urban_plot"):
         return 0.0, ["not land"]
-    if area < FOREST_MIN_M2:
-        return 0.0, [f"{_ha(area) if area else 'size unknown'} — under 10 ha"]
+    if not area or area < FOREST_STARTER_M2:
+        return 0.0, [f"{_ha(area) if area else 'size unknown'} — under 5 ha"]
+    starter = area < FOREST_MIN_M2
     s, reasons, caps = 50.0, [], []
+    if starter:
+        caps.append(FOREST_STARTER_CAP)
+        reasons.append(f"{_ha(area)} — a first plot, under 10 ha")
     pay = _pay(item)
+    s += _forest_sooner(item, now, reasons)
     _doubts(item, kind, pay, area, full, reasons, caps, land_floor=FOREST_DOUBTFUL_EUR_M2)
     if item.get("unlocated"):
         caps.append(UNCHECKED_CAP)
@@ -2101,7 +2377,8 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         s += curve(per_ha, FOREST_EUR_HA_POINTS) * w("price")
         reasons.append(f"€{per_ha:,.0f} a hectare")
     s += curve(ha, FOREST_SIZE_POINTS)
-    reasons.append(_ha(area))
+    if not starter:
+        reasons.append(_ha(area))
     if kind == "urban_plot":
         s += BUILDING_LAND
         reasons.append("building land, not rustic — dearer to hold and to plant")
@@ -2139,6 +2416,8 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         if site.get("forest_share") is not None:
             wooded = wooded or site["forest_share"] >= 0.5
             reasons.append(f"site check: {site['forest_share']:.0%} wooded{where}")
+
+    s += _habitat_points(item, full, reasons, forest=True)
 
     water = water_nearby(full, item)
     c = item.get("climate") or {}

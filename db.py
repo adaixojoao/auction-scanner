@@ -19,7 +19,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from common import (
-    LOG, effective_end, find_terms, normalize, parse_dt, safe_url, utcnow, utcnow_iso,
+    LOG, effective_end, find_terms, has_term, normalize, parse_dt, safe_url, utcnow, utcnow_iso,
 )
 
 DB_PATH = os.environ.get("AUCTION_SCANNER_DB") or os.path.join(
@@ -849,15 +849,23 @@ def last_ok_by_source(db: sqlite3.Connection) -> dict[str, datetime]:
 
 # ─── Reading: the one loader ─────────────────────────────────────────
 
-def filter_reason(item: dict, filters: dict | None) -> str | None:
-    """Why the user's config filters exclude this listing, or None."""
+def filter_reason(item: dict, filters: dict | None, mode: str = "home") -> str | None:
+    """Why the user's config filters exclude this listing, or None.
+
+    Occupancy keywords stay for a home to live in; on Investment home a sitting
+    tenant is scored as income (scoring._score_invest), not hidden.
+    """
     if not filters:
         return None
     countries = filters.get("countries") or []
     if countries and item.get("country") not in countries:
         return f"country {item.get('country')} not in filters.countries"
 
-    keywords = filters.get("exclude_keywords") or []
+    keywords = list(filters.get("exclude_keywords") or [])
+    if mode == "invest" and keywords:
+        from scoring import OCCUPANCY_PATTERNS
+        keywords = [k for k in keywords
+                    if not has_term(k, OCCUPANCY_PATTERNS, negations=False)]
     if keywords:
         hits = find_terms(f"{item.get('title') or ''} {item.get('description') or ''}", keywords)
         if hits:
@@ -914,9 +922,18 @@ _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
 
 
+def _land_market(db) -> dict:
+    """The median asking price per hectare of rural land, by country and
+    district, from the plots the scanner itself has seen (land_prices.py)."""
+    import land_prices
+    rows = db.execute("SELECT country, district, title, tipo, area_m2, price FROM listings "
+                      "WHERE price > 0 AND area_m2 >= ?", (land_prices.MIN_PLOT_M2,))
+    return land_prices.observed_index(rows)
+
+
 def _shared_lookups(db, now):
-    """(first prices, rounds index, towns, auction results): rebuilt when the day,
-    the database or the row counts of the tables they come from change."""
+    """(first prices, rounds index, towns, auction results, land market): rebuilt
+    when the day, the database or the row counts of the tables they come from change."""
     import geo
     import outcomes
     import rounds
@@ -927,7 +944,8 @@ def _shared_lookups(db, now):
         "(SELECT COUNT(*) FROM places WHERE lat IS NOT NULL), (SELECT COUNT(*) FROM auction_results)").fetchone())
     key = (path or id(db), now.date(), counts)
     if _SHARED["key"] != key:
-        _SHARED.update(key=key, value=(_first_prices(db), rounds.index(db), geo.town_index(db), outcomes.stats(db)))
+        _SHARED.update(key=key, value=(_first_prices(db), rounds.index(db), geo.town_index(db),
+                                       outcomes.stats(db), _land_market(db)))
     return _SHARED["value"]
 
 
@@ -937,7 +955,8 @@ def forget_scores() -> None:
     _SHARED.update(key=None, value=None)
 
 
-def _score_one(item: dict, now, filters, first_price, cases, towns, closes, climate_on, mode="home") -> float:
+def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land_market,
+               climate_on, mode="home") -> float:
     """Everything load_listings works out for one listing (kept in the score cache)."""
     import climate
     import geo
@@ -960,6 +979,7 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, clim
     item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
     item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
     item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
+    item["land_market"] = land_market        # what land goes for here (land_prices.py)
 
     rank, reasons = score_detail(item, now=now, targets=filters, mode=mode)
     sc = display_score(rank)
@@ -1001,12 +1021,12 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     offers = latest_offers(db)
     # first prices; rounds (all listings: they span sites and dates); where each
     # municipality's town is; what ended sales closed at. Shared, rebuilt when their tables change.
-    first_price, cases, towns, closes = _shared_lookups(db, now)
+    first_price, cases, towns, closes, land_market = _shared_lookups(db, now)
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     climate_on = climate.available()
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
     context = (now.date(), json.dumps(filters or {}, sort_keys=True, default=str), len(towns),   # weights: in filters
-               sum(len(v) for v in closes.values()), climate_on)
+               sum(len(v) for v in closes.values()), len(land_market), climate_on)
     if _SCORED_FOR[0] != context:
         _SCORED.clear()
         _SCORED_FOR[0] = context
@@ -1034,7 +1054,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if seen and ok and ok - seen > STALE_AFTER:
                 reason = f"stale: gone from {item['source']} since {seen:%Y-%m-%d}"
             elif item["status"] != "shortlisted":
-                reason = filter_reason(item, filters)
+                reason = filter_reason(item, filters, mode)
 
         if reason and not include_hidden:
             continue
@@ -1045,7 +1065,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             item.update(kept[1])
             sc = item["score"]
         else:
-            sc = _score_one(item, now, filters, first_price, cases, towns, closes, climate_on, mode)
+            sc = _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
+                            climate_on, mode)
             _SCORED[(mode, item["id"])] = (row_key, {k: item[k] for k in _DERIVED})
 
         if reason is None and min_score and sc < min_score and item["status"] != "shortlisted":
@@ -1058,3 +1079,31 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["is_recent"] = bool(seen_first and now - seen_first <= RECENT)
         items.append(item)
     return items
+
+
+def load_best(db: sqlite3.Connection, **kw) -> list[dict]:
+    """Every listing scored for the goal it suits best (scoring.MODES), with
+    `mode` and `mode_label` on each.
+
+    Listings pages rank one goal at a time; everything that speaks for the
+    whole app — alerts, the report, the Offers shortlist — asks this instead,
+    so a listing that is only interesting as a let or as a plot is not judged
+    as somewhere to live and silently dropped.
+    """
+    from common import mode_max_price
+    from config import load_config
+    from scoring import MODES
+    kw.pop("mode", None)
+    cfg = load_config()
+    best: dict[str, dict] = {}
+    for mode in MODES:
+        budget = mode_max_price(cfg, mode, cfg.get("max_price") or 0)
+        for item in load_listings(db, mode=mode, **kw):
+            # Each goal pays its own price: a listing over this goal's budget
+            # cannot be bought for it, whatever it scores.
+            if budget and (item.get("price") or 0) > budget:
+                continue
+            kept = best.get(item["id"])
+            if kept is None or item.get("rank", item["score"]) > kept.get("rank", kept["score"]):
+                best[item["id"]] = {**item, "mode": mode, "mode_label": MODES[mode]}
+    return list(best.values())

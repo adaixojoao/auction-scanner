@@ -26,6 +26,24 @@ def test_ended_sales_are_recorded_once_with_their_last_bid(db, add):
     assert outcomes.record_results(db, NOW) == 0
 
 
+def test_a_stale_bid_is_not_frozen_until_the_watch_has_had_time(db, add):
+    ended(db, add, 1, 10000, 9000, seen="2026-10-09T12:00:00", end="2026-10-10T10:00:00")
+    assert outcomes.record_results(db, NOW) == 0          # 2 h after the end: wait for the watch
+    later = datetime(2026, 10, 11, 0, 0, tzinfo=timezone.utc)
+    assert outcomes.record_results(db, later) == 1
+    assert db.execute("SELECT outcome FROM auction_results").fetchone()[0] == "unknown"
+
+
+def test_an_unknown_close_is_upgraded_once_the_last_bid_is_fresh(db, add):
+    ended(db, add, 1, 10000, 14000, seen="2026-09-20T09:00:00")
+    assert outcomes.record_results(db, NOW) == 1
+    assert db.execute("SELECT outcome FROM auction_results").fetchone()[0] == "unknown"
+    db.execute("UPDATE listings SET last_seen = ? WHERE id = 'eleiloes:e1'", ("2026-10-01T09:30:00",))
+    db.commit()
+    assert outcomes.record_results(db, NOW) == 1
+    assert tuple(db.execute("SELECT outcome, final_bid FROM auction_results").fetchone()) == ("sold", 14000)
+
+
 def test_a_live_sale_is_judged_on_what_similar_ones_closed_at(db, add):
     for n in range(8):                                   # houses in Viseu closed at 1.5× the base
         ended(db, add, n, 10000, 15000)
@@ -67,3 +85,19 @@ def test_the_closing_watch_reads_the_final_bid(db, add):
     assert outcomes.watch_closing(db, Session(), NOW) == 1
     row = db.execute("SELECT outcome, final_bid FROM auction_results WHERE listing_id='eleiloes:c1'").fetchone()
     assert tuple(row) == ("sold", 12500.0)
+
+
+def test_the_closing_watch_retries_a_sale_already_marked_unknown(db, add):
+    add("eleiloes", "c1", title="Moradia", price=10000, date_end="2026-10-10T11:30:00",
+        raw_json={"referencia": "NP1"})
+    outcomes.ensure_table(db)
+    db.execute("INSERT INTO auction_results (listing_id, source, outcome, recorded_at) VALUES (?,?,?,?)",
+               ("eleiloes:c1", "eleiloes", "unknown", "2026-10-10T11:40:00"))
+    db.commit()
+
+    class Session:
+        def get(self, url, **kw):
+            return FakeResponse(json_data={"item": {"lanceAtual": 18000.0, "dataFim": "2026-10-10T11:35:00"}})
+    assert outcomes.watch_closing(db, Session(), NOW) == 1
+    assert tuple(db.execute("SELECT outcome, final_bid FROM auction_results WHERE listing_id='eleiloes:c1'").fetchone()
+                 ) == ("sold", 18000.0)

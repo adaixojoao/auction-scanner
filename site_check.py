@@ -37,6 +37,7 @@ PT_COS_LAYER = "cos2025v1-s2"
 EEA_HRL = "https://image.discomap.eea.europa.eu/arcgis/rest/services/GioLandPublic/{}/ImageServer/getSamples"
 SAMPLE_POINTS = 49          # about a 7 × 7 grid over the land
 MONTADO = ("sobreiro", "azinheira")
+EUCALYPTUS = ("eucalipto", "eucalyptus")
 NATURA = ("https://bio.discomap.eea.europa.eu/arcgis/rest/services/ProtectedSites/Natura2000Sites/"
           "MapServer/2/query")
 SLOPE_CLASSES = [(30, "wheeled machines"), (60, "tracked or winch only"), (1000, "cable yarding only")]
@@ -204,6 +205,11 @@ def montado_share(cover: dict[str, float]) -> float:
     return sum(v for k, v in cover.items() if any(w in k.lower() for w in MONTADO))
 
 
+def eucalyptus_share(cover: dict[str, float]) -> float:
+    """The share of eucalyptus forest in a COS breakdown."""
+    return sum(v for k, v in cover.items() if any(w in k.lower() for w in EUCALYPTUS))
+
+
 # ─── Everywhere: EU forest type and tree cover ─────────────────────
 def eu_forest(session, shape_wgs84) -> dict | None:
     """{"broadleaf", "conifer", "no forest": share, "tree_cover_pct"} from the Copernicus
@@ -328,6 +334,9 @@ def describe(r: dict) -> list[str]:
     if cover:
         lines.append("land cover (DGT COS 2025): " + ", ".join(f"{v:.0%} {k}" for k, v in list(cover.items())[:5]))
         lines.append(f"montado (cork or holm oak): {montado_share(cover):.0%} of the land")
+        gum = eucalyptus_share(cover)
+        if gum:
+            lines.append(f"eucalyptus: {gum:.0%} of the land")
     if r.get("extraction") is None and r.get("slope") and r.get("tracks") is not None:
         est = access_estimate(r["slope"], r["tracks"].get("_nearest_m"))
         if est:
@@ -396,6 +405,7 @@ def summary(r: dict) -> dict:
            "lines": describe(r)}
     if r.get("pt_cover"):
         out["montado"] = round(montado_share(r["pt_cover"]), 2)
+        out["eucalyptus"] = round(eucalyptus_share(r["pt_cover"]), 2)
     e = r.get("eu_forest")
     if e:
         out["forest_share"] = round(1 - e["no forest"], 2)
@@ -405,12 +415,18 @@ def summary(r: dict) -> dict:
 
 
 def check_pending(db, items: list[dict], limit: int = SHORTLIST) -> int:
-    """Site-check the first `limit` listings (already ranked) that have none yet."""
+    """Site-check up to `limit` listings that have none yet (already ranked).
+
+    Walks past rows that are already checked or have no position, so a shortlist
+    of 20 already-checked plots does not block the rest of the land tab.
+    """
     import json
     import geo
     from common import LOG
     done = 0
-    for item in items[:limit]:
+    for item in items:
+        if done >= limit:
+            break
         if (item.get("country") or "").upper() not in CHECK_COUNTRIES:
             continue
         raw = geo._raw(item)
@@ -429,5 +445,5 @@ def check_pending(db, items: list[dict], limit: int = SHORTLIST) -> int:
         db.commit()
         done += 1
     if done:
-        LOG.info(f"Site check: {done} forestry listings")
+        LOG.info(f"Site check: {done} listings")
     return done

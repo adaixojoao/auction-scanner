@@ -26,9 +26,9 @@ from urllib.parse import urlsplit
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file
 
 import geo
-from common import COUNTRY_NAMES, FLAGS, make_session, price_to_pay, safe_url
+from common import COUNTRY_NAMES, FLAGS, make_session, mode_max_price, price_to_pay, safe_url
 from locks import lock_holder
-from db import connect, hidden_category, load_listings, set_listing_status, source_health
+from db import connect, hidden_category, load_best, load_listings, set_listing_status, source_health
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -251,9 +251,8 @@ def api_listings():
     climate_exact = args.get("climate_exact", "0") == "1"
     sort = args.get("sort", "score")
     mode = _mode(args)
-    if mode == "forest" and max_price:      # land is searched up to its own, higher limit
-        from common import land_max_price
-        max_price = max(max_price, land_max_price(_config(), _config().get("max_price") or max_price))
+    if max_price:      # each goal has its own budget: land and lets cost more
+        max_price = max(max_price, mode_max_price(_config(), mode, _config().get("max_price") or max_price))
     direction = args.get("dir", "desc")
     page = max(1, _num(args.get("page"), 1, int))
     per_page = min(1000, max(1, _num(args.get("per_page"), 50, int)))
@@ -358,6 +357,7 @@ def api_listing_detail():
         "bid_cap": _bid_cap(it),
         "climate": listing_info.climate_panel(it),
         "stewardship": _stewardship(it),
+        "project": _forest_project(it),
         "location": {**geo.location_confidence(it), "history": history, "country": it.get("country") or "PT"},
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
@@ -627,6 +627,14 @@ def _bid_cap(item: dict, cfg: dict | None = None) -> dict:
     return bidcap.for_item(item, cfg or _config())
 
 
+def _forest_project(item: dict, cfg: dict | None = None):
+    """The forestry project this plot can be on the land budget. None for a home."""
+    import forestry
+    from common import land_max_price
+    cfg = cfg or _config()
+    return forestry.project_plan(item, land_max_price(cfg, cfg.get("max_price") or 0))
+
+
 def _stewardship(item: dict, cfg: dict | None = None) -> dict:
     import stewardship
     return stewardship.build(item, cfg or _config())
@@ -676,6 +684,8 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
         "letter_types": types,
         "categoria": classify_property(it.get("title") or "", it.get("description") or "", area) or "IMOVEL",
         "kind": it.get("kind"),
+        "mode": it.get("mode") or "home",            # the goal it was scored for
+        "mode_label": it.get("mode_label") or "",
         "score": it["score"],
         "rank": it.get("rank", it["score"]),
         "reasons": it["reasons"],
@@ -720,7 +730,9 @@ def api_offers():
 
     db = get_db()
     try:
-        items = load_listings(db, filters=_config().get("filters"), include_hidden=True)
+        # Each listing for the goal it suits best: an offer is worth making on a
+        # good let or a cheap plot, not only on a home to live in.
+        items = load_best(db, filters=_config().get("filters"), include_hidden=True)
         logs = [dict(r) for r in db.execute("SELECT * FROM carta_log ORDER BY created_at DESC, id DESC")]
         checks = checklist.stored_all(db)
     finally:
@@ -732,7 +744,6 @@ def api_offers():
             if log["outcome"] == "pending" or (log.get("is_offer", 1) and log["outcome"] != "cancelled")}
     cfg = _config()
     min_score = (cfg.get("filters") or {}).get("min_score") or 45
-    budget = cfg.get("max_price") or 0
     size = max(1, _num(cfg.get("max_listings"), 100, int))
     shortlisted, candidates = [], []
     for it in items:
@@ -743,9 +754,11 @@ def api_offers():
             continue
         if it["hidden_reason"]:
             continue
-        # Strong candidates: your minimum score and budget, sales where the offer is a
-        # letter; online auctions and French court sales only if you shortlist them.
+        # Strong candidates: your minimum score for their goal (the budget is
+        # already applied by load_best), sales where the offer is a letter;
+        # online auctions and French court sales only if you shortlist them.
         pay = price_to_pay(it)
+        budget = mode_max_price(cfg, it.get("mode") or "home", cfg.get("max_price") or 0)
         if (it["score"] >= min_score and (not budget or pay <= budget) and channel(it) == "letter"
                 and classify_property(it.get("title") or "", it.get("description") or "",
                                       it.get("area_m2") or 0) is not None):
@@ -1179,15 +1192,20 @@ def api_analyze_property():
         return jsonify({"error": "No data"}), 400
     filters = _config().get("filters") or {}
     data = {**data, "targets": {k: filters.get(k) for k in ("rural_min_m2", "rural_max_eur_m2")}}
-    result = analyze_property(data)
-    if "verdict" in result and (_config().get("climate") or {}).get("bid_guardrail") and data.get("id"):
+    found = None
+    if data.get("id"):
         db = get_db()
         try:
-            found = load_listings(db, include_hidden=True, where="id = ?", params=(str(data["id"]),))
+            rows = load_best(db, include_hidden=True, where="id = ?", params=(str(data["id"]),))
         finally:
             db.close()
-        if found:
-            apply_climate_guardrail(result, _climate_of(found[0]))
+        found = rows[0] if rows else None
+    if found:
+        # Judge it against the goal it suits, not always against a home to live in.
+        data["mode"] = found.get("mode") or "home"
+    result = analyze_property(data)
+    if "verdict" in result and (_config().get("climate") or {}).get("bid_guardrail") and found:
+        apply_climate_guardrail(result, _climate_of(found))
     return jsonify(result), (502 if "verdict" not in result else 200)
 
 
@@ -1331,7 +1349,9 @@ def api_proponente():
 
 # What the Settings page may change: section → allowed keys (None = a scalar).
 EDITABLE = {
-    "max_price": None,
+    "max_price": None,            # one budget per goal (common.py)
+    "invest_max_price": None,
+    "land_max_price": None,
     "max_listings": None,
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
                 "rural_max_eur_m2", "weights"),

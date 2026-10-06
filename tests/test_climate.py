@@ -15,6 +15,11 @@ def with_climate(item, **c):
     return {**item, "climate": {"water_km": 0.5, **c}}      # somewhere to swim: not what these test
 
 
+def plot_score(item):
+    """A plot is ranked on the Investment land goal, not as somewhere to live."""
+    return score_detail(item, mode="land")
+
+
 def test_summers_hotter_than_35_by_2090_are_not_wanted():
     cool, reasons = score_detail(with_climate(HOME, heat={"ssp245_2081-2100": 31.0, "ssp585_2081-2100": 33.5,
                                                           "today": 29.0}))
@@ -41,15 +46,15 @@ def test_more_than_7_days_above_35_by_2090_are_not_wanted():
 
 
 def test_permanent_water_fire_flood_and_stress():
-    base, _ = score_detail(PLOT)
-    wet, reasons = score_detail(with_climate(PLOT, water_km=0.3))
+    base, _ = plot_score(PLOT)
+    wet, reasons = plot_score(with_climate(PLOT, water_km=0.3))
     assert wet - base >= 13 and "permanent water 0.3 km away" in reasons
-    approx, _ = score_detail(with_climate(PLOT, water_km=0.3, approx=True))
+    approx, _ = plot_score(with_climate(PLOT, water_km=0.3, approx=True))
     assert base < approx < wet
-    burnt, reasons = score_detail(with_climate(PLOT, fire={"count": 2, "years": [2017, 2022], "burnt_here": True,
-                                                           "km": 2}))
+    burnt, reasons = plot_score(with_climate(PLOT, fire={"count": 2, "years": [2017, 2022], "burnt_here": True,
+                                                         "km": 2}))
     assert burnt < base and "burnt since 2016 (2017, 2022) — EFFIS" in reasons
-    dry, reasons = score_detail(with_climate(PLOT, stress={"stress_2080": 4}))
+    dry, reasons = plot_score(with_climate(PLOT, stress={"stress_2080": 4}))
     assert dry < base and "water stress extremely high by 2080 (WRI Aqueduct)" in reasons
     flooded, reasons = score_detail(with_climate(HOME, flood_m=0.8))
     assert flooded < score_detail(with_climate(HOME))[0] and "in the 100-year flood zone (0.8 m) — JRC" in reasons
@@ -102,8 +107,8 @@ def test_future_fire_danger(tmp_path, monkeypatch):
     assert got == {"high_days_now": 27.0, "high_days_2090": 47.4}
     assert climate.fire_danger(45.0, 10.0) is None                      # off the grid
     climate._fire_danger.cache_clear()
-    calm, _ = score_detail(with_climate(PLOT, fire_danger={"high_days_2090": 10}))
-    risky, reasons = score_detail(with_climate(PLOT, fire_danger={"high_days_2090": 90, "high_days_now": 60}))
+    calm, _ = plot_score(with_climate(PLOT, fire_danger={"high_days_2090": 10}))
+    risky, reasons = plot_score(with_climate(PLOT, fire_danger={"high_days_2090": 90, "high_days_now": 60}))
     assert calm - risky >= 15 and "90 days a year of high fire danger by 2079-2098 (60 today) — Copernicus" in reasons
 
 

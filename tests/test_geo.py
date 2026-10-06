@@ -258,9 +258,12 @@ def test_water_is_asked_at_the_plot_and_about_the_village_and_counts_like_the_wo
     assert "around:1000,40.100000,-8.200000" in session.calls[1][2]["data"]["data"]    # about its village
     row = dict(db.execute("SELECT * FROM listings WHERE id='citius:w1'").fetchone())
     assert json.loads(row["raw_json"])["water_check"]["found"][0] == {"name": "Rio Alva", "kind": "river"}
-    wet, reasons = score_detail(row)
-    near, near_reasons = score_detail(dict(db.execute("SELECT * FROM listings WHERE id='citius:w2'").fetchone()))
-    dry, _ = score_detail({**row, "raw_json": json.dumps({"geo": {"lat": 40.1, "lon": -8.2, "precision": "street"}})})
+    # A plot is ranked on the Investment land goal, not as somewhere to live.
+    wet, reasons = score_detail(row, mode="land")
+    near, near_reasons = score_detail(dict(db.execute("SELECT * FROM listings WHERE id='citius:w2'").fetchone()),
+                                      mode="land")
+    dry, _ = score_detail({**row, "raw_json": json.dumps({"geo": {"lat": 40.1, "lon": -8.2, "precision": "street"}})},
+                          mode="land")
     assert wet > near > dry and "next to water (river Rio Alva, within 300 m on the map)" in reasons
     assert "near water (river Rio Alva, within about 1 km of the village on the map (approx.))" in near_reasons
     # Once each; nothing found is remembered too.

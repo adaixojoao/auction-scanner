@@ -16,7 +16,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from common import COUNTRY_NAMES, utcnow
-from db import load_listings, mark_alerted, not_yet_alerted
+from db import load_best, mark_alerted, not_yet_alerted
 from scoring import FORCED_SOURCES
 
 LOG = logging.getLogger("auction-scanner")
@@ -26,10 +26,6 @@ CHANNEL = "email"
 
 def _esc(v) -> str:
     return html.escape(str(v or ""), quote=True)
-
-
-def _in_budget(item, max_price) -> bool:
-    return (item.get("price") or 0) <= max_price and (item.get("current_bid") or 0) <= max_price
 
 
 def _send_email(notify_cfg: dict, subject: str, html_body: str, plain: str) -> bool:
@@ -95,8 +91,9 @@ def send_alerts(db, notify_cfg: dict, score_fn=None, max_price: float = 50000,
 
     min_score = notify_cfg.get("min_score", 60)
     now = utcnow()
-    alerts = [it for it in load_listings(db, filters=filters, now=now)
-              if it["score"] >= min_score and _in_budget(it, max_price)]
+    # Each goal at its own budget (db.load_best applies them), so max_price is
+    # no longer the one ceiling.
+    alerts = [it for it in load_best(db, filters=filters, now=now) if it["score"] >= min_score]
     if notify_cfg.get("send_on", "new") == "new":
         fresh = not_yet_alerted(db, CHANNEL, [it["id"] for it in alerts])
         alerts = [it for it in alerts if it["id"] in fresh]
@@ -168,7 +165,7 @@ def send_weekly_digest(db, notify_cfg: dict, score_fn=None, max_price: float = 5
         return
 
     now = utcnow()
-    scored = [it for it in load_listings(db, filters=filters, now=now) if _in_budget(it, max_price)]
+    scored = list(load_best(db, filters=filters, now=now))
     scored.sort(key=lambda it: -it.get("rank", it["score"]))
     top = scored[:top_n]
     if not top:

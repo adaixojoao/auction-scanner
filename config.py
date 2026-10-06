@@ -14,7 +14,11 @@ import os
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
 DEFAULTS = {
-    "max_price": 100000,
+    # One budget per goal (common.py). A scrape keeps anything under the
+    # highest of them; each tab, its alerts and its report section apply their own.
+    "max_price": 100000,          # a home to live in
+    "invest_max_price": 150000,   # a home to let or resell
+    "land_max_price": 100000,     # a plot (investment land and forestry)
     "max_bid": 100000,
     "max_listings": 100,          # Listings shows at most this many: the best first
 

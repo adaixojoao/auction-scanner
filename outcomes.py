@@ -7,8 +7,10 @@ twice the base, a plot in the interior below it. So:
 1. Recording. When a sale on a site with public bids (RESULT_SOURCES) ends, its
    last bid is kept in `auction_results`: from the scans (every ~2h) and from
    `watch_closing()`, which the scheduler runs every half hour to read the bids
-   of the e-leilões sales closing now. A sale last seen long before its end is
-   kept as "unknown" (not counted), one that ended without a bid as "no bids".
+   of the e-leilões sales closing now. A sale last seen long before its end is not frozen as "unknown" until
+`UNKNOWN_AFTER_H` after the end, so `watch_closing()` can still read the last
+bid. After that it is kept as "unknown" (not counted); one that ended without
+a bid as "no bids". An unknown row is upgraded if a later watch has a fresh bid.
 2. Learning. The final bid ÷ base of the ended sales, as a median, first for the
    same site, kind (home, plot…) and district, else the site and kind, else the
    site: the first group with at least MIN_GROUP sales.
@@ -30,7 +32,11 @@ RESULT_SOURCES = ("eleiloes", "financas")
 MIN_GROUP = 8
 FRESH_HOURS = 6          # a bid seen longer than this before the end is not the final one
 WATCH_BEFORE_MIN = 60    # watch_closing(): sales ending within this…
-WATCH_AFTER_H = 3        # …or that ended this long ago and have no result yet
+WATCH_AFTER_H = 12       # …or that ended this long ago and are still unknown
+# Do not freeze a sale as "unknown" until the closing watch has had this long
+# after the end. A scan every 12 h used to write "unknown" first, and the
+# watch then skipped the row forever — 107 of 164 ended e-leilões sales.
+UNKNOWN_AFTER_H = 12
 
 
 def ensure_table(db):
@@ -51,26 +57,39 @@ def ensure_table(db):
 
 
 def record_results(db, now=None) -> int:
-    """Keep the result of every public-bid sale that has ended since the last run."""
+    """Keep the result of every public-bid sale that has ended since the last run.
+
+    A sale already stored as sold / no bids is left alone. One stored as
+    unknown is upgraded when a later watch has a fresh last bid. A stale bid
+    is not frozen as unknown until UNKNOWN_AFTER_H after the end, so
+    watch_closing can still read it.
+    """
     from scoring import property_kind
     ensure_table(db)
     now = now or utcnow()
     marks = ",".join("?" * len(RESULT_SOURCES))
+    kept = {r[0]: r[1] for r in db.execute("SELECT listing_id, outcome FROM auction_results")}
     rows = db.execute(f"""
-        SELECT * FROM listings WHERE source IN ({marks}) AND date_end IS NOT NULL AND date_end < ?
-          AND id NOT IN (SELECT listing_id FROM auction_results)""",
+        SELECT * FROM listings WHERE source IN ({marks}) AND date_end IS NOT NULL AND date_end < ?""",
                       (*RESULT_SOURCES, now.strftime("%Y-%m-%dT%H:%M:%S"))).fetchall()
     done = 0
     for r in rows:
         item = dict(r)
+        prev = kept.get(item["id"])
+        if prev in ("sold", "no bids"):
+            continue
         end, seen = parse_dt(item["date_end"]), parse_dt(item.get("last_seen"))
         if not end or end > now:
             continue
         bid = item.get("current_bid") or 0
         if not seen or end - seen > timedelta(hours=FRESH_HOURS):
+            if now - end < timedelta(hours=UNKNOWN_AFTER_H):
+                continue
             outcome = "unknown"
         else:
             outcome = "sold" if bid > 0 else "no bids"
+        if prev == outcome:
+            continue
         db.execute("""INSERT OR REPLACE INTO auction_results (listing_id, source, country, district, concelho,
                           kind, base, final_bid, outcome, ended_at, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                    (item["id"], item["source"], item.get("country"), item.get("district"), item.get("concelho"),
@@ -89,8 +108,10 @@ def watch_closing(db, session=None, now=None) -> int:
     ensure_table(db)
     now = now or utcnow()
     rows = db.execute("""
-        SELECT id, raw_json FROM listings WHERE source = 'eleiloes' AND date_end BETWEEN ? AND ?
-          AND id NOT IN (SELECT listing_id FROM auction_results)""",
+        SELECT l.id, l.raw_json FROM listings l
+        LEFT JOIN auction_results r ON r.listing_id = l.id
+        WHERE l.source = 'eleiloes' AND l.date_end BETWEEN ? AND ?
+          AND (r.listing_id IS NULL OR r.outcome = 'unknown')""",
                       ((now - timedelta(hours=WATCH_AFTER_H)).strftime("%Y-%m-%dT%H:%M:%S"),
                        (now + timedelta(minutes=WATCH_BEFORE_MIN)).strftime("%Y-%m-%dT%H:%M:%S"))).fetchall()
     session = session or _eleiloes_session()

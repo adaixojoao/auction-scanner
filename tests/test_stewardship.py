@@ -35,6 +35,14 @@ def test_high_fire_risk_shows_fire_actions_and_do_nots():
     assert any("fire service" in q.lower() for q in plan["questions"])
 
 
+def test_eucalyptus_on_the_notice_is_a_conversion_opportunity_not_a_timber_crop():
+    item = {**PLOT, "title": "Eucaliptal", "description": "Povoamento de eucalipto",
+            "climate": MILD}
+    plan = stewardship.build(item, {})
+    gum = next(o for o in plan["opportunities"] if o["key"] == "eucalyptus")
+    assert "native woodland" in gum["text"] and "96/2013" in gum["text"]
+
+
 def test_water_stress_and_river_flood_conflict():
     dry = stewardship.build({**PLOT, "climate": {**MILD, "stress": {"stress_2080": 4}}}, {})
     assert any(r["key"] == "water_stress" for r in dry["risks"])

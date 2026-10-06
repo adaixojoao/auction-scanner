@@ -83,7 +83,7 @@ def build(item: dict, settings: dict | None = None) -> dict:
 
     suitability = _suitability(clim, flags, ha, loc_warn)
     risks = _risks(clim, flags, raw)
-    opportunities = _opportunities(flags, raw, country, profile, floods(raw))
+    opportunities = _opportunities(flags, raw, country, profile, floods(raw), item)
     days_90 = _days_90(flags, loc_warn)
     years_3 = _years_3(flags, ha, profile)
     do_not = _do_not(flags)
@@ -167,7 +167,8 @@ def _risks(clim: dict, flags: set, raw: dict) -> list[dict]:
     return out
 
 
-def _opportunities(flags: set, raw: dict, country: str, profile: dict, flood) -> list[dict]:
+def _opportunities(flags: set, raw: dict, country: str, profile: dict, flood,
+                   item: dict | None = None) -> list[dict]:
     out = []
     wet = raw.get("water_km")
     if wet is not None and wet <= 1.0 and not flood:
@@ -195,6 +196,14 @@ def _opportunities(flags: set, raw: dict, country: str, profile: dict, flood) ->
         out.append({"key": "regen", "title": "Post-fire natural regeneration",
                     "text": "After burns, natural regeneration and fuel-break design matter more than "
                             "quick replanting. Ask the fire service and a forester what is allowed."})
+    text = f"{(item or {}).get('title') or ''} {(item or {}).get('description') or ''}"
+    from common import has_term
+    from scoring import EUCALYPTUS_WORDS
+    if has_term(text, EUCALYPTUS_WORDS, negations=False):
+        out.append({"key": "eucalyptus", "title": "Replace eucalyptus with natives (verify locally)",
+                    "text": "The notice mentions eucalyptus. New planting of Eucalyptus spp. is normally "
+                            "restricted in Portugal (DL 96/2013); conversion to native woodland is the "
+                            "habitat case, not a timber crop. Ask ICNF before any felling or replanting."})
     return out
 
 
