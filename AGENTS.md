@@ -22,13 +22,33 @@ form for rows that already exist (see Citius's `-2` suffix, `id_prefix`).
 ## One score, one loader
 
 `scoring.score()` is the only scorer; the dashboard used to have its own copy
-that disagreed with the report. It encodes the owner's goal — homes and plots
-at very low prices; rural plots only big and cheap; homes in a good location
-without heavy work — and `scoring.property_kind()` is the one classifier
-(Offers and letters use it too). Keep changes to the score pointed at that goal,
-with a test, and keep `buyer_priorities()` (the AI check's copy) in step. Keywords go through `common.find_terms()`:
+that disagreed with the report. `scoring.property_kind()` is the one classifier
+(Offers and letters use it too). Keywords go through `common.find_terms()`:
 whole words, accent-insensitive, negation-aware. Never go back to `x in text`:
 that is how "desocupado" counted as occupied and "11/2023" as a 1/2 share.
+
+## One goal per tab, and one budget each
+
+The owner is buying four different things (`scoring.MODES`), and each is
+ranked on its own: a **home to live in**, a **home to let or resell**, a
+**plot as an investment**, and a **forestry project** on such a plot. A
+listing is judged only against the goal asked for, and says where it does
+belong ("a plot, not a place to live — see Investment land") instead of
+scoring badly as something it never was. Keep changes to a score pointed at
+*that* goal, with a test, and keep `buyer_priorities(targets, mode)` — the AI
+check's copy of the goal — in step with it.
+
+Everything that is not one of the Listings tabs — alerts, the report, the
+Offers shortlist, the AI check — reads `db.load_best()`, which scores each
+listing for the goal it suits best and tags it with `mode`. Never give those
+one goal's ranking: a flat worth letting and a cheap plot used to be scored as
+somewhere to live, fall under the minimum score and never be mentioned.
+
+Each goal has its own budget (`common.mode_max_price()`, set on Settings). A
+scan keeps anything under the highest of them (`common.scrape_max_price()`),
+because a listing thrown away at scrape time can serve no goal later; the caps
+are applied when a view shows it. Do not reintroduce a single `max_price` as
+the one ceiling.
 
 ## Money figures are estimates, in one place
 
@@ -43,6 +63,19 @@ round matcher and the estimate all call it.
 Every figure is shown as an estimate and says so, because the scanner does not
 know the VPT, the region's rate or the state of the building. Never present one
 as a fact, and never use one to decide a listing's score.
+
+`land_prices.py` is the same rule for what land costs. Outside France (whose
+forest price is published) no one publishes it, so the benchmark is the median
+**asking** price per hectare of the rural plots the scanner has itself seen in
+that district — labelled as such, and only once there are `MIN_PLOTS` of them.
+Where no figure can be honestly named it returns `None` and the score says
+nothing: a plot compared with the wrong kind of land shows a discount that is
+not there. Do not add a made-up table of land prices.
+
+Habitat status is the same rule: score it from the listing's own words and
+from a stored `site_check` (Natura 2000 / ZNIEFF), never invent a designation.
+A map miss is not "not protected". Eucalyptus is fire-prone and new planting
+is normally restricted in Portugal (DL 96/2013) — it is not a timber crop.
 
 ## A position is not a fact about the building
 

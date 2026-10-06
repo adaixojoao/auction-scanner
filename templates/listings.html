@@ -17,7 +17,8 @@
 
 <div class="tabs" id="modes" role="tablist" aria-label="What to rank for">
   <button data-mode="home" role="tab">My home</button>
-  <button data-mode="invest" role="tab">Investment</button>
+  <button data-mode="invest" role="tab">Investment home</button>
+  <button data-mode="land" role="tab">Investment land</button>
   <button data-mode="forest" role="tab">Forestry</button>
 </div>
 <p class="small muted" id="mode-note"></p>
@@ -88,11 +89,12 @@ const KIND_LABEL = {home: "home", urban_plot: "urban plot", rural_plot: "rural p
 const PER_PAGE = 50;
 const $ = id => document.getElementById(id);
 
-// Three goals, each ranked on its own (scoring.MODES).
+// Each goal ranked on its own (scoring.MODES).
 const MODE_NOTE = {
-  home: "A place to live: somewhere to swim within 1.5 km, your five wishes, mild winters if the Atlantic current fails.",
-  invest: "Homes to make money on: far below the local price, by the beach, a good rental yield, forced or bank sales.",
-  forest: "Land for forestry: rustic or forest land of 10 ha or more, cheapest per hectare, water on or by it, a climate trees will stand.",
+  home: "A home to live in — not a plot: somewhere to swim within 1.5 km, your five wishes, mild winters if the Atlantic current fails.",
+  invest: "Homes to make money on: far below the local price all-in (taxes, fees and the work), a net rental yield, by the beach, forced or bank sales.",
+  land: "Plots as an investment: cheap per hectare against what land goes for there, big enough, reachable, water on it — with the forestry upside on top.",
+  forest: "Land for a forestry project: the cheaper the hectare, the better, and the sooner the sale can close. 10 ha is the project, 5 ha can be a first plot. Portugal first — you can visit it. No deadline of this year.",
 };
 let mode = "home";
 try { mode = localStorage.getItem("listings-mode") || "home"; } catch (e) { /* private window */ }
@@ -220,6 +222,25 @@ function costsHtml(c) {
     <p class="small muted">${AS.esc(c.note)}</p>${rent}</div>`;
 }
 
+function projectHtml(d) {
+  const p = d.project;
+  if (!p) return "";
+  const lines = (p.lines || []).map(l =>
+    `<div class="fact"><span class="k">${AS.esc(l.label)}</span><span class="v">${AS.esc(l.value)}</span>
+     <span class="small muted">${AS.esc(l.note || "")}</span></div>`).join("");
+  const steps = (p.steps || []).map(t => `<li>${AS.esc(t)}</li>`).join("");
+  const unknowns = (p.unknowns || []).length
+    ? `<p class="small muted">Not known yet: ${AS.esc(p.unknowns.join("; "))}.</p>` : "";
+  return `<div class="guide">
+    <b>Forestry project on the land budget</b>
+    <p class="small">${AS.esc(p.headline || "")}</p>
+    <div class="facts">${lines}</div>
+    <ol class="small">${steps}</ol>
+    ${unknowns}
+    <p class="small muted">${AS.esc(p.note || "")}</p>
+  </div>`;
+}
+
 function stewardshipHtml(d) {
   const s = d.stewardship;
   if (!s || !s.available) return "";
@@ -337,6 +358,7 @@ function detailsHtml(d) {
       ${costsHtml(d.costs)}
       ${AS.bidCapHtml(d.bid_cap)}
       ${AS.climateHtml(d.climate)}
+      ${projectHtml(d)}
       ${stewardshipHtml(d)}
       ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${d.past_results ? `<div class="d-lots"><b>What auctions within ${d.past_results.km} km sold for</b>

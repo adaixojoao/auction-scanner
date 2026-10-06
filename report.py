@@ -1,9 +1,9 @@
 """
 report.py — the Markdown / Word / PDF report and the console summary.
 
-Everything reads through db.load_listings(), so the report shows exactly what
-the dashboard and the alerts show: no expired, duplicate, stale or filtered
-listings, one score per listing.
+Everything reads through db.load_best(), so the report shows exactly what the
+dashboard and the alerts show: no expired, duplicate, stale or filtered
+listings, each scored for the goal it suits best (scoring.MODES).
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 
 from common import COUNTRY_NAMES, COUNTRY_ORDER, LOG, days_left, utcnow
-from db import hidden_category, load_listings, source_health
+from db import hidden_category, load_best, load_listings, source_health
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -61,19 +61,24 @@ def _md_link(item, limit=160) -> str:
     return f"[{title}]({item['url']})" if item.get("url") else title
 
 
-def select(items, max_price: float, max_bid: float):
-    """Split listings into priced-within-budget per category, plus unpriced property."""
+def select(items, max_price: float, max_bid: float, budgets: dict | None = None):
+    """Split listings into priced-within-budget per category, plus unpriced property.
+
+    Each listing is judged against the budget of the goal it was scored for
+    (`budgets`, from common.mode_max_price): a home to let may cost more than
+    a home to live in, and a plot has its own ceiling."""
     categories = {cat: [] for cat in SECTION_NAMES}
     unknown_imoveis = []
     for item in items:
         price, bid = item.get("price"), item.get("current_bid") or 0
+        limit = (budgets or {}).get(item.get("mode"), max_price)
         # 0 is not a price. It used to sit in the ranked table as "?", so the
         # top of the report was unpriced court sales.
         if not price:
             if item["category"] == "imoveis":
                 unknown_imoveis.append(item)
             continue
-        if price <= max_price and bid <= max_bid:
+        if price <= limit and bid <= max(max_bid, limit):
             categories[item["category"]].append(item)
     for cat in categories:
         categories[cat].sort(key=lambda it: (-it.get("rank", it["score"]), (it["current_bid"] or 0) / it["price"]
@@ -83,7 +88,7 @@ def select(items, max_price: float, max_bid: float):
 
 
 def _table(lines, rows, *, with_country=False):
-    head = "| # | Score | " + ("Country | " if with_country else "") + \
+    head = "| # | Score | Goal | " + ("Country | " if with_country else "") + \
         "Title | Price | Bid | Location | Ends | Why |"
     lines.append(head)
     lines.append("|" + "---|" * (head.count("|") - 1))
@@ -91,15 +96,25 @@ def _table(lines, rows, *, with_country=False):
         country = f"{it.get('country')} | " if with_country else ""
         drop = f" ↓{it['price_drop_pct']:.0f}%" if it.get("price_drop_pct") else ""
         lines.append(
-            f"| {i} | {_shown_score(it)} | {country}{_md_link(it)} | {_money(it['price'])}{drop} | "
+            f"| {i} | {_shown_score(it)} | {md_cell(it.get('mode_label') or '-')} | "
+            f"{country}{_md_link(it)} | {_money(it['price'])}{drop} | "
             f"{_money(it['current_bid']) if it.get('current_bid') else '-'} | {md_cell(_loc(it), 60)} | "
             f"{(it.get('date_end') or '-')[:10]} | {md_cell(', '.join(it['reasons']), 160)} |"
         )
     lines.append("")
 
 
-def build_markdown(items, hidden_counts: Counter, health, max_price, max_bid, now) -> tuple[str, dict]:
-    categories, unknown_imoveis = select(items, max_price, max_bid)
+def _budget_text(budgets: dict | None, max_price: float) -> str:
+    """"a home to live in €100,000, a home to let €150,000, …" — one per goal."""
+    from scoring import MODES
+    if not budgets:
+        return f"€{max_price:,.0f}"
+    return ", ".join(f"{MODES.get(mode, mode)} €{limit:,.0f}" for mode, limit in budgets.items())
+
+
+def build_markdown(items, hidden_counts: Counter, health, max_price, max_bid, now,
+                   budgets: dict | None = None) -> tuple[str, dict]:
+    categories, unknown_imoveis = select(items, max_price, max_bid, budgets)
     # Score 0 = fractional share / usufruct: listed per country, never a "pick".
     props = [it for it in categories["imoveis"] if it["score"] > 0]
 
@@ -107,7 +122,7 @@ def build_markdown(items, hidden_counts: Counter, health, max_price, max_bid, no
     lines = [
         "# EU Investment Scanner Report",
         f"**Generated**: {now:%Y-%m-%d %H:%M} UTC  ",
-        f"**Budget**: €{max_price:,.0f}  ",
+        f"**Budget**: {_budget_text(budgets, max_price)}  ",
         f"**Listings shown**: {len(items)} (hidden: {hidden})  ",
         "",
     ]
@@ -204,13 +219,19 @@ def generate_report(db, max_price: float = 50000, max_bid: float | None = None, 
     max_bid = max_price if max_bid is None else max_bid
     out_dir = out_dir or HERE
 
-    everything = load_listings(db, filters=filters, include_hidden=True, now=now)
+    everything = load_best(db, filters=filters, include_hidden=True, now=now)
     items = [it for it in everything if not it["hidden_reason"]]
     hidden_counts = Counter(hidden_category(it["hidden_reason"]) for it in everything
                             if it["hidden_reason"])
     health = source_health(db, known_sources)
 
-    report, parts = build_markdown(items, hidden_counts, health, max_price, max_bid, now)
+    from common import mode_max_price
+    from config import load_config
+    from scoring import MODES
+    cfg = load_config()
+    budgets = {mode: mode_max_price(cfg, mode, max_price) for mode in MODES}
+
+    report, parts = build_markdown(items, hidden_counts, health, max_price, max_bid, now, budgets)
     report_path = os.path.join(out_dir, "report.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)

@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timezone
 
 from common import days_left, utcnow, utcnow_iso
-from db import load_listings, set_listing_status
+from db import load_best, load_listings, set_listing_status
 
 LOG = logging.getLogger("outbox")
 
@@ -117,7 +117,7 @@ def request_candidates(db, cfg: dict, now=None) -> list[tuple[dict, object]]:
     written_proc = {r[0] for r in db.execute("SELECT processo FROM carta_log WHERE processo IS NOT NULL")}
     now = now or utcnow()
     out = []
-    for it in load_listings(db, filters=cfg.get("filters"), now=now):
+    for it in load_best(db, filters=cfg.get("filters"), now=now):
         if (it["category"] != "imoveis" or it.get("status") == "dismissed"
                 or it["score"] < rs["min_score"] or it["id"] in already or it["id"] in written):
             continue

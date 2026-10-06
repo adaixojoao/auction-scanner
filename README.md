@@ -63,7 +63,7 @@ another window.
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
-| **Settings** | What you are looking for (rural plot size and price), budget, what to hide, your details for letters, alerts, automatic scanning. |
+| **Settings** | What you are looking for (rural plot size and price), a budget per goal (a home to live in, a home to let or resell, land), what to hide, your details for letters, alerts, automatic scanning. |
 
 **Scan now** (top right) scans Portugal or every country; progress shows
 next to it. While the app is open it also scans on the timetable in
@@ -170,6 +170,13 @@ pay on top of the price:
   says it is in good condition, €300–600/m² when it says it needs work,
   €700–1 200/m² for a ruin, €200–500/m² when it says nothing. It is shown as a
   range because it is a guess.
+- **What it would let for**, from the rent per m² in its municipality (INE's
+  median of new leases in Portugal, the carte des loyers in France), on the
+  all-in cost — so the yield is on what it takes to own it, not on the asking
+  price. Both the gross figure and a **net** one are given: about 20% goes on
+  the property tax, insurance, repairs and management, and about 8% on the
+  months it stands empty (`costs.py`). The *Investment home* score uses the net
+  figure. Income tax is not in it.
 
 All of it is an estimate. The Portuguese IMT is charged on the higher of the
 price and the taxable value (VPT), which the listings do not publish, and the
@@ -178,19 +185,34 @@ brackets change with each Orçamento do Estado — they live in `costs.py`
 
 ## Scoring (0–100)
 
-The score says how well a listing fits the goal: **homes and plots at
-ridiculous prices**, in this order of preference:
+**Four goals, each ranked on its own.** The tabs at the top of Listings decide
+which one the list is sorted for, and a listing is judged only against that
+goal: a plot is not a bad home, it is somewhere else on the board.
+
+| Tab | What it ranks | Budget (Settings) |
+|---|---|---|
+| **My home** | A home to live in — not a plot. Somewhere to swim within 1.5 km, your five wishes, mild winters if the Atlantic current fails. | *a home to live in* |
+| **Investment home** | A home to make money on: far below the local price **all-in** (price + taxes + fees + the work), a net rental yield, by the beach, forced and bank sales. | *a home to let or resell* |
+| **Investment land** | A plot as an investment: cheap per hectare against what land goes for in that district, big enough, reachable, water on it — with the forestry upside counted on top. | *land* |
+| **Forestry** | A forestry project: cheap per hectare, and a sale that can close sooner. 10 ha is the project, from 5 ha a first plot. Portugal first, because you can visit it. No deadline of this year. | *land* |
+
+On **My home** the order of preference is:
 
 1. a house in good condition, in a great location, well under market price;
-2. a large farm plot next to water (river, stream, lake, reservoir), very cheap;
-3. a house needing some repairs, dirt cheap, in a great location;
-4. a medium farm plot next to water, dirt cheap;
-5. a house in good condition, dirt cheap, in an ordinary location.
+2. a house needing some repairs, dirt cheap, in a great location;
+3. a house in good condition, dirt cheap, in an ordinary location.
 
-Not wanted: small or partial homes or plots, homes needing heavy work (unless
-they come with a big farm plot, which is then what is scored), expensive
-homes, bad locations. These examples are a test (`tests/test_scoring.py`), so
-the order holds whenever the weights change.
+Not wanted there: plots (they rank on *Investment land*), small or partial
+homes, homes needing heavy work, expensive homes, bad locations. On
+**Investment land** the order is a large farm plot next to water and very
+cheap, then a medium one, dirt cheap. These examples are a test
+(`tests/test_scoring.py`), so the order holds whenever the weights change.
+
+**Everything outside the Listings tabs scores each listing for the goal it
+suits best** (`db.load_best`): the alerts, the report, the Offers shortlist and
+the AI check. A flat worth letting and a cheap plot used to be judged as
+somewhere to live, fall under the minimum score and never be mentioned. Each
+says which goal it was scored for.
 
 Every listing is sorted into a kind (Listings → *What*): home, urban plot,
 rural plot, or other. Starts at 50.
@@ -255,11 +277,36 @@ than €20,001 instead of jumping at a step.
   "municipality" is ignored (that pin **is** the town), and so is any distance
   over 40 km, which means the wrong town was found. Without a distance the old
   word-matching still applies.
-- **Rural plots:** size as a multiple of the minimum (1 ha by default; about
-  5× scores as large), next to water, and €/m² against the maximum (€0.50/m²
-  by default). Both limits are in **Settings → What you are looking for**.
-  The absolute price counts half for land: its €/m² already says how cheap it is.
-- **Urban plots:** up. **Shops, garages, storage:** down.
+- **Rural plots** (*Investment land*): size as a multiple of the minimum (1 ha
+  by default; about 5× scores as large), next to water, and €/m² against the
+  maximum (€0.50/m² by default). Both limits are in **Settings → What you are
+  looking for**. The absolute price counts half for land: its €/m² already says
+  how cheap it is.
+- **What land goes for there.** A plot's price per hectare is also compared
+  with what land actually sells for where it is: for French woodland the
+  official SAFER forest price, and everywhere else the median asking price of
+  the rural plots the scanner has itself seen in that district (at least 5 of
+  them), else in that country. Asking prices, not sales, and only from the
+  sites scanned — enough to say "cheap for around here", not what the land is
+  worth, and the reason says which it is. Where neither figure can be named,
+  nothing is claimed: a plot compared with the wrong kind of land shows a
+  discount that is not there. A gap wider than 80% costs points instead of
+  earning them, because it usually means a share, no access or a wrong area.
+- **Building land resells to anyone**, not only to the neighbour, so an urban
+  plot scores above rustic land on *Investment land* — the opposite of
+  *Forestry*, where building land is dearer to hold and to plant.
+- **Forestry is upside on a plot, not the only way it can rank.** A plot of
+  10 ha+ in Portugal, Spain, France or Benelux says what a project on it would
+  return a year (the Forestry tab's own figures) and scores a little higher for
+  it. A 2 ha plot can still be a good buy; it simply has no forestry case.
+- **A project is planned on the land budget.** Open a plot and the panel says what acquiring it costs against the land budget in Settings, what is left, and how many hectares of the crop the climate still allows that leftover plants. Over the budget, it says not to buy. The figures are estimates (transfer tax, the CAOF planting matrix, the crop model).
+- **Habitat is scored, never invented.** Natura 2000 / ZNIEFF from a stored
+  site check, and Natura, REN or RAN named in the notice, cost the land and
+  forestry scores because planting, felling and building normally need permits.
+  A map miss is not "not protected". Eucalyptus is fire-prone; new planting is
+  normally restricted in Portugal — converting to natives is the habitat case,
+  not a timber crop.
+- **Shops, garages, storage:** down.
 - **Price:** up the lower the amount you would actually pay (current bid, else
   minimum, else price); down above about €60,000. Up for a deep bid-to-value
   discount, no bids yet and a price cut since first seen.
@@ -277,15 +324,18 @@ than €20,001 instead of jumping at a step.
 
 What is not the goal stays under the default minimum score (45), however good
 the sale looks: other (at most 35), homes needing heavy work or in an isolated
-location (40). Small homes and plots and expensive homes are held down along a
-curve: a 25 m² home at most 35, 40 m² at most 45, no limit from about 100 m²;
-a home at €60,000 at most 100, €75,000 at most 55, €90,000 at most 40. They
-are hidden unless you shortlist them.
+location (40), and anything belonging to another goal — a plot on *My home*, a
+home on *Investment land* (40, with the tab to look at instead). Small homes
+and plots and expensive homes are held down along a curve: a 25 m² home at most
+35, 40 m² at most 45, no limit from about 100 m²; a home at €60,000 at most
+100, €75,000 at most 55, €90,000 at most 40. They are hidden unless you
+shortlist them.
 
 Words match whole words, accents ignored, and negations are understood:
 *desocupado* is vacant, not occupied; *não necessita de obras* does not count
 as needing work; *Casal do Mato* is not a *casa*; *Rio Maior* is a town, not a
-river. The **AI check** is told the same goal.
+river. The **AI check** is told the goal of the tab the listing came from, not
+a mixture of all of them.
 
 ## Sources and their health
 

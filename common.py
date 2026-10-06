@@ -42,17 +42,46 @@ FLAGS = {
 }
 
 
-# Land for forestry costs more than a cheap house: land searches go up to this
-# (config "land_max_price"), houses stay at "max_price" (owner, 2026-10-05).
+# The owner's goals have a budget each (2026-10-05): a home to live in
+# ("max_price"), a home bought to let or resell ("invest_max_price", normally
+# higher: a house far below the local price is rarely the cheapest house), and
+# land ("land_max_price"). A scrape keeps anything under the highest of them,
+# so no goal is thrown away at scrape time; each tab then applies its own.
 LAND_MAX_PRICE = 100_000
+INVEST_MAX_PRICE = 150_000
+
+
+def _budget(config: dict | None, key: str, default: float, floor: float) -> float:
+    try:
+        return max(float(floor), float((config or {}).get(key) or default))
+    except (TypeError, ValueError):
+        return max(float(floor), default)
 
 
 def land_max_price(config: dict | None, max_price: float) -> float:
     """The price limit for land searches: never below the house limit."""
-    try:
-        return max(float(max_price), float((config or {}).get("land_max_price") or LAND_MAX_PRICE))
-    except (TypeError, ValueError):
-        return max(float(max_price), LAND_MAX_PRICE)
+    return _budget(config, "land_max_price", LAND_MAX_PRICE, max_price)
+
+
+def invest_max_price(config: dict | None, max_price: float) -> float:
+    """The price limit for a home bought as an investment."""
+    return _budget(config, "invest_max_price", INVEST_MAX_PRICE, max_price)
+
+
+def scrape_max_price(config: dict | None, max_price: float) -> float:
+    """What a scrape must keep: the highest of the three budgets. A listing
+    above every budget can serve no goal, so it is not stored."""
+    return max(invest_max_price(config, max_price), land_max_price(config, max_price))
+
+
+def mode_max_price(config: dict | None, mode: str, max_price: float) -> float:
+    """The budget of one goal (scoring.MODES): what that tab, its alerts and
+    its report section may show."""
+    if mode == "invest":
+        return invest_max_price(config, max_price)
+    if mode in ("land", "forest"):
+        return land_max_price(config, max_price)
+    return float(max_price)
 
 
 def utcnow() -> datetime:

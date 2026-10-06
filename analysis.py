@@ -14,15 +14,17 @@ import re
 
 import costs
 from common import LOG, has_term, parse_price, utcnow
-from db import load_listings
+from db import load_best
 from scoring import buyer_priorities, is_fractional_share
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = "claude-haiku-4-5"
 
 ANALYSIS_PROMPT = """You are a Portuguese real estate investment analyst. Budget: €{budget:,.0f}.
-What the buyer wants: {priorities}
-Analyze these auction/sale listings and rank them by how well they fit that goal.
+The buyer has several goals; each listing says in "goal" which one it was scored for.
+What the buyer wants, goal by goal:
+{priorities}
+Analyze these auction/sale listings and rank them by how well they fit their own goal.
 
 For each listing, assess:
 1. Is this a FULL property or a fractional share (quota-parte, 1/2, 1/12, avos)?
@@ -72,9 +74,8 @@ def analyze_with_llm(db, max_price: float = 50000, category: str = "imoveis",
                      *, filters: dict | None = None, limit: int = 25, out_dir: str | None = None):
     """Send the top-scored listings to Claude for a verdict. Returns the analysis path."""
     now = utcnow()
-    items = [it for it in load_listings(db, filters=filters, now=now)
+    items = [it for it in load_best(db, filters=filters, now=now)
              if it["category"] == category
-             and (it.get("price") or 0) <= max_price
              and (it.get("current_bid") or 0) <= max_price]
     if not items:
         LOG.info("No listings to analyze")
@@ -94,12 +95,15 @@ def analyze_with_llm(db, max_price: float = 50000, category: str = "imoveis",
             "url": it["url"],
             "src": it["source"],
             "auto_score": it["score"],
+            "goal": it.get("mode_label") or "",
         }
         if it.get("description"):
             entry["desc"] = it["description"][:200]
         compact.append(entry)
 
-    prompt = ANALYSIS_PROMPT.format(budget=max_price, priorities=buyer_priorities(filters),
+    from scoring import MODES
+    goals = "\n".join(f"- {label}: {buyer_priorities(filters, mode)}" for mode, label in MODES.items())
+    prompt = ANALYSIS_PROMPT.format(budget=max_price, priorities=goals,
                                     listings_json=json.dumps(compact, ensure_ascii=False))
     out_dir = out_dir or HERE
     analysis_path = os.path.join(out_dir, "analysis.md")
@@ -194,7 +198,7 @@ def _property_prompt(data: dict) -> str:
     country = data.get("country") or "PT"
     return f"""You are an expert in European judicial property auctions with 20 years of experience.
 The buyer is based in Portugal, buys across the EU for charitable use, and wants:
-{buyer_priorities(data.get('targets'))}
+{buyer_priorities(data.get('targets'), data.get('mode') or 'home')}
 Judge the property against that goal first.
 
 COUNTRY CONTEXT: {COUNTRY_CONTEXT.get(country, "European judicial auction.")}

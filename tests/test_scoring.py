@@ -213,19 +213,34 @@ def test_what_a_listing_is():
 
 
 def test_rural_plots_must_be_big_and_cheap():
-    small, r_small = score(item(title="Prédio rústico", area_m2=3000, price=1500))
-    big_cheap, r_big = score(item(title="Prédio rústico", area_m2=30000, price=4500))    # €0.15/m²
-    big_dear, r_dear = score(item(title="Prédio rústico", area_m2=30000, price=45000))   # €1.50/m²
-    unknown, r_unknown = score(item(title="Prédio rústico", price=4500))
+    # Plots are ranked on Investment land (mode="land"); My home ranks homes.
+    land = lambda **kw: score(item(**kw), mode="land")   # noqa: E731
+    small, r_small = land(title="Prédio rústico", area_m2=3000, price=1500)
+    big_cheap, r_big = land(title="Prédio rústico", area_m2=30000, price=4500)    # €0.15/m²
+    big_dear, r_dear = land(title="Prédio rústico", area_m2=30000, price=45000)   # €1.50/m²
+    unknown, r_unknown = land(title="Prédio rústico", price=4500)
     assert "rural plot too small (3 000 m² < 1.0 ha)" in r_small
     assert "medium rural plot (3.0 ha)" in r_big and "very cheap land (€0.15/m²)" in r_big
     assert "dear for rural land (€1.50/m²)" in r_dear
     assert "rural plot, size unknown" in r_unknown
     assert big_cheap > unknown > small and big_cheap > big_dear
     # the limits come from Settings (config filters)
-    _, relaxed = score(item(title="Prédio rústico", area_m2=3000, price=1500),
+    _, relaxed = score(item(title="Prédio rústico", area_m2=3000, price=1500), mode="land",
                        targets={"rural_min_m2": 2000, "rural_max_eur_m2": 1})
     assert "medium rural plot (3 000 m²)" in relaxed and "very cheap land (€0.50/m²)" in relaxed
+
+
+def test_each_tab_ranks_one_thing():
+    """My home ranks homes, Investment land ranks plots: neither crowds out the
+    other's list, and each says where the listing does belong."""
+    from scoring import score_detail
+    home = item(title="Moradia T3", area_m2=120, price=20000, description="Em bom estado. No centro da vila.")
+    plot = item(title="Prédio rústico", area_m2=30000, price=4500, description="Terreno que confronta com o rio.")
+    on_home = score_detail(plot)
+    on_land = score_detail(home, mode="land")
+    assert on_home[0] <= 40 and "a plot, not a place to live — see Investment land" in on_home[1]
+    assert on_land[0] <= 40 and "a home, not land — see My home or Investment home" in on_land[1]
+    assert score_detail(home)[0] > 40 and score_detail(plot, mode="land")[0] > 40
 
 
 def test_homes_in_good_places_without_heavy_work():
@@ -367,17 +382,19 @@ def _ex(**kw):
     return item(**kw)
 
 
-OWNER_WANTS = [   # best first
+OWNER_WANTS = [   # a home to live in, best first
     _ex(title="Moradia T3 em bom estado", description="Remodelada, no centro da vila.",
         concelho="Guarda", area_m2=120, price=45000),                  # pristine, great place, well under market
-    _ex(title="Prédio rústico com 8 ha", description="Terreno agrícola que confronta com o rio.",
-        area_m2=80000, price=20000),                                  # large farm plot by water, very cheap
     _ex(title="Moradia T2", description="Necessita de obras. No centro da vila.",
         concelho="Guarda", area_m2=100, price=8000),                   # some repairs, dirt cheap, great place
-    _ex(title="Terreno rústico", description="Terreno de cultura junto à ribeira.",
-        area_m2=20000, price=3000),                                   # medium farm plot by water, dirt cheap
     _ex(title="Moradia em bom estado", description="Casa de habitação.",
         area_m2=100, price=9000),                                     # pristine, dirt cheap, ordinary place
+]
+OWNER_WANTS_LAND = [   # a plot as an investment, best first
+    _ex(title="Prédio rústico com 8 ha", description="Terreno agrícola que confronta com o rio.",
+        area_m2=80000, price=20000),                                  # large farm plot by water, very cheap
+    _ex(title="Terreno rústico", description="Terreno de cultura junto à ribeira.",
+        area_m2=20000, price=3000),                                   # medium farm plot by water, dirt cheap
 ]
 OWNER_DOES_NOT_WANT = {
     "small home": _ex(title="Apartamento T0 com 25 m2", description="No centro da vila.",
@@ -388,32 +405,38 @@ OWNER_DOES_NOT_WANT = {
                           concelho="Guarda", area_m2=120, price=95000),
     "bad location": _ex(title="Moradia em bom estado", description="Lugar isolado, caminho de terra.",
                         area_m2=100, price=9000),
+    "parking": _ex(title="Lugar de aparcamento no rés-do-chão", price=2000),
+    "unclear": _ex(title="Artigo urbano 4517, sito no Montoiro", price=1372),
+}
+OWNER_DOES_NOT_WANT_LAND = {
     "small plot": _ex(title="Terreno rústico", description="Junto à ribeira.", area_m2=2000, price=500),
     "small building plot": _ex(title="Lote de terreno para construção", area_m2=90, price=3000),
     "parking": _ex(title="Lugar de aparcamento no rés-do-chão", price=2000),
-    "unclear": _ex(title="Artigo urbano 4517, sito no Montoiro", price=1372),
 }
 
 
 def test_the_owners_order():
     from scoring import score_detail
-    raws = [score_detail(x)[0] for x in OWNER_WANTS]
-    assert raws == sorted(raws, reverse=True), raws
-    assert len(set(raws)) == len(raws), raws
+    for wanted, mode in ((OWNER_WANTS, "home"), (OWNER_WANTS_LAND, "land")):
+        raws = [score_detail(x, mode=mode)[0] for x in wanted]
+        assert raws == sorted(raws, reverse=True), (mode, raws)
+        assert len(set(raws)) == len(raws), (mode, raws)
 
 
 def test_what_the_owner_does_not_want_stays_under_the_minimum_score():
     from scoring import score_detail
-    worst_wanted = min(score_detail(x)[0] for x in OWNER_WANTS)
-    for label, x in OWNER_DOES_NOT_WANT.items():
-        sc, reasons = score(x)
-        assert sc <= 45 and sc < worst_wanted, (label, sc, reasons)
+    for wanted, unwanted, mode in ((OWNER_WANTS, OWNER_DOES_NOT_WANT, "home"),
+                                   (OWNER_WANTS_LAND, OWNER_DOES_NOT_WANT_LAND, "land")):
+        worst_wanted = min(score_detail(x, mode=mode)[0] for x in wanted)
+        for label, x in unwanted.items():
+            sc, reasons = score(x, mode=mode)
+            assert sc <= 45 and sc < worst_wanted, (mode, label, sc, reasons)
 
 
 def test_a_ruin_on_a_big_farm_is_valued_as_land():
     sc, reasons = score(item(title="Quinta com casa em ruínas",
                              description="Prédio misto com 6 ha de terreno agrícola.",
-                             area_m2=60000, price=25000))
+                             area_m2=60000, price=25000), mode="land")
     assert "ruin on a farm — valued as land" in reasons and "large rural plot (6.0 ha)" in reasons
     assert sc >= 80
 

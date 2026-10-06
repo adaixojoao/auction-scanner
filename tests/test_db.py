@@ -154,6 +154,18 @@ def test_vacant_listing_not_hidden_by_occupancy_filter(db, add):
     assert visible == {"v"}
 
 
+def test_occupancy_exclude_does_not_hide_an_investment_home(db, add):
+    """A sitting tenant is income on Investment home, not a reason to hide the row."""
+    add(external_id="o", title="Moradia T2", description="imóvel ocupado, arrendado a inquilino",
+        price=20000, area_m2=80)
+    filters = {"exclude_keywords": ["ocupado", "arrendado", "inquilino", "usufruto"]}
+    home = {it["external_id"] for it in load_listings(db, filters=filters, mode="home")}
+    invest = {it["external_id"]: it for it in load_listings(db, filters=filters, mode="invest")}
+    assert "o" not in home
+    assert "o" in invest
+    assert any("tenant" in r.lower() or "occupied" in r.lower() for r in invest["o"]["reasons"])
+
+
 def test_min_score_filter(db, add):
     add(external_id="frac", title="1/2 de prédio", price=10000)
     add(external_id="good", title="Moradia", price=10000)

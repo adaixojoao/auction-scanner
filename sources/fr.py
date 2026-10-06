@@ -402,10 +402,32 @@ def scrape_notaires(db, max_price: float = 50000, config: dict | None = None, **
 # ─── SAFER (proprietes-rurales.com) ─────────────────────────────────
 # The rural land agencies' own sale site: forests all over France. The list
 # loads 30 at a time (prod_list.php?start=…). Ads name only the département,
-# never the commune, so the land is placed at the département's middle.
+# never the commune, so the land is placed at the département's préfecture.
 SAFER = "https://www.proprietes-rurales.com"
 SAFER_FOREST = "vente-propriete-agricole/foret,11"
 SAFER_MAX = 3000
+
+# Ads name only the département: the land is placed at its préfecture, so the map,
+# the climate and the distances are approximate (to ~50 km).
+SAFER_PREFECTURE = {"01": "Bourg-en-Bresse", "02": "Laon", "03": "Moulins", "04": "Digne-les-Bains", "05": "Gap",
+                    "06": "Nice", "07": "Privas", "08": "Charleville-Mézières", "09": "Foix", "10": "Troyes", "11":
+                    "Carcassonne", "12": "Rodez", "13": "Marseille", "14": "Caen", "15": "Aurillac", "16":
+                    "Angoulême", "17": "La Rochelle", "18": "Bourges", "19": "Tulle", "2A": "Ajaccio", "2B":
+                    "Bastia", "21": "Dijon", "22": "Saint-Brieuc", "23": "Guéret", "24": "Périgueux", "25":
+                    "Besançon", "26": "Valence", "27": "Évreux", "28": "Chartres", "29": "Quimper", "30": "Nîmes",
+                    "31": "Toulouse", "32": "Auch", "33": "Bordeaux", "34": "Montpellier", "35": "Rennes", "36":
+                    "Châteauroux", "37": "Tours", "38": "Grenoble", "39": "Lons-le-Saunier", "40":
+                    "Mont-de-Marsan", "41": "Blois", "42": "Saint-Étienne", "43": "Le Puy-en-Velay", "44":
+                    "Nantes", "45": "Orléans", "46": "Cahors", "47": "Agen", "48": "Mende", "49": "Angers", "50":
+                    "Saint-Lô", "51": "Châlons-en-Champagne", "52": "Chaumont", "53": "Laval", "54": "Nancy", "55":
+                    "Bar-le-Duc", "56": "Vannes", "57": "Metz", "58": "Nevers", "59": "Lille", "60": "Beauvais",
+                    "61": "Alençon", "62": "Arras", "63": "Clermont-Ferrand", "64": "Pau", "65": "Tarbes", "66":
+                    "Perpignan", "67": "Strasbourg", "68": "Colmar", "69": "Lyon", "70": "Vesoul", "71": "Mâcon",
+                    "72": "Le Mans", "73": "Chambéry", "74": "Annecy", "75": "Paris", "76": "Rouen", "77": "Melun",
+                    "78": "Versailles", "79": "Niort", "80": "Amiens", "81": "Albi", "82": "Montauban", "83":
+                    "Toulon", "84": "Avignon", "85": "La Roche-sur-Yon", "86": "Poitiers", "87": "Limoges", "88":
+                    "Épinal", "89": "Auxerre", "90": "Belfort", "91": "Évry-Courcouronnes", "92": "Nanterre", "93":
+                    "Bobigny", "94": "Créteil", "95": "Cergy"}
 
 _SAFER_AD = re.compile(r'<div class="res_div1" id="res_div_(VN\d+)">(.*?)(?=<div class="res_div1"|\Z)', re.S)
 
@@ -432,7 +454,8 @@ def parse_safer(block_id: str, block: str) -> dict | None:
         "safer", block_id, "FR", title=html.unescape(link.group(2)) if link else "Forêt",
         description=html.unescape(re.sub(r"<[^>]+>", " ", text.group(1))).strip() if text else None,
         tipo="terreno", area_m2=ha * 10000, price=float(price.group(1)), min_price=float(price.group(1)),
-        district=dept.group(2) if dept else None, concelho=name,
+        district=dept.group(2) if dept else None,
+        concelho=SAFER_PREFECTURE.get(dept.group(2)) if dept else None, freguesia=name,
         url=SAFER + link.group(1) if link else None, image_url=image.group(1) if image else None)
 
 

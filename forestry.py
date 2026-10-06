@@ -37,34 +37,34 @@ CARBON_FEE = 0.15          # the aggregator's share of every credit sold
 #   carbon: t CO2 per ha per year it stores and keeps (only crops not clear-felled)
 CROPS = {
     "cork oak": dict(heat_max=38, cold_min=-8, countries={"PT", "ES", "FR", "IT"},
-                     plant=3000, income=[(30, 9, 900), (39, 9, 2700, None, 1080)], carbon=2.5,
+                     plant="broadleaf", income=[(30, 9, 900), (39, 9, 2700, None, 1080)], carbon=2.5,
                      note="first cork at ~30 years, then every 9; protected species, ~€2.5/kg"),
-    "stone pine": dict(heat_max=38, cold_min=-12, plant=2000, income=[], harvest=(15, 600, "pine cones"),
+    "stone pine": dict(heat_max=38, cold_min=-12, plant="broadleaf", income=[], harvest=(15, 600, "pine cones"),
                        carbon=3.0, note="grafted, pine cones from ~15 years, ~600 kg/ha"),
-    "maritime pine": dict(heat_max=33, cold_min=-12, plant=1800, fire_prone=True,
-                          income=[(20, 1, 120), (20, 10, 1200, 30), (40, 40, 11000, 260)], carbon=0,
-                          note="resin, thinnings, clear-fell at ~40 years (~8 m³/ha/yr)"),
-    "Douglas fir": dict(heat_max=30, cold_min=-20, wet=True, plant=3500,
-                        income=[(25, 10, 2500, 40), (50, 50, 45000, 600)], carbon=0,
-                        note="~14 m³/ha/yr, clear-fell at ~50 years"),
+    "maritime pine": dict(heat_max=33, cold_min=-12, plant="conifer", fire_prone=True,
+                          income=[(20, 1, 120), (20, 10, 1200, 30), (40, 40, 11000, 324)], carbon=0,
+                          note="resin, thinnings, clear-fell at ~40 years"),
+    "Douglas fir": dict(heat_max=30, cold_min=-20, wet=True, plant="conifer",
+                        income=[(25, 10, 2500, 40), (50, 50, 45000, 565)], carbon=0,
+                        note="thinnings, clear-fell at ~50 years"),
     "chestnut": dict(heat_max=32, cold_min=-15, wet=True, plant=5000, income=[], harvest=(10, 1200, "chestnuts"),
                      carbon=2.0, note="grafted nut orchard, ~1.2 t/ha a year"),
     "walnut": dict(heat_max=33, cold_min=-20, wet=True, river=True, plant=6000, income=[], harvest=(8, 2000, "walnuts"),
                    carbon=2.0, note="grafted nut orchard, ~2 t/ha a year from ~8 years; only by water (irrigated)"),
-    "carob": dict(heat_max=42, cold_min=-4, plant=3000, income=[], harvest=(8, 2000, "carob"), carbon=2.5,
+    "carob": dict(heat_max=42, cold_min=-4, plant="broadleaf", income=[], harvest=(8, 2000, "carob"), carbon=2.5,
                   countries={"PT", "ES", "IT", "GR", "CY", "HR", "FR"},
                   note="dry-farmed pods, ~2 t/ha a year from ~8 years; tolerates heat, not frost"),
     "poplar": dict(heat_max=34, cold_min=-20, river=True, plant=2500, income=[(14, 14, 12000, 280)], carbon=0,
                    note="by water only, ~20 m³/ha/yr, felled every ~14 years"),
     # Northern and central Europe (Latvia, Germany, Poland…): yields are provisional.
-    "Scots pine": dict(heat_max=30, cold_min=-40, plant=1500, income=[(30, 10, 600, 25), (60, 60, 9000, 300)],
+    "Scots pine": dict(heat_max=30, cold_min=-40, plant="conifer", income=[(30, 10, 600, 25), (60, 60, 9000, 171)],
                        carbon=0, note="thinnings, clear-fell at ~60 years on good soil"),
-    "Norway spruce": dict(heat_max=28, cold_min=-40, wet=True, plant=1800,
-                          income=[(25, 10, 700, 30), (55, 55, 16000, 380)], carbon=0,
+    "Norway spruce": dict(heat_max=28, cold_min=-40, wet=True, plant="conifer",
+                          income=[(25, 10, 700, 30), (55, 55, 16000, 531)], carbon=0,
                           note="clear-fell at ~55 years; bark beetle in droughts"),
     "birch": dict(heat_max=29, cold_min=-40, plant=1500, income=[(20, 10, 300, 15), (50, 50, 8000, 220)],
                   carbon=0, note="plywood and pulp, clear-fell at ~50 years"),
-    "native mixed forest": dict(heat_max=40, cold_min=-25, plant=2500, income=[], carbon=None,
+    "native mixed forest": dict(heat_max=40, cold_min=-25, plant="broadleaf", income=[], carbon=None,
                                 note="carbon credits only; nothing felled"),
 }
 
@@ -141,6 +141,44 @@ def cork_net_eur_kg() -> float:
     return (CORK_EUR_ARROBA - CORK_EXTRACTION_EUR_ARROBA) / ARROBA_KG
 
 
+# Clearing woodland for another use needs an authorisation (FR: défrichement,
+# Code forestier L341-3; PT/ES: regional forest services).
+CLEARING_PERMIT = {"FR", "PT", "ES"}
+
+
+# Growth, m³ a hectare a year: IGN Mémento 2025 (national forest inventory, 2015-2023),
+# each species' yearly production divided by the area where it is the main species.
+# The clear-fell volumes above are growth × rotation less the thinnings. French
+# averages, used elsewhere too until the Spanish and Portuguese inventories are read.
+GROWTH_IGN = {"maritime pine": 9.6, "Douglas fir": 13.7, "Norway spruce": 11.3, "Scots pine": 4.1}
+GROWTH_SOURCE = "growth {:.1f} m³/ha/yr, IGN Mémento 2025"
+
+
+# Planting cost a hectare: the work from CAOF's 2024 reference matrix (Portugal,
+# Comissão de Acompanhamento das Operações Florestais) — scrub clearing, ripping,
+# planting, weeding and earthing up, fertilising — the midpoint between easy
+# ground (flat, light scrub) and hard (over 25% slope, rocky, dense scrub). The
+# plants and tree guards themselves are not in the matrix: PROVISIONAL.
+CAOF_WORK = {"conifer": (1464, 2270),             # 1,100 container plants a hectare: easy, hard
+             "broadleaf": (1231, 1880)}           # 500 plants a hectare, guards fitted
+CAOF_EASY_SLOPE, CAOF_HARD_SLOPE = 10, 25         # CAOF's conditions: under 10% easy, over 25% hard
+PLANT_MATERIAL = {"conifer": 1100 * 0.40, "broadleaf": 500 * (1.0 + 1.5)}   # PROVISIONAL
+CAOF_SOURCE = "planting work CAOF 2024"
+CAOF_SMALL_PLOT = 0.03    # CAOF: +3% for each hectare under 10
+
+
+def planting_cost(kind: str, hectares: float, slope_pct: float | None = None) -> float:
+    """CAOF work at the measured slope (the midpoint when unknown), plus the plants."""
+    easy, hard = CAOF_WORK[kind]
+    if slope_pct is None:
+        work = (easy + hard) / 2
+    else:
+        t = min(1.0, max(0.0, (slope_pct - CAOF_EASY_SLOPE) / (CAOF_HARD_SLOPE - CAOF_EASY_SLOPE)))
+        work = easy + t * (hard - easy)
+    small = max(0.0, 10 - hectares) * CAOF_SMALL_PLOT if hectares else 0.0
+    return work * (1 + small) + PLANT_MATERIAL[kind]
+
+
 def _annuity(npv: float) -> float:
     r, n = DISCOUNT_RATE, FOREST_YEARS
     return npv * r / (1 - (1 + r) ** -n)
@@ -174,7 +212,8 @@ def growing(text: str) -> set[str]:
 
 
 def options(climate: dict | None, country: str | None, hectares: float, water_on_land: bool = False,
-            existing: set[str] | None = None, trees: dict | None = None) -> list[dict]:
+            existing: set[str] | None = None, trees: dict | None = None, wooded: bool = False,
+            slope_pct: float | None = None) -> list[dict]:
     """Every crop that still thrives here in 2100, best first:
     {"crop", "eur_ha_year", "carbon_eur_ha_year", "note", "limits"}."""
     c = climate or {}
@@ -195,6 +234,8 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             continue
         if crop.get("river") and not by_water:
             continue
+        if wooded and crop.get("harvest") and (country or "").upper() in CLEARING_PERMIT:
+            continue          # an orchard would mean clearing the wood first: needs a permit, often refused
         fit = species_fit(trees, name) if trees else None
         if fit is not None:
             # EU-Trees4F (JRC): suitable here around 2065 and 2095 under moderate
@@ -219,12 +260,18 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             limits.append(f"fire: {1 - (1 - p) ** 40:.0%} chance of losing it within 40 years")
         sources: set[str] = set()
         established = name in (existing or ())
-        flows = {0: 0 if established else -crop["plant"]}
+        plant = crop["plant"]
+        if isinstance(plant, str):
+            plant = planting_cost(plant, hectares, slope_pct)
+            sources.add(CAOF_SOURCE)
+        flows = {0: 0 if established else -plant}
         income = crop["income"]
         if established:          # already growing: the mature income from now (felling at half a rotation)
             income = [(1 if t[1] < 20 else t[1] // 2,) + tuple(t[1:]) for t in income
                       if t[1] == 1 or t == income[-1]]
             limits.append("already on the land")
+        if name in GROWTH_IGN:
+            sources.add(GROWTH_SOURCE.format(GROWTH_IGN[name]))
         price = timber_price(country, name) or timber_price(country, "mixed")
         if price and any(len(t) > 3 and t[3] for t in income):
             sources.add(price["label"])
@@ -394,3 +441,137 @@ def stand(text: str) -> dict:
     out = {k: any(w in low for w in words) for k, words in STAND_WORDS.items()}
     out["species"] = [sp for sp, words in SPECIES_WORDS.items() if any(w in low for w in words)]
     return out
+
+
+# ─── A project on the money set aside for land ──────────────────────────────
+PLAN_NOTE = (
+    "Estimate. The land budget is what Settings sets aside for a plot. Buying costs are the "
+    "usual transfer tax and notary for that country. Planting is the CAOF 2024 work plus a "
+    "provisional cost for the plants. Crop income is the screening model, not a forecast."
+)
+
+
+def _plant_eur_ha(name: str, hectares: float, slope_pct: float | None) -> float | None:
+    plant = CROPS[name]["plant"]
+    if isinstance(plant, str):
+        return planting_cost(plant, hectares, slope_pct)
+    if isinstance(plant, (int, float)):
+        return float(plant)
+    return None
+
+
+def _first_cash_year(name: str) -> int | None:
+    crop = CROPS[name]
+    years = [crop["harvest"][0]] if crop.get("harvest") else []
+    years += [row[0] for row in crop["income"]]
+    return min(years) if years else None
+
+
+def project_plan(item: dict, budget: float) -> dict | None:
+    """What a forestry project on this plot looks like on `budget` euros.
+
+    None when the listing is not land in the forestry countries. The money is
+    spent on acquiring the plot first; whatever is left is what can be planted.
+    Nothing here is a bid, a quote or a yield you can count on.
+    """
+    import scoring
+    country = (item.get("country") or "").upper()
+    if country not in scoring.FOREST_COUNTRIES:
+        return None
+    full = f"{item.get('title') or ''} {item.get('description') or ''}"
+    kind = item.get("kind") or scoring.property_kind(item)
+    area = item.get("area_m2") or 0
+    if kind not in ("rural_plot", "urban_plot") or area < scoring.FOREST_STARTER_M2:
+        return None
+    pay = scoring._pay(item)
+    ha = area / 10000
+    costs, costs_label = scoring.buying_costs(item, full)
+    acquire = pay * (1 + costs) if pay else 0
+    budget = float(budget or 0)
+    unknowns = []
+    if not pay:
+        unknowns.append("no price, so the acquisition cannot be planned")
+    if not item.get("climate"):
+        unknowns.append("climate layers not read, so no crop is chosen")
+    site = scoring._site_check(item) or {}
+    if site.get("slope_mean") is None:
+        unknowns.append("slope not measured, so planting cost is the midpoint of easy and hard ground")
+
+    left = budget - acquire if pay and budget else 0
+    fundable = bool(pay and budget and acquire <= budget)
+    existing = growing(full)
+    crops = []
+    if item.get("climate"):
+        water = scoring.water_nearby(full, item)
+        crops = options(item.get("climate"), country, ha,
+                        water_on_land=bool(water) and not str(water).endswith("(approx.)"),
+                        existing=existing, trees=trees_for_item(item),
+                        wooded=scoring.has_term(full, scoring.FOREST_WORDS, negations=False),
+                        slope_pct=site.get("slope_mean"))
+    best = crops[0] if crops else None
+    established = bool(best and best["crop"] in existing)
+    plant_ha = _plant_eur_ha(best["crop"], ha, site.get("slope_mean")) if best and not established else 0
+    if fundable and plant_ha:
+        hectares_now = min(ha, left / plant_ha)
+    elif fundable:
+        hectares_now = ha
+    else:
+        hectares_now = 0
+
+    def eur(n):
+        return f"€{n:,.0f}"
+
+    if not budget:
+        headline = "Set a land budget on Settings before this can be planned against money you have."
+    elif not pay:
+        headline = "This plot has no price, so it cannot be planned against the land budget."
+    elif fundable:
+        headline = (f"Land budget {eur(budget)}. Acquiring it is about {eur(acquire)} "
+                    f"({costs_label}), leaving about {eur(left)}.")
+        if best and plant_ha and hectares_now < ha - 0.05:
+            headline += (f" That plants about {hectares_now:.1f} ha of {best['crop']} "
+                         f"with the money left, of {ha:.1f} ha on the plot.")
+        elif best and not established:
+            headline += f" That covers planting the whole {ha:.1f} ha with {best['crop']}."
+        elif best and established:
+            headline += f" {best['crop'].capitalize()} is already on the land, so the leftover is not for planting it."
+    else:
+        headline = (f"Land budget {eur(budget)}. Acquiring it is about {eur(acquire)} "
+                    f"({costs_label}), {eur(acquire - budget)} over the money set aside for land.")
+
+    steps = []
+    if fundable:
+        steps.append(f"Buy the {ha:.1f} ha for about {eur(acquire)}, inside the {eur(budget)} land budget.")
+    elif pay and budget:
+        steps.append(f"Do not buy this one on the current land budget: it needs about {eur(acquire)}.")
+    if best and fundable and not established and hectares_now >= 0.5:
+        year = _first_cash_year(best["crop"])
+        steps.append(f"Plant about {hectares_now:.1f} ha of {best['crop']} with what is left"
+                     + (f" (about {eur(plant_ha)}/ha, {CAOF_SOURCE})." if plant_ha else "."))
+        if hectares_now < ha - 0.05:
+            steps.append(f"Leave the other {ha - hectares_now:.1f} ha until a later year. Do not borrow to plant it all at once.")
+        if year:
+            steps.append(f"The model has the first cash from new {best['crop']} around year {year}. "
+                         "That is a screening figure, not income you can spend.")
+    elif best and established:
+        steps.append(f"{best['crop'].capitalize()} is already growing. Plan the management, not a new planting, and check the volume the ad does not state.")
+    if scoring.has_term(full, scoring.EUCALYPTUS_WORDS, negations=False) or (site.get("eucalyptus") or 0) >= 0.3:
+        steps.append("Do not replant eucalyptus. New planting is normally restricted in Portugal (DL 96/2013); conversion to the crop above is the project.")
+    if not steps:
+        steps.append("Nothing to schedule until there is a price, a land budget and a crop the climate still supports.")
+
+    lines = [{"label": "Land budget", "value": eur(budget) if budget else "not set", "note": "Settings"}]
+    if pay:
+        lines.append({"label": "To acquire", "value": eur(acquire), "note": costs_label})
+        lines.append({"label": "Left for the work", "value": eur(max(left, 0)) if fundable else "€0",
+                      "note": "after buying" if fundable else "over budget"})
+    if best:
+        lines.append({"label": "Crop the climate still allows", "value": best["crop"],
+                      "note": f"about €{best['eur_ha_year']:,}/ha a year in the model"})
+    lines.append({"label": "Plant with what's left", "value": f"{hectares_now:.1f} ha" if fundable else "0 ha",
+                  "note": f"of {ha:.1f} ha advertised"})
+    return {"fundable": fundable, "headline": headline, "lines": lines, "steps": steps,
+            "unknowns": unknowns, "budget": budget, "acquire": round(acquire),
+            "left": round(max(left, 0)) if fundable else 0,
+            "hectares": round(ha, 2), "hectares_now": round(hectares_now, 2),
+            "crop": best["crop"] if best else None, "note": PLAN_NOTE}
