@@ -50,6 +50,21 @@ SHARE_WORDS = ["spoluvlastnícky podiel", "spoluvlastnický podíl", "spoluvlast
                "suvlasnički dio", "suvlasnički udio", "идеална част", "идеални части"]
 
 
+# Co-ownership sold as a holiday home: "compartes el inmueble con otros 5 socios".
+CO_OWNERSHIP = ["copropiedad", "propiedad compartida", "compartes el inmueble", "compartir el inmueble",
+                "fractional ownership", "co-ownership", "partihome", "comproprieta", "copropriété"]
+_CO_OWNERS = re.compile(r"\bcon (?:otros|otras) \d+ (?:socios|propietarios|copropietarios|familias)\b")
+
+# Not a home all year and not lettable: a seasonal bungalow on a campsite.
+NOT_ALL_YEAR = ["no se puede alquilar", "no es posible como vivienda habitual", "no apto como vivienda habitual",
+                "no puede ser vivienda habitual", "solo uso temporal", "es de uso temporal",
+                "bungalow de temporada", "dentro de un camping", "en un camping"]
+
+
+def is_co_ownership(text: str) -> bool:
+    return bool(has_term(text or "", CO_OWNERSHIP, negations=False) or _CO_OWNERS.search(normalize(text or "")))
+
+
 def is_percent_share(text: str) -> bool:
     return bool(_PERCENT_SHARE.search(normalize(text or ""))) or has_term(text or "", SHARE_WORDS, negations=False)
 
@@ -107,6 +122,8 @@ UNFINISHED_HOUSE = ["vivienda en construcción", "vivienda en construccion", "ca
                     "obra parada", "obra sin terminar", "obra inacabada", "construção inacabada",
                     "moradia inacabada", "em construção", "maison inachevée"]
 NO_VIEWING = ["sin visitas previas", "subasta fácil", "subasta facil"]
+# A bank flat nobody may visit: in practice someone lives in it.
+NOT_VISITABLE = ["no visitable", "no se puede visitar", "sin posibilidad de visita", "não visitável"]
 
 NOT_A_BUILDING = ["casa movel", "casa móvel", "casa prefabricada móvil", "mobile home", "mobil-home",
                   "mobilhome", "caravana residencial"]
@@ -801,12 +818,13 @@ _DESC_OPENS_AS_OUTBUILDING = re.compile(
     r"(?:grange|granges|panera|horreo|hangar|ecurie|cabanon|palheiro|curral)\b"
     r"|^\W*(?:se vende |vendo |venta de )?(?:una |la )?(?:finca con )?cuadra\b")
 _DESC_OPENS_AS_FINCA = re.compile(
-    r"^\W*(?:se vende |vendo )?(?:una |un |gran |bonita )*(?:finca (?:rustica|de recreo)|parcela"
+    r"^\W*(?:se vende |vendo )?(?:una |un |gran |bonita )*(?:finca (?:rustica|de recreo)|parcelas?"
     r"|terreno(?: grande| rustico| agrario)?)\b"
     r"|^\W*(?:\w+\W+){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
 _SELLS_A_PLOT = re.compile(
     r"\bse vende (?:una |un )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica|terreno)\b"
-    r"|\bactualmente es una parcela\b")
+    r"|\bactualmente es una parcela\b"
+    r"|\bpresentamos (?:esta|una) (?:\w+ )?finca de\b")
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
 
 
@@ -825,8 +843,11 @@ def property_kind(item: dict) -> str | None:
         if _is_household_goods(text):
             return "other"
         norm = normalize(text)
-        if _PLOT_FOR_A_HOUSE.search(norm) or (
-                _STARTS_AS_LAND.match(norm) and not has_term(text, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False)):
+        if _PLOT_FOR_A_HOUSE.search(norm) or (_STARTS_AS_LAND.match(norm) and (
+                not has_term(text, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False)
+                # "Prédio rústico …, Casa Caída": a place name, not a house on it
+                or norm.startswith("predio rustico") and not has_term(text, ["com casa", "com moradia"],
+                                                                     negations=False))):
             # The title says land; whether rural often only the description says.
             if has_term(f"{text} {desc}", RURAL_WORDS, negations=False) or area >= 5000:
                 return "rural_plot"
@@ -851,7 +872,8 @@ def property_kind(item: dict) -> str | None:
         return "other"
     if ((_DESC_OPENS_AS_FINCA.match(ndesc) or _SELLS_A_PLOT.search(ndesc[:300]))
             and not _FINCA_WITH_HOUSE.search(ndesc[:300])):
-        return "rural_plot" if area >= 1000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
+        big = max(area, find_area(desc) or 0)       # the ad's area is often the cabin's
+        return "rural_plot" if big >= 1000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
         # The portal says land (or "Lote Moradia"): a plot, whatever house word follows.
@@ -1217,6 +1239,10 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
     housing, a timeshare."""
     if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
         return "fractional share — skip"
+    if is_co_ownership(full):
+        return "a share shared with other owners, not the whole property — skip"
+    if has_term(full, NOT_ALL_YEAR, negations=False):
+        return "seasonal only: cannot be lived in all year or let — skip"
     if has_term(full, NOT_A_BUILDING, negations=False):
         return "mobile home or caravan, not a house — skip"
     if has_term(full, USUFRUCT_PATTERNS):
@@ -1246,6 +1272,9 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
     if has_term(full, NO_VIEWING, negations=False):
         caps.append(UNCHECKED_CAP)
         reasons.append("auction resold by a middleman: no viewing, cash only")
+    if has_term(full, NOT_VISITABLE, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("cannot be visited — usually means someone lives there; ask before bidding")
     if item.get("place_conflict"):
         # The title names a town far from where the listing is placed: the
         # climate and distances belong to the wrong place.
@@ -1902,15 +1931,9 @@ def _forestry_upside(item: dict, area: float, pay: float, full: str) -> dict | N
     climate = item.get("climate") or {}
     if not climate:
         return None
-    import forestry
-    ha = area / 10000
-    crops = forestry.options(climate, item.get("country"), ha,
-                             water_on_land=bool(water_nearby(full, item)),
-                             existing=forestry.growing(full),
-                             trees=forestry.trees_for_item(item))
-    timber = forestry.standing_timber(full, item.get("country"), ha)
-    costs, _ = buying_costs(item, full)
-    roi = forest_return(pay * (1 + costs), ha, crops[0] if crops else None, timber)
+    out: dict = {}
+    _score_forest(item, None, None, out=out)     # the same figure the Forestry tab shows
+    roi = out.get("roi")
     if roi is None or roi <= 0:
         return None
     return {"roi": roi, "text": f"forestry on it would return about {roi:.1%} a year "
@@ -2343,7 +2366,8 @@ def _forest_sooner(item: dict, now: datetime | None, reasons: list[str]) -> floa
     return s
 
 
-def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
+def _score_forest(item: dict, now: datetime | None, targets: dict | None,
+                  out: dict | None = None) -> tuple[float, list[str]]:
     """Land for a forestry project: big, cheap per hectare, wet enough, fit for trees."""
     title, desc = item.get("title") or "", item.get("description") or ""
     full = f"{title} {desc}"
@@ -2494,7 +2518,10 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None) -> tup
         crops = [{**crops[0], "eur_ha_year": crops[0]["carbon_eur_ha_year"]}] + crops[1:]
         reasons.append("no timber income counted: machines cannot reach most of the land")
     roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, crops[0] if crops and c else None, timber,
-                        land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay else 0.0)
+                        # land nobody can work is not worth the regional forest price
+                        land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay and not unreachable else 0.0)
+    if out is not None:
+        out["roi"] = roi
     if roi is not None:
         reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years (timber now + best crop, "
                        f"on the price)" + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))

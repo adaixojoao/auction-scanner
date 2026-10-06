@@ -807,3 +807,20 @@ def test_the_five_wishes_at_a_glance():
     assert got["water"][0] == "yes"
     far = {w["key"]: w["state"] for w in wishes(item(title="Moradia", price=20000, area_m2=60, climate={"hot_days": {}}))}
     assert far["swim"] == "no" and far["space"] == "no" and far["condition"] == "unknown"
+
+
+def test_listing_traps_seen_in_the_top_15():
+    """Each was ranked near the top before (2026-10-06)."""
+    from scoring import NOT_VISITABLE, _skip_reason, has_term, property_kind
+    share = "Compartes el inmueble con otros 5 socios, y disfrutas 60 días al año."
+    assert _skip_reason({}, "Vivienda en Antigua", share).startswith("a share")
+    camp = "Bungalow de TEMPORADA. NO ES POSIBLE COMO VIVIENDA HABITUAL, NO SE PUEDE ALQUILAR"
+    assert _skip_reason({}, "Casa en Malgrat", camp).startswith("seasonal")
+    assert property_kind({"title": "Casa en Chiclana", "tipo": "vivienda", "area_m2": 500,
+                          "description": "‼️‼️PARCELAS EN LA ZONA DE EL NOVO SANTI PETRI 500m2"}) == "urban_plot"
+    assert property_kind({"title": "Prédio rústico com 585 m2, Casa Caída, Estreito", "tipo": "terreno_rustico",
+                          "description": ""}) == "rural_plot"
+    assert property_kind({"title": "Casa en San Pedro", "tipo": "vivienda", "area_m2": 90,
+                          "description": "En lo alto, presentamos esta maravillosa finca de más de 40.000m2 "
+                                         "con dos cabañas"}) == "rural_plot"
+    assert has_term("Piso de 3 dormitorios. No Visitable.", NOT_VISITABLE, negations=False)
