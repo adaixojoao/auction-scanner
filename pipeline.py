@@ -131,6 +131,18 @@ def _plots_for_site_check(db, cfg: dict) -> list[dict]:
     return forest + [it for it in land if it["id"] not in seen]
 
 
+def rescore(db, cfg: dict) -> None:
+    """Score again what the scan changed (new towns, auction results, land prices),
+    for every goal, so the next page view finds the scores ready."""
+    try:
+        from db import load_listings
+        from scoring import MODES
+        for mode in MODES:
+            load_listings(db, filters=cfg.get("filters"), include_hidden=True, mode=mode, refresh=True)
+    except Exception:  # noqa: BLE001 — only a speed-up
+        LOG.exception("Rescoring after the scan failed")
+
+
 def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
              max_price: float | None = None, label: str | None = None,
              report: bool = True, alerts: bool = True, db=None) -> dict:
@@ -235,6 +247,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                 _set_state(db, running=0, current=None, finished_at=utcnow_iso(),
                            summary=json.dumps(summary))
             LOG.info(f"Scan of {label} finished: {summary}")
+            rescore(db, cfg)
             return {**summary, "results": results, "report": report_path}
     finally:
         if own_db:
