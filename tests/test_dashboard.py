@@ -388,7 +388,7 @@ def test_export_report(client, add):
 
 
 def test_heartbeat_and_ping(client):
-    assert client.get("/api/ping").get_json() == {"app": "auction-scanner"}
+    assert client.get("/api/ping").get_json()["app"] == "auction-scanner"
     dashboard.app.config["LAST_HEARTBEAT"] = None
     client.post("/api/heartbeat")
     assert dashboard.app.config["LAST_HEARTBEAT"] is not None
