@@ -178,7 +178,10 @@ def _old_health():
 
 @app.route("/api/ping")
 def api_ping():
-    return jsonify({"app": "auction-scanner"})
+    last = app.config.get("LAST_HEARTBEAT")
+    # how long ago a window last checked in: app.py opens no second window while one is open
+    return jsonify({"app": "auction-scanner",
+                    "window_seen_s": None if last is None else round(time.monotonic() - last)})
 
 
 @app.route("/api/heartbeat", methods=["POST"])
@@ -242,17 +245,25 @@ LIST_FRESH_S = 600
 _LISTS: dict = {}            # mode -> (built at, items)
 _LISTS_BUILDING: set = set()
 _LISTS_LOCK = threading.Lock()
+_BUILD_LOCKS: dict = {}      # mode -> lock: one build at a time, every window waits for the same one
 
 
 def _build_list(mode: str) -> list:
-    db = get_db()
-    try:
-        items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
-    finally:
-        db.close()
     with _LISTS_LOCK:
-        _LISTS[mode] = (time.monotonic(), items)
-        _LISTS_BUILDING.discard(mode)
+        lock = _BUILD_LOCKS.setdefault(mode, threading.Lock())
+        started = time.monotonic()
+    with lock:
+        kept = _LISTS.get(mode)
+        if kept and kept[0] >= started:     # built by someone else while we waited
+            return kept[1]
+        db = get_db()
+        try:
+            items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+        finally:
+            db.close()
+        with _LISTS_LOCK:
+            _LISTS[mode] = (time.monotonic(), items)
+            _LISTS_BUILDING.discard(mode)
     return items
 
 
@@ -274,8 +285,12 @@ def _rebuild_soon(mode: str) -> None:
 
 def all_listings(mode: str) -> list:
     """Every listing of a goal, scored, hidden ones included (db.load_listings)."""
-    if app.config.get("TESTING"):
-        return _build_list(mode)
+    if app.config.get("TESTING"):      # tests change the database between requests: never keep
+        db = get_db()
+        try:
+            return load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+        finally:
+            db.close()
     kept = _LISTS.get(mode)
     if kept is None:
         return _build_list(mode)

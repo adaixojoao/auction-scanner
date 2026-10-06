@@ -70,15 +70,29 @@ def app_url(cfg: dict) -> str:
     return f"http://{d.get('host', '127.0.0.1')}:{d.get('port', 8050)}/"
 
 
-def already_running(url: str) -> bool:
+def _ping(url: str) -> dict | None:
     # urllib, not requests: this runs before an update may reinstall packages.
     import json
     import urllib.request
     try:
         with urllib.request.urlopen(url + "api/ping", timeout=2) as r:
-            return json.load(r).get("app") == "auction-scanner"
+            data = json.load(r)
+        return data if data.get("app") == "auction-scanner" else None
     except Exception:
-        return False
+        return None
+
+
+def already_running(url: str) -> bool:
+    return _ping(url) is not None
+
+
+# A window checks in every 15 s; one seen within this long is still open.
+WINDOW_OPEN_S = 40
+
+
+def window_open(url: str) -> bool:
+    seen = (_ping(url) or {}).get("window_seen_s")
+    return seen is not None and seen <= WINDOW_OPEN_S
 
 
 # Set when the app restarts itself after an update from Settings: the window is
@@ -230,15 +244,19 @@ def main() -> int:
                 break
             time.sleep(0.5)
     elif already_running(url):
-        LOG.info("Already running — opening another window")
-        open_window(url)
+        if window_open(url):           # only one window: the open one already shows everything
+            LOG.info("Already running with a window open — not opening another")
+        else:
+            LOG.info("Already running — opening the window")
+            open_window(url)
         return 0
 
     if not claim_start():
         LOG.info("Another copy is starting (updating?) — waiting for it")
         for _ in range(180):
             if already_running(url):
-                open_window(url)
+                if not window_open(url):       # only one window: an open one keeps showing the app
+                    open_window(url)
                 return 0
             time.sleep(1)
         show_error("The app did not start. Look at app.log in the app folder.")
@@ -304,7 +322,12 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
     updater.confirm_start()            # this version works here
     LOG.info(f"Auction Scanner running at {url}")
     if not restarting:                 # after a restart the window is already open
-        open_window(url)
+        # A window left open from before reconnects within one heartbeat: then it is the window.
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and dashboard.app.config.get("LAST_HEARTBEAT") is None:
+            time.sleep(1)
+        if dashboard.app.config.get("LAST_HEARTBEAT") is None:
+            open_window(url)
 
     stop = threading.Event()
     threading.Thread(target=auto_scan_loop, args=(stop,), name="timetable", daemon=True).start()
