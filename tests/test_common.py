@@ -114,3 +114,8 @@ def test_find_terms_whole_words(text, term, hit):
 ])
 def test_uf_parish_strips_the_label(raw, expected):
     assert uf_parish(raw) == expected
+
+
+def test_effective_end_survives_the_9999_no_date_marker():
+    from common import effective_end
+    assert effective_end("9999-01-01T00:00:00").year == 9999   # Citius: no date set
