@@ -234,6 +234,67 @@ def _climate_matches(item: dict, grade: str, exact_only: bool) -> bool:
     return c["grade"] in GRADE_ORDER and GRADE_ORDER.index(c["grade"]) >= GRADE_ORDER.index(grade)
 
 
+# The whole list of one goal, kept in memory: reading and checking 70,000
+# listings takes a minute or two, so a page view gets the kept list at once and
+# an old one (older than LIST_FRESH_S, or after a status change) is rebuilt in
+# the background while the old one is still shown.
+LIST_FRESH_S = 600
+_LISTS: dict = {}            # mode -> (built at, items)
+_LISTS_BUILDING: set = set()
+_LISTS_LOCK = threading.Lock()
+
+
+def _build_list(mode: str) -> list:
+    db = get_db()
+    try:
+        items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+    finally:
+        db.close()
+    with _LISTS_LOCK:
+        _LISTS[mode] = (time.monotonic(), items)
+        _LISTS_BUILDING.discard(mode)
+    return items
+
+
+def _rebuild_soon(mode: str) -> None:
+    with _LISTS_LOCK:
+        if mode in _LISTS_BUILDING:
+            return
+        _LISTS_BUILDING.add(mode)
+
+    def run():
+        try:
+            _build_list(mode)
+        except Exception:  # noqa: BLE001 — the old list stays on show
+            with _LISTS_LOCK:
+                _LISTS_BUILDING.discard(mode)
+            logging.getLogger("auction-scanner").exception("Rebuilding the list failed")
+    threading.Thread(target=run, name=f"list-{mode}", daemon=True).start()
+
+
+def all_listings(mode: str) -> list:
+    """Every listing of a goal, scored, hidden ones included (db.load_listings)."""
+    if app.config.get("TESTING"):
+        return _build_list(mode)
+    kept = _LISTS.get(mode)
+    if kept is None:
+        return _build_list(mode)
+    if time.monotonic() - kept[0] > LIST_FRESH_S:
+        _rebuild_soon(mode)
+    return kept[1]
+
+
+def _matches(it: dict, country, source, tipo, max_price, search) -> bool:
+    if (country and it.get("country") != country) or (source and it.get("source") != source)             or (tipo and it.get("tipo") != tipo):
+        return False
+    if max_price and it.get("price") is not None and it["price"] > max_price:
+        return False
+    if search:
+        s = search.lower()
+        return any(s in (it.get(k) or "").lower() for k in ("title", "concelho", "district", "description"))
+    return True
+
+
 @app.route("/api/listings")
 def api_listings():
     args = request.args
@@ -257,28 +318,15 @@ def api_listings():
     page = max(1, _num(args.get("page"), 1, int))
     per_page = min(1000, max(1, _num(args.get("per_page"), 50, int)))
 
-    conditions, params = [], []
-    if country:
-        conditions.append("country = ?"); params.append(country)
-    if source:
-        conditions.append("source = ?"); params.append(source)
-    if tipo:
-        conditions.append("tipo = ?"); params.append(tipo)
-    if max_price:
-        conditions.append("(price <= ? OR price IS NULL)"); params.append(max_price)
-    if search:
-        conditions.append("(title LIKE ? OR concelho LIKE ? OR district LIKE ? OR description LIKE ?)")
-        params.extend([f"%{search}%"] * 4)
-    if not show_hidden:
-        # Cheap pre-filter; load_listings() applies the exact end-of-day rule.
-        conditions.append("(date_end IS NULL OR date_end >= date('now', '-1 day'))")
-
+    from datetime import timedelta
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
     db = get_db()
     try:
-        loaded = load_listings(db, filters=_config().get("filters"), include_hidden=True,
-                               where=" AND ".join(conditions), params=params, mode=mode)
-        loaded = [it for it in loaded
-                  if it["score"] >= min_score and (not properties_only or it["category"] == "imoveis")
+        loaded = [it for it in all_listings(mode)
+                  if _matches(it, country, source, tipo, max_price, search)
+                  # long-ended sales are not counted among the open view's hidden ones
+                  and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
+                  and it["score"] >= min_score and (not properties_only or it["category"] == "imoveis")
                   and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
         if climate_grade or climate_exact:
             loaded = [it for it in loaded if _climate_matches(it, climate_grade, climate_exact)]
@@ -457,6 +505,15 @@ def api_listing_status():
             return jsonify({"error": str(e)}), 400
     finally:
         db.close()
+    for mode in list(_LISTS):           # the kept lists show it now, and are rebuilt
+        for it in _LISTS[mode][1]:
+            if it["id"] == data["id"]:
+                it["status"] = data.get("status") or None
+                if it["status"] == "dismissed":
+                    it["hidden_reason"] = "dismissed"
+                elif it.get("hidden_reason") == "dismissed":
+                    it["hidden_reason"] = None
+        _rebuild_soon(mode)
     return jsonify({"ok": True})
 
 
