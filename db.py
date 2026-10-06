@@ -11,6 +11,7 @@ Rules this module enforces:
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -968,6 +969,19 @@ _LOADED_MODES: set = set()
 
 
 _SCORE_DBS: dict = {}
+
+
+@functools.lru_cache(maxsize=1)
+def _code_version() -> str:
+    """A fingerprint of the scoring code: a new version of the app scores again
+    instead of showing scores kept from the old one."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    h = hashlib.sha1()
+    for name in sorted(os.listdir(here)):
+        if name.endswith(".py"):
+            with open(os.path.join(here, name), "rb") as f:
+                h.update(f.read())
+    return h.hexdigest()[:12]
 _SCORE_LOCK = threading.Lock()     # one file, shared by the app's threads
 
 
@@ -1094,7 +1108,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     # A new day or new filters (with the weights) score again; new towns, auction
     # results or land prices (a scan adds some every few minutes) do not throw the
     # scores away: the kept ones stay on show until refresh=True (after each scan).
-    context = (now.date().isoformat(), json.dumps(filters or {}, sort_keys=True, default=str), climate_on)
+    context = (now.date().isoformat(), json.dumps(filters or {}, sort_keys=True, default=str), climate_on,
+               _code_version())
     inputs = json.dumps([len(towns), sum(len(v) for v in closes.values()), len(land_market)])
     if _SCORED_FOR[0] != context:
         _SCORED.clear()
