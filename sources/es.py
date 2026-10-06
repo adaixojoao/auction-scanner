@@ -758,9 +758,14 @@ def parse_aliseda(item: dict, tipo: str) -> dict | None:
         raw["occupation"] = "occupied"
     title = f"{'Terreno' if tipo == 'terreno' else 'Vivienda'} en {town or ''}" + (f", {street}" if street else "")
     images = item.get("imagenes") or []
+    description = item.get("Description") or ""
+    if item.get("Proindiviso"):
+        # Only a share of the property, shown on the page in a box the API's text lacks.
+        raw["proindiviso"] = True
+        description = "Transmisión de una participación indivisa (copropiedad). " + description
     return make_listing(
         "aliseda", item["id"], "ES", title=title[:200],
-        description=(item.get("Description") or "")[:3000] or None, tipo=tipo,
+        description=description[:3000] or None, tipo=tipo,
         area_m2=area or None, price=float(price), min_price=float(price),
         district=(item.get("provinciaUrl") or "").replace("-", " ").title() or None, concelho=town,
         url=f"{ALISEDA_SITE}/inmueble/{item['id']}",
