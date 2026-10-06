@@ -158,15 +158,10 @@ def warm_up():
     """Score the list once in the background at start: the first page view then
     finds every score kept (db.load_listings' score cache; cold, 15,000 listings take ~40-90 s)."""
     try:
-        import db
-        from config import load_config
-        conn = db.connect()
-        try:   # the same filters as the list page: they are part of the score cache's key
-            from scoring import MODES
-            for mode in MODES:     # each goal has its own ranking (and its own kept scores)
-                db.load_listings(conn, filters=load_config().get("filters"), include_hidden=True, mode=mode)
-        finally:
-            conn.close()
+        import dashboard
+        from scoring import MODES
+        for mode in MODES:     # each goal's list, kept in memory for the pages (dashboard.all_listings)
+            dashboard._build_list(mode)
         LOG.info("List warmed up")
     except Exception as e:  # noqa: BLE001 — only a speed-up
         LOG.info(f"Warm-up skipped ({type(e).__name__}: {e})")
