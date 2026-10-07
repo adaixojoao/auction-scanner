@@ -19,7 +19,9 @@ def test_intervals_with_slack():
     last = {"pt": now - timedelta(hours=1, minutes=55), "eu": now - timedelta(hours=3),
             "backup": now - timedelta(hours=3), "morning": now - timedelta(hours=1),
             "report": now - timedelta(days=1), "closing": now - timedelta(minutes=5)}
-    assert due_jobs(now, last) == ["pt"]          # 1h55 ≥ 2h − 10 min slack
+    short = {"pt_every_hours": 2, "eu_every_hours": 6}
+    assert due_jobs(now, last, short) == ["pt"]          # 1h55 ≥ 2h − 10 min slack
+    assert due_jobs(now, last) == []                     # defaults: a week, and a fortnight
 
 
 def test_check_times_catch_up_once():

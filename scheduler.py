@@ -18,8 +18,8 @@ through a slot catches up on the next tick instead of waiting for the next
 slot, and two ticks never run at once (scheduler.lock).
 
 Timetable (config.json → "schedule"; these are the defaults):
-  pt_every_hours  2        PT sources
-  eu_every_hours  6        every other country
+  pt_every_hours  168      PT sources, once a week
+  eu_every_hours  336      every other country, once a fortnight
   check_times     ["08:00", "20:00"]   deadline alerts
   weekly_report   "mon 08:00"
 """
@@ -46,8 +46,8 @@ SLACK = timedelta(minutes=10)
 LOG = logging.getLogger("scheduler")
 
 DEFAULT_SCHEDULE = {
-    "pt_every_hours": 2,
-    "eu_every_hours": 6,
+    "pt_every_hours": 168,
+    "eu_every_hours": 336,
     "backup_every_hours": 24,
     "check_times": ["08:00", "20:00"],
     "weekly_report": "mon 08:00",
