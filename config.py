@@ -114,8 +114,8 @@ DEFAULTS = {
     # the app window is open, without the Windows background task.
     "schedule": {
         "while_app_open": True,
-        "pt_every_hours": 2,
-        "eu_every_hours": 6,
+        "pt_every_hours": 168,        # once a week
+        "eu_every_hours": 336,        # every other country, once a fortnight
         "backup_every_hours": 24,
         "check_times": ["08:00", "20:00"],
         "weekly_report": "mon 08:00",

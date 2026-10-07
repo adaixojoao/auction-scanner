@@ -130,8 +130,8 @@
   <h3>Automatic scanning</h3>
   <label class="check"><input type="checkbox" id="while_app_open"> Scan on this timetable while the app is open</label>
   <div class="form-grid" style="margin-top:12px">
-    <div class="field"><label>Portugal every (hours)</label><input type="number" id="pt_every_hours" min="0" step="1"></div>
-    <div class="field"><label>Other countries every (hours, 0 = never)</label><input type="number" id="eu_every_hours" min="0" step="1"></div>
+    <div class="field"><label>Portugal every (hours, 168 = a week)</label><input type="number" id="pt_every_hours" min="0" step="1"></div>
+    <div class="field"><label>Other countries every (hours, 336 = two weeks, 0 = never)</label><input type="number" id="eu_every_hours" min="0" step="1"></div>
   </div>
   <div style="margin-top:14px" id="background">
     <label class="check"><input type="checkbox" id="bg_enabled"> Keep scanning when the app is closed (Windows background task, every 30 min when something is due)</label>
