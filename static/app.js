@@ -80,6 +80,24 @@ const AS = (() => {
   function link(url, text) {
     return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text);
   }
+  /* The app window has no download bar. A court PDF opened here asks where to
+     save it. Outside links go to the normal browser, and a PDF to the reader. */
+  function openOutside(e) {
+    const a = e.target.closest ? e.target.closest("a[href]") : null;
+    if (!a) return;
+    let u;
+    try { u = new URL(a.href, location.href); } catch (err) { return; }
+    if (u.host === location.host) return;
+    if (u.protocol !== "http:" && u.protocol !== "https:") return;
+    e.preventDefault();
+    fetch("/api/open", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({url: u.href})})
+      .then(r => r.json().then(d => ({ok: r.ok, d})))
+      .then(({ok, d}) => { if (!ok) toast(d.error || "Could not open that link", "bad"); })
+      .catch(() => toast("Could not open that link", "bad"));
+  }
+  document.addEventListener("click", openOutside, true);
+  document.addEventListener("auxclick", openOutside, true);
   function ago(iso) {
     if (!iso) return "never";
     const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);

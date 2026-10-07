@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import Counter
@@ -636,6 +637,69 @@ def api_scan_stop():
     finally:
         db.close()
     return jsonify({"ok": True}), 202
+
+
+# Outside the app window. A PDF opened in that window asks where to save it,
+# because the window has no download bar and no PDF viewer.
+_OPEN_DIR = os.path.join(tempfile.gettempdir(), "auction-scanner")
+_OPEN_MAX = 25_000_000
+
+
+def _is_pdf(url: str) -> bool:
+    return urlsplit(url).path.lower().endswith(".pdf")
+
+
+def _pdf_name(url: str) -> str:
+    from urllib.parse import unquote
+    name = unquote(urlsplit(url).path.rsplit("/", 1)[-1]) or "document.pdf"
+    name = re.sub(r"[^\w.\- ]+", "_", name).strip(" .")[:120] or "document.pdf"
+    return name if name.lower().endswith(".pdf") else name + ".pdf"
+
+
+def _download_pdf(url: str) -> str:
+    from common import make_session
+    os.makedirs(_OPEN_DIR, exist_ok=True)
+    path = os.path.join(_OPEN_DIR, _pdf_name(url))
+    session = make_session(timeout=60)
+    with session.get(url, stream=True) as resp:
+        resp.raise_for_status()
+        total = 0
+        with open(path, "wb") as f:
+            for chunk in resp.iter_content(65536):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > _OPEN_MAX:
+                    raise ValueError("document is too large")
+                f.write(chunk)
+    return path
+
+
+def _open_path(path: str) -> None:
+    if sys.platform == "win32":
+        os.startfile(path)  # noqa: the PDF reader, not a save dialog
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
+@app.route("/api/open", methods=["POST"])
+def api_open():
+    """Open a listing or its notice outside this window."""
+    import webbrowser
+    url = safe_url((request.get_json(silent=True) or {}).get("url"))
+    if not url:
+        return jsonify({"error": "That link cannot be opened"}), 400
+    try:
+        if _is_pdf(url):
+            _open_path(_download_pdf(url))
+        else:
+            webbrowser.open(url)
+    except Exception:
+        app.logger.exception("Could not open an outside link")
+        return jsonify({"error": "Could not open that link"}), 502
+    return jsonify({"ok": True})
 
 
 @app.route("/api/health")
