@@ -473,7 +473,7 @@ def test_latvian_ads_say_how_old_the_forest_is():
     s = forestry.stand("Pārdod mežu, priede un egle, pieaugusi audze, gatava galvenajai cirtei.")
     assert s["mature"] and not s["young"] and s["species"] == ["pine", "spruce"]
     est = forestry.standing_timber("Pieaugusi audze, priede.", "LV", 20)
-    assert est["estimated"] and est["m3"] == 20 * forestry.LV_MATURE_M3_HA
+    assert est["estimated"] and est["m3"] == 20 * forestry.LV_MEAN_M3_HA
     young = forestry.standing_timber("Jaunaudze, krājums 500 m3.", "LV", 10)
     full = forestry.standing_timber("Krājums 500 m3.", "LV", 10)
     assert young["young"] and young["eur"] < full["eur"] * 0.6

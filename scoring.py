@@ -2620,7 +2620,7 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         share = timber["eur"] / pay
         s += curve(share, FOREST_TIMBER_POINTS) * w("price")
         reasons.append(f"standing timber {'~' if timber['estimated'] else ''}{timber['m3']:,.0f} m³"
-                       f"{' (estimated: mature stand, no volume given)' if timber['estimated'] else ''}"
+                       f"{' (estimated: average Latvian stand, Silava NFI 2019–2023; the ad gave no volume)' if timber['estimated'] else ''}"
                        f"{' (young stand: valued at its sale in ~20 years)' if timber['young'] else ''}"
                        f" ≈ €{timber['eur']:,.0f} ({share:.0%} of the price, at {timber['label']})")
         if timber["rights_only"]:

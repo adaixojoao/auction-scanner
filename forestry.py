@@ -5,12 +5,12 @@ place's climate (today and 2081-2100, from climate.py) suits it, then values the
 crop's cash flows over FOREST_YEARS at DISCOUNT_RATE and turns them into one
 "equivalent € per hectare per year" that can be set against the price of the land.
 
-PROVISIONAL: the yields, prices, costs and climate limits below are rough
-mid-range European figures, not yet taken from a published table. They are
-being replaced by sourced ones (EU-Trees4F for where each species can live in
-2095; national inventories for yields; SIMeF/ICNF, ONF, LVM and APCOR for
-prices). Until then, compare listings with them; do not plan with them.
-Grants for planting (PEPAC/CAP) are left out.
+PROVISIONAL: most yields, prices and costs below are rough mid-range figures, not
+yet taken from a published table. Sourced so far: EU-Trees4F for where a species
+can live in 2095; IGN growth; SIMeF, ONF and LVM timber prices; CCDR-N produce
+prices; UNAC cork; CAOF planting work; Silava's average Latvian stand (2019–2023).
+Grants for planting (PEPAC/CAP) are left out. Compare listings with this; do not
+plan with it.
 """
 from __future__ import annotations
 
@@ -344,7 +344,7 @@ def standing_timber(text: str, country: str | None, hectares: float) -> dict | N
     s = stand(text)
     estimated = False
     if not m3 and s["mature"] and not s["young"] and (country or "").upper() == "LV" and hectares:
-        m3, estimated = hectares * LV_MATURE_M3_HA, True     # "mature stand", no volume given
+        m3, estimated = hectares * LV_MEAN_M3_HA, True     # ad says mature, states no volume
     if not m3 or not price or (hectares and m3 / hectares > 1000):
         return None
     eur = m3 * price["eur_m3"]
@@ -432,7 +432,7 @@ STAND_WORDS = {
 SPECIES_WORDS = {"pine": ("priede", "priež"), "spruce": ("egle", "egļu"), "birch": ("bērz",),
                  "aspen": ("apse", "apšu"), "alder": ("alksn",), "oak": ("ozol",)}
 YOUNG_YEARS = 20          # a young stand's timber is sold about this far ahead
-LV_MATURE_M3_HA = 200     # PROVISIONAL growing stock of a mature Latvian stand, until the inventory is read
+LV_MEAN_M3_HA = 208.8     # average of all stands, Silava NFI (MRM) 2019–2023, not a mature stand
 
 
 def stand(text: str) -> dict:
