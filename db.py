@@ -34,7 +34,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -432,10 +432,15 @@ def _migrate_v15(db: sqlite3.Connection):
                        (cleaned, row["id"]))
 
 
+def _migrate_v16(db: sqlite3.Connection):
+    """A running scan can be asked to stop once the source it is on has finished."""
+    _add_column(db, "scan_state", "stop", "INTEGER NOT NULL DEFAULT 0")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
-               15: _migrate_v15}
+               15: _migrate_v15, 16: _migrate_v16}
 
 
 def init_db(db: sqlite3.Connection):

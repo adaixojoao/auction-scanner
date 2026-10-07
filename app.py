@@ -190,7 +190,7 @@ def auto_scan_loop(stop: threading.Event):
         delay = AUTO_SCAN_EVERY
         try:
             if load_config().get("schedule", {}).get("while_app_open", True):
-                ran = scheduler.tick(telegram=False)   # telegram_loop listens meanwhile
+                ran = scheduler.tick(telegram=False, block_scans=False)   # telegram_loop listens meanwhile
                 if ran:
                     LOG.info(f"Timetable ran: {', '.join(ran)}")
         except Exception:

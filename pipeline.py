@@ -59,6 +59,27 @@ def _set_state(db, **fields):
     db.commit()
 
 
+def request_stop(db) -> None:
+    """Ask the running scan to finish the source it is on and then stop."""
+    _set_state(db, stop=1)
+
+
+def _stop_requested(db) -> bool:
+    db.commit()  # end this connection's read, so a stop from the app is visible
+    row = db.execute("SELECT stop FROM scan_state WHERE id = 1").fetchone()
+    return bool(row and row["stop"])
+
+
+def _postpone_country_jobs(db, countries) -> None:
+    """A stopped country scan counts as this interval's run, so the timetable
+    does not start the same country again until the next week or fortnight."""
+    from db import set_job_last_run
+    if countries is None or "PT" in countries:
+        set_job_last_run(db, "pt")
+    if countries is None or any(c != "PT" for c in countries):
+        set_job_last_run(db, "eu")
+
+
 def scan_status(db) -> dict:
     row = db.execute("SELECT * FROM scan_state WHERE id = 1").fetchone()
     state = dict(row) if row else {"running": 0}
@@ -67,6 +88,7 @@ def scan_status(db) -> dict:
                                  or (started and utcnow() - started > STALE_SCAN)):
         state["running"] = 0  # the process died mid-scan (app killed, PC shut down)
     state["running"] = bool(state.get("running"))
+    state["stop"] = bool(state.get("stop"))
     state["summary"] = json.loads(state["summary"]) if state.get("summary") else None
     state["last_scrape"] = db.execute("SELECT MAX(timestamp) FROM scrape_log").fetchone()[0]
     return state
@@ -172,83 +194,101 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
     db = db or connect()
     try:
         with scan_lock():
-            _set_state(db, running=1, label=label, total=len(chosen), done=0, current=None,
+            _set_state(db, running=1, stop=0, label=label, total=len(chosen), done=0, current=None,
                        started_at=utcnow_iso(), finished_at=None, summary=None)
             results = []
+            stopped = False
+            report_path = None
             try:
                 for i, source in enumerate(chosen):
+                    if _stop_requested(db):
+                        stopped = True
+                        break
                     _set_state(db, current=source.name, done=i)
                     results.append(run_source(db, source, max_price=max_price, config=cfg))
-                _set_state(db, current="de-duplicating", done=len(chosen))
-                try:
-                    from links import link_court_sales
-                    link_court_sales(db)
-                except Exception:  # noqa: BLE001 — a join must never fail the scan
-                    LOG.exception("Joining Citius to e-leilões failed")
-                mark_duplicates(db)
-                report_path = None
-                if report:
-                    _set_state(db, current="report")
-                    report_path = build_report(db, cfg)
-                if alerts:
-                    _set_state(db, current="alerts")
-                    send_alerts(db, cfg)
+                if not stopped and _stop_requested(db):
+                    stopped = True
+                if not stopped:
+                    _set_state(db, current="de-duplicating", done=len(chosen))
                     try:
-                        from telegram_alert import alert_source_failures
-                        alert_source_failures(db, cfg, [r["source"] for r in results])
-                    except Exception:  # noqa: BLE001 — an alarm must never fail the scan
-                        LOG.exception("Source alarm failed")
+                        from links import link_court_sales
+                        link_court_sales(db)
+                    except Exception:  # noqa: BLE001 — a join must never fail the scan
+                        LOG.exception("Joining Citius to e-leilões failed")
+                    mark_duplicates(db)
+                    if report:
+                        _set_state(db, current="report")
+                        report_path = build_report(db, cfg)
+                    if alerts:
+                        _set_state(db, current="alerts")
+                        send_alerts(db, cfg)
+                        try:
+                            from telegram_alert import alert_source_failures
+                            alert_source_failures(db, cfg, [r["source"] for r in results])
+                        except Exception:  # noqa: BLE001 — an alarm must never fail the scan
+                            LOG.exception("Source alarm failed")
+                        try:
+                            from outbox import queue_requests
+                            queue_requests(db, cfg)          # offered on Telegram; sent only on your tap
+                        except Exception:  # noqa: BLE001
+                            LOG.exception("Preparing information requests failed")
                     try:
-                        from outbox import queue_requests
-                        queue_requests(db, cfg)          # offered on Telegram; sent only on your tap
+                        import outcomes
+                        outcomes.record_results(db)      # ended sales and their last bid
                     except Exception:  # noqa: BLE001
-                        LOG.exception("Preparing information requests failed")
-                try:
-                    import outcomes
-                    outcomes.record_results(db)      # ended sales and their last bid
-                except Exception:  # noqa: BLE001
-                    LOG.exception("Recording auction results failed")
-                _set_state(db, current="map positions")
-                try:
-                    import geo
-                    best = enrich_order(db, cfg)
-                    session = make_session()
-                    geo.locate_towns(db, session, best)
-                    geo.geocode_pending(db, session, best, towns=geo.town_index(db))
-                    import cadastre
-                    cadastre.locate_pending(db, session, best, geo.town_index(db))
-                    geo.check_water_pending(db, session, best)
-                    import climate                    # heat by 2090, water, fire, flood: local files
-                    climate.assess_pending(db, best, geo.town_index(db))
-                except Exception:  # noqa: BLE001 — a map position must never fail the scan
-                    LOG.exception("Locating listings failed")
-                try:
-                    import site_check                 # slope, forest type, Natura: land and forestry
-                    plots = _plots_for_site_check(db, cfg)
-                    site_check.check_pending(db, plots)
-                except Exception:  # noqa: BLE001
-                    LOG.exception("Site check failed")
-                _set_state(db, current="photo check")
-                try:
-                    import photos                    # the photos of the best homes (needs an API key)
-                    from db import load_listings
-                    best = sorted(load_listings(db, filters=cfg.get("filters")),
-                                  key=lambda it: -it.get("rank", it["score"]))
-                    photos.check_pending(db, cfg, best)
-                except Exception:  # noqa: BLE001 — a photo check must never fail the scan
-                    LOG.exception("Photo check failed")
+                        LOG.exception("Recording auction results failed")
+                    _set_state(db, current="map positions")
+                    try:
+                        import geo
+                        best = enrich_order(db, cfg)
+                        session = make_session()
+                        geo.locate_towns(db, session, best)
+                        geo.geocode_pending(db, session, best, towns=geo.town_index(db))
+                        import cadastre
+                        cadastre.locate_pending(db, session, best, geo.town_index(db))
+                        geo.check_water_pending(db, session, best)
+                        import climate                    # heat by 2090, water, fire, flood: local files
+                        climate.assess_pending(db, best, geo.town_index(db))
+                    except Exception:  # noqa: BLE001 — a map position must never fail the scan
+                        LOG.exception("Locating listings failed")
+                    try:
+                        import site_check                 # slope, forest type, Natura: land and forestry
+                        plots = _plots_for_site_check(db, cfg)
+                        site_check.check_pending(db, plots)
+                    except Exception:  # noqa: BLE001
+                        LOG.exception("Site check failed")
+                    _set_state(db, current="photo check")
+                    try:
+                        import photos                    # the photos of the best homes (needs an API key)
+                        from db import load_listings
+                        best = sorted(load_listings(db, filters=cfg.get("filters")),
+                                      key=lambda it: -it.get("rank", it["score"]))
+                        photos.check_pending(db, cfg, best)
+                    except Exception:  # noqa: BLE001 — a photo check must never fail the scan
+                        LOG.exception("Photo check failed")
             finally:
+                finished_at = utcnow_iso()
+                if not stopped:
+                    _set_state(db, current="refreshing the lists")
+                    rescore(db, cfg)
+                try:
+                    import dashboard
+                    dashboard.refresh_cached_lists(finished_at)
+                except Exception:  # noqa: BLE001 — the open page keeps the list it has
+                    LOG.exception("Refreshing the lists failed")
+                if stopped and not source_names:
+                    _postpone_country_jobs(db, countries)
                 summary = {
                     "listings": sum(r["count"] for r in results),
                     "ok": sum(1 for r in results if r["status"] == "ok"),
                     "empty": sum(1 for r in results if r["status"] == "empty"),
                     "errors": sum(1 for r in results if r["status"] == "error"),
                     "sources": len(results),
+                    "stopped": stopped,
                 }
-                _set_state(db, running=0, current=None, finished_at=utcnow_iso(),
+                _set_state(db, running=0, stop=0, current=None, finished_at=finished_at,
                            summary=json.dumps(summary))
-            LOG.info(f"Scan of {label} finished: {summary}")
-            rescore(db, cfg)
+            LOG.info(f"Scan of {label} {'stopped' if stopped else 'finished'}: {summary}")
             return {**summary, "results": results, "report": report_path}
     finally:
         if own_db:

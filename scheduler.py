@@ -15,7 +15,9 @@ Usage:
 
 Each job's last run is kept in the database (job_runs), so a PC that slept
 through a slot catches up on the next tick instead of waiting for the next
-slot, and two ticks never run at once (scheduler.lock).
+slot. The short jobs (deadlines, backup, the closing watch, the weekly report)
+share scheduler.lock. A scrape does not: it has scan.lock, and the timetable
+keeps running those short jobs while a scan is going.
 
 Timetable (config.json → "schedule"; these are the defaults):
   pt_every_hours  168      PT sources, once a week
@@ -31,6 +33,7 @@ import logging.handlers
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -55,6 +58,9 @@ DEFAULT_SCHEDULE = {
 }
 _WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 JOBS = ("pt", "eu", "backup", "morning", "report", "closing")
+SCAN_JOBS = ("pt", "eu")   # long scrapes: their own lock, so a tick is not stuck behind one
+_scan_guard = threading.Lock()
+_scan_thread: threading.Thread | None = None
 
 
 def setup_logging():
@@ -132,6 +138,8 @@ def _scan(countries, label):
         run_scan(countries=countries, label=label)
     except ScanBusy:
         LOG.info(f"{label}: another scan is running, skipped")
+        return False   # still due: the scan that is running will record its own job
+    return True
 
 
 def run_pt_scrape():
@@ -266,13 +274,76 @@ def _last_runs(db) -> dict:
     return {job: job_last_run(db, job) for job in JOBS}
 
 
-def tick(dry_run: bool = False, telegram: bool = True) -> list[str]:
+def _record(job: str) -> None:
+    from db import connect, set_job_last_run
+    db = connect()
+    try:
+        set_job_last_run(db, job)
+    finally:
+        db.close()
+
+
+def _run_recorded(job: str) -> bool:
+    """Run one job and record it. False when a scrape was skipped because
+    another scan already holds scan.lock — that job stays due."""
+    try:
+        outcome = JOB_FUNCS[job]()
+    except Exception:
+        LOG.exception(f"Job {job} failed")
+        outcome = None
+    if outcome is False:
+        return False
+    # Mark it run even if it failed: retrying a crashing job every
+    # 30 minutes helps nobody. The error is in scheduler.log.
+    _record(job)
+    return True
+
+
+def _start_scan_jobs(jobs: list[str]) -> list[str]:
+    """Start the due scrapes on a background thread. The app's timetable
+    calls this so deadline checks are not stuck behind a scan that lasts hours.
+    The command-line tick runs the scrapes itself: that process must stay
+    alive until they finish."""
+    global _scan_thread
+    with _scan_guard:
+        if _scan_thread is not None and _scan_thread.is_alive():
+            return []
+        from locks import lock_holder
+        from pipeline import LOCK_PATH
+        if lock_holder(LOCK_PATH):
+            return []
+
+        def work():
+            for job in jobs:
+                # A scan that finished while this tick was on the short jobs
+                # has already recorded itself.
+                from config import load_config
+                from db import connect
+                db = connect()
+                try:
+                    still_due = job in due_jobs(
+                        datetime.now().astimezone(), _last_runs(db),
+                        load_config().get("schedule", {}))
+                finally:
+                    db.close()
+                if still_due:
+                    _run_recorded(job)
+
+        _scan_thread = threading.Thread(target=work, name="scheduled-scan", daemon=True)
+        _scan_thread.start()
+        return list(jobs)
+
+
+def tick(dry_run: bool = False, telegram: bool = True, block_scans: bool = True) -> list[str]:
     """Run every due job once. Returns the jobs that ran (or would run).
 
     `telegram`: also handle Telegram button taps waiting since the last tick.
-    The app passes False: while it is open it listens to Telegram itself."""
+    The app passes False: while it is open it listens to Telegram itself.
+    `block_scans`: the command line waits for a scrape. The open app passes
+    False and keeps checking the short jobs while the scrape runs.
+    """
     from config import load_config
-    from db import connect, set_job_last_run
+    from db import connect
 
     cfg = load_config()
     schedule = cfg.get("schedule", {})
@@ -291,25 +362,27 @@ def tick(dry_run: bool = False, telegram: bool = True) -> list[str]:
     if dry_run or not due:
         return due
 
-    if not _acquire_lock():
-        LOG.info("Another tick is still running; skipping.")
-        return []
-    try:
-        for job in due:
+    quick = [job for job in due if job not in SCAN_JOBS]
+    scans = [job for job in due if job in SCAN_JOBS]
+    ran: list[str] = []
+    if quick:
+        if not _acquire_lock():
+            LOG.info("Another tick is still running; skipping the short jobs.")
+        else:
             try:
-                JOB_FUNCS[job]()
-            except Exception:
-                LOG.exception(f"Job {job} failed")
-            # Mark it run even if it failed: retrying a crashing job every
-            # 30 minutes helps nobody. The error is in scheduler.log.
-            db = connect()
-            try:
-                set_job_last_run(db, job)
+                for job in quick:
+                    if _run_recorded(job):
+                        ran.append(job)
             finally:
-                db.close()
-    finally:
-        _release_lock()
-    return due
+                _release_lock()
+    if not scans:
+        return ran
+    if block_scans:
+        for job in scans:
+            if _run_recorded(job):
+                ran.append(job)
+        return ran
+    return ran + _start_scan_jobs(scans)
 
 
 def run_loop(every_minutes: int = 5):

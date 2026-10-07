@@ -20,7 +20,7 @@ def test_every_page_renders_with_the_shared_layout(client):
         r = client.get(path)
         assert r.status_code == 200, path
         html = r.get_data(as_text=True)
-        assert 'class="topbar"' in html and "Scan now" in html, path
+        assert 'class="topbar"' in html and "Scan now" in html and 'id="scan-stop"' in html, path
     assert client.get("/cartas-review").status_code == 302   # old bookmarks still work
     assert client.get("/health").headers["Location"].endswith("/sources")
     assert client.get("/static/app.js").status_code == 200
@@ -302,6 +302,55 @@ def test_scan_api(client, monkeypatch):
                        {"countries": None, "source_names": ["citius"]}]
     assert client.post("/api/scan", json={"countries": ["XX"]}).status_code == 400
     assert client.post("/api/scan", json={"source": "nope"}).status_code == 400
+    assert client.post("/api/scan/stop").status_code == 409
+
+
+def test_stop_asks_the_running_scan_to_finish_its_source(client, db):
+    import os
+    from pipeline import LOCK_PATH
+    with open(LOCK_PATH, "w") as f:
+        f.write(f"{os.getpid()} now")
+    db.execute("UPDATE scan_state SET running=1, started_at='2026-10-07T10:00:00+00:00' WHERE id=1")
+    db.commit()
+    assert client.post("/api/scan/stop").status_code == 202
+    state = client.get("/api/scan").get_json()
+    assert state["running"] is True and state["stop"] is True
+
+
+def test_an_open_list_waits_until_the_scan_finishes(db, monkeypatch):
+    import os
+    import time
+    from pipeline import LOCK_PATH
+    dashboard._LISTS["home"] = (time.monotonic(), [{"id": "kept"}], "2026-10-07T12:00:00+00:00")
+    with open(LOCK_PATH, "w") as f:
+        f.write(f"{os.getpid()} now")
+    dashboard.app.config["TESTING"] = False
+    try:
+        assert dashboard.all_listings("home") == [{"id": "kept"}]    # stale on purpose, still served
+    finally:
+        dashboard.app.config["TESTING"] = True
+        dashboard._LISTS.pop("home", None)
+        os.remove(LOCK_PATH)
+
+    built = []
+
+    def fake(mode, tag=None):
+        built.append(tag)
+        return [{"id": "new"}]
+
+    monkeypatch.setattr(dashboard, "_build_list", fake)
+    db.execute("UPDATE scan_state SET finished_at='2026-10-07T12:00:00+00:00', running=0 WHERE id=1")
+    db.commit()
+    dashboard._LISTS["home"] = (time.monotonic(), [{"id": "current"}], "2026-10-07T12:00:00+00:00")
+    dashboard.app.config["TESTING"] = False
+    try:
+        assert dashboard.all_listings("home") == [{"id": "current"}] and built == []
+        dashboard._LISTS["home"] = (time.monotonic(), [{"id": "old"}], "yesterday")
+        assert dashboard.all_listings("home") == [{"id": "new"}]
+        assert built == ["2026-10-07T12:00:00+00:00"]
+    finally:
+        dashboard.app.config["TESTING"] = True
+        dashboard._LISTS.pop("home", None)
 
 
 def test_health_api(client, db):
