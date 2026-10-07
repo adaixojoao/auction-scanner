@@ -45,16 +45,27 @@ def test_scan_writes_report_and_sends_alerts(db, add, fake_http, monkeypatch, tm
 
 def test_scan_state_of_a_killed_process_is_not_running(db):
     import os
-    db.execute("UPDATE scan_state SET running=1, started_at=?, label='x' WHERE id=1",
-               (pipeline.utcnow_iso(),))
+    db.execute(
+        "UPDATE scan_state SET running=1, done=4, current='bpi', started_at=?, label='x' WHERE id=1",
+        (pipeline.utcnow_iso(),))
     db.commit()
-    assert pipeline.scan_status(db)["running"] is False          # no lock at all
+    state = pipeline.scan_status(db)
+    assert state["running"] is False and state["summary"]["stopped"] is True
+    assert state["summary"]["sources"] == 4 and state["finished_at"]
+    assert pipeline.scan_status(db)["finished_at"] == state["finished_at"]  # one close, not every poll
+
+    db.execute(
+        "UPDATE scan_state SET running=1, stop=0, finished_at=NULL, summary=NULL, started_at=? WHERE id=1",
+        (pipeline.utcnow_iso(),))
+    db.commit()
     with open(pipeline.LOCK_PATH, "w") as f:
         f.write(f"{os.getpid()} now")
     assert pipeline.scan_status(db)["running"] is True           # live holder
+    assert db.execute("SELECT running FROM scan_state WHERE id=1").fetchone()[0] == 1
     with open(pipeline.LOCK_PATH, "w") as f:
         f.write("999999999 then")
-    assert pipeline.scan_status(db)["running"] is False          # holder died
+    closed = pipeline.scan_status(db)
+    assert closed["running"] is False and closed["summary"]["stopped"] is True
 
 
 def _ok(source):
