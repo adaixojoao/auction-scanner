@@ -265,7 +265,22 @@ _LISTS_LOCK = threading.Lock()
 _BUILD_LOCKS: dict = {}      # mode -> lock: one build at a time, every window waits for the same one
 
 
-def _build_list(mode: str) -> list:
+def _scan_busy() -> bool:
+    """A scan (this app or the timetable) is writing. The page keeps its list."""
+    from pipeline import LOCK_PATH
+    return bool(lock_holder(LOCK_PATH))
+
+
+def _scan_finished_at() -> str:
+    db = get_db()
+    try:
+        row = db.execute("SELECT finished_at FROM scan_state WHERE id = 1").fetchone()
+    finally:
+        db.close()
+    return (row["finished_at"] or "") if row else ""
+
+
+def _build_list(mode: str, tag: str | None = None) -> list:
     with _LISTS_LOCK:
         lock = _BUILD_LOCKS.setdefault(mode, threading.Lock())
         started = time.monotonic()
@@ -279,12 +294,22 @@ def _build_list(mode: str) -> list:
         finally:
             db.close()
         with _LISTS_LOCK:
-            _LISTS[mode] = (time.monotonic(), items)
+            _LISTS[mode] = (time.monotonic(), items, tag if tag is not None else _scan_finished_at())
             _LISTS_BUILDING.discard(mode)
     return items
 
 
+def refresh_cached_lists(finished_at: str) -> None:
+    """Rebuild the lists already on screen once a scan has stopped writing."""
+    if app.config.get("TESTING"):
+        return
+    for mode in list(_LISTS):
+        _build_list(mode, tag=finished_at)
+
+
 def _rebuild_soon(mode: str) -> None:
+    if _scan_busy():
+        return
     with _LISTS_LOCK:
         if mode in _LISTS_BUILDING:
             return
@@ -309,8 +334,13 @@ def all_listings(mode: str) -> list:
         finally:
             db.close()
     kept = _LISTS.get(mode)
+    if _scan_busy() and kept is not None:
+        return kept[1]
     if kept is None:
         return _build_list(mode)
+    finish = _scan_finished_at()
+    if finish and (len(kept) < 3 or kept[2] != finish):
+        return _build_list(mode, tag=finish)   # the scan has finished: rebuild once, then serve it
     if time.monotonic() - kept[0] > LIST_FRESH_S:
         _rebuild_soon(mode)
     return kept[1]
@@ -592,6 +622,19 @@ def api_scan_start():
     if busy or lock_holder(LOCK_PATH):
         return jsonify({"error": "A scan is already running"}), 409
     _start_scan(countries=countries, source_names=[source] if source else None)
+    return jsonify({"ok": True}), 202
+
+
+@app.route("/api/scan/stop", methods=["POST"])
+def api_scan_stop():
+    from pipeline import LOCK_PATH, request_stop, scan_status
+    db = get_db()
+    try:
+        if not scan_status(db)["running"] and not lock_holder(LOCK_PATH):
+            return jsonify({"error": "No scan is running"}), 409
+        request_stop(db)
+    finally:
+        db.close()
     return jsonify({"ok": True}), 202
 
 

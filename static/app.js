@@ -117,19 +117,25 @@ const AS = (() => {
     const el = document.getElementById("scan-status");
     const btn = document.getElementById("scan-btn");
     if (!el) return;
+    const stop = document.getElementById("scan-stop");
     if (s.running) {
       const pct = s.total ? Math.round(100 * (s.done || 0) / s.total) : 0;
-      el.innerHTML = `Scanning ${esc(s.label || "")} · ${s.done || 0}/${s.total || "?"}` +
+      const verb = s.stop ? "Stopping after" : "Scanning";
+      el.innerHTML = `${verb} ${esc(s.label || "")} · ${s.done || 0}/${s.total || "?"}` +
         `${s.current ? " · " + esc(s.current) : ""}<div class="scan-bar"><div style="width:${pct}%"></div></div>`;
       btn.disabled = true;
+      if (stop) { stop.hidden = false; stop.disabled = !!s.stop; }
     } else {
       const sum = s.summary;
       el.innerHTML = `Last scan ${ago(s.finished_at || s.last_scrape)}` +
         (sum && sum.errors ? ` · <a href="/sources" class="bad">${sum.errors} failing</a>` : "");
       btn.disabled = false;
+      if (stop) stop.hidden = true;
     }
     if (wasRunning && !s.running) {
-      toast(`Scan finished: ${s.summary ? s.summary.listings : 0} listings`);
+      const sum = s.summary;
+      if (sum && sum.stopped) toast("Scan stopped");
+      else toast(`Scan finished: ${sum ? sum.listings : 0} listings`);
       document.dispatchEvent(new CustomEvent("scan-finished"));
     }
     wasRunning = s.running;
@@ -144,6 +150,13 @@ const AS = (() => {
     await api("/api/scan", {method: "POST", body});
     toast("Scan started");
     wasRunning = true;
+    pollScan();
+  }
+  async function stopScan() {
+    const stop = document.getElementById("scan-stop");
+    if (stop) stop.disabled = true;
+    await api("/api/scan/stop", {method: "POST"});
+    toast("Stopping after the current source");
     pollScan();
   }
 
@@ -190,5 +203,5 @@ const AS = (() => {
     announceUpdate();
   });
 
-  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, pollScan};
+  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, stopScan, pollScan};
 })();

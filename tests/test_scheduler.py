@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 
 import scheduler
@@ -61,15 +62,77 @@ def test_tick_runs_due_jobs_once_and_records_them(db, monkeypatch, tmp_path):
     assert not (tmp_path / "lock").exists()
 
 
-def test_tick_skips_when_locked(db, monkeypatch, tmp_path):
+def test_tick_skips_short_jobs_when_the_timetable_lock_is_held(db, monkeypatch, tmp_path):
     import os
     lock = tmp_path / "lock"
     lock.write_text(f"{os.getpid()} now")    # held by a live process
     monkeypatch.setattr(scheduler, "LOCK_PATH", str(lock))
-    monkeypatch.setattr(scheduler, "JOB_FUNCS", {j: (lambda: 1 / 0) for j in scheduler.JOBS})
+    called = []
+    monkeypatch.setattr(scheduler, "JOB_FUNCS", {j: (lambda j=j: called.append(j)) for j in scheduler.JOBS})
     import config
     monkeypatch.setattr(config, "load_config", lambda: {"schedule": {}})
+    assert scheduler.tick() == ["pt", "eu"]          # a scrape has its own lock
+    assert called == ["pt", "eu"]                    # deadlines and the backup wait
+
+
+def test_a_scan_does_not_hold_the_timetable_lock(db, monkeypatch):
+    import os
+    held = {}
+
+    def make(job):
+        def run():
+            held[job] = os.path.exists(scheduler.LOCK_PATH)
+        return run
+
+    monkeypatch.setattr(scheduler, "JOB_FUNCS", {j: make(j) for j in scheduler.JOBS})
+    import config
+    monkeypatch.setattr(config, "load_config", lambda: {"schedule": {}})
+    assert "closing" in scheduler.tick()
+    assert held["closing"] is True
+    assert held["pt"] is False and held["eu"] is False
+
+
+def test_a_skipped_scan_stays_due(db, monkeypatch):
+    calls = {"n": 0}
+
+    def pt():
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr(scheduler, "JOB_FUNCS", {**{j: (lambda: None) for j in scheduler.JOBS}, "pt": pt})
+    import config
+    monkeypatch.setattr(config, "load_config", lambda: {"schedule": {
+        "eu_every_hours": 0, "backup_every_hours": 0, "check_times": [],
+        "weekly_report": "", "closing_every_minutes": 0}})
     assert scheduler.tick() == []
+    assert scheduler.tick() == []
+    assert calls["n"] == 2
+    from db import job_last_run
+    assert job_last_run(db, "pt") is None
+
+
+def test_the_open_app_keeps_checking_while_a_scan_runs(db, monkeypatch):
+    import threading
+    started = threading.Event()
+    release = threading.Event()
+
+    def pt():
+        started.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(scheduler, "JOB_FUNCS", {**{j: (lambda: None) for j in scheduler.JOBS}, "pt": pt})
+    import config
+    monkeypatch.setattr(config, "load_config", lambda: {"schedule": {
+        "eu_every_hours": 0, "backup_every_hours": 0, "check_times": [],
+        "weekly_report": "", "closing_every_minutes": 0}})
+    try:
+        assert scheduler.tick(block_scans=False) == ["pt"]
+        assert started.wait(2)
+        assert not os.path.exists(scheduler.LOCK_PATH)
+    finally:
+        release.set()
+        if scheduler._scan_thread is not None:
+            scheduler._scan_thread.join(5)
 
 
 def test_lock_left_by_a_dead_process_is_taken_over(db, monkeypatch, tmp_path):

@@ -57,6 +57,44 @@ def test_scan_state_of_a_killed_process_is_not_running(db):
     assert pipeline.scan_status(db)["running"] is False          # holder died
 
 
+def _ok(source):
+    return {"source": source.name, "count": 0, "status": "ok", "message": None, "duration_s": 0}
+
+
+def test_a_stop_finishes_the_current_source_and_skips_the_rest(db, monkeypatch):
+    seen = []
+
+    def fake(conn, source, **kw):
+        seen.append(source.name)
+        if len(seen) == 1:
+            pipeline.request_stop(conn)
+        return _ok(source)
+
+    monkeypatch.setattr("sources.run_source", fake)
+    monkeypatch.setattr(pipeline, "rescore", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rescored")))
+    result = pipeline.run_scan(countries=["PT"], cfg={"filters": {}}, db=db, report=False, alerts=False)
+    assert result["stopped"] is True and result["sources"] == 1 and len(seen) == 1
+    state = pipeline.scan_status(db)
+    assert state["running"] is False and state["stop"] is False and state["summary"]["stopped"] is True
+    from db import job_last_run
+    assert job_last_run(db, "pt") is not None          # this week is done
+    assert job_last_run(db, "eu") is None
+    assert not os.path.exists(pipeline.LOCK_PATH)
+
+
+def test_stopping_one_source_does_not_skip_the_country_scan(db, monkeypatch):
+    def fake(conn, source, **kw):
+        pipeline.request_stop(conn)
+        return _ok(source)
+
+    monkeypatch.setattr("sources.run_source", fake)
+    result = pipeline.run_scan(source_names=["bcp", "leilosoc"], cfg={"filters": {}}, db=db,
+                               report=False, alerts=False)
+    assert result["stopped"] is True and result["sources"] == 1
+    from db import job_last_run
+    assert job_last_run(db, "pt") is None and job_last_run(db, "eu") is None
+
+
 def test_pid_alive():
     import os
     from locks import pid_alive
