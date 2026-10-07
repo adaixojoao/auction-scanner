@@ -971,16 +971,22 @@ _LOADED_MODES: set = set()
 _SCORE_DBS: dict = {}
 
 
+# A dashboard or scraper change must not throw away every kept score. Only
+# these decide the number a listing gets.
+_SCORE_CODE = ("scoring.py", "costs.py", "forestry.py", "land_prices.py", "common.py",
+               "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py")
+
+
 @functools.lru_cache(maxsize=1)
 def _code_version() -> str:
     """A fingerprint of the scoring code: a new version of the app scores again
     instead of showing scores kept from the old one."""
     here = os.path.dirname(os.path.abspath(__file__))
     h = hashlib.sha1()
-    for name in sorted(os.listdir(here)):
-        if name.endswith(".py"):
-            with open(os.path.join(here, name), "rb") as f:
-                h.update(f.read())
+    for name in _SCORE_CODE:
+        h.update(name.encode())
+        with open(os.path.join(here, name), "rb") as f:
+            h.update(f.read())
     return h.hexdigest()[:12]
 _SCORE_LOCK = threading.Lock()     # one file, shared by the app's threads
 
@@ -1090,9 +1096,19 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     """
     now = now or utcnow()
     sql = "SELECT * FROM listings"
+    query_params = tuple(params)
+    clauses = []
     if where:
-        sql += f" WHERE {where}"
-    rows = db.execute(sql, params).fetchall()
+        clauses.append(f"({where})")
+    if not include_hidden:
+        # Ended sales are hidden on the way out. Leaving them in the read is
+        # what made every list walk tens of thousands of dead rows. A bare date
+        # counts for that whole day, so the comparison is the date only.
+        clauses.append("(date_end IS NULL OR date_end = '' OR substr(date_end, 1, 10) >= ?)")
+        query_params = query_params + (now.date().isoformat(),)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    rows = db.execute(sql, query_params).fetchall()
     # A scan touches last_seen on every listing it sees; the score never reads it.
     scored_cols = [i for i, k in enumerate(rows[0].keys()) if k not in _UNSCORED] if rows else []
 
@@ -1156,6 +1172,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             sc = _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
                             climate_on, mode)
             data = {k: item[k] for k in _DERIVED}
+            if item.get("area_note"):
+                data["area_m2"] = item["area_m2"]
+                data["area_note"] = item["area_note"]
             _SCORED[(mode, item["id"])] = (row_key, data, inputs)
             new_scores.append((item["id"], row_key, inputs, data))
 

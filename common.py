@@ -32,6 +32,8 @@ COUNTRY_NAMES = {
     "DE": "Germany", "NL": "Netherlands", "BE": "Belgium", "HR": "Croatia",
     "GR": "Greece", "RO": "Romania", "PL": "Poland", "CY": "Cyprus", "BG": "Bulgaria", "SK": "Slovakia",
     "LV": "Latvia",
+    "AT": "Austria", "LU": "Luxembourg", "IE": "Ireland", "EE": "Estonia",
+    "FI": "Finland",
 }
 # Display order everywhere (report, console, dashboard): Portugal first.
 COUNTRY_ORDER = list(COUNTRY_NAMES)
@@ -344,27 +346,83 @@ _AREA_RE = re.compile(
     r"(m²|m2|m\s?2|mq|sq\.?\s?m|ha|hectares?)(?![a-z])", re.I)
 
 
+def _area_value(number: str, unit: str) -> float | None:
+    number = number.replace("\u00a0", " ")
+    if re.fullmatch(r"\d{1,3}(?:[ .]\d{3})+(?:,\d+)?", number):
+        value = float(number.replace(" ", "").replace(".", "").replace(",", "."))
+    else:                          # "106,63", and a typed "106, 63"
+        value = float(number.replace(" ", "").replace(",", "."))
+    if unit.lower().startswith("h"):
+        value *= 10000
+    return value if value > 0 else None
+
+
+def find_areas(text) -> list[float]:
+    """Every size in a text, in m², in the order written."""
+    values = []
+    for m in _AREA_RE.finditer(str(text or "")):
+        value = _area_value(m.group(1), m.group(2))
+        if value:
+            values.append(value)
+    if not values:
+        # Italian court texts put the unit first: "di MQ. 90", "mq 127,22".
+        m = _AREA_UNIT_FIRST_RE.search(str(text or ""))
+        if m:
+            value = float(m.group(1).replace(".", "").replace(",", "."))
+            if value > 0:
+                values.append(value)
+    return values
+
+
 def find_area(text) -> float | None:
     """The first size in a text, in m²: "d'environ 35,50 m²" → 35.5,
     "com 1.250 m2" → 1250, "8 ha" → 80000. None if there is none."""
-    for m in _AREA_RE.finditer(str(text or "")):
-        number = m.group(1).replace("\u00a0", " ")
-        if re.fullmatch(r"\d{1,3}(?:[ .]\d{3})+(?:,\d+)?", number):
-            value = float(number.replace(" ", "").replace(".", "").replace(",", "."))
-        else:                          # "106,63", and a typed "106, 63"
-            value = float(number.replace(" ", "").replace(",", "."))
-        if m.group(2).lower().startswith("h"):
-            value *= 10000
-        if value > 0:
-            return value
-    # Italian court texts put the unit first: "di MQ. 90", "mq 127,22".
-    m = _AREA_UNIT_FIRST_RE.search(str(text or ""))
-    if m:
-        return float(m.group(1).replace(".", "").replace(",", ".")) or None
-    return None
+    found = find_areas(text)
+    return found[0] if found else None
 
 
 _AREA_UNIT_FIRST_RE = re.compile(r"\bmq\.?\s*(\d{1,6}(?:,\d{1,2})?)\b", re.I)
+
+# "Parcelas de 0,8 a 2,8 ha": the plots for sale, not the development they sit in.
+_PLOT_SPAN = re.compile(
+    r"\bparcelas?\b[^.]{0,60}?(\d+(?:[.,]\d+)?)\s*(?:a|al|y|–|-)\s*(\d+(?:[.,]\d+)?)\s*"
+    r"(ha|hect[aá]reas?|hectares?)",
+    re.I)
+# The feed's "total area" is sometimes the whole sector. Trust the ad when it
+# states a plot at most half as big, and the feed figure is at least a hectare.
+STATED_AREA_MIN_FEED = 10_000
+STATED_AREA_MAX_SHARE = 0.5
+
+
+def stated_plot_m2(text) -> float | None:
+    """The plot the ad itself describes, in m². A range of plots uses the
+    largest of them. Room sizes (under 1 000 m²) are left out."""
+    spans = []
+    for m in _PLOT_SPAN.finditer(str(text or "")):
+        hi = float(m.group(2).replace(",", "."))
+        if m.group(3).lower().startswith("h"):
+            hi *= 10000
+        if hi > 0:
+            spans.append(hi)
+    if spans:
+        return max(spans)
+    landish = [a for a in find_areas(text) if a >= 1000]
+    return max(landish) if landish else None
+
+
+def prefer_stated_area(feed, text) -> tuple[float | None, float | None]:
+    """(area to use, feed area) when the ad states a much smaller plot.
+
+    The second value is None when the feed figure stands. A house's floor area
+    is not a plot: callers skip dwellings."""
+    try:
+        feed_n = float(feed) if feed else 0.0
+    except (TypeError, ValueError):
+        feed_n = 0.0
+    stated = stated_plot_m2(text)
+    if feed_n >= STATED_AREA_MIN_FEED and stated and stated <= feed_n * STATED_AREA_MAX_SHARE:
+        return stated, feed_n
+    return (feed_n or None), None
 
 
 def find_price(text) -> float | None:

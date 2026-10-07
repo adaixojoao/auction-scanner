@@ -9,7 +9,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 from common import (LOG, find_area, find_price, land_max_price, make_listing, make_session, normalize, parse_date_dmy,
-                    parse_price, safe_url, stable_id, to_number)
+                    parse_price, prefer_stated_area, safe_url, stable_id, to_number)
 from db import upsert_listing
 from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
@@ -535,7 +535,9 @@ HAYA = CardSite(
     params={"precio_max": "{max_price}"}, max_pages=29,
     description="Haya Real Estate (Sareb/BBVA)", tipo="inmueble", price_is_min_price=True,
 )
-@register("haya", "ES")
+# Blocked by this PC's firewall (WinError 10013) on every scan. Left runnable by
+# name; a default scan no longer waits on it.
+@register("haya", "ES", default=False)
 def scrape_haya(db, max_price: float = 100000, **_):
     """haya.es — Sareb/BBVA repossessions."""
     return scrape_cards(db, HAYA, max_price)
@@ -694,7 +696,8 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
     return total
 
 
-@register("subastasactivas", "ES")
+# Blocked by this PC's firewall on every scan, same as haya.es.
+@register("subastasactivas", "ES", default=False)
 def scrape_subastasactivas(db, max_price: float = 100000, **_):
     """subastasactivas.com — aggregator of BOE/AEAT/Social Security/notarial auctions."""
     session = make_session()
@@ -737,6 +740,33 @@ ALISEDA_TYPES = {10: "vivienda", 8: "terreno"}
 ALISEDA_MAX_PAGES = 80
 
 
+def bank_share_sentence(card: dict) -> str | None:
+    """A co-ownership flag the search JSON carries beside the description.
+
+    Aliseda's is Proindiviso. Altamira and Solvia use the same idea under other
+    names; a price-off percentage is not one of them."""
+    if not isinstance(card, dict):
+        return None
+    for key, value in card.items():
+        if not isinstance(key, str):
+            continue
+        nk = normalize(key).replace("_", "").replace(" ", "")
+        if "proindiviso" not in nk and nk not in ("copropiedad", "escopropiedad"):
+            continue
+        if value in (None, False, 0, "0", "false", "False", "N", "NO", "no", ""):
+            continue
+        return "Transmisión de una participación indivisa (copropiedad)."
+    for key in ("porcentajeTitularidad", "participacionIndivisa", "participacion"):
+        raw = card.get(key)
+        try:
+            pct = float(str(raw).replace(",", "."))
+        except (TypeError, ValueError):
+            continue
+        if 0 < pct < 100:
+            return f"Participación del {pct:g}% (copropiedad), no el pleno dominio."
+    return None
+
+
 def parse_aliseda(item: dict, tipo: str) -> dict | None:
     op = item.get("operacion") or {}
     addr = item.get("address") or {}
@@ -747,6 +777,17 @@ def parse_aliseda(item: dict, tipo: str) -> dict | None:
     street = " ".join(str(x) for x in (addr.get("TipoVia"), addr.get("StreetName"), addr.get("StreetNumber")) if x)
     area = item.get("SupParcela") or item.get("SuperficieTotal") if tipo == "terreno" else \
         item.get("ConstructedArea") or item.get("SuperficieTotal")
+    description = item.get("Description") or ""
+    if tipo == "terreno":
+        # The feed's total is often the whole sector (Calella 135 ha; the ad says 0.8–2.8).
+        stated, feed = prefer_stated_area(area, description)
+        if feed:
+            raw_area_note = feed
+            area = stated
+        else:
+            raw_area_note = None
+    else:
+        raw_area_note = None
     raw = {"posesion": item.get("posesion"), "referencia_catastral": item.get("RefCatastral") or None,
            "precio_anterior": op.get("PrecioAnterior")}
     if addr.get("Latitude") and addr.get("Longitude"):
@@ -758,7 +799,8 @@ def parse_aliseda(item: dict, tipo: str) -> dict | None:
         raw["occupation"] = "occupied"
     title = f"{'Terreno' if tipo == 'terreno' else 'Vivienda'} en {town or ''}" + (f", {street}" if street else "")
     images = item.get("imagenes") or []
-    description = item.get("Description") or ""
+    if raw_area_note:
+        raw["area_feed_m2"] = raw_area_note
     if item.get("Proindiviso"):
         # Only a share of the property, shown on the page in a box the API's text lacks.
         raw["proindiviso"] = True
@@ -825,9 +867,10 @@ def parse_altamira(card: dict, tipo: str) -> dict | None:
     url = (f"{ALTAMIRA_SITE}/venta-de-{_slug(kind)}/{_slug(card.get('provinciaurl'))}/{_slug(card.get('poblacionurl'))}"
            f"/segunda-mano/{card['referencia']}/{card.get('cinmueble')}/1")
     street = card.get("calle") or ""
+    share = bank_share_sentence(card)
     return make_listing(
         "altamira", card["referencia"], "ES", title=f"{kind} en {town}" + (f", {street}" if street else ""),
-        description=" · ".join(str(x) for x in (kind, street, card.get("cp"), town, card.get("provinciaurl"),
+        description=" · ".join(str(x) for x in (share, kind, street, card.get("cp"), town, card.get("provinciaurl"),
                                                 f"{card['numhab']} habs" if card.get("numhab") else None) if x),
         tipo=tipo, area_m2=card.get("superficie") or None, price=float(price), min_price=float(price),
         district=card.get("provinciaurl"), concelho=town, url=url,
@@ -1376,7 +1419,7 @@ def parse_solvia(item: dict) -> dict | None:
     sub = (item.get("tipoVivienda") or {}).get("nombre") or ""
     town = (item.get("poblacion") or {}).get("nombre")
     province = (item.get("provincia") or {}).get("nombre")
-    notes = [item.get("tituloFicha"), sub,
+    notes = [bank_share_sentence(item), item.get("tituloFicha"), sub,
              "Sin posesión: inmueble ocupado" if item.get("sinPosesion") else None,
              "Para reformar" if item.get("reformar") else None,
              "En subasta" if item.get("enSubasta") else None,
@@ -1422,3 +1465,11 @@ def scrape_solvia(db, max_price: float = 50000, config: dict | None = None, **_)
         time.sleep(1)
     LOG.info(f"Solvia: {total} listings")
     return total
+
+
+@register("habitaclia", "ES",
+          description="Habitaclia — homes for sale in Lugo, Ourense and León")
+def scrape_habitaclia(db, max_price: float = 50000, **_):
+    """Habitaclia — homes for sale in Lugo, Ourense and León."""
+    from sources._market import scrape_named
+    return scrape_named(db, "habitaclia", max_price)

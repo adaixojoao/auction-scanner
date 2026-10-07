@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import re
 import sys
 
 import requests
@@ -257,6 +258,36 @@ def natura2000(session, shape_wgs84) -> list[str]:
             for a in r.json().get("features", [])]
 
 
+# Nationally designated areas (CDDA). Natura 2000 does not include every national
+# park; Sierra Nevada is one the forestry score has to see.
+CDDA = ("https://bio.discomap.eea.europa.eu/arcgis/rest/services/ProtectedSites/CDDA_Dyna_WM/"
+        "MapServer/0/query")
+_NATIONAL_PARK = re.compile(r"national park|parque nacional|parc national|parco nazionale", re.I)
+
+
+def national_parks(session, shape_wgs84) -> list[str]:
+    """National parks intersecting the land. An empty list is 'none named', not
+    proof the land is unprotected — the service can miss a site."""
+    import json
+    from shapely.geometry import mapping
+    rings = [list(map(list, ring)) for ring in mapping(shape_wgs84.convex_hull)["coordinates"]]
+    r = session.post(CDDA, data={
+        "geometry": json.dumps({"rings": rings, "spatialReference": {"wkid": 4326}}),
+        "geometryType": "esriGeometryPolygon", "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "siteName,iucncat,designation", "returnGeometry": "false", "f": "json"}, timeout=60)
+    r.raise_for_status()
+    names = []
+    for feat in r.json().get("features") or []:
+        attrs = {str(k).lower(): v for k, v in (feat.get("attributes") or {}).items()}
+        blob = " ".join(str(v or "") for v in attrs.values())
+        if not _NATIONAL_PARK.search(blob):
+            continue
+        label = attrs.get("sitename") or attrs.get("site_name") or "national park"
+        names.append(f"National park: {label}")
+    return names
+
+
 def tracks_near(session, lat: float, lon: float, radius_m: int, land=None) -> dict:
     """OpenStreetMap ways a vehicle can use within radius_m: {kind: count}, plus
     "_nearest_m": the distance from the land to the nearest of them."""
@@ -296,7 +327,8 @@ def check(lat: float | None = None, lon: float | None = None, radius_m: float = 
     lat, lon = c.y, c.x
     out = {"lat": lat, "lon": lon, "hectares": area_ha(land), "exact": bool(parcels),
            "satellite": satellite_url({"lat": lat, "lon": lon})}
-    steps = [("slope", lambda: slope_stats(land)), ("natura2000", lambda: natura2000(session, land))]
+    steps = [("slope", lambda: slope_stats(land)), ("natura2000", lambda: natura2000(session, land)),
+             ("national_parks", lambda: national_parks(session, land))]
     if country.upper() == "FR":
         steps += [("forest", lambda: forest_types(session, land)), ("extraction", lambda: extraction(session, land)),
                   ("znieff", lambda: znieff(session, land))]
@@ -344,8 +376,9 @@ def describe(r: dict) -> list[str]:
     if r.get("extraction") is not None:
         lines.append("timber extraction (IGN): " + (", ".join(f"{v:.0%} {k}" for k, v in r["extraction"].items())
                                                     or "not mapped"))
-    protected = (r.get("natura2000") or []) + (r.get("znieff") or [])
-    lines.append("protection: " + ("; ".join(protected) if protected else "none found (Natura 2000"
+    protected = ((r.get("natura2000") or []) + (r.get("znieff") or [])
+                 + (r.get("national_parks") or []))
+    lines.append("protection: " + ("; ".join(protected) if protected else "none found (Natura 2000, national parks"
                                    + (", ZNIEFF" if r.get("znieff") is not None else "") + ")"))
     if r.get("tracks") is not None:
         ways = {k: n for k, n in r["tracks"].items() if not k.startswith("_")}
@@ -397,11 +430,14 @@ def summary(r: dict) -> dict:
            "cable_share": round(shares.get("cable yarding only", 0), 2),
            "winch_share": round(shares.get("tracked or winch only", 0), 2),
            "slope_mean": round(s["mean_pct"]) if s else None,
+           "min_m": round(s["min_m"]) if s.get("min_m") is not None else None,
+           "max_m": round(s["max_m"]) if s.get("max_m") is not None else None,
            "inaccessible": round(sum(v for k, v in extraction.items()
                                      if k.lower().startswith(("inaccessible", "zone non exploitable"))), 2)
            if extraction else None,
            "track_m": (r.get("tracks") or {}).get("_nearest_m"),
-           "protected": (r.get("natura2000") or []) + (r.get("znieff") or []),
+           "protected": ((r.get("natura2000") or []) + (r.get("znieff") or [])
+                         + (r.get("national_parks") or [])),
            "lines": describe(r)}
     if r.get("pt_cover"):
         out["montado"] = round(montado_share(r["pt_cover"]), 2)

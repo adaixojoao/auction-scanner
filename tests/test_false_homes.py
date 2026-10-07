@@ -120,6 +120,49 @@ def test_a_preview_line_never_replaces_the_full_text():
     assert _is_cut_copy("Busca su lugar de escape, de retiro?, alejado pero cercano?. Disponemos de esta...", full)
 
 
+def test_a_stable_and_hayloft_under_a_house_title_is_not_a_home():
+    assert property_kind(item(title="Vivienda en Villaviciosa", tipo="vivienda",
+                              description="Antigua cuadra y pajar en el centro del pueblo.")) == "other"
+    assert property_kind(item(title="Casa en Llanes", tipo="vivienda",
+                              description="Establo de piedra con nave adosada.")) == "other"
+    # A house that also has a stable stays a house.
+    assert property_kind(item(title="Casa en Valdés", tipo="vivienda",
+                              description="Se vende casa con cuadra y pajar.")) == "home"
+
+
+def test_okupas_are_out_in_every_tab():
+    taken = item(source="aliseda", title="Vivienda en Villanueva de la Reina", tipo="vivienda",
+                 price=25000, area_m2=90, description="Vivienda en buen estado.",
+                 raw_json='{"posesion": "OKUPADO", "occupation": "occupied"}')
+    for mode in ("home", "invest", "land", "forest"):
+        sc, reasons = score_detail(taken, mode=mode)
+        assert sc == 0 and "okupa" in reasons[0], mode
+    tenant = item(title="Piso en Lugo", price=40000, area_m2=80, concelho="Lugo", district="Lugo",
+                  description="Piso reformado, actualmente arrendado.")
+    assert score_detail(tenant, mode="invest")[0] > 0
+    assert any("rent from day one" in r or "occupied/tenanted" in r
+               for r in score_detail(tenant, mode="invest")[1])
+
+
+def test_a_feed_area_much_larger_than_the_ad_is_not_the_plot():
+    calella = item(title="Terreno en Calella", tipo="terreno", area_m2=1_350_000, price=90000,
+                   description="Parcelas de 0,8 a 2,8 ha. Suelo urbanizable para futuros desarrollos.")
+    sc, reasons = score_detail(calella, mode="forest")
+    assert sc == 0 and any("ad states" in r and "2.8 ha" in r for r in reasons)
+    assert any("building land" in r for r in reasons)
+    tordesillas = item(title="Terreno en Tordesillas", tipo="terreno", area_m2=480_000, price=40000,
+                       description="Parcela de 15,7 ha en el sector SUED-10.")
+    assert score_detail(tordesillas, mode="forest")[0] == 0
+    assert tordesillas["area_m2"] == 157_000
+
+
+def test_a_fibre_cement_roof_and_a_collapsed_barn_raise_the_repair():
+    from scoring import condition
+    assert condition(item(description="Casa en buen estado. Cubierta de uralita.")) == "some"
+    raw = '{"photo_check": {"condition": "good", "confidence": "high", "notes": "collapsed barn roof, asbestos sheets", "shows_house": true}}'
+    assert condition(item(description="Casa en buen estado.", raw_json=raw)) == "heavy"
+
+
 def test_a_share_named_in_words_is_skipped():
     for desc in ("Predmetom dražby je spoluvlastnícky podiel na rodinnom dome",
                  "Prodaje se suvlasnički dio kuće u Gvozdu", "Продава идеална част от къща"):

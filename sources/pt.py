@@ -1677,3 +1677,18 @@ def scrape_imovirtual(db, max_price: float = 50000, **_):
                 time.sleep(0.6)
     LOG.info(f"Imovirtual: {total} listings")
     return total
+
+
+@register("custojusto", "PT",
+          description="CustoJusto — plots, and houses in the inland districts")
+def scrape_custojusto(db, max_price: float = 50000, **_):
+    """CustoJusto — plots, and houses in the inland districts."""
+    from sources._market import scrape_named
+    return scrape_named(db, "custojusto", max_price)
+
+
+@register("casasapo", "PT", description="Casa Sapo — plots for sale across Portugal")
+def scrape_casasapo(db, max_price: float = 50000, **_):
+    """Casa Sapo — plots for sale across Portugal."""
+    from sources._market import scrape_named
+    return scrape_named(db, "casasapo", max_price)

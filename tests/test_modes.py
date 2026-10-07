@@ -21,6 +21,20 @@ def test_investment_takes_only_homes_and_forestry_only_land():
     assert score_detail(home, mode="forest") == (0.0, ["not land"])
 
 
+def test_urbanizable_and_high_mountain_are_not_forestry():
+    sector = listing(title="Terreno en Turre", tipo="terreno", area_m2=200000, price=40000,
+                     description="Suelo urbanizable. Futuros desarrollos residenciales.")
+    assert score_detail(sector, mode="forest") == (
+        0.0, ["building land (urbanizable or a development sector) — not a forestry plot"])
+    rustic = listing(title="Terreno rústico", tipo="terreno", area_m2=200000, price=40000,
+                     description="Suelo no urbanizable. Pinhal.")
+    assert score_detail(rustic, mode="forest")[0] > 0
+    park = listing(title="Finca en Laujar de Andarax", tipo="terreno", area_m2=300000, price=30000,
+                   description="Finca rústica en el Parque Nacional de Sierra Nevada, altitud 2.000-2.370 m.")
+    assert score_detail(park, mode="forest")[0] == 0
+    assert any("national park" in r or "high mountain" in r for r in score_detail(park, mode="forest")[1])
+
+
 def test_forestry_wants_10_ha_cheap_per_hectare_and_rustic():
     small = listing(title="Terreno rústico", tipo="terreno", area_m2=50000, price=5000)
     assert score_detail(small, mode="forest")[1][0].endswith("under 10 ha")

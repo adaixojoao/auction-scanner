@@ -124,7 +124,7 @@ def fake_http(monkeypatch):
 
     def install(handler):
         session = FakeSession(handler)
-        for mod in ["sources._cards"] + [f"sources.{m}" for m in sources._MODULES]:
+        for mod in ["sources._cards", "sources._market"] + [f"sources.{m}" for m in sources._MODULES]:
             module = importlib.import_module(mod)
             if hasattr(module, "make_session"):
                 monkeypatch.setattr(module, "make_session", lambda *a, **k: session)
