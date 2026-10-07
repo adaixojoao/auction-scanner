@@ -80,16 +80,36 @@ def _postpone_country_jobs(db, countries) -> None:
         set_job_last_run(db, "eu")
 
 
+def _close_dead_scan(db, state) -> None:
+    """The process that held the scan was killed. Write that down, so the bar
+    and the list refresh see a finished scan instead of one still on a source."""
+    finished = utcnow_iso()
+    summary = {
+        "listings": 0,
+        "ok": 0,
+        "empty": 0,
+        "errors": 0,
+        "sources": state.get("done") or 0,
+        "stopped": True,
+    }
+    _set_state(db, running=0, stop=0, current=None, finished_at=finished,
+               summary=json.dumps(summary))
+    state.update(running=0, stop=0, current=None, finished_at=finished, summary=summary)
+
+
 def scan_status(db) -> dict:
     row = db.execute("SELECT * FROM scan_state WHERE id = 1").fetchone()
     state = dict(row) if row else {"running": 0}
     started = parse_dt(state.get("started_at"))
-    if state.get("running") and (not lock_holder(LOCK_PATH)
-                                 or (started and utcnow() - started > STALE_SCAN)):
-        state["running"] = 0  # the process died mid-scan (app killed, PC shut down)
+    holder = lock_holder(LOCK_PATH)
+    if state.get("running") and not holder:
+        _close_dead_scan(db, state)
+    elif state.get("running") and started and utcnow() - started > STALE_SCAN:
+        state["running"] = 0  # still alive, but far too long: show it as finished
     state["running"] = bool(state.get("running"))
     state["stop"] = bool(state.get("stop"))
-    state["summary"] = json.loads(state["summary"]) if state.get("summary") else None
+    if isinstance(state.get("summary"), str):
+        state["summary"] = json.loads(state["summary"]) if state["summary"] else None
     state["last_scrape"] = db.execute("SELECT MAX(timestamp) FROM scrape_log").fetchone()[0]
     return state
 

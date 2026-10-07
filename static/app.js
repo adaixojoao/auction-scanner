@@ -127,7 +127,8 @@ const AS = (() => {
       if (stop) { stop.hidden = false; stop.disabled = !!s.stop; }
     } else {
       const sum = s.summary;
-      el.innerHTML = `Last scan ${ago(s.finished_at || s.last_scrape)}` +
+      const when = ago(s.finished_at || s.last_scrape);
+      el.innerHTML = `${sum && sum.stopped ? "Scan stopped" : "Last scan"} ${when}` +
         (sum && sum.errors ? ` · <a href="/sources" class="bad">${sum.errors} failing</a>` : "");
       btn.disabled = false;
       if (stop) stop.hidden = true;
