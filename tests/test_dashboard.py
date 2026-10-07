@@ -353,6 +353,25 @@ def test_an_open_list_waits_until_the_scan_finishes(db, monkeypatch):
         dashboard._LISTS.pop("home", None)
 
 
+def test_a_court_pdf_opens_in_the_reader(client, monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr(dashboard, "_download_pdf", lambda url: str(tmp_path / "avviso.pdf"))
+    monkeypatch.setattr(dashboard, "_open_path", opened.append)
+    url = "https://resource-pvp.giustizia.it/allegati/1/avviso%20di%20vendita.pdf?versionId=x"
+    assert client.post("/api/open", json={"url": url}).status_code == 200
+    assert opened == [str(tmp_path / "avviso.pdf")]
+    assert client.post("/api/open", json={"url": "javascript:alert(1)"}).status_code == 400
+
+
+def test_a_listing_page_opens_in_the_browser(client, monkeypatch):
+    import webbrowser
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+    url = "https://pvp.giustizia.it/pvp/it/detail_annuncio.page?idAnnuncio=1"
+    assert client.post("/api/open", json={"url": url}).status_code == 200
+    assert opened == [url]
+
+
 def test_health_api(client, db):
     record_scrape(db, "bpi", count=0, status="error", message="boom")
     health = {h["source"]: h for h in client.get("/api/health").get_json()}
