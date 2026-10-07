@@ -11,14 +11,23 @@ Everything here is an estimate, and it says so:
 - Portugal uses the published IMT brackets (see IMT_YEAR). IMT is charged on
   the higher of the price and the taxable value (VPT), which the listings do
   not give, so a property whose VPT is above the price will cost more.
-- Other countries use one typical rate per country; transfer tax varies by
-  region in Spain, Germany and Belgium, so treat those as a ballpark.
+- Spain's ITP is the 2026 general rate of the autonomous community when the
+  listing names a province. It is charged on the price or the cadastral
+  reference value, whichever is higher; the listing does not give the reference
+  value. Reduced rates (a home you will live in, age, family) are not applied.
+- France's transfer tax is the DGFiP scale of 1 June 2026: departmental duty,
+  the 1.20% municipal tax and the 2.37% collection charge. Most departments
+  are at 5%. Notary fees stay a separate 2% estimate.
+- Other countries use one typical rate. Transfer tax varies by region in
+  Germany and Belgium, so treat those as a ballpark.
 - Renovation is €/m² by how much work the description admits to. It is the
   widest guess of the three, and it is shown as a range.
 """
 from __future__ import annotations
 
-from common import price_to_pay
+import re
+
+from common import normalize, price_to_pay
 from scoring import categorize, condition, property_kind
 
 IMT_YEAR = 2025
@@ -51,10 +60,12 @@ PT_REGISTRY_EUR = 250       # registo predial online, with certificates
 PT_DEED_EUR = 600           # escritura and papers, when it is not a court sale
 
 # Everywhere else: (transfer tax, other costs as a share of the price, what the
-# tax is called, what the other costs are). Regional rates are the middle of the range.
+# tax is called, what the other costs are). Spain and France replace the tax
+# rate below when the region is known; these rows are the fallback.
 COUNTRY_COSTS = {
-    "ES": (0.080, 0.015, "ITP transfer tax (6–10%, by región)", "notary, registry and gestoría"),
-    "FR": (0.058, 0.020, "droits de mutation", "notary fees and disbursements"),
+    "ES": (0.080, 0.015, "ITP, region not recognised (about 6–10%)", "notary, registry and gestoría"),
+    "FR": (0.063185, 0.020, "droits de mutation 6.32% (most departments, DGFiP 1 June 2026)",
+           "notary fees, about 2% — the regulated scale depends on the price"),
     "IT": (0.090, 0.010, "imposta di registro (9%, at least €1 000)", "notary and registry"),
     "DE": (0.055, 0.020, "Grunderwerbsteuer (3,5–6,5%, by Land)", "notary and Grundbuch"),
     "NL": (0.104, 0.012, "overdrachtsbelasting (10,4% when you will not live in it)", "notary and registry"),
@@ -67,6 +78,191 @@ COUNTRY_COSTS = {
 }
 DEFAULT_COSTS = (0.070, 0.015, "transfer tax (typical)", "notary and registry")
 IT_REGISTRO_MIN = 1_000
+
+# Spanish ITP, general rate for a used property, 2026. A single rate, or a
+# marginal scale of (up to, rate) with None as the last open band. Sources:
+# each community's published general rate, compared September 2026. The first
+# band covers the prices this scanner keeps.
+ES_ITP_2026 = {
+    "andalucia": (0.07, "Andalucía, general rate 7%"),
+    "aragon": (0.08, "Aragón, 8% — the bottom of the regional scale"),
+    "asturias": (0.08, "Asturias, 8% up to €300,000"),
+    "baleares": (0.08, "Illes Balears, 8% up to €400,000"),
+    "canarias": (0.065, "Canarias, general rate 6.5%"),
+    "cantabria": (0.09, "Cantabria, general rate 9%"),
+    "castilla la mancha": (0.09, "Castilla-La Mancha, general rate 9%"),
+    "castilla y leon": ([(250_000, 0.08), (None, 0.10)],
+                        "Castilla y León, 8% up to €250,000 and 10% above"),
+    "cataluna": ([(600_000, 0.10), (900_000, 0.11), (1_500_000, 0.12), (None, 0.13)],
+                 "Cataluña, 10% up to €600,000, then 11%, 12% and 13%"),
+    "extremadura": (0.08, "Extremadura, 8% — the bottom of the regional scale"),
+    "galicia": (0.08, "Galicia, general rate 8%"),
+    "madrid": (0.06, "Madrid, general rate 6%"),
+    "murcia": (0.0775, "Murcia, general rate 7.75%"),
+    "navarra": (0.06, "Navarra, general rate 6%"),
+    "rioja": (0.07, "La Rioja, general rate 7%"),
+    "valencia": (0.09, "Comunitat Valenciana, general rate 9%"),
+    "bizkaia": (0.04, "Bizkaia, 4% on a home (7% on other property)"),
+    "gipuzkoa": (0.04, "Gipuzkoa, 4% on a home (7% on other property)"),
+}
+# Longer names first so "santa cruz de tenerife" is not read as something shorter.
+ES_PROVINCE = (
+    ("santa cruz de tenerife", "canarias"), ("las palmas", "canarias"),
+    ("a coruna", "galicia"), ("la coruna", "galicia"), ("coruna", "galicia"),
+    ("pontevedra", "galicia"), ("ourense", "galicia"), ("orense", "galicia"), ("lugo", "galicia"),
+    ("almeria", "andalucia"), ("cadiz", "andalucia"), ("cordoba", "andalucia"),
+    ("granada", "andalucia"), ("huelva", "andalucia"), ("jaen", "andalucia"),
+    ("malaga", "andalucia"), ("sevilla", "andalucia"),
+    ("huesca", "aragon"), ("teruel", "aragon"), ("zaragoza", "aragon"),
+    ("asturias", "asturias"), ("oviedo", "asturias"),
+    ("illes balears", "baleares"), ("islas baleares", "baleares"), ("baleares", "baleares"),
+    ("cantabria", "cantabria"), ("santander", "cantabria"),
+    ("albacete", "castilla la mancha"), ("ciudad real", "castilla la mancha"),
+    ("cuenca", "castilla la mancha"), ("guadalajara", "castilla la mancha"),
+    ("toledo", "castilla la mancha"),
+    ("avila", "castilla y leon"), ("burgos", "castilla y leon"), ("leon", "castilla y leon"),
+    ("palencia", "castilla y leon"), ("salamanca", "castilla y leon"),
+    ("segovia", "castilla y leon"), ("soria", "castilla y leon"),
+    ("valladolid", "castilla y leon"), ("zamora", "castilla y leon"),
+    ("barcelona", "cataluna"), ("girona", "cataluna"), ("gerona", "cataluna"),
+    ("lleida", "cataluna"), ("lerida", "cataluna"), ("tarragona", "cataluna"),
+    ("madrid", "madrid"),
+    ("murcia", "murcia"), ("navarra", "navarra"), ("la rioja", "rioja"),
+    ("alicante", "valencia"), ("alacant", "valencia"), ("castellon", "valencia"),
+    ("castello", "valencia"), ("valencia", "valencia"),
+    ("badajoz", "extremadura"), ("caceres", "extremadura"),
+    ("alava", "alava"), ("araba", "alava"), ("bizkaia", "bizkaia"), ("vizcaya", "bizkaia"),
+    ("gipuzkoa", "gipuzkoa"), ("guipuzcoa", "gipuzkoa"),
+)
+
+
+def _where(item: dict) -> str:
+    text = normalize(" ".join(str(item.get(k) or "") for k in
+                              ("district", "concelho", "freguesia", "title", "description")))
+    return re.sub(r"[^a-z0-9]+", " ", text)
+
+
+def _spanish_community(item: dict) -> str | None:
+    text = _where(item)
+    for name, community in ES_PROVINCE:
+        if re.search(rf"\b{re.escape(name)}\b", text):
+            return community
+    return None
+
+
+def _marginal(value: float, bands: list) -> float:
+    tax, prev = 0.0, 0.0
+    for limit, rate in bands:
+        cap = value if limit is None else min(value, limit)
+        if cap > prev:
+            tax += (cap - prev) * rate
+        if limit is None or value <= limit:
+            break
+        prev = limit
+    return tax
+
+
+def spanish_itp(item: dict, value: float) -> tuple[float, str]:
+    """ITP on `value`, and the rule. The general rate; a home you live in is often less."""
+    community = _spanish_community(item)
+    if community == "alava":
+        return (value * 0.08,
+                "Álava: sources disagree (4% for a home, 7% generally) — 8% is a ballpark, check the foral rule"
+                "; on the price or the cadastral reference value, whichever is higher")
+    if community is None:
+        rate, note = 0.08, "ITP, region not recognised — 8%, the middle of the 6–10% range"
+        amount = value * rate
+    else:
+        scale, note = ES_ITP_2026[community]
+        kind = item.get("kind") or property_kind(item)
+        if community in {"bizkaia", "gipuzkoa"} and kind != "home":
+            amount = value * 0.07
+            note = note.split(",")[0] + ", 7% — not a home"
+        elif community == "valencia" and value > 1_000_000:
+            amount = value * 0.11
+            note = "Comunitat Valenciana, 11% on the whole value above €1,000,000"
+        elif community == "asturias" and value > 300_000:
+            amount = value * 0.08
+            note = "Asturias, 8% — a higher single rate applies above €300,000 and was not used"
+        elif isinstance(scale, list):
+            amount = _marginal(value, scale)
+        else:
+            amount = value * scale
+    return amount, note + "; on the price or the cadastral reference value, whichever is higher"
+
+
+# France, DGFiP barème of 1 June 2026. The departmental duty plus the 1.20%
+# municipal tax plus 2.37% of the departmental duty for collection.
+def _dmto(departmental: float) -> float:
+    return departmental + 0.012 + departmental * 0.0237
+
+
+FR_DMTO_5 = _dmto(0.05)       # 6.3185%, the rate of most departments
+FR_DMTO_45 = _dmto(0.045)     # 5.80665%
+FR_DMTO_38 = _dmto(0.038)     # 5.09006%, Indre
+# Longer phrases first: "indre et loire" is not Indre.
+FR_DEPARTMENT = (
+    ("indre et loire", FR_DMTO_5, "Indre-et-Loire, departmental rate 5%"),
+    ("charente maritime", FR_DMTO_5, "Charente-Maritime, departmental rate 5%"),
+    ("hautes alpes", FR_DMTO_45, "Hautes-Alpes, departmental rate 4.50%"),
+    ("alpes maritimes", FR_DMTO_45, "Alpes-Maritimes, departmental rate 4.50%"),
+    ("ardeche", FR_DMTO_45, "Ardèche, departmental rate 4.50%"),
+    ("charente", FR_DMTO_45, "Charente, departmental rate 4.50%"),
+    ("drome", FR_DMTO_45, "Drôme, departmental rate 4.50%"),
+    ("lozere", FR_DMTO_45, "Lozère, departmental rate 4.50%"),
+    ("hautes pyrenees", FR_DMTO_45, "Hautes-Pyrénées, departmental rate 4.50%"),
+    ("saone et loire", FR_DMTO_45, "Saône-et-Loire, departmental rate 4.50%"),
+    ("oise", FR_DMTO_45, "Oise, departmental rate 4.50%"),
+    ("indre", FR_DMTO_38, "Indre, departmental rate 3.80%"),
+)
+
+
+FR_CODE = {
+    "36": (FR_DMTO_38, "Indre, departmental rate 3.80%"),
+    "05": (FR_DMTO_45, "Hautes-Alpes, departmental rate 4.50%"),
+    "06": (FR_DMTO_45, "Alpes-Maritimes, departmental rate 4.50%"),
+    "07": (FR_DMTO_45, "Ardèche, departmental rate 4.50%"),
+    "16": (FR_DMTO_45, "Charente, departmental rate 4.50%"),
+    "26": (FR_DMTO_45, "Drôme, departmental rate 4.50%"),
+    "48": (FR_DMTO_45, "Lozère, departmental rate 4.50%"),
+    "60": (FR_DMTO_45, "Oise, departmental rate 4.50%"),
+    "65": (FR_DMTO_45, "Hautes-Pyrénées, departmental rate 4.50%"),
+    "71": (FR_DMTO_45, "Saône-et-Loire, departmental rate 4.50%"),
+}
+
+
+def french_dmto(item: dict, value: float) -> tuple[float, str]:
+    """Transfer tax on `value` from the June 2026 departmental scale."""
+    code = str(item.get("district") or "").strip()
+    if code in FR_CODE:
+        rate, label = FR_CODE[code]
+        return value * rate, f"{label} → {rate:.2%} with the municipal tax (DGFiP, 1 June 2026)"
+    text = _where(item)
+    for name, rate, label in FR_DEPARTMENT:
+        if re.search(rf"\b{re.escape(name)}\b", text):
+            return value * rate, f"{label} → {rate:.2%} with the municipal tax (DGFiP, 1 June 2026)"
+    return value * FR_DMTO_5, ("droits de mutation 6.32% — most departments on 1 June 2026; "
+                               "Indre is 5.09% and eleven departments are 5.81%")
+
+
+def purchase_share(item: dict) -> tuple[float, str]:
+    """Tax and notary as a share of the price, for the forestry return.
+
+    Portugal stays the rustic rule (5% IMT and 0.8% stamp). Spain and France
+    use the same rates as the cost panel."""
+    country = (item.get("country") or "PT").upper()
+    if country == "PT":
+        return 0.058, "IMT 5% on rustic land and 0.8% stamp duty"
+    if country == "ES":
+        tax, note = spanish_itp(item, 1.0)
+        extra = COUNTRY_COSTS["ES"][1]
+        return tax + extra, f"{note}; notary about {extra:.1%}"
+    if country == "FR":
+        tax, note = french_dmto(item, 1.0)
+        extra = COUNTRY_COSTS["FR"][1]
+        return tax + extra, f"{note}; notary about {extra:.0%}"
+    rate, extra, tax_name, extra_name = COUNTRY_COSTS.get(country, DEFAULT_COSTS)
+    return rate + extra, f"{tax_name}; {extra_name}"
 
 # What a home needs, in €/m² of floor area: (low, high).
 RENOVATION_EUR_M2 = {
@@ -135,11 +331,18 @@ def _pt_lines(value: float, kind: str | None, judicial: bool, own_home: bool) ->
     return [line for line in lines if line["amount"] > 0]
 
 
-def _other_lines(value: float, country: str) -> list[dict]:
-    rate, extra, tax_name, extra_name = COUNTRY_COSTS.get(country, DEFAULT_COSTS)
-    tax = value * rate
-    if country == "IT":
-        tax = max(tax, IT_REGISTRO_MIN)
+def _other_lines(item: dict, value: float, country: str) -> list[dict]:
+    if country == "ES":
+        tax, tax_name = spanish_itp(item, value)
+        _, extra, _, extra_name = COUNTRY_COSTS["ES"]
+    elif country == "FR":
+        tax, tax_name = french_dmto(item, value)
+        _, extra, _, extra_name = COUNTRY_COSTS["FR"]
+    else:
+        rate, extra, tax_name, extra_name = COUNTRY_COSTS.get(country, DEFAULT_COSTS)
+        tax = value * rate
+        if country == "IT":
+            tax = max(tax, IT_REGISTRO_MIN)
     lines = []
     if tax:
         lines.append({"label": "Transfer tax", "amount": tax, "note": tax_name})
@@ -167,7 +370,7 @@ def fee_lines(item: dict, value: float, *, own_home: bool = False) -> list[dict]
     """The taxes and fees of buying `item` for `value`."""
     country = (item.get("country") or "PT").upper()
     if country != "PT":
-        return _other_lines(value, country)
+        return _other_lines(item, value, country)
     kind = item.get("kind") or property_kind(item)
     return _pt_lines(value, kind, (item.get("source") or "") in JUDICIAL_SOURCES, own_home)
 
@@ -244,8 +447,10 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     out = {"base": value, "basis": basis, "lines": lines, "fees": fee_total, "total": value + fee_total,
            "renovation": work, "all_in": None,
            "note": ("Estimate. Portuguese IMT is charged on the higher of the price and the taxable "
-                    "value (VPT), which the listing does not give." if country == "PT"
-                    else "Estimate: one typical rate per country; regional rates differ.")}
+                    "value (VPT), which the listing does not give. Fire insurance is not included."
+                    if country == "PT"
+                    else "Estimate. Fire insurance is not included; there is no single published "
+                         "premium for this building.")}
     if work:
         out["all_in"] = {"low": value + fee_total + work["low"], "high": value + fee_total + work["high"]}
     cost = (out["all_in"]["low"] + out["all_in"]["high"]) / 2 if work else out["total"]

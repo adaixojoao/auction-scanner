@@ -120,15 +120,16 @@ def enrich_order(db, cfg: dict) -> list[dict]:
 
 
 def _plots_for_site_check(db, cfg: dict) -> list[dict]:
-    """Forestry first, then the other investment plots, so Natura and eucalyptus
-    are read for land you might buy, not only for a 10 ha project."""
+    """The top forestry plots, then the top other plots. A habitat check of
+    every plot is what made a scan slow; the ones you might buy are enough."""
     from db import load_listings
     forest = sorted(load_listings(db, filters=cfg.get("filters"), mode="forest"),
-                    key=lambda it: -it.get("rank", it["score"]))
+                    key=lambda it: -it.get("rank", it["score"]))[:20]
     land = sorted(load_listings(db, filters=cfg.get("filters"), mode="land"),
                   key=lambda it: -it.get("rank", it["score"]))
     seen = {it["id"] for it in forest}
-    return forest + [it for it in land if it["id"] not in seen]
+    rest = [it for it in land if it["id"] not in seen][:20]
+    return forest + rest
 
 
 def rescore(db, cfg: dict) -> None:

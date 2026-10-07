@@ -499,9 +499,9 @@ def scrape_entreparticuliers(db, max_price: float = 50000, **_):
     return scrape_named(db, "entreparticuliers", max_price)
 
 
-@register("iadfrance", "FR", description="IAD — agency houses for sale across France")
+@register("iadfrance", "FR", description="IAD — agency houses and land for sale across France")
 def scrape_iadfrance(db, max_price: float = 50000, **_):
-    """IAD — agency houses for sale across France."""
+    """IAD — agency houses and land for sale across France."""
     from sources._market import scrape_named
     return scrape_named(db, "iadfrance", max_price)
 
@@ -520,8 +520,8 @@ def scrape_optimhome(db, max_price: float = 50000, **_):
     return scrape_named(db, "optimhome", max_price)
 
 
-@register("laforet", "FR", description="Laforêt — agency houses for sale across France")
+@register("laforet", "FR", description="Laforêt — agency houses and land for sale across France")
 def scrape_laforet(db, max_price: float = 50000, **_):
-    """Laforêt — agency houses for sale across France."""
+    """Laforêt — agency houses and land for sale across France."""
     from sources._market import scrape_named
     return scrape_named(db, "laforet", max_price)

@@ -175,7 +175,7 @@ function renderRows(items, hiddenView) {
       <td>${AS.scoreBadge(it.score, it.rank, it.excellent)}</td>
       <td>${AS.flag(it.country)}</td>
       <td class="t-title">${titleLink}${badges}${mode === "home" ? AS.wishesHtml(it.wishes, true) : ""}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
-      <td class="nowrap"><b>${AS.money(it.price)}</b></td>
+      <td class="nowrap"><b>${AS.money(it.price)}</b>${it.with_tax ? `<div class="small faint" title="${AS.esc(it.tax_note || "")}">~${AS.money(it.with_tax)} with tax</div>` : ""}</td>
       <td class="nowrap muted">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
       <td class="small muted">${AS.esc(loc)}</td>
       <td class="nowrap small">${AS.esc(it.date_end ? it.date_end.slice(0, 10) : "–")}</td>

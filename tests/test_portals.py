@@ -160,3 +160,18 @@ def test_portals_skip_a_foreign_willhaben_ad_and_tag_a_french_athome_home():
     assert parse_portal("optimhome", OPTIM)[0]["tipo"] == "terreno"
     assert parse_portal("kvee", KVEE)[0]["area_m2"] == 47.7
     assert parse_portal("willhaben", WILLHABEN)[0]["area_m2"] == 49
+
+
+def test_the_heading_wins_over_the_photo_link():
+    from sources._market import parse_portal
+    html = """<div>
+    <a href="/s-anzeige/x/3337536333-207-4753">5</a>
+    <a href="/s-anzeige/neues-baugebiet-in-bad-zwesten/3337536333-207-4753">NEUES BAUGEBIET in Bad Zwesten</a>
+    <p>49.950 €</p></div>"""
+    row = parse_portal("kleinanzeigen", html)[0]
+    assert row["external_id"] == "3337536333" and row["price"] == 49950
+    assert row["title"].startswith("NEUES BAUGEBIET")
+    land = """<a href="https://www.laforet.com/agence-immobiliere/labaule/acheter/le-pouliguen/terrain-52968141">(nouvel onglet)</a>
+    <span>49 900 €</span>"""
+    plot = parse_portal("laforet", land)[0]
+    assert plot["tipo"] == "terreno" and "pouliguen" in plot["title"]

@@ -32,7 +32,10 @@ class Portal:
     min_amount: float = 0          # ignore a smaller figure left after the price rule above
 
 
-_LAND = re.compile(r"terreno|terrain|grundst|tontti|parcelle|bauland|baugrund", re.I)
+_LAND = re.compile(r"terreno|terrain|grundst|tontti|parcelle|bauland|baugrund|\bland\b|\bground\b", re.I)
+_TITLE_PREFIX = re.compile(r"^(?:avaa kohteen tiedot|nouvel onglet|\(nouvel onglet\)|photo n[°o]?\s*\d+)\s*:?\s*", re.I)
+_PATH_SKIP = {"acheter", "en", "buy", "s anzeige", "agence immobiliere", "annonce", "annonces",
+              "immobilier", "vente", "kohde", "id"}
 _RENT = re.compile(
     r"(/location/|zu-vermieten|/mieten\b|-miete-|for-rent|aluguer|arrendamento|/rent/|/prenajom/)",
     re.I)
@@ -63,7 +66,8 @@ PORTALS: dict[str, Portal] = {
         r"ref-\d+", r"ref-(\d+)"),
     "iadfrance": Portal(
         "iadfrance", "FR", "https://www.iadfrance.fr",
-        ("https://www.iadfrance.fr/annonces/achat/maison",),
+        ("https://www.iadfrance.fr/annonces/achat/maison",
+         "https://www.iadfrance.fr/annonces/achat/terrain"),
         r"/annonce/", r"/r(\d{5,})"),
     "etreproprio": Portal(
         "etreproprio", "FR", "https://www.etreproprio.com",
@@ -75,11 +79,13 @@ PORTALS: dict[str, Portal] = {
         r"/immobilier/vente/.+/\d", r"/(\d{5,})"),
     "laforet": Portal(
         "laforet", "FR", "https://www.laforet.com",
-        ("https://www.laforet.com/acheter/achat-maison",),
+        ("https://www.laforet.com/acheter/achat-maison",
+         "https://www.laforet.com/acheter/achat-terrain"),
         r"/acheter/", r"(\d{6,})", id_last=True),
     "kleinanzeigen": Portal(
         "kleinanzeigen", "DE", "https://www.kleinanzeigen.de",
-        ("https://www.kleinanzeigen.de/s-haus-kaufen/preis::{max}/c208",),
+        ("https://www.kleinanzeigen.de/s-haus-kaufen/preis::{max}/c208",
+         "https://www.kleinanzeigen.de/s-grundstuecke-garten/preis::{max}/c207"),
         r"/s-anzeige/", r"/(\d{8,})"),
     "immowelt": Portal(
         "immowelt", "DE", "https://www.immowelt.de",
@@ -88,7 +94,8 @@ PORTALS: dict[str, Portal] = {
         r"/expose/", _UUID),
     "willhaben": Portal(
         "willhaben", "AT", "https://www.willhaben.at",
-        ("https://www.willhaben.at/iad/immobilien/haus-kaufen/haus-angebote?PRICE_TO={max}&rows=30",),
+        ("https://www.willhaben.at/iad/immobilien/haus-kaufen/haus-angebote?PRICE_TO={max}&rows=30",
+         "https://www.willhaben.at/iad/immobilien/grundstuecke/grundstueck-angebote?PRICE_TO={max}&rows=30"),
         "", "", parser="willhaben"),
     "wohnnet": Portal(
         "wohnnet", "AT", "https://www.wohnnet.at",
@@ -96,7 +103,8 @@ PORTALS: dict[str, Portal] = {
         r"/immobilien/.+-\d{6,}", r"-(\d{6,})"),
     "athome": Portal(
         "athome", "LU", "https://www.athome.lu",
-        ("https://www.athome.lu/en/buy?price_max={max}",),
+        ("https://www.athome.lu/en/buy?price_max={max}",
+         "https://www.athome.lu/en/buy/land?price_max={max}"),
         r"/id-\d+", r"id-(\d+)"),
     "myhome": Portal(
         "myhome", "IE", "https://www.myhome.ie",
@@ -114,7 +122,8 @@ PORTALS: dict[str, Portal] = {
         r"/comprar/", _UUID),
     "etuovi": Portal(
         "etuovi", "FI", "https://www.etuovi.com",
-        ("https://www.etuovi.com/myytavat-asunnot?hinta_max={max}",),
+        ("https://www.etuovi.com/myytavat-asunnot?hinta_max={max}",
+         "https://www.etuovi.com/myytavat-tontit?hinta_max={max}"),
         r"/kohde/\d+", r"/kohde/(\d+)"),
     "bazos": Portal(
         "bazos", "SK", "https://reality.bazos.sk",
@@ -186,16 +195,30 @@ def _clean_url(href: str, base: str) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
+def _letters(text: str) -> int:
+    return sum(ch.isalpha() for ch in text)
+
+
+def _path_title(path: str) -> str:
+    parts = []
+    for part in path.strip("/").split("/"):
+        part = re.sub(r"\d{5,}", "", part).strip("- ")
+        part = re.sub(r"\s+", " ", part.replace("-", " ")).strip()
+        if not part or part.lower() in _PATH_SKIP or _letters(part) < 3:
+            continue
+        parts.append(part)
+    return " ".join(parts[-3:])[:200]
+
+
 def _title_from(a, text: str, path: str) -> str:
     label = a.get("title") or a.get("aria-label") or ""
-    label = re.sub(r"\s+", " ", label).strip()
-    if len(label) >= 8:
-        return label[:200]
-    visible = re.sub(r"\s+", " ", a.get_text(" ", strip=True))
-    if len(visible) >= 8:
-        return visible[:200]
-    slug = path.rstrip("/").split("/")[-1].replace("-", " ")
-    return (slug or text)[:200]
+    label = _TITLE_PREFIX.sub("", re.sub(r"\s+", " ", label)).strip(" -:")
+    visible = _TITLE_PREFIX.sub("", re.sub(r"\s+", " ", a.get_text(" ", strip=True))).strip(" -:")
+    # The photo link often comes before the heading. Prefer the one with words.
+    chosen = visible if _letters(visible) > _letters(label) else label
+    if _letters(chosen) >= 4:
+        return chosen[:200]
+    return (_path_title(path) or text)[:200]
 
 
 def _image(node) -> str | None:
@@ -248,7 +271,13 @@ def parse_links(html: str, portal: Portal) -> list[dict]:
         if not found:
             continue
         eid = found[-1] if portal.id_last else found[0]
+        title = _title_from(a, "", path)
         if eid in seen:
+            # A later link to the same ad often carries the heading the photo link lacked.
+            previous = next(row for row in out if row["external_id"] == eid)
+            if _letters(title) > _letters(previous["title"]):
+                previous["title"] = title
+                previous["tipo"] = _tipo(url, title)
             continue
         text = _card_text(a)
         amounts = _amounts(text)
@@ -270,7 +299,7 @@ def parse_links(html: str, portal: Portal) -> list[dict]:
         if place and portal.name in {"athome", "immoregion"}:
             town = place.group(1).replace("-", " ").strip().title() or None
         out.append(_row(
-            portal, eid, title=_title_from(a, text, path), text=text, url=url,
+            portal, eid, title=title or _path_title(path), text=text, url=url,
             price=price, concelho=town, image=_image(a.parent or a), country=country))
     return out
 

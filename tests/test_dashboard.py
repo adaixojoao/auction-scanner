@@ -38,6 +38,7 @@ def test_listings_api_uses_shared_scoring_and_sanitises(client, db, add):
     from scoring import score
     expected, _ = score({"title": '<img src=x onerror=alert(1)>Moradia', "price": 20000, "source": "eleiloes"})
     assert by_id["eleiloes:a"]["score"] == expected
+    assert by_id["eleiloes:a"]["with_tax"] == 20610
     assert data["stats"]["new_today"] == 1   # the legacy row was first seen in January
 
 

@@ -202,9 +202,9 @@ def scrape_zvg_de(db, max_price: float = 100000, **_):
     return total
 
 
-@register("kleinanzeigen", "DE", description="Kleinanzeigen — houses for sale across Germany")
+@register("kleinanzeigen", "DE", description="Kleinanzeigen — houses and plots for sale across Germany")
 def scrape_kleinanzeigen(db, max_price: float = 50000, **_):
-    """Kleinanzeigen — houses for sale across Germany."""
+    """Kleinanzeigen — houses and plots for sale across Germany."""
     from sources._market import scrape_named
     return scrape_named(db, "kleinanzeigen", max_price)
 

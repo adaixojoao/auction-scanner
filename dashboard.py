@@ -208,6 +208,23 @@ def _public(item: dict) -> dict:
     return out
 
 
+def _with_fees(item: dict) -> dict:
+    """The row the list shows, plus the tax estimate so the price is not the only number."""
+    out = {**_public(item), "climate_grade": _climate_of(item)["grade"]}
+    if item.get("category") != "imoveis":
+        return out
+    from common import price_to_pay
+    from costs import fee_lines
+    value = float(price_to_pay(item) or 0)
+    if value <= 0:
+        return out
+    lines = fee_lines(item, value)
+    fees = sum(line["amount"] for line in lines)
+    out["with_tax"] = round(value + fees)
+    out["tax_note"] = lines[0]["note"] if lines else ""
+    return out
+
+
 @app.route("/api/meta")
 def api_meta():
     db = get_db()
@@ -358,8 +375,7 @@ def api_listings():
         items = sorted(items, key=SORT_KEYS["score"], reverse=True)[:cap]
         items.sort(key=SORT_KEYS.get(sort, SORT_KEYS["score"]), reverse=(direction == "desc"))
         total = len(items)
-        page_items = [{**_public(it), "climate_grade": _climate_of(it)["grade"]}
-                      for it in items[(page - 1) * per_page:page * per_page]]
+        page_items = [_with_fees(it) for it in items[(page - 1) * per_page:page * per_page]]
         visible = [it for it in loaded if not it["hidden_reason"]]
         health = source_health(db, _registry())
         last_scrape = db.execute("SELECT MAX(timestamp) FROM scrape_log").fetchone()[0]
