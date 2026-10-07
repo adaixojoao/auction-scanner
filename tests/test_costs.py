@@ -56,6 +56,23 @@ def test_a_court_sale_has_no_deed_but_a_bank_sale_does():
     assert labels(costs.estimate(home(source="novobanco")))["Deed"] == float(costs.PT_DEED_EUR)
 
 
+def test_spain_and_france_use_the_published_regional_rate():
+    lugo = costs.estimate(home(country="ES", price=50000, concelho="Lugo"))
+    assert labels(lugo)["Transfer tax"] == 4000.0 and "Galicia" in lugo["lines"][0]["note"]
+    madrid = costs.estimate(home(country="ES", price=50000, concelho="Madrid"))
+    assert labels(madrid)["Transfer tax"] == 3000.0 and "Madrid" in madrid["lines"][0]["note"]
+    leon = costs.estimate(home(country="ES", price=300000, district="León"))
+    # 8% on the first €250,000 and 10% on the rest.
+    assert labels(leon)["Transfer tax"] == pytest.approx(250000 * 0.08 + 50000 * 0.10)
+    indre = costs.estimate(home(country="FR", price=100000, district="Indre"))
+    assert labels(indre)["Transfer tax"] == pytest.approx(100000 * costs.FR_DMTO_38)
+    loire = costs.estimate(home(country="FR", price=100000, title="Terrain à Chinon, Indre-et-Loire"))
+    assert labels(loire)["Transfer tax"] == pytest.approx(100000 * costs.FR_DMTO_5)
+    most = costs.estimate(home(country="FR", price=100000))
+    assert labels(most)["Transfer tax"] == pytest.approx(100000 * costs.FR_DMTO_5)
+    assert "Fire insurance is not included" in most["note"]
+
+
 def test_other_countries_use_one_typical_rate_each():
     spain = labels(costs.estimate(home(country="ES", price=50000)))
     assert (spain["Transfer tax"], spain["Notary and registry"]) == (4000.0, 750.0)

@@ -548,7 +548,8 @@ def test_an_orchard_is_not_proposed_where_a_wood_would_have_to_be_cleared():
 def test_the_return_is_on_the_price_plus_buying_costs():
     from scoring import buying_costs
     share, label = buying_costs({"country": "FR"}, "Magnifique terrain (9.24 % d'honoraires TTC à la charge de l'acquéreur.)")
-    assert abs(share - (0.075 + 0.0924)) < 1e-9 and "agent fee paid by the buyer" in label
+    from costs import FR_DMTO_5
+    assert abs(share - (FR_DMTO_5 + 0.02 + 0.0924)) < 1e-9 and "agent fee paid by the buyer" in label
     assert buying_costs({"country": "PT"}, "")[0] == 0.058
 
 

@@ -2388,19 +2388,14 @@ def forest_return(pay: float, ha: float, best: dict | None, timber: dict | None,
     return earned / pay / FOREST_ROI_YEARS
 
 
-# What buying costs on top of the price, as a share of it. PT: IMT 5% on rustic
-# land + 0.8% stamp duty (Código do IMT art. 17, Tabela Geral do Imposto do Selo
-# 1.1). ES and FR: PROVISIONAL — transfer tax varies by region (ES ITP 6-10%), and
-# notary fees; FR notary costs on older property are commonly 7-8%.
-BUYING_COSTS = {"PT": 0.058, "ES": 0.08, "FR": 0.075}
 _BUYER_FEE = re.compile(r"(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:d'honoraires|de honorarios|de honorários)?[^.%]{0,40}?"
                         r"(?:charge de l'acqu[ée]reur|a cargo del comprador|a cargo do comprador)", re.I)
 
 
 def buying_costs(item: dict, text: str) -> tuple[float, str]:
     """(share of the price, label): taxes and notary, plus a buyer-paid agent fee the ad states."""
-    share = BUYING_COSTS.get((item.get("country") or "").upper(), 0.08)
-    label = f"taxes and notary ~{share:.0%}"
+    from costs import purchase_share
+    share, label = purchase_share(item)
     fee = _BUYER_FEE.search(text or "")
     if fee:
         pct = float(fee.group(1).replace(",", ".")) / 100
