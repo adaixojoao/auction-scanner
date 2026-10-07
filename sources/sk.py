@@ -102,3 +102,24 @@ def scrape_nehnutelnosti(db, max_price: float = 50000, config: dict | None = Non
             time.sleep(1)
     LOG.info(f"nehnutelnosti.sk: {total} listings")
     return total
+
+
+@register("bazos", "SK", description="Bazoš reality — homes for sale in Slovakia")
+def scrape_bazos(db, max_price: float = 50000, **_):
+    """Bazoš reality — homes for sale in Slovakia."""
+    from sources._market import scrape_named
+    return scrape_named(db, "bazos", max_price)
+
+
+@register("realitysk", "SK", description="Reality.sk — homes for sale in Slovakia")
+def scrape_realitysk(db, max_price: float = 50000, **_):
+    """Reality.sk — homes for sale in Slovakia."""
+    from sources._market import scrape_named
+    return scrape_named(db, "realitysk", max_price)
+
+
+@register("topreality", "SK", description="TopReality — homes for sale in Slovakia")
+def scrape_topreality(db, max_price: float = 50000, **_):
+    """TopReality — homes for sale in Slovakia."""
+    from sources._market import scrape_named
+    return scrape_named(db, "topreality", max_price)

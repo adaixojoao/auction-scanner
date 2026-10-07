@@ -374,6 +374,10 @@ RURAL_TYPES = {normalize(t) for t in (
     "terreno_rustico", "rustico", "agricola", "florestal", "herdade", "finca", "rustica",
 )}
 
+# A stable, hayloft or shed sold under a "Casa en …" title. A house that also
+# has one ("casa … con cuadra") stays a house: the dwelling word is in the text.
+OUTBUILDING_WORDS = ["cuadra", "pajar", "establo", "cabaña", "cabana", "nave"]
+
 OTHER_WORDS = [   # not a home and not a plot
     "parking", "garagem", "garage", "garaje", "box", "emplacement", "estacionamento",
     "lugar de garagem", "lugar de aparcamento", "lugar de estacionamento", "aparcamento",
@@ -399,7 +403,8 @@ HEAVY_WORK = [
     "ruin*", "arruinad*", "em ruínas", "para recuperar", "para reconstruir", "reconstrução",
     "para recuperação", "recuperação total", "necessita de recuperação", "a necessitar de recuperação",
     "carece de recuperação", "para reabilitação", "para reabilitar",
-    "obras profundas", "reabilitação total", "reabilitação integral", "inabitável", "sem telhado",
+    "obras profundas", "reabilitação total", "reabilitação integral", "inabitável",     "sem telhado", "tejado caído", "tejado caido", "tejado hundido", "cubierta hundida", "cubierta caída",
+    "cubierta caida", "tejado derrumbado",
     "telhado caído", "muito degradad*", "mau estado", "mal estado", "en mal estado", "para demolir", "demolição",
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
     "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
@@ -435,6 +440,8 @@ SOME_WORK = [
     "necessita de obras", "precisa de obras", "necessitar de obras", "carece de obras",
     "obras de conservação", "degradad*", "degradat*", "in stato di degrado",
     "necesita reforma", "necesita reformas",
+    # A fibre-cement roof has to come off even when the ad says the house is sound.
+    "uralita", "fibrocemento", "amianto", "placas de amianto",
     "para remodelar", "a remodelar", "para renovar", "a renovar", "para restaurar",
     "para actualizar", "requiere reforma", "requiere reformas", "recomendable reforma", "necesita rehabilitación",
     "necesita rehabilitacion", "para finalizar", "por finalizar",
@@ -683,8 +690,10 @@ _INVEST_PRIORITIES = (
     "empty months) worth having; near the sea for a holiday let; a forced sale (court, tax or "
     "social security) or a bank selling what it repossessed, because those must sell. A sitting "
     "tenant is income from day one but makes it harder to resell and the rent may be below market: "
-    "say which it is here. Not wanted: a gap so wide it cannot be real (a share of the property, a "
-    "ruin sold as a home, an area that is really the plot) — say what to check; a flat too small "
+    "say which it is here. Okupas, or a bank sale 'sin posesión', are not a tenant: they are out. "
+    "Not wanted: a gap so wide it cannot be real (more than about 70% under the local price, a "
+    "share of the property, a ruin sold as a home, an area that is really the plot) — say what to "
+    "check, and do not treat that gap as a bargain; a flat too small "
     "to let; somewhere the heat by 2071-2100 or a flood zone will take the value away. When the "
     "listing does not say the condition, treat it as needing work. Judge the money, not whether "
     "the buyer would enjoy living there."
@@ -700,8 +709,9 @@ _LAND_PRIORITIES = (
     "upside on top, not the reason to buy. Not wanted: a plot too small; one with no access or "
     "landlocked; one sold only together with another lot; a share rather than the whole; a price "
     "per hectare so far below the local one that something is wrong (check the area, the access "
-    "and the title); eucalyptus (fire-prone; new planting is normally restricted in Portugal); "
-    "land the notice or a site check places in Natura 2000, REN or RAN, because planting, felling "
+    "and the title) — more than about 70% under is a check, not a bargain; eucalyptus (fire-prone; "
+    "new planting is normally restricted in Portugal); "
+    "land the notice or a site check places in Natura 2000, a national park, REN or RAN, because planting, felling "
     "and building normally need permits. Land that floods is not land next to water."
 )
 
@@ -718,7 +728,9 @@ _FOREST_PRIORITIES = (
     "comes first: you can visit it and the paperwork is in your language. Not wanted: steep ground "
     "only loggable by cable; land machines cannot reach; scrub and firewood-grade coppice; "
     "eucalyptus (fire-prone, and new planting is normally restricted in Portugal — converting to "
-    "natives is the habitat case, not a timber crop); protected areas (Natura 2000, REN, RAN) "
+    "natives is the habitat case, not a timber crop); building land (suelo urbanizable, a "
+    "development sector, futuros desarrollos); a national park or high mountain (about 1 800 m and "
+    "above); protected areas (Natura 2000, REN, RAN) "
     "where felling and planting need permits; several scattered parcels; felling "
     "rights sold without the land. Say plainly when the ad does not give the volume or the age of "
     "the stand, because then the timber figure is a guess."
@@ -828,6 +840,13 @@ _SELLS_A_PLOT = re.compile(
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
 
 
+def _sold_as_outbuilding(desc: str) -> bool:
+    """The description is a barn, stable or shed, and never names a house."""
+    if not desc or has_term(desc, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False):
+        return False
+    return has_term(desc, OUTBUILDING_WORDS, negations=False)
+
+
 def property_kind(item: dict) -> str | None:
     """"home", "urban_plot", "rural_plot", "other" (shop, garage, storage…) or
     None when the listing does not say. The title and the portal's own type
@@ -874,6 +893,9 @@ def property_kind(item: dict) -> str | None:
             and not _FINCA_WITH_HOUSE.search(ndesc[:300])):
         big = max(area, find_area(desc) or 0)       # the ad's area is often the cabin's
         return "rural_plot" if big >= 1000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
+    # "Vivienda en Villaviciosa" whose text is only "antigua cuadra y pajar".
+    if _sold_as_outbuilding(desc):
+        return "other"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
         # The portal says land (or "Lote Moradia"): a plot, whatever house word follows.
@@ -916,18 +938,38 @@ def _raw(item: dict) -> dict:
         return {}
 
 
+# Photo notes (English, from photos.py) that the seller's "good condition" hides.
+_PHOTO_ROOF_HEAVY = ["collapsed roof", "roof collapsed", "fallen roof", "roof has collapsed",
+                     "collapsed barn", "barn roof"]
+_PHOTO_ROOF_SOME = ["uralita", "asbestos", "fibre-cement", "fiber-cement", "fibre cement",
+                    "fiber cement", "fibrocement"]
+
+
 def condition(item: dict) -> str:
     """"heavy", "some", "good" or "unknown": how much work the listing admits
-    to, else what its photos show (photos.py) when the text says nothing."""
+    to, else what its photos show (photos.py) when the text says nothing.
+
+    A fallen roof or fibre-cement sheets in the photos raise the estimate even
+    when the ad says the house is sound. A barn photo that does not say so
+    still says nothing about the house."""
     text = f"{item.get('title') or ''} {item.get('description') or ''}"
     if has_term(text, HEAVY_WORK):
+        state = "heavy"
+    elif has_term(text, SOME_WORK):
+        state = "some"
+    elif has_term(text, GOOD_CONDITION):
+        state = "good"
+    else:
+        seen = photo_condition(item)
+        state = seen["condition"] if seen else "unknown"
+    notes = ""
+    if '"photo_check"' in (item.get("raw_json") or ""):
+        notes = str((_raw(item).get("photo_check") or {}).get("notes") or "")
+    if state != "heavy" and has_term(notes, _PHOTO_ROOF_HEAVY, negations=False):
         return "heavy"
-    if has_term(text, SOME_WORK):
+    if state in ("good", "unknown") and has_term(notes, _PHOTO_ROOF_SOME, negations=False):
         return "some"
-    if has_term(text, GOOD_CONDITION):
-        return "good"
-    seen = photo_condition(item)
-    return seen["condition"] if seen else "unknown"
+    return state
 
 
 def photo_condition(item: dict) -> dict | None:
@@ -1234,11 +1276,23 @@ def score_detail(item: dict, now: datetime | None = None,
         _WEIGHTS.reset(token)
 
 
+def no_possession(item: dict, full: str) -> bool:
+    """Okupas, or a bank that does not have the keys. A sitting tenant is not this:
+    the ad says arrendado, and Investment home still scores that as a let."""
+    if has_term(full, ["okupad*", "okupa*", "sin posesión", "sin posesion", "sin la posesión"],
+                negations=False):
+        return True
+    posesion = normalize(str(_raw(item).get("posesion") or ""))
+    return "okupa" in posesion or "sin poses" in posesion
+
+
 def _skip_reason(item: dict, title: str, full: str) -> str | None:
     """Never worth buying in any mode: a share, a caravan, a usufruct, subsidised
-    housing, a timeshare."""
+    housing, a timeshare, a property the seller does not possess."""
     if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
         return "fractional share — skip"
+    if no_possession(item, full):
+        return "occupied without possession (okupa) — skip"
     if is_co_ownership(full):
         return "a share shared with other owners, not the whole property — skip"
     if has_term(full, NOT_ALL_YEAR, negations=False):
@@ -1291,8 +1345,28 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
         reasons.append(f"price doubtful (€{pay:,.0f} for {_ha(area)}) — check the price and area")
 
 
+def apply_stated_area(item: dict) -> None:
+    """Use the plot the ad states when the feed's area is the whole development.
+
+    Houses keep the feed figure: a floor area in the text is not the plot.
+    Sets area_note so the list can say why the hectares changed."""
+    if item.get("area_note"):
+        return
+    tipo = normalize(item.get("tipo") or "")
+    title = item.get("title") or ""
+    if has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False) and not _LAND_TYPE.match(tipo):
+        return
+    from common import prefer_stated_area
+    used, feed = prefer_stated_area(item.get("area_m2"), f"{title} {item.get('description') or ''}")
+    if feed and used:
+        item["area_m2"] = used
+        item["area_note"] = (f"feed says {_ha(feed)}; the ad states {_ha(used)} — "
+                             "scored on the smaller figure")
+
+
 def _score_detail(item: dict, now: datetime | None, targets: dict | None,
                   mode: str = "home") -> tuple[float, list[str]]:
+    apply_stated_area(item)
     s = 50.0
     reasons: list[str] = []
     caps: list[float] = []
@@ -1319,6 +1393,8 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None,
     skip = _skip_reason(item, title, full)
     if skip:
         return 0.0, [skip]
+    if item.get("area_note"):
+        reasons.append(item["area_note"])
 
     # ── What it is ────────────────────────────────────────────────────
     # A ruin on a big farm: the value is the land, so it is scored as land.
@@ -1880,7 +1956,7 @@ def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: st
 # land sells for there, so that gap carries the most points. Size, access and
 # a town within reach decide whether anyone will buy it from you.
 LAND_DISCOUNT_POINTS = [(0.1, 0), (0.3, 10), (0.5, 20), (0.7, 28)]   # share below the local land price
-LAND_DISCOUNT_TRUST = 0.8     # beyond this the gap is not believed: wrong area, a share, no access
+LAND_DISCOUNT_TRUST = 0.7     # beyond this the gap is not believed: wrong area, a share, no access
 LAND_TOO_CHEAP = -12          # …and past it, it costs until someone checks why
 # Kilometres from the middle of the plot's own town: a buyer has to want it.
 LAND_TOWN_POINTS = [(2, 8), (10, 5), (25, 0), (50, -8)]
@@ -1898,13 +1974,15 @@ def _land_points(item: dict, kind: str, area: float, pay: float, full: str,
     if fair and pay and area:
         worth = fair["eur_ha"] * (area / 10000)
         disc = (worth - pay) / worth
-        s += curve(min(disc, LAND_DISCOUNT_TRUST), LAND_DISCOUNT_POINTS) * w("price")
         reasons.append(f"land here sells for €{fair['eur_ha']:,.0f}/ha ({fair['label']}): "
                        + (f"{disc:.0%} below that" if disc >= 0.01 else "not below that"))
         if disc > LAND_DISCOUNT_TRUST:
+            # Past ~70% the gap is not a bargain: wrong area, a share, or no access.
             s += LAND_TOO_CHEAP
             reasons.append("so far below what land sells for there usually means a share, no access or a "
                            "wrong area — check why")
+        else:
+            s += curve(disc, LAND_DISCOUNT_POINTS) * w("price")
     if kind == "urban_plot":
         s += LAND_BUILDING_PLOT
         reasons.append("building land — resells to anyone, not only to a neighbour")
@@ -2130,20 +2208,24 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         factor, why = local_value_factor(item)
         mv = found[0] * min(area, INVEST_VALUE_MAX_M2) * factor
         disc = (mv - all_in) / mv
-        s += curve(min(disc, INVEST_DISCOUNT_TRUST), INVEST_DISCOUNT_POINTS) * w("price")
         if disc > 0.1:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
             reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
-        if disc > INVEST_DISCOUNT_TRUST + 0.15:
+        if disc > INVEST_DISCOUNT_TRUST:
+            # Shown, but not rewarded: a gap this wide is usually a share, a tenant or a wrong area.
             s += INVEST_TOO_CHEAP
             reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
                            " — check why")
+        else:
+            s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
     rent = (est or {}).get("rent")
     if rent:
         s += curve(rent["net_yield_pct"], INVEST_YIELD_POINTS)
         reasons.append(f"rent about €{rent['monthly']:,.0f}/month: {rent['net_yield_pct']}% a year net of "
                        f"running costs and empty months ({rent['yield_pct']}% gross)"
-                       + (" (a town average — check rents there)" if rent["yield_pct"] > 15 else ""))
+                       + (" (a province average, halved — check rents in the village)"
+                          if rent.get("province_average")
+                          else " (a town average — check rents there)" if rent["yield_pct"] > 15 else ""))
     beach = item.get("beach")
     if beach and beach.get("km") is not None:
         s += curve(beach["km"], INVEST_BEACH_POINTS) * (BEACH_APPROX_SHARE if beach.get("approx") else 1) * w("beach")
@@ -2224,6 +2306,7 @@ EUCALYPTUS_WORDS = ["eucalipt*", "eucalyp*"]
 PROTECTED_LAND_WORDS = [
     "natura 2000", "znieff", "zone protégée", "réserve naturelle",
     "espacio protegido", "espacio natural protegido", "parque natural",
+    "parque nacional", "parc national", "parco nazionale", "national park",
     "rede natura", "zona de protecção", "zona de proteção",
     "reserva ecológica nacional", "reserva ecologica nacional",
     "reserva agrícola nacional", "reserva agricola nacional",
@@ -2366,9 +2449,59 @@ def _forest_sooner(item: dict, now: datetime | None, reasons: list[str]) -> floa
     return s
 
 
+# "suelo no urbanizable" is rustic. "suelo urbanizable" and a numbered sector are not.
+_DEVELOPMENT_LAND = re.compile(
+    r"(?<!\bno )\burbanizable\b|\bfuturos desarrollos\b|\bdesarrollo urbanistico\b"
+    r"|\bsector\s+[a-z]{0,8}\d+\b|\bsued[-\s]?\d+\b")
+_HIGH_MOUNTAIN = re.compile(
+    r"\b(?:altitud|cota|snm|sobre el nivel)[^.]{0,40}?(\d{1,2}[.,]\d{3})")
+HIGH_MOUNTAIN_M = 1800
+
+
+def _development_land(text: str) -> bool:
+    return bool(_DEVELOPMENT_LAND.search(normalize(text or "")))
+
+
+def _high_mountain_text(text: str) -> str | None:
+    """'altitud 2.000–2.370 m' when the ad states it. A distance ('a 2 km') is not."""
+    found = []
+    for m in _HIGH_MOUNTAIN.finditer(normalize(text or "")):
+        meters = float(m.group(1).replace(".", "").replace(",", ""))
+        if meters >= HIGH_MOUNTAIN_M:
+            found.append(meters)
+    if not found:
+        return None
+    if len(found) == 1:
+        return f"{found[0]:.0f} m"
+    return f"{min(found):.0f}–{max(found):.0f} m"
+
+
+def _forest_block(item: dict, full: str, kind: str) -> str | None:
+    """Building land, a national park or high mountain: not a forestry project."""
+    if kind == "urban_plot" or _development_land(full):
+        return "building land (urbanizable or a development sector) — not a forestry plot"
+    if has_term(full, ["parque nacional", "parc national", "parco nazionale", "national park"],
+                negations=False):
+        return "inside a national park — not a forestry project"
+    site = _site_check(item)
+    names = " ".join((site or {}).get("protected") or [])
+    if has_term(names, ["parque nacional", "parc national", "parco nazionale", "national park"],
+                negations=False):
+        return "site check: national park — not a forestry project"
+    stated = _high_mountain_text(full)
+    if stated:
+        return f"high mountain ({stated}) — not a forestry project"
+    if site and site.get("min_m") is not None and site["min_m"] >= HIGH_MOUNTAIN_M:
+        top = site.get("max_m")
+        span = f"{site['min_m']:.0f}–{top:.0f} m" if top else f"{site['min_m']:.0f} m"
+        return f"high mountain ({span}) — not a forestry project"
+    return None
+
+
 def _score_forest(item: dict, now: datetime | None, targets: dict | None,
                   out: dict | None = None) -> tuple[float, list[str]]:
     """Land for a forestry project: big, cheap per hectare, wet enough, fit for trees."""
+    apply_stated_area(item)
     title, desc = item.get("title") or "", item.get("description") or ""
     full = f"{title} {desc}"
     skip = _skip_reason(item, title, full)
@@ -2382,10 +2515,16 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         kind = "rural_plot"                        # a house on a big estate: the value is the land
     if kind not in ("rural_plot", "urban_plot"):
         return 0.0, ["not land"]
+    blocked = _forest_block(item, full, kind)
+    if blocked:
+        note = [item["area_note"]] if item.get("area_note") else []
+        return 0.0, note + [blocked]
     if not area or area < FOREST_STARTER_M2:
         return 0.0, [f"{_ha(area) if area else 'size unknown'} — under 5 ha"]
     starter = area < FOREST_MIN_M2
     s, reasons, caps = 50.0, [], []
+    if item.get("area_note"):
+        reasons.append(item["area_note"])
     if starter:
         caps.append(FOREST_STARTER_CAP)
         reasons.append(f"{_ha(area)} — a first plot, under 10 ha")

@@ -482,3 +482,46 @@ def scrape_safer(db, max_price: float = 50000, config: dict | None = None, **_):
         time.sleep(1)
     LOG.info(f"SAFER: {total} forests")
     return total
+
+
+@register("paruvendu", "FR", description="ParuVendu — houses and land for sale across France")
+def scrape_paruvendu(db, max_price: float = 50000, **_):
+    """ParuVendu — houses and land for sale across France."""
+    from sources._market import scrape_named
+    return scrape_named(db, "paruvendu", max_price)
+
+
+@register("entreparticuliers", "FR",
+          description="Entreparticuliers — private-sale houses across France")
+def scrape_entreparticuliers(db, max_price: float = 50000, **_):
+    """Entreparticuliers — private-sale houses across France."""
+    from sources._market import scrape_named
+    return scrape_named(db, "entreparticuliers", max_price)
+
+
+@register("iadfrance", "FR", description="IAD — agency houses for sale across France")
+def scrape_iadfrance(db, max_price: float = 50000, **_):
+    """IAD — agency houses for sale across France."""
+    from sources._market import scrape_named
+    return scrape_named(db, "iadfrance", max_price)
+
+
+@register("etreproprio", "FR", description="Être Proprio — houses for sale across France")
+def scrape_etreproprio(db, max_price: float = 50000, **_):
+    """Être Proprio — houses for sale across France."""
+    from sources._market import scrape_named
+    return scrape_named(db, "etreproprio", max_price)
+
+
+@register("optimhome", "FR", description="Optimhome — houses and land for sale across France")
+def scrape_optimhome(db, max_price: float = 50000, **_):
+    """Optimhome — houses and land for sale across France."""
+    from sources._market import scrape_named
+    return scrape_named(db, "optimhome", max_price)
+
+
+@register("laforet", "FR", description="Laforêt — agency houses for sale across France")
+def scrape_laforet(db, max_price: float = 50000, **_):
+    """Laforêt — agency houses for sale across France."""
+    from sources._market import scrape_named
+    return scrape_named(db, "laforet", max_price)

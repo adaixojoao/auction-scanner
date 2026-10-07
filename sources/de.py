@@ -200,3 +200,19 @@ def scrape_zvg_de(db, max_price: float = 100000, **_):
         ))
         total += 1
     return total
+
+
+@register("kleinanzeigen", "DE", description="Kleinanzeigen — houses for sale across Germany")
+def scrape_kleinanzeigen(db, max_price: float = 50000, **_):
+    """Kleinanzeigen — houses for sale across Germany."""
+    from sources._market import scrape_named
+    return scrape_named(db, "kleinanzeigen", max_price)
+
+
+@register("immowelt", "DE", description="Immowelt — houses for sale across Germany")
+def scrape_immowelt(db, max_price: float = 50000, **_):
+    """Immowelt — houses for sale across Germany."""
+    from sources._market import scrape_named
+    return scrape_named(db, "immowelt", max_price)
+
+

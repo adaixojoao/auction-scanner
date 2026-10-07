@@ -195,7 +195,9 @@ def test_a_spanish_village_falls_back_on_its_provinces_rent(tmp_path, monkeypatc
     home = {"title": "Vivienda unifamiliar", "tipo": "Casa", "country": "ES", "source": "servihabitat",
             "concelho": "Villamayor De Calatrava", "district": "ciudadreal", "area_m2": 75, "price": 9500}
     rent = costs.estimate(home)["rent"]
-    assert rent["monthly"] == 379 and rent["source"] == "SERPAVI 2024, province"
+    # The province figure is the towns. A village missing from the table is counted at half.
+    assert rent["monthly"] == 190 and rent["source"] == "SERPAVI 2024, province"
+    assert rent["province_average"] and "counted at half" in rent["note"]
     assert costs.estimate({**home, "concelho": "Tabernas", "district": "Almería"})["rent"]["monthly"] == 270
 
 

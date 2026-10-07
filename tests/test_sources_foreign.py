@@ -98,7 +98,9 @@ def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
     # Its page is read once: "sin posesión" (occupied, no visits) reaches the description and the reject.
     assert row["description"].startswith("Oportunidad para inversores. Inmueble sin posesión")
     from scoring import score_detail
-    assert "rejected: occupied" in score_detail(dict(row))[1]
+    # "sin posesión" is a hard reject in every tab, not only a penalty on My home.
+    assert score_detail(dict(row))[0] == 0
+    assert "possession" in score_detail(dict(row))[1][0]
     REGISTRY["servihabitat"].func(db, max_price=30000)
     assert sum(u.endswith("/60580509") for u in calls) == 1
     again = db.execute("SELECT description FROM listings WHERE source='servihabitat'").fetchone()[0]
@@ -106,7 +108,7 @@ def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
 
 
 def test_bot_walled_sources_are_out_of_the_default_scan():
-    for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece"):
+    for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece", "haya", "subastasactivas"):
         assert REGISTRY[name].default is False, name
 
 

@@ -61,7 +61,11 @@ The seller's description (any language): {description}
 Judge the building's condition from the photos AND the description:
 - "good": lived in or ready to live in, roof and walls sound, maybe dated;
 - "some": needs work (old kitchen or bathroom, damp, worn finishes, windows) but sound;
-- "heavy": a ruin, no roof, collapsed or gutted, or unfinished construction;
+- "heavy": a ruin, no roof, a collapsed or fallen roof, or unfinished construction.
+  A collapsed barn or outbuilding roof counts: say "collapsed barn roof" in notes
+  and do not call the property good;
+- fibre-cement, uralita or asbestos sheet roofing is at least "some" (it has to
+  come off): say "fibre-cement" or "asbestos" in notes;
 - "unknown": the photos do not show the building (a map, a document, a logo, only land).
 Sellers photograph the best parts: when the description admits damage the photos
 do not show ("tejado caído", "telhado em ruína", "needs renovation"), use the worse.

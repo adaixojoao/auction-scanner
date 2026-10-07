@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 57
+    assert len(REGISTRY) == 77
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -19,7 +19,7 @@ def test_registry_is_complete():
     # (and, since Sept 2026, the ones behind a bot wall or a broken certificate)
     assert optional == {"idealista", "courtbid", "novobanco", "aeat",
                         "sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece",
-                        "veilingbiljet", "justiz_auktion"}
+                        "veilingbiljet", "justiz_auktion", "haya", "subastasactivas"}
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
@@ -643,6 +643,11 @@ def test_aliseda_gives_price_position_and_possession(db, fake_http):
     from scoring import _skip_reason
     share = parse_aliseda({**ALISEDA_ITEM, "Proindiviso": 1}, "vivienda")     # Foz, 2026-10-06
     assert _skip_reason({}, share["title"], share["description"]).endswith("skip")
+    land = {**ALISEDA_ITEM, "SuperficieTotal": 1_350_000, "SupParcela": 0,
+            "Description": "Parcelas de 0,8 a 2,8 ha en Calella."}
+    row = parse_aliseda(land, "terreno")
+    assert row["area_m2"] == 28_000
+    assert json.loads(row["raw_json"])["area_feed_m2"] == 1_350_000
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"data": [ALISEDA_ITEM], "last_page": 1}))
     assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
     assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000", "0-100000"}      # homes; land up to the land limit
@@ -666,6 +671,14 @@ def test_altamira_gives_price_position_and_link(db, fake_http):
     assert json.loads(row["raw_json"])["geo"]["lat"] == 43.52
     risky = parse_altamira({**ALTAMIRA_CARD, "riesgoocupacion": "ALTO"}, "vivienda")
     assert json.loads(risky["raw_json"])["occupation"] == "occupied"
+    shared = parse_altamira({**ALTAMIRA_CARD, "proindiviso": True}, "vivienda")
+    assert "copropiedad" in shared["description"]
+    from sources.es import parse_solvia
+    solvia_share = parse_solvia({"id": "1-2-O", "precio": 10000, "mostrarPrecio": True, "m2": 80,
+                                 "categoriaTipoVivienda": {"nombre": "Viviendas"},
+                                 "tipoVivienda": {"nombre": "Piso"}, "poblacion": {"nombre": "Foz"},
+                                 "provincia": {"nombre": "Lugo"}, "participacion": 40})
+    assert "40%" in solvia_share["description"] and "copropiedad" in solvia_share["description"]
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"totalResultados": "1",
                                                                     "minifichas": [ALTAMIRA_CARD]}))
     assert scrape_altamira(db, max_price=50000) == 2               # homes and land (same fake card)

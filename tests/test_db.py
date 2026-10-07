@@ -126,6 +126,12 @@ def test_upsert_keeps_enriched_fields_and_tracks_price(db):
     assert any("price cut 20%" in r for r in item["reasons"])
 
 
+def test_only_scoring_files_invalidate_kept_scores():
+    from db import _SCORE_CODE
+    assert "scoring.py" in _SCORE_CODE and "costs.py" in _SCORE_CODE
+    assert "dashboard.py" not in _SCORE_CODE and "app.py" not in _SCORE_CODE
+
+
 def test_visibility_rules(db, add):
     now = datetime.now(timezone.utc)
     add(external_id="live", title="Moradia", price=10000,

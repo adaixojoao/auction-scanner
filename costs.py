@@ -194,14 +194,23 @@ def rent(item: dict, cost: float) -> dict | None:
         return None
     eur_m2, source = found
     used = min(area, RENT_MAX_M2)
+    # A missing village falls back on the province, which is the towns. Count
+    # half of that and say so: a remote village does not let at the province rate.
+    province = "province" in source
+    if province:
+        eur_m2 = eur_m2 / 2
     monthly = round(used * eur_m2)
     if monthly <= 0:
         return None
     gross = 1200 * monthly / cost
+    where = f"{place} ({source})"
+    if province:
+        where += "; province average, counted at half — check rents in the village"
     return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
+            "province_average": province,
             "yield_pct": round(gross, 1), "net_yield_pct": round(gross * NET_RENT_SHARE, 1),
             "payback_years": round(cost / (12 * monthly), 1),
-            "note": f"€{eur_m2:.2f}/m² a month in {place} ({source}), "
+            "note": f"€{eur_m2:.2f}/m² a month in {where}, "
                     f"over {used:.0f} m²; net of about {RENT_RUNNING_SHARE:.0%} running costs "
                     f"and {RENT_VACANCY_SHARE:.0%} empty months, before income tax"}
 
