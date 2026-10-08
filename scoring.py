@@ -43,7 +43,9 @@ _PERCENT_SHARE = re.compile(
     r"(?:\b(?:el|un|o|uma?)\s+)?\b\d{1,2}(?:[.,]\d+)?\s*%?\s+(?:del|de la|do|da|de)\s+"
     r"(?:pleno dominio|plena propiedad|propiedad|pleno dominio|nuda propiedad|propriedade|dominio"
     r"|solar|inmueble|finca|terreno|piso|vivienda|parcela)\b"
-    r"|\bproindiviso\b|\bpro indiviso\b|\bparticipaci[oó]n indivisa\b")
+    r"|\bproindiviso\b|\bpro indiviso\b|\bindiviso\b|\bparticipaci[oó]n indivisa\b"
+    r"|\b\d{1,2}/\d{1,2}\s+(?:de(?:l| la| los| las)?|do|da)\s+"
+    r"(?:indiviso|propiedad|inmueble|finca|terreno|piso|vivienda|parcela|solar)\b")
 
 
 # A share named in words in the text: Slovak/Czech, Croatian, Bulgarian court sales.

@@ -125,6 +125,12 @@ def test_percent_share_of_solar_or_inmueble_is_caught():
     assert is_percent_share("Se vende el 50% del inmueble")
     assert is_percent_share("Transmisión del 40% de la finca")
     assert not is_percent_share("Piso de 90m2 en el centro de Madrid, reformado")
+    # fraction patterns: "1/6 de INDIVISO", "1/2 del inmueble"
+    assert is_percent_share("Vendo 1/6 de INDIVISO. Inversores o gente especializada en compra de indivisos.")
+    assert is_percent_share("Se vende 1/2 del inmueble ubicado en Madrid")
+    assert is_percent_share("Transmisión de 3/4 de la finca registral")
+    # bare "indiviso" word
+    assert is_percent_share("Piso en indiviso, se vende participación")
 
 
 def test_vacant_is_not_occupied():
