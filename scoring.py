@@ -168,6 +168,7 @@ SEALED_BID_PATTERNS = [
 FORCED_SOURCES = {
     "citius", "financas", "zvg", "anaf", "aeat",
     "pvp_giustizia", "poland", "greece", "cyprus",
+    "france", "encheres_publiques",   # French judicial auctions (licitor / encheres-publiques)
 }
 
 TAX_SOURCES = {"financas", "anaf", "aeat"}
@@ -1569,7 +1570,8 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None,
         s += 20 * w("sale")
         reasons.append("sealed-bid (carta fechada)")
 
-    if source in FORCED_SOURCES:
+    is_forced = source in FORCED_SOURCES or _raw(item).get("judicial")
+    if is_forced:
         s += 6 * w("sale")
         reasons.append("forced sale (must sell)")
     if source in TAX_SOURCES:
@@ -1578,7 +1580,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None,
 
     # Minimum bid signal (one bonus per listing: these all describe the same fact).
     min_p = item.get("min_price") or 0
-    offer_sale = sealed or source in FORCED_SOURCES or has_term(full, OFFER_SALE_PATTERNS, negations=False)
+    offer_sale = sealed or is_forced or has_term(full, OFFER_SALE_PATTERNS, negations=False)
     if not pay and offer_sale:
         s += 18 * w("sale")
         reasons.append("no price — you set your offer")
@@ -1591,7 +1593,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None,
     elif min_p and price and price > 1000 and min_p < price and curve(min_p, LOW_MIN_BID_POINTS) > 0:
         s += curve(min_p, LOW_MIN_BID_POINTS)
         reasons.append(f"min bid only €{min_p:.0f}")
-    elif not min_p and pay and source in FORCED_SOURCES:
+    elif not min_p and pay and is_forced:
         s += 4
         reasons.append("no minimum bid")
 

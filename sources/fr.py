@@ -356,7 +356,7 @@ def parse_notaires(ad: dict) -> dict | None:
         "notaires", ad["annonceId"], "FR",
         title=f"{'Maison' if tipo == 'maison' else 'Terrain'} à {town} ({ad.get('codePostal') or ''})",
         description=description[:3000], tipo=tipo,
-        area_m2=(land if tipo == "terrain" else built) or land or built,
+        area_m2=(land if tipo == "terrain" else built) or None,
         price=float(price), min_price=float(price),
         district=ad.get("departementNom"), concelho=town,
         url=ad.get("urlDetailAnnonceFr"), image_url=ad.get("urlPhotoPrincipale"),

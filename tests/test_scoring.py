@@ -60,6 +60,30 @@ def test_prices_above_floor_are_not_skipped():
     assert sc2 == 0 and "placeholder" in reasons2[0]
 
 
+def test_french_judicial_sources_get_forced_sale_bonus():
+    # licitor (source="france") and encheres_publiques are court-mandated sales
+    # and must score the same +6 forced-sale bonus as citius/zvg/pvp_giustizia.
+    sc_fr, reasons_fr = score(item(source="france", country="FR",
+                                   title="Maison à Voutezac", price=15000, area_m2=120))
+    sc_pt, reasons_pt = score(item(source="citius", country="PT",
+                                   title="Moradia em Guarda", price=15000, area_m2=120))
+    assert any("forced sale" in r for r in reasons_fr), f"no forced-sale reason: {reasons_fr}"
+    assert any("forced sale" in r for r in reasons_pt)
+    # both get the bonus — FR score may differ due to country-specific factors
+    assert sc_fr > 0 and sc_pt > 0
+
+
+def test_notaires_judicial_flag_gets_forced_sale_bonus():
+    import json
+    sc_jud, reasons = score(item(source="notaires", country="FR",
+                                 title="Maison à Seix", price=24000, area_m2=150,
+                                 raw_json=json.dumps({"judicial": True})))
+    sc_vol, _ = score(item(source="notaires", country="FR",
+                           title="Maison à Seix", price=24000, area_m2=150))
+    assert any("forced sale" in r for r in reasons), f"no forced-sale reason: {reasons}"
+    assert sc_jud > sc_vol
+
+
 def test_dates_in_titles_are_not_fractions():
     sc, _ = score(item(title="Moradia penhorada em 11/2023", price=20000))
     assert sc > 0

@@ -811,6 +811,9 @@ def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
     assert parse_notaires({**ad, "descriptionFr": "Sous compromis : maison"}) is None
     land = parse_notaires({**ad, "typeBien": "TER"})
     assert land["tipo"] == "terrain" and land["area_m2"] == 2111
+    # When a maison has no built area, area_m2 must be None — not the plot area.
+    no_built = parse_notaires({**ad, "surface": None})
+    assert no_built["area_m2"] is None, f"got {no_built['area_m2']} instead of None"
 TGSS_TABLE = """<div class="tablas-resultados"><table><caption>Finca Rústica - CANTABRIA - (03/10/2026)</caption>
 <tbody><tr class="par">
 <td><a href="/subastas/SubaSeControladorInter?opcion=13&amp;EMB_ID=901&amp;opcion2=1&amp;tipoOperacion=1">YERA  (VEGA DE PAS)</a></td>
