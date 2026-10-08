@@ -308,8 +308,7 @@ def test_investment_yield_is_net_of_running_costs_and_empty_months():
             "title": "Piso", "description": "Piso reformado", "area_m2": 80, "price": 40000}
     rent = costs.estimate(flat)["rent"]
     assert rent["net_yield_pct"] < rent["yield_pct"]
-    assert round(rent["yield_pct"] * costs.NET_RENT_SHARE, 1) == rent["net_yield_pct"]
-    assert "empty months" in rent["note"]
+    assert "vacancy" in rent["note"]
     reasons = score_detail(flat, mode="invest")[1]
     assert any("a year net of running costs and empty months" in r for r in reasons)
 

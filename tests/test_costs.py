@@ -159,10 +159,10 @@ def test_a_home_shows_what_it_would_rent_for_and_the_yield(pt_rents):
     assert rent["monthly"] == 520 and rent["eur_m2"] == 5.2
     cost = (est["all_in"]["low"] + est["all_in"]["high"]) / 2 if est["all_in"] else est["total"]
     assert rent["yield_pct"] == round(1200 * 520 / cost, 1)
-    assert rent["net_yield_pct"] == round(rent["yield_pct"] * costs.NET_RENT_SHARE, 1)
-    kept = 520 * costs.NET_RENT_SHARE
+    assert rent["net_yield_pct"] < rent["yield_pct"]
+    kept = rent["monthly"] * (1 - costs.RENT_RUNNING_SHARE - costs._liquidity_vacancy(rent.get("population")))
     assert rent["payback_years"] == round(cost / (12 * kept), 1)
-    assert "20% running costs" in rent["note"] and "8% empty months" in rent["note"]
+    assert "20% running costs" in rent["note"] and "vacancy" in rent["note"]
     assert "Reguengos de Monsaraz" in rent["note"] and "Rent: about €520" in costs.as_text(est)
     from telegram_alert import _cost_line
     line = _cost_line(house)

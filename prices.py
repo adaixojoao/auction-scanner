@@ -34,6 +34,7 @@ PT_RENT_FILE = os.path.join(HERE, "data", "pt_rents.csv")
 # for villages too small to have a figure).
 RENT_FILES = {"FR": os.path.join(HERE, "data", "fr_rents.csv"),
               "ES": os.path.join(HERE, "data", "es_rents.csv")}
+EU_POPULATION_FILE = os.path.join(HERE, "data", "eu_population.csv")
 # Prices of homes per m² outside Portugal (scripts/update_prices.py), same
 # columns: a municipality's figure under "Name" and "Name|<province code>", and
 # each province's average under "prov:<code>" for villages too small to have one.
@@ -191,6 +192,44 @@ def rent_per_m2(country: str, place: str | None, district: str | None = None) ->
         if found:
             found = (found[0], found[1] + ", province")
     return found
+
+
+@functools.lru_cache(maxsize=1)
+def _load_population(path: str, mtime: float) -> dict[tuple[str, str], int]:
+    """(country, name_key) → population from eu_population.csv."""
+    table: dict[tuple[str, str], int] = {}
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                cc = (row.get("country") or "").strip().upper()
+                pop_str = (row.get("population") or "").strip()
+                if not cc or not pop_str:
+                    continue
+                try:
+                    pop = int(pop_str)
+                except ValueError:
+                    continue
+                for name_col in ("name_latin", "name"):
+                    raw = (row.get(name_col) or "").strip()
+                    if raw:
+                        key = (cc, place_key(raw))
+                        table.setdefault(key, pop)
+    except OSError:
+        return {}
+    return table
+
+
+def population_of(country: str, place: str | None) -> int | None:
+    """Population of the named municipality, or None if unknown.
+    Uses Eurostat LAU 2024 data (eu_population.csv)."""
+    if not place:
+        return None
+    try:
+        table = _load_population(EU_POPULATION_FILE, os.path.getmtime(EU_POPULATION_FILE))
+    except OSError:
+        return None
+    cc = (country or "PT").upper()
+    return table.get((cc, place_key(place)))
 
 
 def local_price(country: str, place: str | None, fallback: dict[str, dict[str, float]],

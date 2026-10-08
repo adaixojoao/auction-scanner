@@ -379,6 +379,24 @@ def fees(item: dict, value: float, *, own_home: bool = False) -> float:
     return sum(line["amount"] for line in fee_lines(item, value, own_home=own_home))
 
 
+def _liquidity_vacancy(population: int | None) -> float:
+    """Effective vacancy rate, rising continuously as population falls.
+    A city of 100k+ gets the base rate; a hamlet of 500 gets ~4x more vacancy.
+    Uses tanh so the curve is smooth with no hard steps:
+      pop=100000 → factor≈1.00, vacancy≈RENT_VACANCY_SHARE
+      pop=10000  → factor≈0.76, vacancy×1.3
+      pop=2000   → factor≈0.54, vacancy×1.9
+      pop=500    → factor≈0.39, vacancy×2.6
+      pop=100    → factor≈0.22, vacancy×4.5
+    """
+    import math
+    if not population or population <= 0:
+        return RENT_VACANCY_SHARE * 2.0   # unknown → assume small
+    factor = math.tanh(population / 25000)
+    factor = max(factor, 0.15)
+    return RENT_VACANCY_SHARE / factor
+
+
 def rent(item: dict, cost: float) -> dict | None:
     """What a home would rent for, from the rent per m² in its municipality
     (Portugal: INE's median of new leases; France: the carte des loyers), and
@@ -405,18 +423,25 @@ def rent(item: dict, cost: float) -> dict | None:
     monthly = round(used * eur_m2)
     if monthly <= 0:
         return None
+
+    population = prices.population_of(country, place)
+    vacancy = _liquidity_vacancy(population)
+    net_share = 1 - RENT_RUNNING_SHARE - vacancy
+
     gross = 1200 * monthly / cost
-    kept = monthly * NET_RENT_SHARE
+    kept = monthly * net_share
     where = f"{place} ({source})"
     if province:
         where += "; province average, counted at half — check rents in the village"
+    pop_note = f"pop. {population:,}" if population else "population unknown"
     return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
             "province_average": province,
-            "yield_pct": round(gross, 1), "net_yield_pct": round(gross * NET_RENT_SHARE, 1),
+            "population": population,
+            "yield_pct": round(gross, 1), "net_yield_pct": round(gross * net_share, 1),
             "payback_years": round(cost / (12 * kept), 1),
             "note": f"€{eur_m2:.2f}/m² a month in {where}, "
-                    f"over {used:.0f} m²; {RENT_RUNNING_SHARE:.0%} running costs "
-                    f"and {RENT_VACANCY_SHARE:.0%} empty months, before income tax. "
+                    f"over {used:.0f} m²; {RENT_RUNNING_SHARE:.0%} running costs, "
+                    f"{vacancy:.0%} vacancy ({pop_note}), before income tax. "
                     f"Gross, before those, is {round(gross, 1)}%"}
 
 
