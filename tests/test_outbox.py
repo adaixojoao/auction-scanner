@@ -14,7 +14,7 @@ CFG = {
     "telegram": {"enabled": True, "token": "t", "chat_id": CHAT, "min_score": 60},
     "notifications": {"smtp_host": "smtp.example.com", "smtp_user": "me@example.com", "smtp_password": "x"},
     "proponente": {"nome": "Nome Exemplo", "email": "me@example.com", "nif": "000000000"},
-    "auto_requests": {"enabled": True, "min_score": 75, "per_day": 5},
+    "auto_requests": {"enabled": True, "min_score": 50, "per_day": 5},
     "max_price": 100000, "filters": {}, "dashboard": {},
 }
 LATER = (datetime.now(timezone.utc) + timedelta(days=20)).replace(tzinfo=None).isoformat()

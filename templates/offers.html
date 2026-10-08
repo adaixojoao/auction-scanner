@@ -3,13 +3,14 @@
 <div class="page-head">
   <div>
     <h1>Offers</h1>
-    <p>Prepare, send and track letters and online bids. <b>To review</b> is strong letter-sale candidates plus anything you ☆ on Listings. <b>Sent</b> awaits an answer; <b>Closed</b> is won/lost/cancelled; <b>Rejected</b> is what you dismissed.</p>
+    <p>Prepare, send and track letters and online bids. <b>To review</b> is court and bank sales ranked as an investment or as land, plus anything you ☆ on Listings. Portal asking prices stay on the Listings tabs. <b>Sent</b> awaits an answer; <b>Closed</b> is won/lost/cancelled; <b>Rejected</b> is what you dismissed.</p>
   </div>
   <a class="btn" href="/api/offers/calendar.ics" title="Sale dates of listings on Offers and of offers waiting for an answer, with a reminder the day before">📅 Deadlines to my calendar</a>
 </div>
 {% if not proponente_ok %}
 <div class="notice bad" style="margin:0 0 14px">Your name, tax number (NIF) and address are not set, so letters will be incomplete. <a href="/settings#details">Fill them in under Settings → Buying</a>.</div>
 {% endif %}
+<p class="small" id="cash-note"></p>
 
 <div class="split">
   <div>
@@ -37,9 +38,26 @@ const EMPTY = {
   sent: "Nothing waiting for an answer.", closed: "Nothing closed yet.", rejected: "Nothing rejected.",
 };
 const PRICE_LABEL = {PT: "Base value", ES: "Auction value", FR: "Mise à prix"};
+function cashHtml(cash) {
+  if (!cash) return "";
+  const deposit = cash.deposit ? `<p class="small muted">${AS.esc(cash.deposit)}</p>` : "";
+  if (!cash.set) return deposit + `<div class="notice warn">${AS.esc(cash.text)}</div>`;
+  if (cash.over) return deposit + `<div class="notice bad">${AS.esc(cash.text)}</div>`;
+  return deposit + `<p class="small muted">${AS.esc(cash.text)}</p>`;
+}
 async function load() {
-  const {location_gate_mode, ...lists} = await (await fetch("/api/offers")).json();
-  data = lists; gateMode = location_gate_mode || "warn";
+  const payload = await (await fetch("/api/offers")).json();
+  gateMode = payload.location_gate_mode || "warn";
+  const cash = payload.cash || {};
+  const note = $("cash-note");
+  if (cash.set) {
+    note.className = "small muted";
+    note.textContent = `Cash you can lose is ${AS.money(cash.amount)}. An offer above it asks for a reason.`;
+  } else {
+    note.className = "notice warn";
+    note.textContent = "Cash you can lose is not set. Set it under Settings → Budget before sending an offer.";
+  }
+  data = {review: payload.review || [], sent: payload.sent || [], closed: payload.closed || [], rejected: payload.rejected || []};
   for (const k of Object.keys(data)) $("n-" + k).textContent = data[k].length ? `(${data[k].length})` : "";
   renderList();
   if (sel && !current()) { sel = null; }
@@ -70,14 +88,18 @@ function bidCompare(c, bidText) {
 // checklist items): {} when nothing does, null when you cancelled.
 function overrideReason(c, isOffer) {
   if (!isOffer) return {};
+  const d = draft(c);
+  const cash = d.cash || c.cash || {};
+  if (cash.set === false) { AS.toast("Set the cash you can lose under Settings before sending an offer", "bad"); return null; }
   const why = [];
   if (c.location_gate && gateMode === "block") why.push(`${c.location_check.label}: the property's own position is not known.`);
   if (c.checklist && c.checklist.blocking_left) why.push(`Checklist: ${c.checklist.summary}`);
+  if (cash.over) why.push(cash.text);
   if (!why.length) return {};
   const r = prompt(why.join("\n") + "\n\nWhy send this offer anyway? (kept with the offer)");
   if (r === null) return null;
   if (r.trim().length < 5) { AS.toast("Give a short reason (at least 5 characters)", "bad"); return null; }
-  return {location_override: r.trim(), checklist_override: r.trim()};
+  return {location_override: r.trim(), checklist_override: r.trim(), cash_override: r.trim()};
 }
 function locationNotice(c) {
   const l = c.location_check || {};
@@ -89,6 +111,7 @@ function locationNotice(c) {
   const kept = (o && o.location_override
     ? `<p class="small muted">Sent with the location at ${AS.esc(o.location_level || "?")} level. Your reason: ${AS.esc(o.location_override)}</p>` : "")
     + (o && o.checklist_summary ? `<p class="small muted">Checklist when it was sent: ${AS.esc(o.checklist_summary)}</p>` : "")
+    + (o && o.cash_override ? `<p class="small muted">Sent over the cash you can lose. Your reason: ${AS.esc(o.cash_override)}</p>` : "")
     + (o && o.bid_cap_absolute != null
       ? `<p class="small muted">Calculator when it was sent: recommended ${AS.money(o.bid_cap_recommended)} · absolute max ${AS.money(o.bid_cap_absolute)}${o.bid_cap_note ? `. ${AS.esc(o.bid_cap_note)}` : ""}</p>` : "");
   return {badge, warn, kept};
@@ -195,6 +218,7 @@ function renderDetail() {
       <div class="field"><label>Amount (EUR)</label><input id="online" value="${AS.esc(d.online)}" ${done ? "disabled" : ""}></div>
     </div>
     <div id="online-warn"></div>
+    <div id="online-cash"></div>
     ${done ? "" : `<div class="row" style="margin-top:10px"><button class="btn btn-success" onclick="logOnline()">${AS.esc(bc.button)}</button></div>`}
   </details>` : ""}
 
@@ -210,7 +234,8 @@ function renderDetail() {
       ${c.country === "PT" ? `<div class="field" style="grid-column: span 2"><label>In words (filled in automatically)</label><input id="bidtext" value="${AS.esc(d.bidText)}" placeholder="e.g. quatro mil euros" ${lock ? "disabled" : ""}></div>` : ""}
     </div>
     ${lock ? "" : `<div class="row" style="margin-top:8px;gap:6px">${t.presets.map(v => `<button class="btn btn-sm" data-v="${AS.esc(v)}" onclick="setBid(this.dataset.v)">${AS.esc(v.split(",")[0])} €</button>`).join("")}</div>`}
-    <div id="bid-warn"></div>` : ""}
+    <div id="bid-warn"></div>
+    <div id="cash-bid"></div>` : ""}
     <textarea class="letter ${d.edited ? "editing" : ""}" id="letter" ${d.edited && !done ? "" : "readonly"} style="margin-top:10px"></textarea>
     <div class="row" style="margin-top:8px;gap:6px">
       ${done ? "" : `<button class="btn btn-sm" id="edit-btn" onclick="toggleEdit()">${d.edited ? "Undo my edits" : "Edit text"}</button>`}
@@ -373,6 +398,8 @@ function refreshLetter() {
     $("letter").value = r.text;
     mailLink(d.to || r.to, r.subject, r.text);
     if ($("bid-warn")) $("bid-warn").innerHTML = r.warning && !c.offer ? `<div class="notice bad">⚠ ${AS.esc(r.warning)}</div>` : "";
+    d.cash = r.cash || null;
+    if ($("cash-bid") && !c.offer) $("cash-bid").innerHTML = cashHtml(r.cash);
   }, 250);
 }
 
@@ -409,6 +436,8 @@ function refreshOnline() {
     const c = current(); if (!c || !$("online-warn") || c.offer) return;
     const r = await (await fetch("/api/offers/warning?" + new URLSearchParams({id: c.id, bid: draft(c).online || "", type: "online"}))).json();
     $("online-warn").innerHTML = r.warning ? `<div class="notice bad">⚠ ${AS.esc(r.warning)}</div>` : "";
+    d.cash = r.cash || null;
+    if ($("online-cash")) $("online-cash").innerHTML = cashHtml(r.cash);
   }, 250);
 }
 

@@ -193,7 +193,7 @@ def climate_panel(item: dict) -> dict:
         missing = "The climate libraries are not installed: pip install -r requirements-climate.txt."
     elif not climate.available():
         missing = ("The climate layers are not on this PC: download the data to "
-                   "Desktop/auction-climate-data and run scripts/update_climate.py.")
+                   "the auction-climate-data folder next to the app and run scripts/update_climate.py.")
     elif not geo.position(item):
         missing = ("No map position yet: the scan places a listing once it knows at least its "
                    "municipality.")

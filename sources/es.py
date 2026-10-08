@@ -946,20 +946,24 @@ def parse_fotocasa(ad: dict, tipo: str) -> dict | None:
     feats = {f.get("key"): f.get("value") for f in ad.get("features") or []}
     town = re.sub(r"\s*\(.*?\)\s*$", "", addr.get("municipality") or addr.get("city") or "") or None
     raw: dict = {"occupation": "occupied"} if ad.get("isOccupied") or ad.get("isRentedWithTenants") else {}
-    if ad.get("isBareOwnership"):
-        raw["nuda_propiedad"] = True
     coords = ad.get("coordinates") or {}
     if coords.get("latitude") and coords.get("longitude"):
         raw["geo"] = {"lat": float(coords["latitude"]), "lon": float(coords["longitude"]),
                       "precision": "street" if ad.get("accuracy") else "village"}
     detail = (ad.get("detail") or {}).get("es-ES")
     images = [m.get("src") for m in ad.get("multimedia") or [] if m.get("src")]
+    description = ad.get("description") or ""
+    if ad.get("isBareOwnership"):
+        # The page flags bare ownership without putting it in the text, so a
+        # keyword filter never sees it. Same idea as a proindiviso share.
+        raw["nuda_propiedad"] = True
+        description = f"{description} nuda propiedad".strip()
     kind = "Terreno" if tipo == "terreno" else "Casa" if "House" in (ad.get("buildingSubtype") or "") else "Vivienda"
     location = ad.get("location") or ""
     return make_listing(
         "fotocasa", ad["id"], "ES", title=f"{kind} en {town or addr.get('province') or ''}"
                                           + (f", {location}" if location else ""),
-        description=(ad.get("description") or "")[:3000] or None, tipo=tipo,
+        description=description[:3000] or None, tipo=tipo,
         area_m2=feats.get("surface") or None, price=float(price), min_price=float(price),
         district=addr.get("province"), concelho=town, url=f"{FOTOCASA}{detail}" if detail else None,
         image_url=images[0] if images else None, raw_json=json.dumps(raw, ensure_ascii=False) if raw else None,

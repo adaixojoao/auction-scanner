@@ -171,6 +171,15 @@ FORCED_SOURCES = {
     "france", "encheres_publiques",   # French judicial auctions (licitor / encheres-publiques)
 }
 
+
+def forced_sale(item: dict) -> bool:
+    """A court, tax or social-security source, or a listing the site marked judicial.
+
+    Notaires sells both. The home scorer and the investment scorer both ask this
+    before the no-minimum-bid bonus, so a judicial flag is not only a home bonus.
+    """
+    return (item.get("source") or "") in FORCED_SOURCES or bool(_raw(item).get("judicial"))
+
 TAX_SOURCES = {"financas", "anaf", "aeat"}
 
 # ─── What we are looking for ────────────────────────────────────────
@@ -404,8 +413,8 @@ HEAVY_WORK = [
     "ruin*", "arruinad*", "em ruínas", "para recuperar", "para reconstruir", "reconstrução",
     "para recuperação", "recuperação total", "necessita de recuperação", "a necessitar de recuperação",
     "carece de recuperação", "para reabilitação", "para reabilitar",
-    "obras profundas", "reabilitação total", "reabilitação integral", "inabitável",     "sem telhado", "tejado caído", "tejado caido", "tejado hundido", "cubierta hundida", "cubierta caída",
-    "cubierta caida", "tejado derrumbado",
+    "obras profundas", "reabilitação total", "reabilitação integral", "inabitável",     "sem telhado", "tejado caído",     "tejado caido", "tejado hundido", "cubierta hundida", "cubierta caída",
+    "cubierta caida", "tejado derrumbado", "derruid*", "derrumbe",
     "telhado caído", "muito degradad*", "mau estado", "mal estado", "en mal estado", "para demolir", "demolição",
     "a reformar", "para reformar", "reforma integral", "para rehabilitar", "inhabitable",
     "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
@@ -1250,6 +1259,17 @@ def swim_spot(item: dict) -> tuple[float, str] | None:
         return None
     best = max(spots, key=lambda sp: (swim_points(sp), -sp[0]))
     return best if swim_points(best) > 0 else min(spots)
+
+
+def _town_pin_without_a_water_check(item: dict) -> bool:
+    """A municipality or village pin is the town, not the house. Without a water
+    check around it, 'nowhere to swim' is not known — a coastal town's centre
+    can sit more than a swim away from the water."""
+    import geo
+    pos = geo.position(item) or {}
+    if pos.get("precision") not in ("municipality", "village"):
+        return False
+    return '"water_check"' not in (item.get("raw_json") or "")
 # Easy to reach: an airport with scheduled flights and a station on the
 # long-distance trains, smaller bonuses that fade with the distance.
 AIRPORT_POINTS = [(15, 8), (30, 7), (50, 5), (80, 2), (120, 0)]
@@ -1570,7 +1590,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None,
         s += 20 * w("sale")
         reasons.append("sealed-bid (carta fechada)")
 
-    is_forced = source in FORCED_SOURCES or _raw(item).get("judicial")
+    is_forced = forced_sale(item)
     if is_forced:
         s += 6 * w("sale")
         reasons.append("forced sale (must sell)")
@@ -1837,6 +1857,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         full, HEAVY_WORK + SOME_WORK + GOOD_CONDITION) else ""
     if state == "heavy":
         s -= 25
+        caps.append(40)   # a cheap ruin must not outrank a house you can live in
         reasons.append(f"needs heavy work (ruin / full rebuild){seen}")
     elif state == "some":
         s -= 12
@@ -1874,7 +1895,9 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     if swim and swim[0] <= SWIM_MAX_KM:
         s += swim_points(swim) * w("beach")
         reasons.append(f"somewhere to swim {swim[0]:.1f} km away ({swim[1]})")
-    elif swim or item.get("climate"):          # placed on the map, and nothing within reach
+    elif (swim or item.get("climate")) and not _town_pin_without_a_water_check(item):
+        # Placed on the map, and nothing within reach. A town or village pin
+        # with no water check is not that: the house may be by the water.
         s += NO_SWIM * w("beach")
         reasons.append(f"nowhere to swim within {SWIM_MAX_KM:g} km"
                        + (f" (nearest: {swim[1]} {swim[0]:.1f} km)" if swim else ""))
@@ -1925,9 +1948,12 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         if pay > EXPENSIVE_HOME_EUR:
             reasons.append(f"expensive home (€{pay:,.0f})")
 
-    # Below the local price per m² (homes only: land is not priced like buildings)
-    mv = market_value_estimate(item)
-    if mv and pay and area <= 1000:
+    # Below the local price per m². Over 1,000 m² the stored size is usually the
+    # plot: value at most INVEST_VALUE_MAX_M2 of building, and nothing when that
+    # size is the plot itself (land_m2 set and equal to the area).
+    floor = _discount_floor_m2(item, area)
+    mv = market_value_estimate({**item, "area_m2": floor}) if floor else None
+    if mv and pay:
         factor, why = local_value_factor(item, state)
         mv *= factor
         market_disc = (mv - pay) / mv
@@ -1938,6 +1964,22 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
             reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]}{adjusted}){skipped}")
     return s
+
+
+def _discount_floor_m2(item: dict, area: float) -> float | None:
+    """Floor area the home €/m² applies to, or None when the stored size is the plot."""
+    if not area:
+        return None
+    land = _raw(item).get("land_m2")
+    try:
+        land_m2 = float(land) if land not in (None, "") else None
+    except (TypeError, ValueError):
+        land_m2 = None
+    if land_m2 and abs(land_m2 - area) < 1:
+        return None
+    if area > 1000:
+        return INVEST_VALUE_MAX_M2
+    return area
 
 
 def _rural_points(area: float, pay: float, t: dict, reasons: list[str], full: str = "",
@@ -2182,6 +2224,7 @@ INVEST_BANK_SALE = 4            # a bank selling what it repossessed
 INVEST_VALUE_MAX_M2 = 250       # m² of building valued at most: a bigger "area" is usually the plot
 INVEST_DISCOUNT_TRUST = 0.7     # beyond this share below the local price the gap is not believed
 INVEST_TOO_CHEAP = -15          # and 15 points beyond it, it costs: something is wrong until checked
+INVEST_RUIN_CAP = 45            # a full rebuild stays under the line that shows as a score
 
 
 def _discount_skipped(item: dict, why: list[str]) -> str:
@@ -2264,7 +2307,10 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         elif not _discount_skipped(item, why):
             s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
     rent = (est or {}).get("rent")
-    if rent:
+    state = condition(item)
+    if rent and state == "heavy":
+        reasons.append("town rent not counted — it needs a full rebuild before it can be let")
+    elif rent:
         s += curve(rent["net_yield_pct"], INVEST_YIELD_POINTS)
         reasons.append(f"rent about €{rent['monthly']:,.0f}/month: {rent['net_yield_pct']}% a year net of "
                        f"running costs and empty months ({rent['yield_pct']}% gross)"
@@ -2286,7 +2332,8 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         s += INVEST_BANK_SALE * w("sale")
         reasons.append("bank sale")
 
-    state = condition(item)
+    if state == "heavy":
+        caps.append(INVEST_RUIN_CAP)
     s += {"good": 5, "some": -5, "heavy": -15}.get(state, -3)
     reasons.append({"good": "good condition", "some": "needs some work", "heavy": "needs heavy work"}.get(
         state, "condition not stated"))
@@ -2307,6 +2354,9 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if future is not None and future > REJECT_HOT_DAYS:
         s -= 15 * w("heat")
         reasons.append(f"{future:.0f} days a year above 35 °C by 2071-2100 — value at risk")
+    if pay and not (item.get("min_price") or 0) and forced_sale(item):
+        s += 4
+        reasons.append("no minimum bid")
     if pay:
         reasons.append(f"€{pay:,.0f}")
     if caps:

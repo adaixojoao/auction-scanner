@@ -130,6 +130,29 @@ def test_somewhere_to_swim_within_1_5_km_is_a_must():
     assert any(r.startswith("nowhere to swim") for r in score_detail(stream)[1])     # a stream is not a swim
 
 
+def test_a_town_or_village_pin_without_a_water_check_is_not_penalised_for_swimming():
+    def pinned(precision, water_check=False):
+        raw = {"geo": {"lat": 41.0, "lon": -8.6, "precision": precision}}
+        if water_check:
+            raw["water_check"] = {"radius_m": 300, "found": []}
+        return {**home(8), "climate": {}, "raw_json": json.dumps(raw)}
+
+    town, town_reasons = score_detail(pinned("municipality"))
+    village, village_reasons = score_detail(pinned("village"))
+    assert not any(r.startswith("nowhere to swim") for r in town_reasons)
+    assert not any(r.startswith("nowhere to swim") for r in village_reasons)
+    street, street_reasons = score_detail(pinned("street"))
+    assert any(r.startswith("nowhere to swim") for r in street_reasons)
+    assert street < town and street < village
+    # A check that looked and found nothing is a result, even from a town pin.
+    checked, checked_reasons = score_detail(pinned("municipality", water_check=True))
+    assert any(r.startswith("nowhere to swim") for r in checked_reasons)
+    assert checked < town
+    close = {**home(0.5), "climate": {}, "raw_json": json.dumps(
+        {"geo": {"lat": 41.0, "lon": -8.6, "precision": "village"}})}
+    assert "somewhere to swim 0.5 km away (the sea)" in score_detail(close)[1]
+
+
 def test_sea_beats_lake_beats_river():
     def at(kind):
         if kind == "the sea":

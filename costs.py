@@ -382,8 +382,8 @@ def fees(item: dict, value: float, *, own_home: bool = False) -> float:
 def rent(item: dict, cost: float) -> dict | None:
     """What a home would rent for, from the rent per m² in its municipality
     (Portugal: INE's median of new leases; France: the carte des loyers), and
-    the gross yield on `cost` (what it takes to own it, with the work). None
-    without an area or a figure."""
+    the yield on `cost` (what it takes to own it, with the work), net of the
+    default running costs and empty months. None without an area or a figure."""
     if (item.get("kind") or property_kind(item)) != "home":
         return None
     country = (item.get("country") or "PT").upper()
@@ -406,16 +406,18 @@ def rent(item: dict, cost: float) -> dict | None:
     if monthly <= 0:
         return None
     gross = 1200 * monthly / cost
+    kept = monthly * NET_RENT_SHARE
     where = f"{place} ({source})"
     if province:
         where += "; province average, counted at half — check rents in the village"
     return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
             "province_average": province,
             "yield_pct": round(gross, 1), "net_yield_pct": round(gross * NET_RENT_SHARE, 1),
-            "payback_years": round(cost / (12 * monthly), 1),
+            "payback_years": round(cost / (12 * kept), 1),
             "note": f"€{eur_m2:.2f}/m² a month in {where}, "
-                    f"over {used:.0f} m²; net of about {RENT_RUNNING_SHARE:.0%} running costs "
-                    f"and {RENT_VACANCY_SHARE:.0%} empty months, before income tax"}
+                    f"over {used:.0f} m²; {RENT_RUNNING_SHARE:.0%} running costs "
+                    f"and {RENT_VACANCY_SHARE:.0%} empty months, before income tax. "
+                    f"Gross, before those, is {round(gross, 1)}%"}
 
 
 def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) -> dict | None:
@@ -458,6 +460,76 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     return out
 
 
+def money_out(item: dict, *, bid: float | None = None) -> dict | None:
+    """What one purchase takes from cash you can lose.
+
+    {"amount", "detail", "estimate"}. The amount is the low end of the all-in
+    figure when the floor area is known, otherwise the price plus taxes and
+    fees. Repairs are left out of that second case, and the detail says so.
+    """
+    est = estimate(item, bid=bid)
+    if not est:
+        return None
+    if est["all_in"]:
+        amount = est["all_in"]["low"]
+        detail = (f"price, taxes, fees and the low end of repairs"
+                  f" (high end about €{est['all_in']['high']:,.0f})")
+    else:
+        amount = est["total"]
+        detail = "price, taxes and fees — repairs are not included (no floor area, or not a home)"
+    return {"amount": round(amount), "detail": detail, "estimate": est}
+
+
+def over_cash(item: dict, cash: float, *, bid: float | None = None) -> str | None:
+    """Why this purchase is over the cash you can lose, or None.
+
+    A cash figure of 0 is not set, and hides nothing: the Offers page refuses
+    the bid instead.
+    """
+    if not cash or cash <= 0:
+        return None
+    out = money_out(item, bid=bid)
+    if not out or out["amount"] <= cash:
+        return None
+    return f"cash €{out['amount']:,.0f} all-in is over the €{cash:,.0f} you can lose ({out['detail']})"
+
+
+def sealed_cheque(item: dict, amount: float) -> str | None:
+    """The usual 5% cheque on a Portuguese sealed offer or e-leilão.
+
+    An estimate of the deposit, which counts toward the price. Confirm the
+    figure in the notice.
+    """
+    if amount <= 0 or item.get("source") not in ("citius", "eleiloes"):
+        return None
+    cheque = round(amount * 0.05)
+    return (f"About €{cheque:,.0f} as a cheque (5% of €{amount:,.0f}). "
+            "A Portuguese sealed offer or an e-leilão normally asks for that. "
+            "Confirm the amount in the notice. The cheque counts toward the price.")
+
+
+def cash_view(item: dict, cash: float, *, bid: float | None = None, cheque: bool = False) -> dict:
+    """What the Offers page shows next to an amount, and whether it is over the cash."""
+    limit = float(cash or 0)
+    out = money_out(item, bid=bid)
+    spent = out["amount"] if out else None
+    base = out["estimate"]["base"] if out else 0
+    deposit = sealed_cheque(item, base) if cheque and out else None
+    if limit <= 0:
+        return {"set": False, "limit": None, "spent": spent, "over": False, "deposit": deposit,
+                "text": "Cash you can lose is not set. Set it under Settings → Budget before an offer."}
+    if out is None:
+        text = f"Within the €{limit:,.0f} you can lose. This listing has no price to add taxes to."
+        over = False
+    elif spent > limit:
+        text = over_cash(item, limit, bid=bid) or ""
+        over = True
+    else:
+        text = f"About €{spent:,.0f} all-in, within the €{limit:,.0f} you can lose ({out['detail']})."
+        over = False
+    return {"set": True, "limit": limit, "spent": spent, "over": over, "deposit": deposit, "text": text}
+
+
 def as_text(est: dict | None) -> str:
     """The estimate as plain lines, for the AI check and the letter drafts."""
     if not est:
@@ -471,7 +543,8 @@ def as_text(est: dict | None) -> str:
         rows.append(f"- All-in: €{est['all_in']['low']:,.0f}–{est['all_in']['high']:,.0f}")
     if est.get("rent"):
         r = est["rent"]
-        rows.append(f"- Rent: about €{r['monthly']:,.0f} a month, {r['yield_pct']}% a year gross and "
-                    f"{r['net_yield_pct']}% net, paid back in {r['payback_years']} years ({r['note']})")
+        rows.append(f"- Rent: about €{r['monthly']:,.0f} a month, {r['net_yield_pct']}% a year "
+                    f"after {RENT_RUNNING_SHARE:.0%} running costs and {RENT_VACANCY_SHARE:.0%} empty months "
+                    f"({r['yield_pct']}% gross), paid back in {r['payback_years']} years ({r['note']})")
     rows.append(f"- {est['note']}")
     return "\n".join(rows)

@@ -25,8 +25,9 @@ class FakeSession:
 @pytest.fixture
 def client(db, monkeypatch):
     import config
-    config.save_config({"filters": {}, "proponente": {"nome": "Test Person", "nif": "123",
-                                                      "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"}})
+    config.save_config({"filters": {}, "cash_on_hand": 10_000_000,
+                        "proponente": {"nome": "Test Person", "nif": "123",
+                                       "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"}})
     monkeypatch.setattr(geo.time, "sleep", lambda s: None)
     dashboard.app.config["TESTING"] = True
     return dashboard.app.test_client()

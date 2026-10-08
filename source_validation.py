@@ -182,6 +182,18 @@ CATALOG: dict[str, dict] = {
 }
 
 
+# Aggregators of a real sale: a bank's stock, or an auction. The other aggregators
+# are owners and agents naming an asking price.
+SALE_AGGREGATORS = {"imobancos", "italy", "subastasactivas", "courtbid"}
+
+
+def asking_price(source: str | None) -> bool:
+    """A portal of asking prices. A court, tax or bank sale is not one, and
+    stays where an offer is made."""
+    meta = CATALOG.get(source or "") or {}
+    return meta.get("kind") == "aggregator" and source not in SALE_AGGREGATORS
+
+
 def meta_for(name: str, source=None) -> dict:
     """Merged catalog + Source fields for the Sources page and health API."""
     cat = dict(CATALOG.get(name) or {})

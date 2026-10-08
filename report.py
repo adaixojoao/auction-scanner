@@ -239,7 +239,8 @@ def generate_report(db, max_price: float = 50000, max_bid: float | None = None, 
     LOG.info(f"Report: {len(cats['imoveis'])} imóveis, {len(cats['ouro_joias'])} ouro/joias, "
              f"{len(cats['outros'])} outros → {report_path}")
 
-    desktop = os.path.join(os.path.expanduser("~"), "Desktop") if desktop_copy else None
+    # Next to the app (the Auction Scanner folder), not on the Desktop.
+    desktop = os.path.dirname(HERE) if desktop_copy else None
     try:
         _write_docx(parts, now, max_price, len(items), out_dir, desktop)
     except ImportError:

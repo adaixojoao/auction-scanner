@@ -425,7 +425,7 @@ def api_listings():
             "properties": sum(1 for it in visible if it["category"] == "imoveis"),
             "countries": len({it.get("country") for it in visible}),
             "new_today": sum(1 for it in visible if it["is_recent"]),
-            "high_score": sum(1 for it in visible if it["score"] >= 70),
+            "high_score": sum(1 for it in visible if it["score"] >= 40),
             "homes": sum(1 for it in visible if it["kind"] == "home"),
             "urban_plots": sum(1 for it in visible if it["kind"] == "urban_plot"),
             "rural_plots": sum(1 for it in visible if it["kind"] == "rural_plot"),
@@ -434,6 +434,7 @@ def api_listings():
             "sources_failing": sum(1 for h in health if h["state"] in ("error", "broken", "blocked")),
         },
         "last_scrape": last_scrape,
+        "cash": _cash_public(),
     })
 
 
@@ -890,6 +891,8 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
         "checklist": {"summary": ck["summary"], "blocking_left": len(ck["blocking_left"]),
                       "concerns": len(ck["concerns"])},
         "bid_cap": _bid_cap(it, cfg),
+        "cash": _cash_state(it, (first_offer or {}).get("suggested", ""),
+                            (first_offer or {}).get("key"), bool(first_offer)),
         "status": it.get("status"),
         "bid": (first_offer or {}).get("suggested", ""),   # online-only sales: nothing to suggest
         "contact": _contact(it, raw),
@@ -902,6 +905,7 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
                    "letter_subject": offer.get("letter_subject") or "",
                    "location_level": offer.get("location_level"),
                    "location_override": offer.get("location_override") or "",
+                   "cash_override": offer.get("cash_override") or "",
                    "checklist_summary": offer.get("checklist_summary") or "",
                    "bid_cap_recommended": offer.get("bid_cap_recommended"),
                    "bid_cap_absolute": offer.get("bid_cap_absolute"),
@@ -922,12 +926,16 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
 def api_offers():
     import checklist
     from letters import channel, classify_property
+    from scoring import EARNING_MODES
+    from source_validation import asking_price
 
     db = get_db()
     try:
-        # Each listing for the goal it suits best: an offer is worth making on a
-        # good let or a cheap plot, not only on a home to live in.
-        items = load_best(db, filters=_config().get("filters"), include_hidden=True)
+        # Ranked as an investment home, as land, or as a forestry plot. A home
+        # to live in stays on its own tab: its score is climate and a place to
+        # swim, and that used to fill this list.
+        items = load_best(db, filters=_config().get("filters"), include_hidden=True,
+                          modes=EARNING_MODES)
         logs = [dict(r) for r in db.execute("SELECT * FROM carta_log ORDER BY created_at DESC, id DESC")]
         checks = checklist.stored_all(db)
     finally:
@@ -938,7 +946,9 @@ def api_offers():
     busy = {log["listing_id"] for log in logs
             if log["outcome"] == "pending" or (log.get("is_offer", 1) and log["outcome"] != "cancelled")}
     cfg = _config()
-    min_score = (cfg.get("filters") or {}).get("min_score") or 45
+    min_score = (cfg.get("filters") or {}).get("min_score")
+    if min_score is None:
+        min_score = 1
     size = max(1, _num(cfg.get("max_listings"), 100, int))
     shortlisted, candidates = [], []
     for it in items:
@@ -948,6 +958,10 @@ def api_offers():
             shortlisted.append(it)
             continue
         if it["hidden_reason"]:
+            continue
+        # An asking price on a portal is not a sale you write a letter for.
+        # It stays on the Listings tabs; a shortlisted one is already kept above.
+        if asking_price(it.get("source")):
             continue
         # Strong candidates: your minimum score for their goal (the budget is
         # already applied by load_best), sales where the offer is a letter;
@@ -973,7 +987,7 @@ def api_offers():
     rejected = [_offer_view(it, it["id"], checks=checks, cfg=cfg) for it in items
                 if it["status"] == "dismissed" and it["category"] == "imoveis"]
     return jsonify({"review": review[:150], "sent": sent, "closed": closed, "rejected": rejected[:150],
-                    "location_gate_mode": location_gate_mode()})
+                    "location_gate_mode": location_gate_mode(), "cash": _cash_public()})
 
 
 def _listing(listing_id: str) -> dict | None:
@@ -1046,7 +1060,8 @@ def api_offer_letter():
     return jsonify({"text": letter.text, "subject": letter.subject, "to": letter.to_email,
                     "bid_text": letter.extra.get("bid_text", ""), "filename": letter.filename,
                     "type": letter.type_key, "is_offer": letter.is_offer,
-                    "warning": bid_warning(item, bid, letter.type_key) if letter.is_offer else None})
+                    "warning": bid_warning(item, bid, letter.type_key) if letter.is_offer else None,
+                    "cash": _cash_state(item, bid, letter.type_key, letter.is_offer)})
 
 
 @app.route("/api/offers/warning")
@@ -1054,7 +1069,10 @@ def api_offer_warning():
     item = _listing(request.args.get("id", ""))
     if not item:
         return jsonify({"error": "no such listing"}), 404
-    return jsonify({"warning": bid_warning(item, request.args.get("bid", ""), request.args.get("type") or None)})
+    ltype = request.args.get("type") or None
+    bid = request.args.get("bid", "")
+    return jsonify({"warning": bid_warning(item, bid, ltype),
+                    "cash": _cash_state(item, bid, ltype or "online", True)})
 
 
 def _pdf_response(data: bytes, filename: str) -> Response:
@@ -1095,14 +1113,58 @@ def api_offer_log_pdf(log_id):
 
 
 def _log_sent(item: dict, *, letter=None, bid: str = "", method: str, sent_to: str = "",
-              notes: str = "", location_override: str | None = None) -> int:
+              notes: str = "", location_override: str | None = None,
+              cash_override: str | None = None) -> int:
     from outbox import log_sent
     db = get_db()
     try:
         return log_sent(db, item, letter=letter, bid=bid, method=method, sent_to=sent_to, notes=notes,
-                        location_override=location_override)
+                        location_override=location_override, cash_override=cash_override)
     finally:
         db.close()
+
+
+def _cash_public() -> dict:
+    amount = float(_config().get("cash_on_hand") or 0)
+    return {"set": amount > 0, "amount": amount if amount > 0 else None}
+
+
+def _wants_cheque(item: dict, letter_type: str | None, is_offer: bool) -> bool:
+    """The 5% cheque note applies to a Portuguese sealed offer or an e-leilão bid."""
+    if not is_offer:
+        return False
+    src = item.get("source")
+    if src == "eleiloes":
+        return True
+    return src == "citius" and (letter_type or "pt_carta_fechada") in ("pt_carta_fechada", "online")
+
+
+def _cash_state(item: dict, bid: str = "", letter_type: str | None = None, is_offer: bool = True) -> dict:
+    import costs
+    from letters import parse_bid
+    amount = parse_bid(bid) if bid else None
+    return costs.cash_view(item, float(_config().get("cash_on_hand") or 0), bid=amount,
+                           cheque=_wants_cheque(item, letter_type, is_offer))
+
+
+def _cash_gate(item: dict, is_offer: bool, data: dict, bid: str):
+    """(error response or None, the reason to record).
+
+    Cash of 0 refuses every offer. An amount over the cash you can lose needs
+    a reason. Information requests are not checked.
+    """
+    if not is_offer:
+        return None, None
+    state = _cash_state(item, bid, data.get("type") or None, True)
+    if not state["set"]:
+        return (jsonify({"error": state["text"], "cash_gate": "unset"}), 409), None
+    if not state["over"]:
+        return None, None
+    reason = str(data.get("cash_override") or "").strip()[:500]
+    if len(reason) < MIN_OVERRIDE_REASON:
+        return (jsonify({"error": f"{state['text']} Say why you are sending this offer anyway.",
+                         "cash_gate": True}), 409), None
+    return None, reason
 
 
 # ─── Offers: the location check (Settings → Location) ───────────────
@@ -1291,9 +1353,13 @@ def api_offer_sent():
     blocked, ck, ck_reason = _checklist_gate(item, is_offer, data)
     if blocked:
         return blocked
+    blocked, cash_reason = _cash_gate(item, is_offer, data, bid)
+    if blocked:
+        return blocked
     method = data.get("method") or ("online" if item.get("source") == "eleiloes" else "email")
     log_id = _log_sent(item, letter=letter, bid=bid, method=method,
-                       sent_to=data.get("to", ""), notes=data.get("notes", ""), location_override=reason)
+                       sent_to=data.get("to", ""), notes=data.get("notes", ""), location_override=reason,
+                       cash_override=cash_reason)
     if is_offer:
         _record_checklist(item, log_id, ck, ck_reason)
         _record_bid_cap(item, log_id, bid)
@@ -1316,11 +1382,14 @@ def api_offer_email():
     blocked, ck, ck_reason = _checklist_gate(item, letter.is_offer, data)
     if blocked:
         return blocked
+    blocked, cash_reason = _cash_gate(item, letter.is_offer, data, data.get("bid", ""))
+    if blocked:
+        return blocked
     to = (data.get("to") or letter.to_email or "").strip()
     db = get_db()
     try:
         error, log_id = email_letter(db, _config(), item, letter, to=to, bid=data.get("bid", ""),
-                                     location_override=reason)
+                                     location_override=reason, cash_override=cash_reason)
     finally:
         db.close()
     if error:
@@ -1443,6 +1512,12 @@ def add_carta_log():
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or not (data.get("listing_id") or data.get("processo")):
         return jsonify({"error": "listing_id or processo required"}), 400
+    if data.get("listing_id") and data.get("bid_amount") not in (None, ""):
+        item = _listing(data["listing_id"])
+        if item:
+            blocked, _reason = _cash_gate(item, True, data, str(data.get("bid_amount")))
+            if blocked:
+                return blocked
     db = get_db()
     try:
         cur = db.execute("""
@@ -1547,6 +1622,7 @@ EDITABLE = {
     "max_price": None,            # one budget per goal (common.py)
     "invest_max_price": None,
     "land_max_price": None,
+    "cash_on_hand": None,         # price + taxes + fees + low end of repairs
     "max_listings": None,
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
                 "rural_max_eur_m2", "weights"),
@@ -1637,6 +1713,11 @@ def api_settings_save():
     if stewards is not None:
         if "enable_for_mixed" in stewards and not isinstance(stewards["enable_for_mixed"], bool):
             return jsonify({"error": "stewardship.enable_for_mixed must be true or false"}), 400
+    if "cash_on_hand" in changes and (not isinstance(changes["cash_on_hand"], (int, float))
+                                     or changes["cash_on_hand"] < 0):
+        return jsonify({"error": "cash_on_hand must be a number ≥ 0 (0 means not set)"}), 400
+    if "cash_on_hand" in changes:
+        _LISTS.clear()
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):
         return jsonify({"error": "unknown country code"}), 400

@@ -74,7 +74,8 @@ def _cost_line(item: dict) -> str:
     if not est:
         return ""
     rent = est.get("rent")
-    rent = f"\n\U0001f3e0 rents ~{_money(rent['monthly'])}/month \u2192 {rent['yield_pct']}% a year" if rent else ""
+    rent = (f"\n\U0001f3e0 rents ~{_money(rent['monthly'])}/month \u2192 {rent['net_yield_pct']}% a year "
+            f"after running costs and empty months" if rent else "")
     if est["all_in"]:
         low, high = est["all_in"]["low"], est["all_in"]["high"]
         return f"\n\U0001f9fe {_money(low)}\u2013{high:,.0f} all-in (taxes, fees and the work)" + rent

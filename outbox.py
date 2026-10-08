@@ -22,7 +22,7 @@ from db import load_best, load_listings, set_listing_status
 
 LOG = logging.getLogger("outbox")
 
-REQUEST_DEFAULTS = {"enabled": True, "min_score": 75, "per_day": 5}
+REQUEST_DEFAULTS = {"enabled": True, "min_score": 50, "per_day": 5}
 MIN_DAYS_LEFT = 5          # a request needs time for an answer before the sale ends
 
 
@@ -36,7 +36,8 @@ def _raw(item: dict) -> dict:
 # ─── Sending and recording ──────────────────────────────────────────
 
 def log_sent(db, item: dict, *, letter=None, bid: str = "", method: str, sent_to: str = "",
-             notes: str = "", location_override: str | None = None) -> int:
+             notes: str = "", location_override: str | None = None,
+             cash_override: str | None = None) -> int:
     """Record a sent letter (or with letter=None an online bid) in carta_log,
     with its text exactly as sent, and how exact the listing's location was."""
     import geo
@@ -47,8 +48,8 @@ def log_sent(db, item: dict, *, letter=None, bid: str = "", method: str, sent_to
         INSERT INTO carta_log (listing_id, processo, tribunal, country, sent_date, bid_amount,
                                method, outcome, notes, created_at, letter_type, is_offer, sent_to,
                                letter_text, letter_subject, letter_filename, location_level,
-                               location_override)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                               location_override, cash_override)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
         item["id"], letter.processo if letter else str(raw.get("processo") or "").split(",")[0].strip(),
         raw.get("tribunal") or raw.get("autoridad"), item.get("country") or "PT",
         datetime.now().strftime("%Y-%m-%d"), parse_bid(bid) if is_offer else None,
@@ -56,7 +57,7 @@ def log_sent(db, item: dict, *, letter=None, bid: str = "", method: str, sent_to
         letter.type_key if letter else "online", int(is_offer), sent_to or None,
         letter.text if letter else None, letter.subject if letter else None,
         letter.filename if letter else None, geo.location_confidence(item)["level"],
-        location_override or None))
+        location_override or None, cash_override or None))
     db.commit()
     if is_offer and item.get("status") == "shortlisted":
         set_listing_status(db, item["id"], None)   # it is an offer now, not a shortlist entry
@@ -64,7 +65,8 @@ def log_sent(db, item: dict, *, letter=None, bid: str = "", method: str, sent_to
 
 
 def email_letter(db, cfg: dict, item: dict, letter, *, to: str = "", bid: str = "",
-                 location_override: str | None = None) -> tuple[str | None, int | None]:
+                 location_override: str | None = None,
+                 cash_override: str | None = None) -> tuple[str | None, int | None]:
     """E-mail `letter` with its PDF from Settings → E-mail and record it.
     Returns (error in plain words, None) or (None, carta_log id)."""
     from letters import letter_pdf
@@ -76,7 +78,7 @@ def email_letter(db, cfg: dict, item: dict, letter, *, to: str = "", bid: str = 
     if error:
         return error, None
     return None, log_sent(db, item, letter=letter, bid=bid, method="email", sent_to=to,
-                          location_override=location_override)
+                          location_override=location_override, cash_override=cash_override)
 
 
 # ─── The request queue ──────────────────────────────────────────────

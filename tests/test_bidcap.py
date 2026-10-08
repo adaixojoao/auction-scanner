@@ -14,8 +14,9 @@ from scoring import climate_score
 @pytest.fixture
 def client(db, monkeypatch):
     import config
-    config.save_config({"filters": {}, "proponente": {"nome": "Test Person", "nif": "123",
-                                                      "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"},
+    config.save_config({"filters": {}, "cash_on_hand": 10_000_000,
+                        "proponente": {"nome": "Test Person", "nif": "123",
+                                       "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"},
                         "bid_cap": {"max_all_in": 0, "margin_pct": 15, "contingency_pct": 10,
                                     "rural_reserve_per_ha": 500, "rural_reserve_fixed": 0,
                                     "require_exact": False, "adviser_reserve_eur": 1500,

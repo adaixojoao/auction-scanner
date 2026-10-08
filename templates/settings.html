@@ -46,11 +46,14 @@
   <h3>Budget &amp; what to show</h3>
   <p class="small muted" style="margin-bottom:10px">One budget per goal. A scan keeps anything under the highest of the three, so nothing is thrown away; each tab, its alerts and its part of the report then show only what fits its own budget. A home bought to let or resell is usually dearer than the cheapest house, and land is priced by the hectare.</p>
   <div class="form-grid">
+    <div class="field"><label>Cash you can lose (EUR)</label><input type="number" id="cash_on_hand" min="0" step="1000">
+      <p class="help">The most one purchase may take: the price, the taxes and fees, and the low end of repairs. A listing above it is hidden (a ☆ one stays). An offer above it asks for a reason. 0 means not set, and offers stay blocked until you set it.</p></div>
     <div class="field"><label>Maximum price — a home to live in (EUR)</label><input type="number" id="max_price" step="5000"></div>
     <div class="field"><label>Maximum price — a home to let or resell (EUR)</label><input type="number" id="invest_max_price" step="5000"></div>
     <div class="field"><label>Maximum price — land (EUR)</label><input type="number" id="land_max_price" step="5000"></div>
     <div class="field"><label>Show at most (listings, best first)</label><input type="number" id="max_listings" min="10" max="1000" step="10"></div>
-    <div class="field"><label>Hide listings scoring below</label><input type="number" id="min_score" min="0" max="100" step="5"></div>
+    <div class="field"><label>Hide listings scoring below</label><input type="number" id="min_score" min="0" max="100" step="5">
+      <p class="help">0 is an ordinary listing and 100 is the best, so the ones worth a look use the whole scale.</p></div>
     <div class="field"><label>Hide listings smaller than (m²)</label><input type="number" id="min_area_m2" min="0" step="10"></div>
   </div>
   <div class="field" style="margin-top:14px"><label>Countries to show</label>
@@ -285,6 +288,7 @@ async function load() {
   loadAccounts();
   const c = await (await fetch("/api/settings")).json();
   const f = c.filters || {}, p = c.proponente || {}, s = c.schedule || {}, t = c.telegram || {}, e = c.notifications || {};
+  setv("cash_on_hand", c.cash_on_hand ?? 0);
   setv("max_price", c.max_price); setv("invest_max_price", c.invest_max_price ?? 150000);
   setv("land_max_price", c.land_max_price ?? 100000); setv("max_listings", c.max_listings ?? 100); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
   setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
@@ -405,6 +409,7 @@ async function applyUpdate() {
 
 async function save() {
   const body = {
+    cash_on_hand: num("cash_on_hand") || 0,
     max_price: num("max_price"),
     invest_max_price: num("invest_max_price"),
     land_max_price: num("land_max_price"),

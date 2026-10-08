@@ -1,7 +1,7 @@
 """
 Build the climate-risk layers the scanner reads (climate.py) from the public
 datasets downloaded into the climate data folder (config: climate.data_dir,
-default Desktop/auction-climate-data). Run it once after downloading, and
+default the auction-climate-data folder next to the app). Run it once after downloading, and
 again when a dataset is refreshed:
 
     python scripts/update_climate.py              # everything

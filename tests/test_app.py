@@ -19,6 +19,7 @@ def test_browser_lookup_never_crashes(monkeypatch):
 
 def test_window_falls_back_to_the_default_browser(monkeypatch):
     opened = []
+    monkeypatch.setattr(app, "app_windows", lambda: [])
     monkeypatch.setattr(app, "find_app_browser", lambda: None)
     monkeypatch.setattr(app.webbrowser, "open", opened.append)
     app.open_window("http://127.0.0.1:8050/")
@@ -27,10 +28,28 @@ def test_window_falls_back_to_the_default_browser(monkeypatch):
 
 def test_app_mode_window(monkeypatch):
     launched = []
+    monkeypatch.setattr(app, "app_windows", lambda: [])
     monkeypatch.setattr(app, "find_app_browser", lambda: "/usr/bin/chromium")
     monkeypatch.setattr(app.subprocess, "Popen", lambda args, **kw: launched.append(args))
     app.open_window("http://127.0.0.1:8050/")
     assert launched[0][:2] == ["/usr/bin/chromium", "--app=http://127.0.0.1:8050/"]
+
+
+def test_an_open_window_is_shown_instead_of_a_second_one(monkeypatch):
+    launched, closed, focused = [], [], []
+    monkeypatch.setattr(app, "app_windows", lambda: [10, 20])
+    monkeypatch.setattr(app, "_foreground_window", lambda: 20)
+    monkeypatch.setattr(app, "_close_window", closed.append)
+    monkeypatch.setattr(app, "focus_window", focused.append)
+    monkeypatch.setattr(app.subprocess, "Popen", lambda *args, **kw: launched.append(args))
+    app.open_window("http://127.0.0.1:8050/")
+    assert closed == [10] and focused == [20] and launched == []
+
+
+def test_only_page_windows_count_as_the_app():
+    assert app.is_app_window("Listings — Auction Scanner")
+    assert not app.is_app_window("Auction Scanner")          # the error dialog
+    assert not app.is_app_window("Listings — Auction Scanner - Google Chrome")
 
 
 def test_restart_runs_the_new_version_without_updating_again(monkeypatch):

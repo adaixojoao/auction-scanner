@@ -159,10 +159,14 @@ def test_a_home_shows_what_it_would_rent_for_and_the_yield(pt_rents):
     assert rent["monthly"] == 520 and rent["eur_m2"] == 5.2
     cost = (est["all_in"]["low"] + est["all_in"]["high"]) / 2 if est["all_in"] else est["total"]
     assert rent["yield_pct"] == round(1200 * 520 / cost, 1)
-    assert rent["payback_years"] == round(cost / (12 * 520), 1)
+    assert rent["net_yield_pct"] == round(rent["yield_pct"] * costs.NET_RENT_SHARE, 1)
+    kept = 520 * costs.NET_RENT_SHARE
+    assert rent["payback_years"] == round(cost / (12 * kept), 1)
+    assert "20% running costs" in rent["note"] and "8% empty months" in rent["note"]
     assert "Reguengos de Monsaraz" in rent["note"] and "Rent: about €520" in costs.as_text(est)
     from telegram_alert import _cost_line
-    assert "rents ~€520/month" in _cost_line(house)
+    line = _cost_line(house)
+    assert "rents ~€520/month" in line and f"{rent['net_yield_pct']}% a year after running costs" in line
     # A mansion rents like a 200 m² house; a plot, another country or an unknown town: no figure.
     assert costs.estimate({**house, "area_m2": 400})["rent"]["monthly"] == 1040
     assert costs.estimate({**house, "title": "Terreno rústico", "tipo": "terreno"})["rent"] is None

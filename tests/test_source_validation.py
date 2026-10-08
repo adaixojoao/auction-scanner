@@ -28,6 +28,10 @@ def test_catalog_covers_every_registered_source():
     for name, meta in source_validation.CATALOG.items():
         assert meta["kind"] in source_validation.KINDS, name
         assert meta["access"] in source_validation.ACCESS, name
+    assert source_validation.asking_price("fotocasa") and source_validation.asking_price("bienici")
+    assert not source_validation.asking_price("citius")
+    assert not source_validation.asking_price("aliseda")
+    assert not source_validation.asking_price("imobancos")
 
 
 def test_source_unavailable_is_blocked_not_error(db):

@@ -156,7 +156,91 @@ def find_app_browser() -> str | None:
     return next((c for c in candidates if c and os.path.exists(c)), None)
 
 
+def is_app_window(title: str) -> bool:
+    """A window of this app. The error dialog is titled exactly "Auction Scanner"
+    and is not one: every page title ends with "— Auction Scanner"."""
+    return bool(title) and title.endswith("Auction Scanner") and title != "Auction Scanner"
+
+
+def app_windows() -> list[int]:
+    """Visible windows of this app, oldest-looking enumeration order. Empty when
+    the platform cannot list them."""
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        found: list[int] = []
+
+        def _each(hwnd, _lparam):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, len(buf))
+                if is_app_window(buf.value):
+                    found.append(int(hwnd))
+            return True
+
+        cb = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(_each)
+        user32.EnumWindows(cb, 0)
+        return found
+    except Exception:
+        LOG.exception("Could not list windows")
+        return []
+
+
+def _foreground_window() -> int:
+    if sys.platform != "win32":
+        return 0
+    try:
+        import ctypes
+        return int(ctypes.windll.user32.GetForegroundWindow() or 0)
+    except Exception:
+        return 0
+
+
+def _close_window(hwnd: int) -> None:
+    if sys.platform != "win32":
+        return
+    import ctypes
+    ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)   # WM_CLOSE
+
+
+def focus_window(hwnd: int) -> None:
+    """Bring the existing window forward instead of opening a second one."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.ShowWindow(hwnd, 9)          # SW_RESTORE, in case it is minimised
+        user32.SetForegroundWindow(hwnd)
+    except Exception:
+        LOG.exception("Could not focus the window")
+
+
+def close_extra_windows() -> int | None:
+    """One window only. Returns the one kept, or None when there is no window."""
+    hwnds = app_windows()
+    if not hwnds:
+        return None
+    fg = _foreground_window()
+    keep = fg if fg in hwnds else hwnds[0]
+    for hwnd in hwnds:
+        if hwnd != keep:
+            LOG.info("Closing an extra Auction Scanner window")
+            _close_window(hwnd)
+    return keep
+
+
 def open_window(url: str):
+    """Open the app's window, or show the one already on screen."""
+    keep = close_extra_windows()
+    if keep is not None:
+        LOG.info("Auction Scanner is already open — showing that window")
+        focus_window(keep)
+        return
     browser = find_app_browser()
     if browser:
         try:
@@ -326,7 +410,9 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline and dashboard.app.config.get("LAST_HEARTBEAT") is None:
             time.sleep(1)
-        if dashboard.app.config.get("LAST_HEARTBEAT") is None:
+        # A window left on screen from the previous process has not pinged this
+        # one yet. Opening anyway is how a second window appeared.
+        if dashboard.app.config.get("LAST_HEARTBEAT") is None and not app_windows():
             open_window(url)
 
     stop = threading.Event()
@@ -338,6 +424,7 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
     try:
         while True:
             time.sleep(5)
+            close_extra_windows()          # a second window cannot stay open
             last = dashboard.app.config.get("LAST_HEARTBEAT")
             now = time.monotonic()
             if last is None:

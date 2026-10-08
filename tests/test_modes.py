@@ -49,6 +49,23 @@ def test_forestry_wants_10_ha_cheap_per_hectare_and_rustic():
     assert urban <= rustic
 
 
+def test_forestry_ranks_by_the_return_not_by_a_cheap_hectare(monkeypatch):
+    """A cheap hectare used to win on its own. The rank is the return on the money."""
+    import scoring
+    base = listing(title="Terreno florestal", tipo="terreno", area_m2=200000, price=20000)
+    seen = {"n": 0}
+
+    def fake_return(pay, ha, best, timber, land_gain=0.0):
+        seen["n"] += 1
+        return 0.20 if seen["n"] == 1 else 0.01
+
+    monkeypatch.setattr(scoring, "forest_return", fake_return)
+    pays, pays_why = score_detail(base, mode="forest")
+    cheap = score_detail({**base, "price": 4000}, mode="forest")[0]
+    assert pays > cheap
+    assert any("meets the 20% goal" in r for r in pays_why)
+
+
 def test_an_earlier_cheap_plot_ranks_above_a_later_one():
     """Sooner is better. A date next year is still a buy, and a cheap hectare
     outweighs a sale that merely ends soon."""
@@ -151,6 +168,11 @@ def test_investment_land_wants_it_reachable_and_resellable():
     building = plot(title="Terreno urbano en Lugo", tipo="suelo", area_m2=2000, price=20000,
                     land_market=MARKET)
     assert any("building land — resells to anyone" in r for r in score_detail(building, mode="land")[1])
+    leftover, leftover_why = score_detail(
+        plot(title="Terreno urbano en Vigo", tipo="suelo", area_m2=213, price=6952, land_market=MARKET),
+        mode="land")
+    assert leftover <= 45 and any("not an investment" in r for r in leftover_why)
+    assert score_detail(building, mode="land")[0] > leftover
 
 
 def test_forestry_is_upside_on_a_plot_not_the_only_way_it_can_rank():
@@ -329,6 +351,27 @@ def test_investment_does_not_believe_an_impossible_discount(monkeypatch):
     penalised = score_detail(absurd, mode="invest")[0]
     monkeypatch.setattr(scoring, "INVEST_TOO_CHEAP", 0)
     assert penalised == score_detail(absurd, mode="invest")[0] - 15
+
+
+def test_a_province_average_or_an_unseen_house_does_not_count_as_a_discount(monkeypatch):
+    """The gap is still shown. It does not raise the score when the comparison
+    is a province average, or the photos do not show the house."""
+    import json
+    import scoring
+    home = listing(concelho="Ourol", district="Lugo", area_m2=100, price=20000,
+                   description="Casa reformada, en buen estado")
+    monkeypatch.setattr(scoring, "local_price", lambda item: (800, "MIVAU"))
+    town = score_detail(home, mode="invest")[0]
+    monkeypatch.setattr(scoring, "local_price", lambda item: (800, "MIVAU, province average"))
+    province, province_reasons = score_detail(home, mode="invest")
+    assert province < town
+    assert any("not counted (a province average" in r for r in province_reasons)
+    unseen = {**home, "price": 45000, "raw_json": json.dumps({"photo_check": {"shows_house": False}})}
+    monkeypatch.setattr(scoring, "local_price", lambda item: (800, "MIVAU"))
+    hidden, hidden_reasons = score_detail(unseen)
+    assert any("not counted (the photos do not show the house)" in r for r in hidden_reasons)
+    seen = score_detail({**home, "price": 45000})[0]
+    assert hidden < seen
 
 
 def test_a_cheap_home_on_the_croatian_coast_is_doubtful():

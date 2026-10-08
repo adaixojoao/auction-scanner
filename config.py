@@ -19,6 +19,11 @@ DEFAULTS = {
     "max_price": 100000,          # a home to live in
     "invest_max_price": 150000,   # a home to let or resell
     "land_max_price": 100000,     # a plot (investment land and forestry)
+    # What you can actually lose on one purchase: price + taxes + fees + the
+    # low end of repairs (costs.py). 0 means not set — listings stay visible
+    # and an offer is refused until you set it. A shortlisted listing stays
+    # visible above the figure. The three budgets above are listing prices.
+    "cash_on_hand": 0,
     "max_bid": 100000,
     "max_listings": 100,          # Listings shows at most this many: the best first
 
@@ -38,7 +43,7 @@ DEFAULTS = {
         # Rural plots are only worth it big and cheap (scoring.py, "What we are looking for")
         "rural_min_m2": 10000,    # 1 ha
         "rural_max_eur_m2": 0.5,  # €5,000 per hectare
-        "min_score": 45,
+        "min_score": 1,           # hides a 0, which is the old 50 and below
         "districts": [],
     },
 
@@ -58,7 +63,7 @@ DEFAULTS = {
         "smtp_password": "",      # use app password for Gmail
         "from_email": "",
         "to_emails": [],          # e.g. ["you@gmail.com"]
-        "min_score": 70,          # only notify for high-confidence deals
+        "min_score": 40,          # old 70, on the spread scale (50–100 → 0–100)
         "send_on": "new",         # "new" = only new listings, "all" = every run
     },
 
@@ -67,10 +72,10 @@ DEFAULTS = {
         "enabled": False,
         "token": "",
         "chat_id": "",
-        "min_score": 75,          # new-listing alerts
-        "deadline_min_score": 60, # "ending soon, no offer sent" alerts
+        "min_score": 50,          # new-listing alerts (old 75)
+        "deadline_min_score": 20, # "ending soon, no offer sent" alerts (old 60)
         "cut_min_pct": 5,         # "the price just dropped" alerts: how big a cut
-        "cut_min_score": 60,      # …and from what score (your shortlist always counts)
+        "cut_min_score": 20,      # …and from what score (old 60; your shortlist always counts)
         "source_alerts": True,    # tell me when a site stops working (and when it is back)
     },
 
@@ -79,7 +84,7 @@ DEFAULTS = {
     # Show letter / Skip; nothing is sent until you tap Send.
     "auto_requests": {
         "enabled": True,
-        "min_score": 75,
+        "min_score": 50,          # old 75, on the spread scale
         "per_day": 5,             # at most this many new requests offered per day
     },
 
@@ -123,11 +128,12 @@ DEFAULTS = {
 
     # Report output
     "report": {
-        "desktop_copy": True,     # also write Auction-Report.docx/.pdf to the Desktop
+        "desktop_copy": True,     # also write Auction-Report.docx/.pdf next to the app
     },
 
     "climate": {
-        # data_dir: where the climate layers are (default Desktop/auction-climate-data).
+        # data_dir: where the climate layers are. By default, the auction-climate-data
+        # folder next to this app.
         "bid_guardrail": False,   # lower AI-suggested bids for a caution/poor climate grade
     },
 

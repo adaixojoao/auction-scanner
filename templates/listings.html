@@ -22,6 +22,7 @@
   <button data-mode="forest" role="tab">Forestry</button>
 </div>
 <p class="small muted" id="mode-note"></p>
+<p class="small" id="cash-note"></p>
 
 <div class="stats" id="stats"></div>
 
@@ -127,6 +128,15 @@ async function load() {
     sort, dir, page, per_page: PER_PAGE, mode,
   });
   const data = await (await fetch("/api/listings?" + params)).json();
+  const cash = data.cash || {};
+  const note = $("cash-note");
+  if (cash.set) {
+    note.className = "small muted";
+    note.textContent = `Cash you can lose is ${AS.money(cash.amount)}. A listing whose all-in cost is higher is hidden, unless you ☆ it.`;
+  } else {
+    note.className = "notice warn";
+    note.textContent = "Cash you can lose is not set. Set it under Settings → Budget. Offers stay blocked until you do.";
+  }
   lastFound = data.found ?? data.total; lastCap = data.cap ?? 100;
   renderStats(data.stats);
   renderRows(data.items, status === "hidden");
@@ -213,7 +223,7 @@ function costsHtml(c) {
   const total = `${eur(c.total)} to own it`
     + (c.all_in ? ` \u00b7 ${eur(c.all_in.low)}\u2013${eur(c.all_in.high)} all-in with the work` : "");
   const rent = c.rent ? `<div class="cost-total">Rents for about ${eur(c.rent.monthly)}/month \u00b7
-      ${c.rent.yield_pct}% a year \u00b7 paid back in ${c.rent.payback_years} years</div>
+      ${c.rent.net_yield_pct}% a year after running costs and empty months \u00b7 paid back in ${c.rent.payback_years} years</div>
       <p class="small muted">${AS.esc(c.rent.note)}</p>` : "";
   return `<div class="guide">
     <b>What it really costs</b> <span class="small muted">on ${AS.esc(c.basis)}, ${eur(c.base)}</span>

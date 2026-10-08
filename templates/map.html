@@ -32,7 +32,7 @@ async function load() {
     if (!key) return;
     placed++;
     const [lat, lng] = C[key], j = () => (Math.random() - 0.5) * 0.08;
-    const col = it.score >= 85 ? "#22c55e" : it.score >= 65 ? "#eab308" : "#94a3b8";
+    const col = it.score >= 70 ? "#22c55e" : it.score >= 30 ? "#eab308" : "#94a3b8";
     L.circleMarker([lat + j(), lng + j()], {radius: 8, fillColor: col, color: "#fff", weight: 1, fillOpacity: .85})
       .addTo(layer)
       .bindPopup(`<b>${AS.esc(it.title)}</b><br>Score ${Math.round(Math.max(it.score, it.rank ?? 0))} · ${AS.money(it.price)}<br>${AS.esc([it.concelho, it.district].filter(Boolean).join(", "))}` +

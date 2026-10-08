@@ -40,7 +40,7 @@ def data_dir(cfg: dict | None = None) -> str:
         except Exception:  # noqa: BLE001
             cfg = {}
     return ((cfg or {}).get("climate") or {}).get("data_dir") or os.path.join(
-        os.path.expanduser("~"), "Desktop", "auction-climate-data")
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "auction-climate-data")
 
 
 def _layers() -> str:

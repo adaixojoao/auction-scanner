@@ -14,8 +14,9 @@ from db import connect, upsert_listing
 @pytest.fixture
 def client(db, monkeypatch):
     import config
-    config.save_config({"filters": {}, "proponente": {"nome": "Test Person", "nif": "123",
-                                                      "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"},
+    config.save_config({"filters": {}, "cash_on_hand": 10_000_000,
+                        "proponente": {"nome": "Test Person", "nif": "123",
+                                       "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"},
                         "checklist": {"blocking": {"pt_court": [], "es_boe": [], "fr_court": []}}})
     monkeypatch.setattr("letters._unicode_fonts", lambda: None)
     dashboard.app.config["TESTING"] = True

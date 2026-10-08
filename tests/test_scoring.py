@@ -84,6 +84,22 @@ def test_notaires_judicial_flag_gets_forced_sale_bonus():
     assert sc_jud > sc_vol
 
 
+def test_an_investment_home_counts_a_judicial_flag_as_no_minimum_bid():
+    import json
+    house = dict(source="notaires", country="FR", title="Maison à Seix", tipo="moradia",
+                 price=24000, area_m2=150)
+    flagged, reasons = score_detail(
+        {**house, "raw_json": json.dumps({"judicial": True})}, mode="invest")
+    plain, plain_reasons = score_detail(house, mode="invest")
+    assert "no minimum bid" in reasons
+    assert "no minimum bid" not in plain_reasons
+    assert flagged > plain
+    with_min, min_reasons = score_detail(
+        {**house, "min_price": 20000, "raw_json": json.dumps({"judicial": True})}, mode="invest")
+    assert "no minimum bid" not in min_reasons
+    assert with_min < flagged
+
+
 def test_dates_in_titles_are_not_fractions():
     sc, _ = score(item(title="Moradia penhorada em 11/2023", price=20000))
     assert sc > 0
@@ -380,6 +396,19 @@ def test_land_is_not_priced_like_buildings():
     assert any("below local prices" in r for r in home)
 
 
+def test_a_home_bigger_than_1000_m2_still_gets_a_discount_unless_that_size_is_the_plot(monkeypatch):
+    import json
+    import scoring
+    monkeypatch.setattr(scoring, "local_price", lambda item: (1000, "test €/m²"))
+    house = dict(title="Moradia isolada", description="em bom estado", concelho="Guarda", price=20000)
+    _, floor = score(item(**house, area_m2=150))
+    _, scraped = score(item(**house, area_m2=20000))
+    _, plot_sized = score(item(**house, area_m2=20000, raw_json=json.dumps({"land_m2": 20000})))
+    assert any("below local prices" in r for r in floor)
+    assert any(r.startswith("92% below local prices") for r in scraped)   # 250 m² of building, not 2 ha
+    assert not any("below local prices" in r for r in plot_sized)
+
+
 def test_shops_and_garages_are_not_the_goal():
     shop, r_shop = score(item(title="Loja comercial", price=10000))
     home, _ = score(item(title="Moradia", price=10000))
@@ -637,6 +666,25 @@ def test_a_home_next_to_water():
 def test_rejected_outright(title, description, why):
     sc, reasons = score(item(title=title, description=description, price=3500, area_m2=900))
     assert why in reasons and sc <= 30, reasons
+
+
+def test_a_ruin_cannot_rank_as_an_investment_just_because_it_is_cheap():
+    """A house to rebuild is not a let. Price and a town rent must not lift it."""
+    ruin = dict(source="aliseda", country="ES", concelho="Lugo", district="Lugo", tipo="vivienda",
+                title="Vivienda en ruinas", description="Casa en ruinas, para rehabilitar",
+                area_m2=90, price=3500)
+    shown, reasons = score(ruin, mode="invest")
+    raw, _ = score_detail(ruin, mode="invest")
+    assert "needs heavy work" in " ".join(reasons)
+    assert "town rent not counted" in " ".join(reasons)
+    assert raw <= 45 and shown == 0
+    home_shown, home_reasons = score(item(title="Casa en ruinas", price=3500, area_m2=90, concelho="Lugo"))
+    assert "needs heavy work" in " ".join(home_reasons) and home_shown == 0
+    # Land stays land. "Terreno" is not a ruin keyword.
+    land_raw, land_reasons = score_detail(item(
+        title="Terreno rústico", tipo="terreno", area_m2=50000, price=20000, concelho="Guarda"), mode="land")
+    assert "needs heavy work" not in " ".join(land_reasons)
+    assert land_raw > 45
 
 
 def test_recovery_is_heavy_work_but_a_house_sold_with_land_is_kept():

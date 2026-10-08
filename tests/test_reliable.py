@@ -10,7 +10,8 @@ MILD = {"hot_days": {"rcp45_2071-2100": 3, "today": 0}, "water_km": 0.3}
 
 
 def test_top_is_squeezed_not_clamped():
-    assert display_score(60) == 60
+    assert display_score(50) == 0
+    assert display_score(60) == 20          # the old 50–100 band is the whole scale
     assert display_score(100) < display_score(120) < display_score(160) < 100
 
 

@@ -9,8 +9,9 @@ from db import record_scrape
 @pytest.fixture
 def client(db, monkeypatch):
     import config
-    config.save_config({"filters": {}, "proponente": {"nome": "Test Person", "nif": "123",
-                                                      "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"}})
+    config.save_config({"filters": {}, "cash_on_hand": 10_000_000,
+                        "proponente": {"nome": "Test Person", "nif": "123",
+                                       "morada": "Rua 1\n6300 Guarda", "email": "t@x.pt"}})
     dashboard.app.config["TESTING"] = True
     return dashboard.app.test_client()
 
@@ -137,6 +138,20 @@ def test_shortlisted_listing_joins_offers_even_below_the_candidate_score(client,
     client.post("/api/listings/status", json={"id": "zvg:k1", "status": "dismissed"})
     offers = client.get("/api/offers").get_json()
     assert offers["review"] == [] and [o["id"] for o in offers["rejected"]] == ["zvg:k1"]
+
+
+def test_offers_rank_court_and_bank_sales_not_portal_ads_or_a_home_to_live_in(client, add):
+    add("fotocasa", "ad", "ES", title="Casa en buen estado junto al mar", price=20000,
+        area_m2=100, concelho="Lugo", district="Lugo")
+    add("citius", "court", title="Moradia em bom estado", price=20000, area_m2=100, concelho="Moura")
+    review = client.get("/api/offers").get_json()["review"]
+    ids = [o["id"] for o in review]
+    assert "fotocasa:ad" not in ids
+    court = next(o for o in review if o["id"] == "citius:court")
+    assert court["mode"] in ("invest", "land", "forest")
+    client.post("/api/listings/status", json={"id": "fotocasa:ad", "status": "shortlisted"})
+    ids = [o["id"] for o in client.get("/api/offers").get_json()["review"]]
+    assert "fotocasa:ad" in ids
 
 
 class FakeSMTP:
@@ -310,7 +325,9 @@ def test_stop_asks_the_running_scan_to_finish_its_source(client, db):
     from pipeline import LOCK_PATH
     with open(LOCK_PATH, "w") as f:
         f.write(f"{os.getpid()} now")
-    db.execute("UPDATE scan_state SET running=1, started_at='2026-10-07T10:00:00+00:00' WHERE id=1")
+    from common import utcnow
+    started = utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    db.execute("UPDATE scan_state SET running=1, started_at=? WHERE id=1", (started,))
     db.commit()
     assert client.post("/api/scan/stop").status_code == 202
     state = client.get("/api/scan").get_json()
@@ -395,7 +412,7 @@ def test_settings_roundtrip_keeps_other_keys(client):
     assert saved["max_price"] == 60000 and saved["filters"]["countries"] == ["PT", "ES"]
     assert saved["apify_token"] == "keep-me" and "dashboard" not in saved
     assert "min_score" not in saved["telegram"]      # None means "leave as is"
-    assert config.load_config()["telegram"]["min_score"] == 75
+    assert config.load_config()["telegram"]["min_score"] == 50
     assert client.post("/api/settings", json={"filters": {"countries": ["XX"]}}).status_code == 400
 
 
@@ -501,7 +518,7 @@ def test_listings_show_at_most_the_best_100(client, add):
 
 def test_offers_to_review_follow_the_owners_filters(client, add):
     import json as _json
-    client.post("/api/settings", json={"max_price": 30000, "max_listings": 2, "filters": {"min_score": 70}})
+    client.post("/api/settings", json={"max_price": 30000, "max_listings": 2, "filters": {"min_score": 1}})
     for n, price in enumerate((5000, 8000, 12000, 40000)):
         add("citius", f"c{n}", title="Moradia com 100 m2", price=price, area_m2=100,
             description="Venda mediante proposta em carta fechada",

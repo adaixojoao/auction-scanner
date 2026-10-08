@@ -743,6 +743,10 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     assert json.loads(row["raw_json"])["geo"]["precision"] == "village"
     taken = parse_fotocasa({**FOTOCASA_AD, "isOccupied": True}, "vivienda")
     assert json.loads(taken["raw_json"])["occupation"] == "occupied"
+    bare = parse_fotocasa({**FOTOCASA_AD, "isBareOwnership": True}, "vivienda")
+    assert json.loads(bare["raw_json"])["nuda_propiedad"] is True
+    assert bare["description"].endswith("nuda propiedad")
+    assert "Casa en una parcela" in bare["description"]
     # two pages of one ad each, then done
     pages = {1: _fotocasa_html([FOTOCASA_AD], 2), 2: _fotocasa_html([{**FOTOCASA_AD, "id": 2}], 2)}
     session = fake_http(lambda m, url, kw: FakeResponse(pages[2 if url.endswith("/l/2") else 1]))
