@@ -31,6 +31,20 @@ def test_raw_proindiviso_flag_scores_zero():
     assert sc == 0 and "proindiviso" in reasons[0]
 
 
+def test_raw_nuda_propiedad_flag_scores_zero():
+    # Fotocasa sets raw["nuda_propiedad"]=True for isBareOwnership listings;
+    # the scorer must skip them even when the title says nothing about usufruct.
+    import json
+    sc, reasons = score(item(
+        source="fotocasa", country="ES",
+        title="Casa en Madrid, Calle Mayor",
+        description="Magnífica vivienda.",
+        price=45000, area_m2=90,
+        raw_json=json.dumps({"nuda_propiedad": True}),
+    ))
+    assert sc == 0 and "usufruct" in reasons[0]
+
+
 def test_placeholder_price_scores_zero():
     # €1 base-bid tokens (fotocasa, imot, pvp etc.) must never score.
     for price in [1, 2, 50, 99]:

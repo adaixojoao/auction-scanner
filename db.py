@@ -34,7 +34,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -437,10 +437,15 @@ def _migrate_v16(db: sqlite3.Connection):
     _add_column(db, "scan_state", "stop", "INTEGER NOT NULL DEFAULT 0")
 
 
+def _migrate_v17(db: sqlite3.Connection):
+    """Why an offer was sent above the cash you can lose."""
+    _add_column(db, "carta_log", "cash_override", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
-               15: _migrate_v15, 16: _migrate_v16}
+               15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17}
 
 
 def init_db(db: sqlite3.Connection):
@@ -625,7 +630,7 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
     duplicate_of set. Nothing is deleted. Returns how many rows are flagged."""
     rows = db.execute("""
         SELECT * FROM listings
-        WHERE price IS NOT NULL AND area_m2 IS NOT NULL
+        WHERE price IS NOT NULL
           AND concelho IS NOT NULL AND TRIM(concelho) != ''
     """).fetchall()
 
@@ -651,11 +656,13 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                     # Portals re-post the same house under a new id: the same price
                     # and size there is the same house.
                     if (keeper["source"] in RELISTING_SOURCES and other["price"] == keeper["price"]
-                            and other["area_m2"] == keeper["area_m2"]):
+                            and (keeper["area_m2"] is None or other["area_m2"] is None
+                                 or other["area_m2"] == keeper["area_m2"])):
                         dup_of[other["id"]] = keeper["id"]
                     continue
-                if (abs(other["price"] - keeper["price"]) < 500
-                        and abs(other["area_m2"] - keeper["area_m2"]) < 5):
+                ka, oa = keeper["area_m2"], other["area_m2"]
+                area_match = (ka is None or oa is None or abs(ka - oa) < 5)
+                if abs(other["price"] - keeper["price"]) < 500 and area_match:
                     dup_of[other["id"]] = keeper["id"]
 
     # The same house on two portals at a different price: the same size to 2%,
@@ -857,6 +864,15 @@ def last_ok_by_source(db: sqlite3.Connection) -> dict[str, datetime]:
 
 # ─── Reading: the one loader ─────────────────────────────────────────
 
+def _cash_on_hand() -> float:
+    """config.cash_on_hand, or 0 when it is missing or not a number."""
+    try:
+        from config import load_config
+        return max(0.0, float(load_config().get("cash_on_hand") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def filter_reason(item: dict, filters: dict | None, mode: str = "home") -> str | None:
     """Why the user's config filters exclude this listing, or None.
 
@@ -900,7 +916,7 @@ def hidden_category(reason: str | None) -> str | None:
     if not reason:
         return None
     for prefix, label in (("dismissed", "dismissed"), ("expired", "expired"), ("duplicate", "duplicate"),
-                          ("stale", "stale"), ("score", "low score")):
+                          ("stale", "stale"), ("score", "low score"), ("cash", "over cash")):
         if reason.startswith(prefix):
             return label
     return "filtered"
@@ -1096,8 +1112,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
 
     Hidden, in order of precedence: dismissed by the user, expired, duplicate,
     stale (gone from its source), excluded by config filters, below
-    filters.min_score. A shortlisted listing ignores the last two: the user
-    picked it on purpose.
+    filters.min_score, over config.cash_on_hand (price, taxes, fees and the
+    low end of repairs). A shortlisted listing ignores the last three: the user
+    picked it on purpose. Cash of 0 is not set and hides nothing.
     """
     now = now or utcnow()
     sql = "SELECT * FROM listings"
@@ -1126,6 +1143,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     climate_on = climate.available()
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
+    cash = _cash_on_hand()
     # A new day or new filters (with the weights) score again; new towns, auction
     # results or land prices (a scan adds some every few minutes) do not throw the
     # scores away: the kept ones stay on show until refresh=True (after each scan).
@@ -1188,6 +1206,17 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if not include_hidden:
                 continue
 
+        # Price plus taxes, fees and the low end of repairs, against cash you
+        # can lose. A shortlisted listing stays: you picked it on purpose.
+        # Cash of 0 is not set and hides nothing.
+        if reason is None and cash and item["status"] != "shortlisted":
+            import costs
+            over = costs.over_cash(item, cash)
+            if over:
+                reason = over
+                if not include_hidden:
+                    continue
+
         item["hidden_reason"] = reason
         seen_first = parse_dt(item.get("first_seen"))
         item["is_recent"] = bool(seen_first and now - seen_first <= RECENT)
@@ -1196,22 +1225,24 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     return items
 
 
-def load_best(db: sqlite3.Connection, **kw) -> list[dict]:
+def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw) -> list[dict]:
     """Every listing scored for the goal it suits best (scoring.MODES), with
     `mode` and `mode_label` on each.
 
     Listings pages rank one goal at a time; everything that speaks for the
     whole app — alerts, the report, the Offers shortlist — asks this instead,
     so a listing that is only interesting as a let or as a plot is not judged
-    as somewhere to live and silently dropped.
+    as somewhere to live and silently dropped. `modes` limits which goals
+    compete: Offers passes the ones that can return cash.
     """
     from common import mode_max_price
     from config import load_config
     from scoring import MODES
     kw.pop("mode", None)
+    chosen = tuple(m for m in (modes or MODES) if m in MODES) or tuple(MODES)
     cfg = load_config()
     best: dict[str, dict] = {}
-    for mode in MODES:
+    for mode in chosen:
         budget = mode_max_price(cfg, mode, cfg.get("max_price") or 0)
         for item in load_listings(db, mode=mode, **kw):
             # Each goal pays its own price: a listing over this goal's budget

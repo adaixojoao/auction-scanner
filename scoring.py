@@ -1309,6 +1309,8 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
         return f"placeholder price (€{pay:g}) — no real asking price, skip"
     if _raw(item).get("proindiviso"):
         return "fractional share (proindiviso) — skip"
+    if _raw(item).get("nuda_propiedad"):
+        return "usufruct — skip (bare ownership: usufructuary keeps living there)"
     if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
         return "fractional share — skip"
     if no_possession(item, full):

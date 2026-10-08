@@ -229,6 +229,17 @@ def test_flats_of_one_building_show_once_cheapest_first(db, add):
     assert shown == {"pvp_giustizia:2", "pvp_giustizia:4"}
 
 
+def test_duplicates_deduped_when_one_side_has_no_area(db, add):
+    # Citius scrapes often have no area_m2; the same property on e-leilões has one.
+    # They should still be deduped on price + concelho.
+    add("eleiloes", "a", title="Moradia", price=20000, area_m2=100, concelho="Guarda")
+    add("citius",   "b", title="Moradia", price=20000, area_m2=None, concelho="Guarda")
+    assert mark_duplicates(db) == 1
+    flagged = db.execute("SELECT id FROM listings WHERE duplicate_of IS NOT NULL").fetchone()[0]
+    # the more complete row (eleiloes, has area) should be kept
+    assert flagged == "citius:b"
+
+
 def test_two_houses_in_one_village_are_not_twins(db, add):
     add("fotocasa", "a", "ES", title="Casa en Castropodame", price=22000, area_m2=158, concelho="Castropodame",
         description="Amplia casa en el centro de Calamocos para reforma integral")
