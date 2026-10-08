@@ -801,10 +801,13 @@ def parse_aliseda(item: dict, tipo: str) -> dict | None:
     images = item.get("imagenes") or []
     if raw_area_note:
         raw["area_feed_m2"] = raw_area_note
-    if item.get("Proindiviso"):
+    coprop_note = bank_share_sentence(item)
+    if item.get("Proindiviso") or coprop_note:
         # Only a share of the property, shown on the page in a box the API's text lacks.
         raw["proindiviso"] = True
-        description = "Transmisión de una participación indivisa (copropiedad). " + description
+        prefix = coprop_note or "Transmisión de una participación indivisa (copropiedad)."
+        if prefix.rstrip(".") not in description:
+            description = prefix + " " + description
     return make_listing(
         "aliseda", item["id"], "ES", title=title[:200],
         description=description[:3000] or None, tipo=tipo,
