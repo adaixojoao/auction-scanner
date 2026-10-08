@@ -1298,9 +1298,15 @@ def no_possession(item: dict, full: str) -> bool:
     return "okupa" in posesion or "sin poses" in posesion
 
 
+PLACEHOLDER_PRICE_EUR = 100   # any price below this is a base-bid token or a data error
+
+
 def _skip_reason(item: dict, title: str, full: str) -> str | None:
     """Never worth buying in any mode: a share, a caravan, a usufruct, subsidised
     housing, a timeshare, a property the seller does not possess."""
+    pay = _pay(item)
+    if pay and pay < PLACEHOLDER_PRICE_EUR:
+        return f"placeholder price (€{pay:g}) — no real asking price, skip"
     if _raw(item).get("proindiviso"):
         return "fractional share (proindiviso) — skip"
     if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):

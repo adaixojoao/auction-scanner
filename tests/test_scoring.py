@@ -31,6 +31,21 @@ def test_raw_proindiviso_flag_scores_zero():
     assert sc == 0 and "proindiviso" in reasons[0]
 
 
+def test_placeholder_price_scores_zero():
+    # €1 base-bid tokens (fotocasa, imot, pvp etc.) must never score.
+    for price in [1, 2, 50, 99]:
+        sc, reasons = score(item(title="Terreno en Córdoba", price=price, area_m2=500000))
+        assert sc == 0 and "placeholder" in reasons[0], f"price={price} slipped through: {reasons}"
+
+
+def test_prices_above_floor_are_not_skipped():
+    sc, _ = score(item(title="Moradia T2", price=100, area_m2=80))
+    # €100 is at the floor — it should at minimum not be caught by the placeholder filter
+    # (it may still score 0 for other reasons, but not the placeholder reason)
+    sc2, reasons2 = score(item(title="Moradia T2", price=99, area_m2=80))
+    assert sc2 == 0 and "placeholder" in reasons2[0]
+
+
 def test_dates_in_titles_are_not_fractions():
     sc, _ = score(item(title="Moradia penhorada em 11/2023", price=20000))
     assert sc > 0
