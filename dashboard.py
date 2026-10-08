@@ -455,6 +455,11 @@ def api_listing_detail():
         results = listing_info.past_results(db, it)
         lots = listing_info.same_case_lots(db, it)
         history = geo.location_history(db, it["id"])
+        user_note = db.execute("SELECT user_note FROM listings WHERE id=?", (listing_id,)).fetchone()
+        user_note = (user_note["user_note"] or "") if user_note else ""
+        contact_log = [dict(r) for r in db.execute(
+            "SELECT method, sent_date, outcome, notes FROM carta_log WHERE listing_id=? ORDER BY created_at DESC",
+            (listing_id,)).fetchall()]
     finally:
         db.close()
     return jsonify({
@@ -473,7 +478,26 @@ def api_listing_detail():
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
+        "user_note": user_note,
+        "contact_log": contact_log,
     })
+
+@app.route("/api/listing/note", methods=["POST"])
+def api_listing_note():
+    """Save a free-text note on a listing."""
+    data = request.get_json(silent=True) or {}
+    listing_id = data.get("id", "")
+    note = str(data.get("note") or "")[:2000]
+    if not listing_id:
+        return jsonify({"error": "id required"}), 400
+    db = get_db()
+    try:
+        db.execute("UPDATE listings SET user_note=? WHERE id=?", (note or None, listing_id))
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({"ok": True})
+
 
 @app.route("/api/listing/location", methods=["POST"])
 def api_listing_location():

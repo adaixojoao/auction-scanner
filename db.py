@@ -34,7 +34,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -442,10 +442,15 @@ def _migrate_v17(db: sqlite3.Connection):
     _add_column(db, "carta_log", "cash_override", "TEXT")
 
 
+def _migrate_v18(db: sqlite3.Connection):
+    """Free-text notes and contact log per listing."""
+    _add_column(db, "listings", "user_note", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
-               15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17}
+               15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18}
 
 
 def init_db(db: sqlite3.Connection):

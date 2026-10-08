@@ -380,7 +380,35 @@ function detailsHtml(d) {
         d.same_case.map(l => `<li>${AS.money(l.price)}${l.area ? ` · ${Math.round(l.area).toLocaleString("de-DE")} m²` : ""} — ${AS.esc(l.title)}</li>`).join("")}</ul></div>` : ""}
       ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
       <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>
+      ${contactLogHtml(d)}
+      <div class="d-note-wrap">
+        <label class="small muted" for="note-${AS.esc(d.id)}">Notes</label>
+        <textarea id="note-${AS.esc(d.id)}" class="d-note" rows="3" placeholder="Personal notes about this listing…"
+          data-id="${AS.esc(d.id)}"
+          onblur="saveNote(this)">${AS.esc(d.user_note || "")}</textarea>
+      </div>
     </div></div>`;
+}
+
+function contactLogHtml(d) {
+  const log = d.contact_log || [];
+  if (!log.length) return "";
+  const rows = log.map(c => `<tr>
+    <td>${AS.esc(c.sent_date || "")}</td>
+    <td>${AS.esc(c.method || "")}</td>
+    <td>${AS.esc(c.outcome || "")}</td>
+    <td class="small">${AS.esc(c.notes || "")}</td>
+  </tr>`).join("");
+  return `<div class="d-contact">
+    <b class="small">Contact history</b>
+    <table class="contact-table small"><thead><tr><th>Date</th><th>How</th><th>Outcome</th><th>Notes</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+  </div>`;
+}
+
+async function saveNote(el) {
+  const id = el.dataset.id, note = el.value.trim();
+  await AS.api("/api/listing/note", {method: "POST", body: {id, note}});
 }
 
 async function copyText(text) {
