@@ -41,7 +41,8 @@ _HOUSE_NUMBER_RE = re.compile(r"(?:\bn\.?\s*[ºo°]|\bn[uú]mero|\bporta)\s*$", 
 # A share stated as a percentage, usually only in the description.
 _PERCENT_SHARE = re.compile(
     r"(?:\b(?:el|un|o|uma?)\s+)?\b\d{1,2}(?:[.,]\d+)?\s*%?\s+(?:del|de la|do|da|de)\s+"
-    r"(?:pleno dominio|plena propiedad|propiedad|pleno dominio|nuda propiedad|propriedade|dominio)\b"
+    r"(?:pleno dominio|plena propiedad|propiedad|pleno dominio|nuda propiedad|propriedade|dominio"
+    r"|solar|inmueble|finca|terreno|piso|vivienda|parcela)\b"
     r"|\bproindiviso\b|\bpro indiviso\b|\bparticipaci[oó]n indivisa\b")
 
 

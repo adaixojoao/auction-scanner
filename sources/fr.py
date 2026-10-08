@@ -352,6 +352,9 @@ def parse_notaires(ad: dict) -> dict | None:
     raw = {"sale": sale}
     if ad.get("origineJudiciaire") == "OUI":
         raw["judicial"] = True
+    # Auction end date: notaires API uses several field names depending on sale type
+    date_end = (ad.get("dateFinOffres") or ad.get("dateLimiteOffres")
+                or ad.get("dateAudience") or ad.get("dateVente") or ad.get("dateCloture"))
     return make_listing(
         "notaires", ad["annonceId"], "FR",
         title=f"{'Maison' if tipo == 'maison' else 'Terrain'} à {town} ({ad.get('codePostal') or ''})",
@@ -361,6 +364,7 @@ def parse_notaires(ad: dict) -> dict | None:
         district=ad.get("departementNom"), concelho=town,
         url=ad.get("urlDetailAnnonceFr"), image_url=ad.get("urlPhotoPrincipale"),
         raw_json=json.dumps(raw, ensure_ascii=False),
+        date_end=str(date_end) if date_end else None,
     )
 
 

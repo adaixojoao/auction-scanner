@@ -119,6 +119,14 @@ def test_any_share_is_a_fraction_but_not_dates_or_case_numbers():
     assert share("1 / 2 (Um Meio) Prédio Urbano")
 
 
+def test_percent_share_of_solar_or_inmueble_is_caught():
+    from scoring import is_percent_share
+    assert is_percent_share("Solar, el cual, esta a la venta el 23% del solar.")
+    assert is_percent_share("Se vende el 50% del inmueble")
+    assert is_percent_share("Transmisión del 40% de la finca")
+    assert not is_percent_share("Piso de 90m2 en el centro de Madrid, reformado")
+
+
 def test_vacant_is_not_occupied():
     vacant, r1 = score(item(title="Moradia", description="Imóvel devoluto e desocupado", price=20000))
     occupied, r2 = score(item(title="Moradia", description="Imóvel arrendado", price=20000))
