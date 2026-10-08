@@ -18,6 +18,19 @@ def test_fractional_share_with_spaces_scores_zero():
     assert sc == 0 and "fractional" in reasons[0]
 
 
+def test_raw_proindiviso_flag_scores_zero():
+    # Aliseda sets raw["proindiviso"]=True without injecting text; scorer must respect it.
+    import json
+    sc, reasons = score(item(
+        source="aliseda", country="ES",
+        title="Vivienda en Tarragona, calle PRAT DE LA RIBA 0",
+        description="Gran oportunidad.",
+        price=28640, area_m2=97,
+        raw_json=json.dumps({"proindiviso": True}),
+    ))
+    assert sc == 0 and "proindiviso" in reasons[0]
+
+
 def test_dates_in_titles_are_not_fractions():
     sc, _ = score(item(title="Moradia penhorada em 11/2023", price=20000))
     assert sc > 0
@@ -72,7 +85,7 @@ def test_no_price_on_an_offer_sale_is_a_chance():
                                     description="Venda por negociação particular"))
     assert "no price — you set your offer" in r_sealed and "sealed-bid (carta fechada)" in r_sealed
     assert "no price — you set your offer" in r_private
-    assert sealed >= 80 and private >= 70
+    assert sealed >= 60 and private >= 40   # the old 80 and 70, on the spread scale
     # an online listing whose price we simply did not read gets no such bonus
     _, r_online = score(item(title="Moradia", source="leilosoc"))
     assert "no price — you set your offer" not in r_online
@@ -99,7 +112,7 @@ def test_price_outweighs_how_the_court_sells():
     dear_court, r_dear = score(item(title="Fracção - habitação no 3º andar", price=97500, **court))
     cheap_online, _ = score(item(title="Moradia", price=12000, concelho="Guarda"))
     assert "€97,500 — not a low price" in r_dear
-    assert dear_court < cheap_online and cheap_online >= 80
+    assert dear_court < cheap_online and cheap_online >= 60   # the old 80, on the spread scale
 
 
 def test_half_shares_and_furniture():

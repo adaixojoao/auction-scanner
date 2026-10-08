@@ -291,7 +291,7 @@ SMALL_HOME_M2 = 40
 # this share of the home's price.
 CASE_LAND_MAX_EUR = 3000
 CASE_LAND_SHARE = 0.4
-SMALL_URBAN_PLOT_M2 = 150
+SMALL_URBAN_PLOT_M2 = 1000   # under this it is a leftover, not a plot to invest in
 EXPENSIVE_HOME_EUR = 60000
 
 DWELLING_WORDS = [
@@ -1079,16 +1079,27 @@ def score(item: dict, now: datetime | None = None,
 
 SOFT_TOP_FROM = 80.0     # up to here the score is the raw points
 SOFT_TOP_SPAN = 40.0     # above it the points count less and less: 100 is never quite reached
+# What used to show as 50–100 is the whole scale. A middling 50 shows as 0 and
+# a perfect 100 stays 100, so the listings worth a look are spread out instead
+# of bunched at the top. Anything below 50 shows as 0.
+SPREAD_FROM = 50.0
+
+
+def _squeeze(raw: float) -> float:
+    """Raw points, with the top squeezed so 100 is never quite reached
+    (raw 100 → 88, 120 → 93, 160 → 97)."""
+    if raw <= SOFT_TOP_FROM:
+        return max(0.0, raw)
+    room = 100.0 - SOFT_TOP_FROM
+    return SOFT_TOP_FROM + room * (1 - math.exp(-(raw - SOFT_TOP_FROM) / SOFT_TOP_SPAN))
 
 
 def display_score(raw: float) -> float:
-    """The 0–100 score shown. Many listings pass 100 raw points; clamping them
-    all to 100 hid which was best, so the top is squeezed instead
-    (raw 100 → 88, 120 → 93, 160 → 97)."""
-    if raw <= SOFT_TOP_FROM:
-        return round(max(0.0, raw), 1)
-    room = 100.0 - SOFT_TOP_FROM
-    return round(SOFT_TOP_FROM + room * (1 - math.exp(-(raw - SOFT_TOP_FROM) / SOFT_TOP_SPAN)), 1)
+    """The 0–100 score shown. The old 50–100 band is stretched across 0–100."""
+    shown = _squeeze(raw)
+    if shown <= SPREAD_FROM:
+        return 0.0
+    return round(min(100.0, (shown - SPREAD_FROM) * (100.0 / (100.0 - SPREAD_FROM))), 1)
 
 
 # ─── Excellent ───────────────────────────────────────────────────────
@@ -1104,7 +1115,8 @@ EXCELLENT_STATION_KM = 30
 
 def excellent(item: dict, score: float, reasons: list[str]) -> list[str] | None:
     """What makes it excellent, or None when a wish is missing or unchecked."""
-    if score < 70 or any(r.startswith("rejected") for r in reasons):
+    # 40 is the old 70, after 50–100 was stretched to 0–100.
+    if score < 40 or any(r.startswith("rejected") for r in reasons):
         return None
     kind = property_kind(item)
     if kind not in ("home", "rural_plot"):
@@ -1246,7 +1258,7 @@ STATION_POINTS = [(1, 7), (3, 6), (8, 4), (20, 1), (40, 0)]
 # too: a 38 m² home is held down a little less than a 30 m² one.
 SMALL_HOME_CAP = [(25, 35), (40, 45), (75, 130), (100, 200)]   # by m²
 EXPENSIVE_HOME_CAP = [(50000, 200), (60000, 100), (75000, 55), (90000, 40)]   # by €
-SMALL_URBAN_PLOT_CAP = [(60, 35), (150, 45), (250, 200)]   # by m²
+SMALL_URBAN_PLOT_CAP = [(200, 35), (1000, 45), (2000, 200)]   # by m²; 2 000 m² can still be a building plot
 SMALL_RURAL_PLOT_CAP = [(0.3, 30), (1.0, 45), (1.3, 200)]  # by multiple of the minimum
 FAR_FROM_TOWN_CAP = [(12, 200), (20, 60), (30, 45), (40, 40)]  # by km from town: a house
                                                                # far from everything is isolated
@@ -1289,6 +1301,8 @@ def no_possession(item: dict, full: str) -> bool:
 def _skip_reason(item: dict, title: str, full: str) -> str | None:
     """Never worth buying in any mode: a share, a caravan, a usufruct, subsidised
     housing, a timeshare, a property the seller does not possess."""
+    if _raw(item).get("proindiviso"):
+        return "fractional share (proindiviso) — skip"
     if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
         return "fractional share — skip"
     if no_possession(item, full):
@@ -1440,7 +1454,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None,
         if area:
             caps.append(curve(area, SMALL_URBAN_PLOT_CAP))
             if area < SMALL_URBAN_PLOT_M2:
-                reasons.append(f"small plot ({area:.0f} m²)")
+                reasons.append(f"small plot ({area:.0f} m²) — not an investment")
         s += _land_points(item, kind, area, pay, full, reasons, caps)
     elif kind == "rural_plot":
         s += _rural_points(area, pay, t, reasons, full, caps, item)
@@ -1907,10 +1921,12 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         factor, why = local_value_factor(item, state)
         mv *= factor
         market_disc = (mv - pay) / mv
-        s += curve(market_disc, MARKET_DISCOUNT_POINTS)
+        skipped = _discount_skipped(item, why)
+        if not skipped:
+            s += curve(market_disc, MARKET_DISCOUNT_POINTS)
         if market_disc > 0.20:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
-            reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]}{adjusted})")
+            reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]}{adjusted}){skipped}")
     return s
 
 
@@ -2145,6 +2161,8 @@ def wishes(item: dict) -> list[dict]:
 #             will stand, timber and crops over FOREST_ROI_YEARS.
 MODES = {"home": "My home", "invest": "Investment home", "land": "Investment land",
          "forest": "Forestry"}
+# What an offer is for. A home to live in is a different tab.
+EARNING_MODES = ("invest", "land", "forest")
 
 INVEST_DISCOUNT_POINTS = [(0.1, 0), (0.3, 12), (0.5, 25), (0.7, 35)]     # share below the local price
 INVEST_YIELD_POINTS = [(3, 0), (5, 8), (7, 16), (11, 24)]                # net rent a year, % of the cost
@@ -2154,6 +2172,19 @@ INVEST_BANK_SALE = 4            # a bank selling what it repossessed
 INVEST_VALUE_MAX_M2 = 250       # m² of building valued at most: a bigger "area" is usually the plot
 INVEST_DISCOUNT_TRUST = 0.7     # beyond this share below the local price the gap is not believed
 INVEST_TOO_CHEAP = -15          # and 15 points beyond it, it costs: something is wrong until checked
+
+
+def _discount_skipped(item: dict, why: list[str]) -> str:
+    """Why a gap to the local price is shown and does not add points, or "".
+
+    A province average includes its cities. Photos that miss the house are
+    not a resale. A wide gap still follows the price curve: cutting it off
+    would rank a dearer home above a cheaper one."""
+    if "province average" in why:
+        return " — not counted (a province average, cities included)"
+    if (_raw(item).get("photo_check") or {}).get("shows_house") is False:
+        return " — not counted (the photos do not show the house)"
+    return ""
 # A sitting tenant: income from the first day, but the flat cannot be shown, the
 # rent is often an old one and a buyer wants it empty. It costs less when the
 # rent is known than when nothing about the letting is.
@@ -2210,13 +2241,17 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         disc = (mv - all_in) / mv
         if disc > 0.1:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
+            skipped = _discount_skipped(item, why)
+            # The wide-gap case has its own reason just below.
+            if skipped and disc <= INVEST_DISCOUNT_TRUST:
+                adjusted += skipped
             reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
         if disc > INVEST_DISCOUNT_TRUST:
             # Shown, but not rewarded: a gap this wide is usually a share, a tenant or a wrong area.
             s += INVEST_TOO_CHEAP
             reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
                            " — check why")
-        else:
+        elif not _discount_skipped(item, why):
             s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
     rent = (est or {}).get("rent")
     if rent:
@@ -2278,7 +2313,6 @@ FOREST_CLOSES_LATER = 2          # a live sale further out still counts, just le
 FOREST_PRIVATE_SALE = 6          # no end date: an offer can go out now
 FOREST_HOME_COUNTRY = 8          # Portugal: a visit and the paperwork are actually possible
 FOREST_DOUBTFUL_EUR_M2 = 0.015   # under €150 a hectare: a placeholder price ("999 €") or a wrong area
-FOREST_EUR_HA_POINTS = [(200, 30), (500, 24), (1000, 16), (2000, 6), (4000, -10), (8000, -25)]
 FOREST_SIZE_POINTS = [(10, 0), (20, 6), (50, 12), (100, 16)]              # hectares
 FOREST_HOT_DAYS_POINTS = [(0, 8), (7, 0), (20, -15), (40, -30)]           # days above 35 °C by 2071-2100
 FOREST_DRY_POINTS = [(-150, -12), (-50, 0)]                               # mm, summer water balance if AMOC stops
@@ -2406,7 +2440,9 @@ def buying_costs(item: dict, text: str) -> tuple[float, str]:
 
 # Standing timber's value as a share of the price: above 1 the land comes free.
 FOREST_TIMBER_POINTS = [(0.3, 0), (0.8, 6), (1.0, 10), (1.2, 18), (1.6, 25)]
-FOREST_RETURN_POINTS = [(-0.01, -10), (0, -4), (0.02, 0), (0.05, 8), (0.10, 15)]
+# Yearly return on the price plus buying costs, over FOREST_ROI_YEARS. 20% is the
+# goal and is what ranks a plot; a cheap hectare is already inside that return.
+FOREST_RETURN_POINTS = [(-0.01, -20), (0, -8), (0.02, 0), (0.05, 12), (0.10, 24), (0.20, 40)]
 
 
 def _forest_sooner(item: dict, now: datetime | None, reasons: list[str]) -> float:
@@ -2495,7 +2531,7 @@ def _forest_block(item: dict, full: str, kind: str) -> str | None:
 
 def _score_forest(item: dict, now: datetime | None, targets: dict | None,
                   out: dict | None = None) -> tuple[float, list[str]]:
-    """Land for a forestry project: big, cheap per hectare, wet enough, fit for trees."""
+    """Land bought as a forestry investment: the rank is the return on the money."""
     apply_stated_area(item)
     title, desc = item.get("title") or "", item.get("description") or ""
     full = f"{title} {desc}"
@@ -2532,7 +2568,6 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
     ha = area / 10000
     if pay:
         per_ha = pay / ha
-        s += curve(per_ha, FOREST_EUR_HA_POINTS) * w("price")
         reasons.append(f"€{per_ha:,.0f} a hectare")
     s += curve(ha, FOREST_SIZE_POINTS)
     if not starter:
@@ -2631,8 +2666,6 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
     if crops and c:
         best = crops[0]
         reasons.append(forestry.describe(best))
-        if pay:
-            s += curve(best["eur_ha_year"] / (pay / ha), FOREST_RETURN_POINTS) * w("price")
     elif c:
         s += FOREST_DEAD_ZONE
         reasons.append("no timber, cork, nut or carbon crop would still thrive here in 2100")
@@ -2657,8 +2690,12 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
     if out is not None:
         out["roi"] = roi
     if roi is not None:
+        s += curve(roi, FOREST_RETURN_POINTS) * w("price")
         reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years (timber now + best crop, "
-                       f"on the price)" + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))
+                       f"on the price and the buying costs)"
+                       + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))
+    elif pay and not caps:
+        reasons.append("no return can be worked out — not ranked as an investment")
     if pay:
         reasons.append(f"€{pay:,.0f}")
     if caps:
