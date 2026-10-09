@@ -553,6 +553,12 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     if work:
         out["all_in"] = {"low": value + fee_total + work["low"], "high": value + fee_total + work["high"]}
     cost = (out["all_in"]["low"] + out["all_in"]["high"]) / 2 if work else out["total"]
+    # A price this far under local sales is a share, a wrong area or not the
+    # price. A rent worked out on it is not a return, so it is not calculated.
+    import scoring
+    if scoring.price_too_far_below(item, cost):
+        out["rent"] = None
+        return out
     town = rent(item, cost)
     stated = stated_monthly_rent(f"{item.get('title') or ''} {item.get('description') or ''}")
     if stated:

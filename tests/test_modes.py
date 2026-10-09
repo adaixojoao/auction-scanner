@@ -389,13 +389,20 @@ def test_each_goal_tells_the_ai_check_its_own_wish():
 
 
 def test_investment_does_not_believe_an_impossible_discount(monkeypatch):
+    """A price this far under local sales is not a bargain, and no rent is
+    worked out on it."""
+    import costs
     plausible = listing(concelho="Ourense", district="Ourense", area_m2=100, price=60000,
                         description="Casa en buen estado")
     absurd = listing(concelho="Ourense", district="Ourense", area_m2=1000, price=5000,
                      description="Casa en buen estado")
     reasons = score_detail(absurd, mode="invest")[1]
+    plausible_reasons = score_detail(plausible, mode="invest")[1]
     assert any("check why" in r for r in reasons)
-    assert not any("check why" in r for r in score_detail(plausible, mode="invest")[1])
+    assert not any("rent" in r.lower() or "a year net" in r for r in reasons)
+    assert costs.estimate(absurd)["rent"] is None
+    assert not any("check why" in r for r in plausible_reasons)
+    assert any("a year net of running costs" in r for r in plausible_reasons)
     import scoring
     penalised = score_detail(absurd, mode="invest")[0]
     monkeypatch.setattr(scoring, "INVEST_TOO_CHEAP", 0)

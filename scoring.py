@@ -735,7 +735,8 @@ _INVEST_PRIORITIES = (
     "do not invent how far that cuts the price. "
     "Not wanted: a gap so wide it cannot be real (more than about 70% under the local price, a "
     "share of the property, a ruin sold as a home, an area that is really the plot) — say what to "
-    "check, and do not treat that gap as a bargain; a flat too small "
+    "check, and do not treat that gap as a bargain or work out a rent on that price; a flat too "
+    "small "
     "to let; somewhere the heat by 2071-2100 or a flood zone will take the value away. When the "
     "listing does not say the condition, treat it as needing work. Judge the money, not whether "
     "the buyer would enjoy living there."
@@ -2278,6 +2279,22 @@ INVEST_TOO_CHEAP = -15          # and 15 points beyond it, it costs: something i
 INVEST_RUIN_CAP = 45            # a full rebuild stays under the line that shows as a score
 
 
+def price_too_far_below(item: dict, all_in: float) -> bool:
+    """The all-in cost is so far under this place's own home price that a rent
+    on it would not be a return. A province average is not that comparison."""
+    area = item.get("area_m2") or 0
+    if not area or not all_in or all_in <= 0:
+        return False
+    found = local_price(item)
+    if not found:
+        return False
+    factor, why = local_value_factor(item)
+    if _discount_skipped(item, why):
+        return False
+    mv = found[0] * min(float(area), INVEST_VALUE_MAX_M2) * factor
+    return mv > 0 and (mv - all_in) / mv > INVEST_DISCOUNT_TRUST
+
+
 def _discount_skipped(item: dict, why: list[str]) -> str:
     """Why a gap to the local price is shown and does not add points, or "".
 
@@ -2342,6 +2359,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                        + (", and the work it needs)" if est["all_in"] else ")"))
 
     found = local_price(item) if area else None
+    unbelievable = False
     if found and all_in:
         # A listing's area is often the plot: value at most INVEST_VALUE_MAX_M2 of building.
         factor, why = local_value_factor(item)
@@ -2356,12 +2374,17 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
             reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
         if disc > INVEST_DISCOUNT_TRUST:
             # Shown, but not rewarded: a gap this wide is usually a share, a tenant or a wrong area.
+            unbelievable = True
             s += INVEST_TOO_CHEAP
             reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
                            " — check why")
         elif not _discount_skipped(item, why):
             s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
     _mention_sold_move(item, reasons)
+    # A price this far under local sales is not a rent. Drop whatever figure was
+    # worked out, including when the comparison was a province average.
+    if unbelievable and est:
+        est["rent"] = None
     rent = (est or {}).get("rent")
     state = condition(item)
     occupied = _occupied(item, full)
@@ -2409,8 +2432,12 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(f"small ({area:.0f} m²)")
     if occupied:
         # A tenant is income when the ad states the rent. The town average is not
-        # that lease, so it is not counted above.
-        if not rent:
+        # that lease, so it is not counted above. A price too far below local
+        # sales has no rent figure: that is the price, not a missing lease.
+        if unbelievable:
+            s += INVEST_TENANT_WITH_RENT
+            reasons.append("tenanted — check the lease; it cannot be shown and a buyer will want it empty")
+        elif not rent:
             s += INVEST_TENANT_UNKNOWN
             reasons.append("occupied/tenanted, and no rent can be worked out — check the lease")
         elif rent.get("stated") and state != "heavy" and rent.get("trusted") is not False:
