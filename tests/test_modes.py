@@ -21,7 +21,7 @@ def test_investment_takes_only_homes_and_forestry_only_land():
     assert score_detail(home, mode="forest") == (0.0, ["not land"])
 
 
-def test_urbanizable_and_high_mountain_are_not_forestry():
+def test_urbanizable_and_a_national_park_are_not_forestry():
     sector = listing(title="Terreno en Turre", tipo="terreno", area_m2=200000, price=40000,
                      description="Suelo urbanizable. Futuros desarrollos residenciales.")
     assert score_detail(sector, mode="forest") == (
@@ -32,7 +32,27 @@ def test_urbanizable_and_high_mountain_are_not_forestry():
     park = listing(title="Finca en Laujar de Andarax", tipo="terreno", area_m2=300000, price=30000,
                    description="Finca rústica en el Parque Nacional de Sierra Nevada, altitud 2.000-2.370 m.")
     assert score_detail(park, mode="forest")[0] == 0
-    assert any("national park" in r or "high mountain" in r for r in score_detail(park, mode="forest")[1])
+    assert any("national park" in r for r in score_detail(park, mode="forest")[1])
+    high = listing(title="Monte alto", tipo="terreno", area_m2=200000, price=30000,
+                   description="Pinhal. Altitud 2.000-2.370 m.")
+    assert score_detail(high, mode="forest")[0] > 0
+    assert not any("high mountain" in r for r in score_detail(high, mode="forest")[1])
+
+
+def test_forestry_uses_heat_water_stress_fire_and_flood():
+    base = listing(title="Terreno florestal", tipo="terreno", area_m2=200000, price=40000)
+    mild = {**base, "climate": {"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1},
+                                "water_km": 0.2, "fire_danger": {"high_days_2090": 5}}}
+    harsh = {**base, "climate": {"hot_days": {"rcp45_2071-2100": 25}, "stress": {"stress_2080": 4},
+                                 "fire_danger": {"high_days_2090": 70}, "flood_m": 1.2,
+                                 "amoc_dry_mm": -160}}
+    assert score_detail(mild, mode="forest")[0] > score_detail(harsh, mode="forest")[0]
+    reasons = score_detail(harsh, mode="forest")[1]
+    assert any("water stress" in r and "extremely high" in r for r in reasons)
+    assert any("days a year above 35" in r for r in reasons)
+    assert any("fire danger" in r for r in reasons)
+    assert any("flood" in r for r in reasons)
+    assert any("water balance" in r for r in reasons)
 
 
 def test_forestry_wants_10_ha_cheap_per_hectare_and_rustic():
@@ -49,8 +69,9 @@ def test_forestry_wants_10_ha_cheap_per_hectare_and_rustic():
     assert urban <= rustic
 
 
-def test_forestry_ranks_by_the_return_not_by_a_cheap_hectare(monkeypatch):
-    """A cheap hectare used to win on its own. The rank is the return on the money."""
+def test_forestry_ranks_profit_only_when_the_forest_is_the_same(monkeypatch):
+    """Profit is the second test. It ranks two plots that are equal as forest;
+    a cheap hectare does not win on its own."""
     import scoring
     base = listing(title="Terreno florestal", tipo="terreno", area_m2=200000, price=20000)
     seen = {"n": 0}
@@ -64,6 +85,32 @@ def test_forestry_ranks_by_the_return_not_by_a_cheap_hectare(monkeypatch):
     cheap = score_detail({**base, "price": 4000}, mode="forest")[0]
     assert pays > cheap
     assert any("meets the 20% goal" in r for r in pays_why)
+
+
+def test_a_native_stand_ranks_ahead_of_a_plantation():
+    climate = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
+    oak = listing(title="Montado", tipo="terreno", area_m2=200000, price=40000,
+                  description="Montado de sobro", climate=climate)
+    pine = listing(title="Pinhal", tipo="terreno", area_m2=200000, price=40000,
+                   description="Pinhal bravo", climate=climate)
+    oak_s, oak_r = score_detail(oak, mode="forest")
+    pine_s, pine_r = score_detail(pine, mode="forest")
+    assert oak_s > pine_s
+    assert any("already a cork oak stand" in r for r in oak_r)
+    assert any("forest to keep: cork oak" in r for r in oak_r)
+    assert any("ranked on profit only" in r for r in pine_r)
+
+
+def test_a_confirmed_native_mix_is_the_project(monkeypatch):
+    import forestry
+    ok = {p: True for p in forestry.PERIODS}
+    monkeypatch.setattr(forestry, "trees_for_item",
+                        lambda item: {"Quercus_robur": ok, "Quercus_ilex": ok})
+    plot = listing(title="Terreno florestal", tipo="terreno", area_m2=200000, price=40000,
+                   climate={"heat": {"today": 24, "ssp245_2081-2100": 28}})
+    _, reasons = score_detail(plot, mode="forest")
+    assert any("native broadleaves still suit" in r for r in reasons)
+    assert any("forest to keep: native mixed forest" in r for r in reasons)
 
 
 def test_an_earlier_cheap_plot_ranks_above_a_later_one():

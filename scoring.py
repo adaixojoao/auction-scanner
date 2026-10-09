@@ -790,25 +790,26 @@ _LAND_PRIORITIES = (
 )
 
 _FOREST_PRIORITIES = (
-    "Land for a forestry project the owner will run, not a plot to resell and not a place to live: "
-    "rustic or forest land of at least {min_ha} ha, as cheap per "
-    "hectare as possible, with a climate trees will still stand in 2100 (summer heat, water "
-    "stress, fire danger, and the summer water balance if the Atlantic current collapses). What "
-    "pays is the standing timber the ad states plus the best crop the climate allows, over "
-    "{years} years; the goal is about {roi} a year on the price including the buying costs. "
-    "Wanted: already wooded or easily planted, a gentle slope, a forest track a timber lorry can "
-    "reach, water on or by the land, cork or holm oak already growing, and a sale that can be "
-    "closed sooner rather than later — there is no deadline of this year. The cheaper the "
-    "hectare, the better. A plot from 5 ha can be a first buy; 10 ha is the project. Portugal "
+    "Land for a forestry project the owner will run, not a plot to resell and not a place to live. "
+    "In order: first, biodiversity — keep a native European forest that will still stand in 2100 "
+    "(an existing cork-oak or chestnut stand, or a native mix EU-Trees4F still says suits the place). "
+    "Second, profit — among plots that do that, the return from keeping the stand (cork, carbon, "
+    "timber the ad states) over {years} years, aiming at about {roi} a year on the price including "
+    "the buying costs. A plantation chosen because it pays more is the profit case, and it ranks "
+    "below a native forest. Climate still decides whether the trees last: summer heat, water "
+    "stress, fire danger, flood, and the summer water balance if the Atlantic current collapses. "
+    "Wanted: at least {min_ha} ha, already wooded, a gentle slope, a forest track a timber lorry can "
+    "reach, water on or by the land, and a sale that can be closed sooner rather than later — there "
+    "is no deadline of this year. A plot from 5 ha can be a first buy; 10 ha is the project. Portugal "
     "comes first: you can visit it and the paperwork is in your language. Not wanted: steep ground "
     "only loggable by cable; land machines cannot reach; scrub and firewood-grade coppice; "
     "eucalyptus (fire-prone, and new planting is normally restricted in Portugal — converting to "
-    "natives is the habitat case, not a timber crop); building land (suelo urbanizable, a "
-    "development sector, futuros desarrollos); a national park or high mountain (about 1 800 m and "
-    "above); protected areas (Natura 2000, REN, RAN) "
+    "natives is the biodiversity case); building land (suelo urbanizable, a "
+    "development sector, futuros desarrollos); a national park; protected areas (Natura 2000, REN, RAN) "
     "where felling and planting need permits; several scattered parcels; felling "
     "rights sold without the land. Say plainly when the ad does not give the volume or the age of "
-    "the stand, because then the timber figure is a guess."
+    "the stand, because then the timber figure is a guess. Do not treat a missing species map as "
+    "proof that native trees would thrive."
 )
 
 
@@ -1729,27 +1730,30 @@ AMOC_DRY_WARN_MM = -50
 
 
 def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float],
-                    *, living: bool = True) -> float:
+                    *, living: bool = True, for_trees: bool = False) -> float:
     """Heat in 2081-2100, permanent water, water stress, fires and floods where
     the listing is (climate.for_item). From a town-level position the local
     risks (water, fire, flood) count half; the heat grid is ~4.5 km anyway.
 
-    `living` is a place to live: summer heat and a winter if the Atlantic
-    current collapses. Investment land leaves those out — they are not what
-    the plot would resell for."""
+    `living` is a place to live: summer heat can cap the score, and a winter
+    if the Atlantic current collapses counts. Investment land leaves those out.
+    `for_trees` is a forestry project: the same heat, water stress, fire, flood
+    and summer water balance move the score, without the living-there cap."""
     s = 0.0
     local = 0.5 if c.get("approx") else 1.0
     heat = c.get("heat") or {}
-    if not living:
+    if not living and not for_trees:
         heat = {}
     hot = heat.get("ssp245_2081-2100") or heat.get("ssp245_2061-2080")
-    days = (c.get("hot_days") or {}) if living else {}
+    days = (c.get("hot_days") or {}) if (living or for_trees) else {}
     future = days.get("rcp45_2071-2100")
     if future is not None:
-        s += curve(future, HOT_DAYS_POINTS) * w("heat")
+        s += curve(future, FOREST_HOT_DAYS_POINTS if for_trees else HOT_DAYS_POINTS) * w("heat")
         worst = days.get("rcp85_2071-2100")
         detail = f"{future:.0f} days a year above 35 °C by 2071-2100" +                  (f", {worst:.0f} worst case" if worst is not None else "") +                  (f"; {days['today']:.0f} today" if days.get("today") is not None else "")
-        if future > REJECT_HOT_DAYS:
+        if for_trees:
+            reasons.append(detail)
+        elif future > REJECT_HOT_DAYS:
             reasons.append(f"rejected: too hot in 50-70 years ({detail})")
         elif future > TOO_MANY_HOT_DAYS:
             caps.append(TOO_HOT_CAP)
@@ -1761,7 +1765,9 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float],
         worst = heat.get("ssp585_2081-2100")
         detail = f"{hot:.1f} °C summer max by 2081-2100" + (f", {worst:.1f} °C worst case" if worst else "") + \
                  (f"; {heat['today']:.1f} °C today" if heat.get("today") else "")
-        if hot > REJECT_HOT_C:
+        if for_trees:
+            reasons.append(detail)
+        elif hot > REJECT_HOT_C:
             reasons.append(f"rejected: too hot in 50-70 years ({detail})")
         elif hot > TOO_HOT_C:
             caps.append(TOO_HOT_CAP)
@@ -1801,7 +1807,10 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float],
             reasons.append(f"{days:.0f} days a year of high fire danger by 2079-2098"
                            + (f" ({now:.0f} today)" if now is not None else "") + " — Copernicus")
     flood = c.get("flood_m")
-    if flood and flood > 0 and kind == "home":
+    if for_trees and flood and flood > 0:
+        s -= 8 * local * w("risks")
+        reasons.append(f"in the 100-year flood zone ({flood:.1f} m) — the stand floods")
+    elif flood and flood > 0 and kind == "home":
         s -= 12 * local * w("risks")
         reasons.append(f"in the 100-year flood zone ({flood:.1f} m) — JRC")
     elif flood and flood > 1 and kind != "home":
@@ -1814,7 +1823,7 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float],
             reasons.append(f"coldest day in 10 years {amoc['off']:.0f} °C if the Atlantic current collapses"
                            + (f" ({amoc['on']:.0f} °C if not)" if amoc.get("on") is not None else "")
                            + " — one model, ~200 km grid (van Westen 2025)")
-    dry = c.get("amoc_dry_mm") if living else None
+    dry = c.get("amoc_dry_mm") if (living or for_trees) else None
     if dry is not None:
         s += curve(dry, AMOC_DRY_POINTS) * w("amoc")
         if dry <= AMOC_DRY_WARN_MM:
@@ -2642,7 +2651,6 @@ FOREST_HOME_COUNTRY = 8          # Portugal: a visit and the paperwork are actua
 FOREST_DOUBTFUL_EUR_M2 = 0.015   # under €150 a hectare: a placeholder price ("999 €") or a wrong area
 FOREST_SIZE_POINTS = [(10, 0), (20, 6), (50, 12), (100, 16)]              # hectares
 FOREST_HOT_DAYS_POINTS = [(0, 8), (7, 0), (20, -15), (40, -30)]           # days above 35 °C by 2071-2100
-FOREST_DRY_POINTS = [(-150, -12), (-50, 0)]                               # mm, summer water balance if AMOC stops
 FOREST_WORDS = ["floresta", "florestal", "pinhal", "montado", "souto", "carvalhal", "forestal", "bosque",
                 "arbolado", "forêt", "forestier", "boisé", "bosco", "boschivo", "wald",
                 "šuma", "гора", "lesný pozemok", "lesná pôda", "lesný"]
@@ -2766,10 +2774,12 @@ def buying_costs(item: dict, text: str) -> tuple[float, str]:
 
 
 # Standing timber's value as a share of the price: above 1 the land comes free.
-FOREST_TIMBER_POINTS = [(0.3, 0), (0.8, 6), (1.0, 10), (1.2, 18), (1.6, 25)]
-# Yearly return on the price plus buying costs, over FOREST_ROI_YEARS. 20% is the
-# goal and is what ranks a plot; a cheap hectare is already inside that return.
-FOREST_RETURN_POINTS = [(-0.01, -20), (0, -8), (0.02, 0), (0.05, 12), (0.10, 24), (0.20, 40)]
+# Kept smaller than the native-forest tier: timber is the profit, not the goal.
+FOREST_TIMBER_POINTS = [(0.3, 0), (0.8, 3), (1.0, 5), (1.2, 8), (1.6, 12)]
+# Yearly return on the price plus buying costs, over FOREST_ROI_YEARS. This ranks
+# two plots that are equal on the forest itself. It does not outrank a native forest.
+FOREST_RETURN_POINTS = [(-0.01, -8), (0, -3), (0.02, 0), (0.05, 4), (0.10, 8), (0.20, 16)]
+FOREST_NATIVE = 28          # a confirmed native stand or a mix EU-Trees4F still suits
 
 
 def _forest_sooner(item: dict, now: datetime | None, reasons: list[str]) -> float:
@@ -2811,31 +2821,18 @@ def _forest_sooner(item: dict, now: datetime | None, reasons: list[str]) -> floa
 _DEVELOPMENT_LAND = re.compile(
     r"(?<!\bno )\burbanizable\b|\bfuturos desarrollos\b|\bdesarrollo urbanistico\b"
     r"|\bsector\s+[a-z]{0,8}\d+\b|\bsued[-\s]?\d+\b")
-_HIGH_MOUNTAIN = re.compile(
-    r"\b(?:altitud|cota|snm|sobre el nivel)[^.]{0,40}?(\d{1,2}[.,]\d{3})")
-HIGH_MOUNTAIN_M = 1800
 
 
 def _development_land(text: str) -> bool:
     return bool(_DEVELOPMENT_LAND.search(normalize(text or "")))
 
 
-def _high_mountain_text(text: str) -> str | None:
-    """'altitud 2.000–2.370 m' when the ad states it. A distance ('a 2 km') is not."""
-    found = []
-    for m in _HIGH_MOUNTAIN.finditer(normalize(text or "")):
-        meters = float(m.group(1).replace(".", "").replace(",", ""))
-        if meters >= HIGH_MOUNTAIN_M:
-            found.append(meters)
-    if not found:
-        return None
-    if len(found) == 1:
-        return f"{found[0]:.0f} m"
-    return f"{min(found):.0f}–{max(found):.0f} m"
-
-
 def _forest_block(item: dict, full: str, kind: str) -> str | None:
-    """Building land, a national park or high mountain: not a forestry project."""
+    """Building land or a national park: not a forestry project.
+
+    Altitude is left to the climate. A high plot is still a project when the
+    heat, the water and the crops say so.
+    """
     if kind == "urban_plot" or _development_land(full):
         return "building land (urbanizable or a development sector) — not a forestry plot"
     if has_term(full, ["parque nacional", "parc national", "parco nazionale", "national park"],
@@ -2846,20 +2843,13 @@ def _forest_block(item: dict, full: str, kind: str) -> str | None:
     if has_term(names, ["parque nacional", "parc national", "parco nazionale", "national park"],
                 negations=False):
         return "site check: national park — not a forestry project"
-    stated = _high_mountain_text(full)
-    if stated:
-        return f"high mountain ({stated}) — not a forestry project"
-    if site and site.get("min_m") is not None and site["min_m"] >= HIGH_MOUNTAIN_M:
-        top = site.get("max_m")
-        span = f"{site['min_m']:.0f}–{top:.0f} m" if top else f"{site['min_m']:.0f} m"
-        return f"high mountain ({span}) — not a forestry project"
     return None
 
 
 def _score_forest(item: dict, now: datetime | None, targets: dict | None,
                   out: dict | None = None) -> tuple[float, list[str]]:
-    """Land for a forestry project the owner will run: the rank is the return
-    on the work, not what the plot would resell for and not a place to live."""
+    """Land the owner will keep as forest. A confirmed native stand ranks first;
+    the return on keeping it ranks two plots that are equal on that."""
     apply_stated_area(item)
     title, desc = item.get("title") or "", item.get("description") or ""
     full = f"{title} {desc}"
@@ -2942,42 +2932,29 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
 
     water = water_nearby(full, item)
     c = item.get("climate") or {}
-    if water:
-        s += (6 if water.endswith("(approx.)") else 12) * w("water")
-        reasons.append(f"water on or by the land ({water})")
-    elif c.get("water_km") is not None and c["water_km"] <= 1:
-        s += (10 if c["water_km"] <= 0.3 else 4) * w("water")
-        reasons.append(f"permanent water {c['water_km']:.1f} km away")
-    future = (c.get("hot_days") or {}).get("rcp45_2071-2100")
-    if future is not None:
-        s += curve(future, FOREST_HOT_DAYS_POINTS) * w("heat")
-        reasons.append(f"{future:.0f} days a year above 35 °C by 2071-2100")
-    stress = (c.get("stress") or {}).get("stress_2080")
-    if stress is not None and (stress >= 3 or stress == -1):
-        s -= (20 if stress in (4, -1) else 10) * w("water")
-        reasons.append("water stress " + ("arid" if stress == -1 else "extremely high" if stress == 4 else "high")
-                       + " by 2080")
-    fire = c.get("fire") or {}
-    if fire.get("burnt_here"):
-        s -= 15 * w("risks")
-        reasons.append(f"burnt since 2016 ({', '.join(map(str, fire.get('years') or []))})")
-    elif fire.get("count"):
-        s -= 6 * w("risks")
-        reasons.append("fires nearby since 2016")
-    danger = (c.get("fire_danger") or {}).get("high_days_2090")
-    if danger is not None and danger >= 30:
-        s -= 8 * w("risks")
-        reasons.append(f"{danger:.0f} days a year of high fire danger by 2090")
-    dry = c.get("amoc_dry_mm")
-    if dry is not None:
-        s += curve(dry, FOREST_DRY_POINTS) * w("amoc")
-        if dry <= AMOC_DRY_WARN_MM:
-            reasons.append(f"summer water balance {dry:.0f} mm if the Atlantic current collapses")
+    if c:
+        s += _climate_points(c, "rural_plot", reasons, caps, living=False, for_trees=True)
+    map_water = any(r.startswith("permanent water") and "no water bonus" not in r for r in reasons)
+    if water and not map_water:
+        if floods(c):
+            reasons.append(f"water on or by the land ({water}), but it floods — no water bonus")
+        else:
+            s += (6 if water.endswith("(approx.)") else 12) * w("water")
+            reasons.append(f"water on or by the land ({water})")
     import forestry
     on_land = bool(water) and not water.endswith("(approx.)")    # near the village is not by the land
     crops = forestry.options(c, item.get("country"), ha, water_on_land=on_land, existing=existing,
                              trees=forestry.trees_for_item(item), wooded=wooded,
                              slope_pct=(site or {}).get("slope_mean"))
+    chosen, why = forestry.project_choice(crops, existing)
+    if why == "stand" and chosen:
+        s += FOREST_NATIVE
+        reasons.append(f"already a {chosen['crop']} stand — first goal is to keep that forest")
+    elif why == "mix":
+        s += FOREST_NATIVE
+        reasons.append("native broadleaves still suit this place until 2100 — first goal is to keep that forest")
+    elif c and crops:
+        reasons.append("no native forest is confirmed here — ranked on profit only")
     timber = forestry.standing_timber(full, item.get("country"), ha)
     if timber and pay:
         share = timber["eur"] / pay
@@ -2991,9 +2968,8 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
             reasons.append("felling rights may be sold without the land — check")
         if share >= 1 + FOREST_ROI_TARGET:
             reasons.append(f"timber alone is worth {share - 1:.0%} more than the price — the land comes free")
-    if crops and c:
-        best = crops[0]
-        reasons.append(forestry.describe(best))
+    if chosen and c:
+        reasons.append(forestry.describe(chosen, kept=why != "profit"))
     elif c:
         s += FOREST_DEAD_ZONE
         reasons.append("no timber, cork, nut or carbon crop would still thrive here in 2100")
@@ -3008,18 +2984,20 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         reasons.append(f"buying costs ≈ €{pay * costs:,.0f} ({costs_label})")
     unreachable = bool(site) and ((site.get("inaccessible") or 0) >= 0.5
                                   or site.get("cable_share", 0) >= SITE_CABLE_SHARE)
-    if unreachable and crops and c:
+    kept = chosen if chosen and c else None
+    if unreachable and kept:
         # timber that cannot be brought out cannot be sold: only the carbon counts
-        crops = [{**crops[0], "eur_ha_year": crops[0]["carbon_eur_ha_year"]}] + crops[1:]
+        kept = {**kept, "eur_ha_year": kept["carbon_eur_ha_year"]}
         reasons.append("no timber income counted: machines cannot reach most of the land")
-    roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, crops[0] if crops and c else None, timber,
+    roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, kept, timber,
                         # land nobody can work is not worth the regional forest price
                         land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay and not unreachable else 0.0)
     if out is not None:
         out["roi"] = roi
     if roi is not None:
         s += curve(roi, FOREST_RETURN_POINTS) * w("price")
-        reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years (timber now + best crop, "
+        reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years "
+                       f"(timber now + the {'forest kept' if why in ('stand', 'mix') else 'earning crop'}, "
                        f"on the price and the buying costs)"
                        + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))
     elif pay and not caps:

@@ -301,7 +301,31 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
     return sorted(out, key=lambda o: -o["eur_ha_year"])
 
 
-def describe(option: dict) -> str:
+# A stand the ad already names, and that the project keeps rather than replaces.
+_KEEP_STANDING = ("cork oak", "chestnut")
+
+
+def project_choice(crops: list[dict], existing: set[str] | None = None) -> tuple[dict | None, str | None]:
+    """Which crop the project follows, and why.
+
+    First a native stand the listing already has (cork oak, chestnut) when it
+    would still thrive. Then a native mixed forest when EU-Trees4F says the
+    place still suits one. Otherwise the crop that earns most: profit is what
+    is left when a native forest is not confirmed.
+    """
+    by_name = {c["crop"]: c for c in crops}
+    for name in _KEEP_STANDING:
+        if name in (existing or ()) and name in by_name:
+            return by_name[name], "stand"
+    native = by_name.get("native mixed forest")
+    if native and any("EU-Trees4F" in x for x in native.get("limits") or []):
+        return native, "mix"
+    if crops:
+        return crops[0], "profit"
+    return None, None
+
+
+def describe(option: dict, *, kept: bool = False) -> str:
     extra = f" incl. €{option['carbon_eur_ha_year']} carbon" if option["carbon_eur_ha_year"] else ""
     limits = f"; {', '.join(option['limits'])}" if option["limits"] else ""
     if option.get("until"):
@@ -310,7 +334,8 @@ def describe(option: dict) -> str:
         limits += "; prices: " + ", ".join(option["sources"])
     else:
         limits += "; provisional prices"
-    return f"best crop: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (estimate{limits})"
+    lead = "forest to keep" if kept else "earning crop"
+    return f"{lead}: {option['crop']} ≈ €{option['eur_ha_year']:,}/ha a year{extra} (estimate{limits})"
 
 
 # "Kopējais mežaudzes krājas apjoms ir 1632 m³", "volume sur pied 1 200 m3",
@@ -508,7 +533,7 @@ def project_plan(item: dict, budget: float) -> dict | None:
                         existing=existing, trees=trees_for_item(item),
                         wooded=scoring.has_term(full, scoring.FOREST_WORDS, negations=False),
                         slope_pct=site.get("slope_mean"))
-    best = crops[0] if crops else None
+    best, _why = project_choice(crops, existing)
     established = bool(best and best["crop"] in existing)
     plant_ha = _plant_eur_ha(best["crop"], ha, site.get("slope_mean")) if best and not established else 0
     if fundable and plant_ha:
