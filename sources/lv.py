@@ -1,4 +1,4 @@
-"""Latvia: ss.lv, the country's main classifieds site — forest land for sale."""
+"""Latvia: ss.lv — forest land, and houses and plots for sale."""
 from __future__ import annotations
 
 import html
@@ -6,7 +6,7 @@ import json
 import re
 import time
 
-from common import LOG, land_max_price, make_listing, make_session
+from common import LOG, find_area, find_price, land_max_price, make_listing, make_session, to_number
 from db import upsert_listing
 from sources import register
 
@@ -122,4 +122,97 @@ def scrape_sslv(db, max_price: float = 50000, config: dict | None = None, **_):
                 break
             time.sleep(1)
     LOG.info(f"ss.lv: {total} forests")
+    return total
+
+
+# ─── ss.lv houses and plots ──────────────────────────────────────────
+# The same table as the forest ads, with different columns.
+# Houses: place, living m², floors, land, price.
+# Plots:  place, area, €/m², price. The €/m² is not the price.
+
+SS_SALES = (
+    (f"{SS}/lv/real-estate/homes-summer-residences/sell/", "house",
+     r'href="(/lv/real-estate/homes-summer-residences/[a-z-]+/sell/)"'),
+    (f"{SS}/lv/real-estate/plots-and-lands/sell/", "terreno",
+     r'href="(/lv/real-estate/plots-and-lands/[a-z-]+/sell/)"'),
+)
+SS_SALE_MAX_PAGES = 2
+_SS_IMG = re.compile(r'src="(https://i\.ss\.(?:lv|com)/gallery/[^"]+)"')
+
+
+def parse_ss_sale_rows(page_html: str, kind: str) -> list[dict]:
+    """{"id", "url", "title", "place", "area_m2", "price", "image"} for houses or plots."""
+    out = []
+    for ad_id, row in _ROW.findall(page_html or ""):
+        link, cells = _LINK.search(row), [_plain(c) for c in _CELL.findall(row)]
+        if not link or len(cells) < 4:
+            continue
+        price = find_price(cells[-1])
+        if not price:
+            continue
+        if kind == "terreno":
+            area = find_area(cells[1])
+        else:
+            area = to_number(cells[1]) or find_area(cells[-2])
+        photo = _SS_IMG.search(row)
+        out.append({
+            "id": ad_id, "url": SS + link.group(1), "title": _plain(link.group(2)),
+            "place": cells[0], "area_m2": area, "price": price,
+            "image": photo.group(1) if photo else None,
+        })
+    return out
+
+
+def _sale_districts(session, index_url: str, pattern: str) -> list[str]:
+    page = session.get(index_url)
+    page.raise_for_status()
+    return sorted(set(SS + path for path in re.findall(pattern, page.text)))
+
+
+@register("sshomes", "LV", description="ss.lv — houses and plots for sale all over Latvia")
+def scrape_sshomes(db, max_price: float = 50000, **_):
+    """ss.lv — houses, summer homes and plots for sale all over Latvia.
+
+    Forest land is the separate sslv source."""
+    session = make_session(timeout=30)
+    total = 0
+    seen: set[str] = set()
+    for index, (index_url, tipo, pattern) in enumerate(SS_SALES):
+        try:
+            districts = _sale_districts(session, index_url, pattern)
+        except Exception:
+            if total == 0 and index == 0:
+                raise
+            LOG.info(f"ss.lv {tipo}: index failed")
+            continue
+        for district_url in districts:
+            region = re.search(r"/([a-z0-9-]+)-and-reg/", district_url)
+            district = region.group(1).replace("-", " ").title() if region else None
+            for page in range(1, SS_SALE_MAX_PAGES + 1):
+                url = district_url if page == 1 else f"{district_url}page{page}.html"
+                try:
+                    resp = session.get(url)
+                    resp.raise_for_status()
+                except Exception as e:  # noqa: BLE001
+                    LOG.info(f"ss.lv {url}: {type(e).__name__}")
+                    break
+                if page > 1 and resp.url.rstrip("/") == district_url.rstrip("/"):
+                    break
+                rows = parse_ss_sale_rows(resp.text, tipo)
+                for r in rows:
+                    if r["id"] in seen or r["price"] > max_price:
+                        continue
+                    seen.add(r["id"])
+                    parish, _, village = r["place"].partition(", ")
+                    upsert_listing(db, make_listing(
+                        "sshomes", r["id"], "LV", title=r["title"], description=r["title"],
+                        tipo=tipo, area_m2=r["area_m2"], price=r["price"], min_price=r["price"],
+                        district=district, concelho=parish or None, freguesia=village or None,
+                        url=r["url"], image_url=r["image"]))
+                    total += 1
+                db.commit()
+                if len(rows) < 25:
+                    break
+                time.sleep(0.8)
+    LOG.info(f"ss.lv homes and plots: {total}")
     return total

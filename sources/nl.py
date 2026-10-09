@@ -1,4 +1,4 @@
-"""Netherlands: openbareverkoop.nl, veilingnotaris.nl, veilingbiljet.nl."""
+"""Netherlands: openbareverkoop.nl, veilingnotaris.nl, veilingbiljet.nl and RE/MAX."""
 from __future__ import annotations
 
 import json
@@ -373,3 +373,10 @@ def scrape_veilingbiljet(db, max_price: float = 100000, **_):
         ))
         total += 1
     return total
+
+
+@register("remaxnl", "NL", description="RE/MAX — homes for sale in the Netherlands")
+def scrape_remaxnl(db, max_price: float = 50000, **_):
+    """RE/MAX — homes for sale in the Netherlands."""
+    from sources._market import scrape_named
+    return scrape_named(db, "remaxnl", max_price)

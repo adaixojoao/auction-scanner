@@ -19,6 +19,29 @@ def test_ss_lv_reads_the_forest_table_and_the_ad():
     assert ad["photos"] == ["https://i.ss.lv/gallery/8/1/2/wood-77398688.800.jpg"]
 
 
+HOME = ('<tr id="tr_54685970"><td class="msga2 pp0"></td><td class="msga2">'
+        '<a class="am" href="/msg/lv/real-estate/homes-summer-residences/aizkraukle-and-reg/plavinas/efdfe.html">'
+        'Privātmāja</a></td><td class="msga2-o pp6">Pļaviņas</td>'
+        '<td class="msga2-o pp6">80</td><td class="msga2-o pp6">2</td>'
+        '<td class="msga2-o pp6">1206 m²</td><td class="msga2-o pp6">15,000 €</td></tr>')
+PLOT = ('<tr id="tr_54685971"><td class="msga2 pp0"></td><td class="msga2">'
+        '<a class="am" href="/msg/lv/real-estate/plots-and-lands/aizkraukle-and-reg/plavinas/abc.html">'
+        'Zeme</a></td><td class="msga2-o pp6">Pļaviņas</td>'
+        '<td class="msga2-o pp6">0.12 ha.</td><td class="msga2-o pp6">7.08 €</td>'
+        '<td class="msga2-o pp6">8,490 €</td></tr>'
+        '<tr id="tr_54685972"><td class="msga2"><a class="am" href="/msg/x.html">Zeme</a></td>'
+        '<td class="msga2-o pp6">Pļaviņas</td><td class="msga2-o pp6">1 ha.</td>'
+        '<td class="msga2-o pp6">1 €</td><td class="msga2-o pp6">Cena runājama</td></tr>')
+
+
+def test_ss_lv_reads_a_house_and_ignores_the_plot_rate():
+    [house] = lv.parse_ss_sale_rows(HOME, "house")
+    assert (house["id"], house["area_m2"], house["price"], house["place"]) == ("54685970", 80, 15000, "Pļaviņas")
+    assert house["url"].endswith("/efdfe.html")
+    [plot] = lv.parse_ss_sale_rows(PLOT, "terreno")
+    assert plot["id"] == "54685971" and plot["area_m2"] == 1200 and plot["price"] == 8490
+
+
 def test_safer_reads_a_forest_card():
     from sources import fr
     block = ('<h2 itemprop="name"><a href="/immobilier/vente-foret-landes-fr_VN32211.htm" title="x">Forêt de pins</a></h2>'

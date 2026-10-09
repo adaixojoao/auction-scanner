@@ -39,6 +39,36 @@ LOST_REASON_LABELS = {
 }
 
 SCORE_BANDS = ((85, "85–100"), (70, "70–84"), (50, "50–69"), (0, "0–49"))
+# A sale this far from the all-in cost is a typo, not a return to annualise.
+_SALE_MULTIPLE = (0.25, 4)
+_MONTHS_HELD_MAX = 600
+
+
+def rent_yield_pct(monthly, all_in) -> float | None:
+    """Rent received as a percentage of the all-in cost a year, before income tax
+    and the costs you still pay. None when either figure is missing."""
+    if not monthly or not all_in or all_in <= 0 or monthly <= 0:
+        return None
+    return round(1200 * float(monthly) / float(all_in), 1)
+
+
+def sale_return(sale_price, all_in, months) -> dict:
+    """{"sale_multiple", "sale_annual_pct"} from a sale against the all-in cost.
+
+    sale_annual_pct is the yearly rate of that multiple over the months held.
+    It stays None when the months are missing, or the multiple is too far from
+    1 to be a real sale (a typo in one of the figures)."""
+    out = {"sale_multiple": None, "sale_annual_pct": None}
+    if not sale_price or not all_in or all_in <= 0 or sale_price <= 0:
+        return out
+    multiple = float(sale_price) / float(all_in)
+    out["sale_multiple"] = round(multiple, 2)
+    if not months or months < 1:
+        return out
+    if not _SALE_MULTIPLE[0] <= multiple <= _SALE_MULTIPLE[1]:
+        return out
+    out["sale_annual_pct"] = round((multiple ** (12 / float(months)) - 1) * 100, 1)
+    return out
 
 
 def _band(score: float | None) -> str:
@@ -109,6 +139,11 @@ def _rows(db) -> list[dict]:
             "bid": bid,
             "winning_bid": row.get("winning_bid"),
             "all_in_cost": row.get("all_in_cost"),
+            "monthly_rent": row.get("monthly_rent"),
+            "sale_price": row.get("sale_price"),
+            "months_held": row.get("months_held"),
+            "rent_yield_pct": rent_yield_pct(row.get("monthly_rent"), row.get("all_in_cost")),
+            **sale_return(row.get("sale_price"), row.get("all_in_cost"), row.get("months_held")),
             "lost_reason": row.get("lost_reason") or "",
             "diligence_blocker": row.get("diligence_blocker"),
             "occupancy_found": row.get("occupancy_found") or "",
@@ -145,6 +180,25 @@ def _rate(rows: list[dict], key: str) -> list[dict]:
             "win_rate": round(100 * won / len(decided), 1) if decided else None,
         })
     return out
+
+
+def _returns(rows: list[dict]) -> dict:
+    """What won purchases actually let for or sold for. Nothing here changes the score."""
+    won = [r for r in rows if r["outcome"] == "won"]
+    rents = [r["rent_yield_pct"] for r in won if r.get("rent_yield_pct") is not None]
+    sales = [r["sale_annual_pct"] for r in won if r.get("sale_annual_pct") is not None]
+    shown = [r for r in won if r.get("rent_yield_pct") is not None or r.get("sale_multiple") is not None]
+    return {
+        "won": len(won),
+        "with_rent": len(rents),
+        "with_sale": len(sales),
+        "median_rent_yield_pct": round(median(rents), 1) if rents else None,
+        "median_sale_annual_pct": round(median(sales), 1) if sales else None,
+        "rows": [{"country": r["country"], "kind": r["kind"], "source": r["source"],
+                  "rent_yield_pct": r.get("rent_yield_pct"), "sale_multiple": r.get("sale_multiple"),
+                  "sale_annual_pct": r.get("sale_annual_pct"), "months_held": r.get("months_held")}
+                 for r in shown[:30]],
+    }
 
 
 def summary(db) -> dict:
@@ -200,6 +254,7 @@ def summary(db) -> dict:
         "bid_vs_all_in": bid_vs[:50],
         "feedback": feedback_for_scoring(rows),
         "lost_reason_labels": [[k, LOST_REASON_LABELS[k]] for k in LOST_REASONS],
+        "returns": _returns(rows),
     }
 
 
@@ -254,9 +309,31 @@ def feedback_for_scoring(rows: list[dict] | None = None, db=None) -> list[dict]:
                                  f"({s['lost']} lost, {s['cancelled']} cancelled). "
                                  "Useful as a volume check against Sources health — not a reason to drop it alone."})
 
+    recorded = [r for r in rows if r["outcome"] == "won"
+                and (r.get("rent_yield_pct") is not None or r.get("sale_annual_pct") is not None)]
+    if recorded and len(recorded) < 3:
+        n = len(recorded)
+        tips.append({"text": f"{n} won {'purchase has' if n == 1 else 'purchases have'} a rent or a sale "
+                             "on record. A few more, and this page can put a figure on them together. "
+                             "Weights are not changed from it."})
+    if len(recorded) >= 3:
+        rents = [r["rent_yield_pct"] for r in recorded if r.get("rent_yield_pct") is not None]
+        sales = [r["sale_annual_pct"] for r in recorded if r.get("sale_annual_pct") is not None]
+        bits = []
+        if rents:
+            bits.append(f"rent received averages {median(rents):.1f}% of the all-in cost a year, "
+                        "before tax and the costs you still pay")
+        if sales:
+            bits.append(f"sales that can be annualised average {median(sales):.1f}% a year")
+        tips.append({"text": f"{len(recorded)} won purchases have a rent or a sale on record"
+                             + (f" — {'; '.join(bits)}" if bits else "")
+                             + ". The score's yield is a town average after running costs, so it is "
+                             "not this figure. Weights are not changed from it."})
+
     if not tips:
         tips.append({"text": "Not enough decided offers yet for a scoring review. "
-                             "Log lost reasons and diligence blockers as you go."})
+                             "Log lost reasons and diligence blockers as you go. "
+                             "When a purchase lets or sells, record the rent or the sale price too."})
     return tips
 
 
@@ -267,7 +344,8 @@ def export_csv(db) -> str:
     fields = ["country", "source", "kind", "method", "outcome", "score_band", "bid_value_band",
               "climate_grade", "bid", "winning_bid", "all_in_cost", "lost_reason",
               "diligence_blocker", "occupancy_found", "title_found", "access_found",
-              "condition_after", "days_to_submit", "sent_date"]
+              "condition_after", "days_to_submit", "sent_date",
+              "monthly_rent", "sale_price", "months_held", "rent_yield_pct", "sale_annual_pct"]
     w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
     w.writeheader()
     for r in rows:
@@ -281,7 +359,7 @@ def update_detail(db, log_id: int, data: dict) -> dict:
     if row is None:
         raise ValueError("not found")
     fields = {}
-    for key in ("winning_bid", "all_in_cost"):
+    for key in ("winning_bid", "all_in_cost", "monthly_rent", "sale_price", "months_held"):
         if key in data and data[key] is not None and data[key] != "":
             try:
                 fields[key] = float(data[key])
@@ -289,6 +367,8 @@ def update_detail(db, log_id: int, data: dict) -> dict:
                 raise ValueError(f"{key} must be a number") from e
             if fields[key] < 0:
                 raise ValueError(f"{key} must be ≥ 0")
+            if key == "months_held" and fields[key] > _MONTHS_HELD_MAX:
+                raise ValueError(f"months held looks too long (above {_MONTHS_HELD_MAX})")
         elif key in data:
             fields[key] = None
     if "lost_reason" in data:

@@ -172,6 +172,14 @@ def test_a_home_shows_what_it_would_rent_for_and_the_yield(pt_rents):
     assert costs.estimate({**house, "title": "Terreno rústico", "tipo": "terreno"})["rent"] is None
     assert costs.estimate({**house, "country": "ES"})["rent"] is None
     assert costs.estimate({**house, "concelho": "Nowhere"})["rent"] is None
+    # A lease the ad states replaces the town average. A year next to the contract does not.
+    leased = costs.estimate({**house, "description": "Moradia arrendada, renda mensal de 450 euros"})
+    assert leased["rent"]["stated"] is True and leased["rent"]["monthly"] == 450
+    assert leased["rent"]["trusted"] is True
+    assert costs.stated_monthly_rent("contrato de arrendamento em vigor desde 2019") is None
+    assert costs.stated_monthly_rent("loyer de 700 € par mois") == 700
+    wild = costs.estimate({**house, "description": "renda mensal de 3500 euros", "price": 20000})
+    assert wild["rent"]["trusted"] is False
 
 
 def test_rents_keep_their_cents():

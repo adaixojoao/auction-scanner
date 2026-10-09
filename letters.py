@@ -43,7 +43,7 @@ NL_NOTARY_SOURCES = {"netherlands", "veilingnotaris", "veilingbiljet"}
 HR_SOURCES = {"croatia", "fina"}
 ONLINE_SOURCES = {"eleiloes", "financas", "leilosoc", "centroleiloes", "bidleiloeira",
                   "spain", "aeat", "subastasactivas", "biddit", "justiz_auktion", "greece",
-                  *NL_NOTARY_SOURCES, *HR_SOURCES}
+                  "cliveemson", *NL_NOTARY_SOURCES, *HR_SOURCES}
 
 SELLER_NAMES = {
     "novobanco": "Novo Banco", "cgd": "Caixa Geral de Depósitos", "santander": "Banco Santander Totta",
@@ -168,6 +168,10 @@ def guidance(item: dict) -> str:
     if src == "greece":
         return ("Greek electronic auction (eauction.gr), run through a notary: you register and lodge the "
                 "deposit set in the notice before bidding online.")
+    if src == "cliveemson":
+        return ("English property auction. The figure shown is the guide price, turned into euros at a "
+                "published ECB rate, not the price the lot will fetch. Bids are made on the auctioneer's "
+                "website or in the room. Read the legal pack first; fees sit on top of the guide.")
     return (f"No sale-specific guidance for {country} yet. This is a general offer letter; check with "
             "the authority how offers have to be submitted.")
 
@@ -791,6 +795,8 @@ COVERED_COUNTRIES = ("PT", "ES", "FR", "DE", "IT", "NL", "BE", "HR", "GR")
 
 
 def _other_country(item: dict, raw: dict) -> bool:
+    if (item.get("source") or "") in ONLINE_SOURCES:
+        return False
     return (item.get("country") or "PT") not in COVERED_COUNTRIES
 
 

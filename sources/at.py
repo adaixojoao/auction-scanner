@@ -1,4 +1,4 @@
-"""Austria: willhaben.at and wohnnet.at."""
+"""Austria: willhaben.at, wohnnet.at and immowelt.at."""
 from __future__ import annotations
 
 from sources import register
@@ -15,3 +15,9 @@ def scrape_willhaben(db, max_price: float = 50000, **_):
 def scrape_wohnnet(db, max_price: float = 50000, **_):
     """Wohnnet — homes for sale in Austria."""
     return scrape_named(db, "wohnnet", max_price)
+
+
+@register("immoweltat", "AT", description="Immowelt Austria — houses and plots for sale")
+def scrape_immoweltat(db, max_price: float = 50000, **_):
+    """Immowelt Austria — houses and plots for sale."""
+    return scrape_named(db, "immoweltat", max_price)

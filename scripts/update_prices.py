@@ -8,7 +8,9 @@ Portuguese municipality, from Statistics Portugal (INE), for the score's
 
 Run it on a PC that can reach www.ine.pt, check the summary it prints, and
 commit data/pt_home_prices.csv through a pull request. INE publishes the
-figures every quarter; refreshing once or twice a year is plenty.
+figures every quarter; refreshing once or twice a year is plenty. The previous
+quarter of the same series is kept (prev_eur_m2, prev_period) and shown beside
+the latest figure; it does not change a listing's score.
 
 The indicator wanted is INE's median sale value per m² of family dwellings by
 municipality, quarterly, from the housing price statistics at local level. The
@@ -26,6 +28,7 @@ import argparse
 import csv
 import io
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,61 +52,126 @@ RENT_INDICATOR = "0012598"
 FR_RENTS_DATASET = "https://www.data.gouv.fr/api/1/datasets/?q=carte%20des%20loyers%20par%20commune&page_size=20"
 
 
+_QUARTER = re.compile(r"(\d)\.?º\s+trimestre\s+de\s+(\d{4})", re.I)
+_YEAR = re.compile(r"(20\d{2})")
+
+
+def _period_ord(label: str) -> int | None:
+    """A quarter label sorts as year*4 + quarter, so the previous published
+    figure can be chosen without trusting the order of the API's keys."""
+    found = _QUARTER.search(label or "")
+    if found:
+        return int(found.group(2)) * 4 + int(found.group(1))
+    year = _YEAR.search(label or "")
+    return int(year.group(1)) * 4 if year else None
+
+
+def _latest_period(entry: dict, data: dict) -> str:
+    named = entry.get("UltimoPref")
+    return named if named in data else list(data)[-1]
+
+
+def _earlier_period(data: dict, latest: str) -> str | None:
+    """The period in this answer immediately before `latest`, or None."""
+    latest_n = _period_ord(latest)
+    if latest_n is None:
+        return None
+    best, best_n = None, None
+    for key in data:
+        n = _period_ord(key)
+        if key == latest or n is None or n >= latest_n:
+            continue
+        if best_n is None or n > best_n:
+            best, best_n = key, n
+    return best
+
+
+def _ine_value(rec: dict, digits: int) -> float | None:
+    extra = [v for k, v in rec.items() if k.startswith("dim_") and k.endswith("_t")]
+    if extra and not all(str(v).strip().lower() in ("total", "t") for v in extra):
+        return None
+    try:
+        return round(float(str(rec.get("valor", "")).replace(",", ".")), digits or None)
+    except ValueError:
+        return None
+
+
+def _attach_previous(rows: list[dict], prior: list[dict], key) -> None:
+    by_name = {key(row): row for row in prior}
+    for row in rows:
+        old = by_name.get(key(row))
+        if old:
+            row["prev_eur_m2"] = old["eur_m2"]
+            row["prev_period"] = old["period"]
+
+
+def _municipality_rows(records, period: str, digits: int) -> list[dict]:
+    """Municipalities only: 7-character codes. Since the 2024 regions many
+    contain letters ("11D1818" Sernancelhe); all-digit codes kept 144 of 308."""
+    rows = []
+    for rec in records:
+        code = str(rec.get("geocod", ""))
+        if not (len(code) == 7 and code.isalnum()):
+            continue
+        value = _ine_value(rec, digits)
+        if value is None:
+            continue
+        rows.append({"municipality": rec.get("geodsg", "").strip(), "eur_m2": value,
+                     "period": period, "source": "INE"})
+    return rows
+
+
 def parse_ine(payload, digits: int = 0) -> tuple[list[dict], str, str]:
     """(rows, period, indicator title) from INE's JSON API answer: the latest
     period's values for municipalities, for all kinds of dwelling ("Total")
-    when the indicator splits them.
-
-    Municipalities have 7-character codes. Since the 2024 regions (NUTS 2024)
-    many contain letters ("11D1818" Sernancelhe, "1C20204" Barrancos); only
-    reading all-digit codes kept 144 of the 308."""
+    when the indicator splits them. When the same answer has an earlier period,
+    each row also carries prev_eur_m2 and prev_period."""
     entry = payload[0] if isinstance(payload, list) else payload
     title = entry.get("IndicadorDsg", "")
     data = entry.get("Dados") or {}
     if not data:
         raise ValueError(f"no data in INE's answer: {str(entry)[:300]}")
-    period = entry.get("UltimoPref") if entry.get("UltimoPref") in data else list(data)[-1]
-    rows = []
-    for rec in data[period]:
-        code = str(rec.get("geocod", ""))
-        if not (len(code) == 7 and code.isalnum()):          # municipalities only
-            continue
-        extra = [v for k, v in rec.items() if k.startswith("dim_") and k.endswith("_t")]
-        if extra and not all(str(v).strip().lower() in ("total", "t") for v in extra):
-            continue
-        try:
-            value = float(str(rec.get("valor", "")).replace(",", "."))
-        except ValueError:
-            continue
-        rows.append({"municipality": rec.get("geodsg", "").strip(), "eur_m2": round(value, digits or None),
-                     "period": period, "source": "INE"})
+    period = _latest_period(entry, data)
+    rows = _municipality_rows(data[period], period, digits)
+    previous = _earlier_period(data, period)
+    if previous:
+        _attach_previous(rows, _municipality_rows(data[previous], previous, digits),
+                         lambda row: row["municipality"])
     return rows, period, title
 
 
+def _parish_rows(records, period: str) -> list[dict]:
+    """Parishes INE gives a figure for (9-character codes), under the municipality
+    named by the first 7 characters of the code."""
+    towns = {str(r.get("geocod")): r.get("geodsg", "").strip() for r in records
+             if len(str(r.get("geocod", ""))) == 7}
+    rows = []
+    for rec in records:
+        code = str(rec.get("geocod", ""))
+        if len(code) != 9 or code[:7] not in towns:
+            continue
+        value = _ine_value(rec, 0)
+        if value is None:
+            continue
+        rows.append({"municipality": towns[code[:7]], "parish": rec.get("geodsg", "").strip(),
+                     "eur_m2": value, "period": period, "source": "INE"})
+    return rows
+
+
 def parse_ine_parishes(payload) -> list[dict]:
-    """The parishes INE gives a figure for (9-character codes: the Porto and
-    Lisbon areas, Setúbal, the Algarve and cities over 100,000 people), each
-    under its municipality (the first 7 characters of its code)."""
+    """The parishes INE gives a figure for (the Porto and Lisbon areas, Setúbal,
+    the Algarve and cities over 100,000 people). An earlier period in the same
+    answer is kept as prev_eur_m2 / prev_period."""
     entry = payload[0] if isinstance(payload, list) else payload
     data = entry.get("Dados") or {}
     if not data:
         return []
-    period = entry.get("UltimoPref") if entry.get("UltimoPref") in data else list(data)[-1]
-    towns = {str(r.get("geocod")): r.get("geodsg", "").strip() for r in data[period]
-             if len(str(r.get("geocod", ""))) == 7}
-    rows = []
-    for rec in data[period]:
-        code = str(rec.get("geocod", ""))
-        extra = [v for k, v in rec.items() if k.startswith("dim_") and k.endswith("_t")]
-        if len(code) != 9 or code[:7] not in towns or (
-                extra and not all(str(v).strip().lower() in ("total", "t") for v in extra)):
-            continue
-        try:
-            value = float(str(rec.get("valor", "")).replace(",", "."))
-        except ValueError:
-            continue
-        rows.append({"municipality": towns[code[:7]], "parish": rec.get("geodsg", "").strip(),
-                     "eur_m2": round(value), "period": period, "source": "INE"})
+    period = _latest_period(entry, data)
+    rows = _parish_rows(data[period], period)
+    previous = _earlier_period(data, period)
+    if previous:
+        _attach_previous(rows, _parish_rows(data[previous], previous),
+                         lambda row: (row["municipality"], row["parish"]))
     return sorted(rows, key=lambda r: (r["municipality"], r["parish"]))
 
 
@@ -446,10 +514,53 @@ def update_prices_de(requests) -> int:
     return _write(PRICE_FILES["DE"], rows)
 
 
-def _write(path: str, rows: list[dict]) -> int:
-    rows.sort(key=lambda row: row["municipality"])
+def _remember_previous(path: str, rows: list[dict], fields: tuple[str, ...] = ("municipality",)) -> None:
+    """When this refresh is a later period of the same source, the figure already
+    in the file becomes prev_eur_m2. Rewriting the same period keeps that older
+    figure. A row that already names its previous period (INE sends it) is left."""
+    old: dict[tuple, dict] = {}
+    try:
+        with open(path, encoding="utf-8", newline="") as handle:
+            for rec in csv.DictReader(handle):
+                key = tuple((rec.get(field) or "").strip() for field in fields)
+                if all(key):
+                    old[key] = rec
+    except OSError:
+        old = {}
+    for row in rows:
+        if str(row.get("prev_eur_m2") or "").strip():
+            continue
+        prior = old.get(tuple((row.get(field) or "").strip() for field in fields))
+        if not prior or (prior.get("source") or "") != (row.get("source") or ""):
+            continue
+        old_period, new_period = prior.get("period") or "", row.get("period") or ""
+        old_n, new_n = _period_ord(old_period), _period_ord(new_period)
+        if old_period == new_period:
+            prev, when = prior.get("prev_eur_m2"), prior.get("prev_period")
+        elif old_n is not None and new_n is not None and old_n > new_n:
+            continue
+        elif old_period and old_period != new_period and str(prior.get("eur_m2") or "").strip():
+            prev, when = prior.get("eur_m2"), old_period
+        else:
+            continue
+        if str(prev or "").strip() and str(when or "").strip():
+            row["prev_eur_m2"] = prev
+            row["prev_period"] = when
+
+
+def _write(path: str, rows: list[dict], columns: tuple[str, ...] = COLUMNS,
+           fields: tuple[str, ...] = ("municipality",)) -> int:
+    _remember_previous(path, rows, fields)
+    rows.sort(key=lambda row: tuple((row.get(field) or "") for field in fields))
+    fieldnames = list(columns)
+    if any(str(row.get("prev_eur_m2") or "").strip() for row in rows):
+        fieldnames += ["prev_eur_m2", "prev_period"]
+    else:
+        for row in rows:
+            row.pop("prev_eur_m2", None)
+            row.pop("prev_period", None)
     with open(path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
     print(f"Written to {path}")
@@ -532,31 +643,28 @@ def main(argv=None) -> int:
     if args.prices_de:
         return update_prices_de(requests)
 
+    # op=2 returns only the latest quarter. op=1 lists every period, but the
+    # figures under each name are copies of that same latest quarter, so they
+    # are not a history. The previous quarter is whatever this file already held
+    # when a later one is published (_remember_previous).
     r = requests.get(API, params={"op": "2", "varcd": args.indicator, "lang": "PT"}, timeout=60)
     r.raise_for_status()
-    rows, period, title = parse_ine(r.json())
+    payload = r.json()
+    rows, period, title = parse_ine(payload)
     print(f"Indicator {args.indicator}: {title}")
     print(f"Period: {period} — {len(rows)} municipalities")
     if len(rows) < 250:
         print("Fewer than 250 municipalities: probably not the right indicator. Nothing written.")
         return 1
-    rows.sort(key=lambda row: row["municipality"])
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    _write(args.out, rows)
     cheapest = sorted(rows, key=lambda row: row["eur_m2"])[:3]
     dearest = sorted(rows, key=lambda row: -row["eur_m2"])[:3]
     print("Cheapest:", ", ".join(f"{x['municipality']} €{x['eur_m2']}/m²" for x in cheapest))
     print("Dearest: ", ", ".join(f"{x['municipality']} €{x['eur_m2']}/m²" for x in dearest))
-    print(f"Written to {args.out}")
-    parishes = parse_ine_parishes(r.json())
+    parishes = parse_ine_parishes(payload)
     if parishes and args.out == PT_FILE:
-        with open(PT_PARISH_FILE, "w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=PARISH_COLUMNS)
-            writer.writeheader()
-            writer.writerows(parishes)
+        _write(PT_PARISH_FILE, parishes, PARISH_COLUMNS, ("municipality", "parish"))
         print(f"{len(parishes)} parishes written to {PT_PARISH_FILE}")
     return 0
 

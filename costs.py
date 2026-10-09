@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 
-from common import normalize, price_to_pay
+from common import normalize, parse_price, price_to_pay
 from scoring import categorize, condition, property_kind
 
 IMT_YEAR = 2025
@@ -77,6 +77,21 @@ COUNTRY_COSTS = {
     "CY": (0.000, 0.010, "transfer fees (none when VAT is charged)", "stamp duty and registry"),
 }
 DEFAULT_COSTS = (0.070, 0.015, "transfer tax (typical)", "notary and registry")
+
+# ECB euro foreign-exchange reference rates: units of foreign currency for 1 euro,
+# taken on ECB_RATE_DATE. A guide price in that currency is stored as euros at
+# this rate. A scan does not look the rate up again, and the listing says so.
+ECB_RATE_DATE = "2026-10-08"
+ECB_PER_EUR = {"GBP": 0.84698, "CHF": 0.9326}
+
+
+def euros_from(amount: float, currency: str) -> int | None:
+    """The amount in euros at ECB_PER_EUR, rounded to the nearest euro.
+    None when that currency has no rate here."""
+    per = ECB_PER_EUR.get((currency or "").upper())
+    if not per or not amount or amount <= 0:
+        return None
+    return int(round(float(amount) / per))
 IT_REGISTRO_MIN = 1_000
 
 # Spanish ITP, general rate for a used property, 2026. A single rate, or a
@@ -353,6 +368,9 @@ def _other_lines(item: dict, value: float, country: str) -> list[dict]:
 
 
 RENT_MAX_M2 = 200            # a bigger house does not rent for proportionally more
+# A lease the ad states, above this share of the cost a year, is not believed:
+# the number is usually the price, a year, or a deposit.
+STATED_YIELD_MAX = 30
 # What a landlord keeps of the rent: the rest goes on the property tax (IMI and
 # its equivalents), insurance, repairs, the agent and the months it stands
 # empty. One planning figure, not a calculation of this landlord's tax.
@@ -397,6 +415,80 @@ def _liquidity_vacancy(population: int | None) -> float:
     return RENT_VACANCY_SHARE / factor
 
 
+# A month's rent written next to a rent word. "Arrendamento" alone is the
+# contract ("em vigor desde 2019"), so it only counts with a currency or a month.
+_STATED_RENT = re.compile(
+    r"\b(renda(?:s| mensal)?|aluguer(?:es)?|aluguel|alquiler(?:es)?|loyer(?:s)?|"
+    r"huurprijs|huur|kaltmiete|miete|renta(?: mensual)?)\b([^.]{0,48})")
+_RENT_AMOUNT_FIRST = re.compile(
+    r"(\d{1,3}(?:[.\s]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:€|eur(?:os)?)?"
+    r"(?:\s*(?:/|por|al|par|per)\s*)?(?:mes|mois|maand|monat)?"
+    r"\s*(?:de\s+)?\b(renda|aluguer|aluguel|alquiler|loyer|huur|miete)\b")
+_RENT_MONTH = re.compile(r"€|eur|mes|mois|maand|monat")
+
+
+def stated_monthly_rent(text: str) -> float | None:
+    """€ a month the ad itself states for a lease, or None.
+
+    The sale price is not this. The number has to sit with a rent word, and
+    inside what one month's rent can be. A year next to the contract is left out."""
+    low = normalize(text or "")
+    windows = [(m.group(1), m.group(2)) for m in _STATED_RENT.finditer(low)]
+    for m in _RENT_AMOUNT_FIRST.finditer(low):
+        windows.append((m.group(2), m.group(1)))
+    for _word, window in windows:
+        if re.search(r"\bm2\b", window):
+            continue
+        amount = parse_price(window)
+        if amount is None:
+            continue
+        if 1900 <= amount <= 2100 and not _RENT_MONTH.search(window):
+            continue
+        if 80 <= amount <= 4000:
+            return float(amount)
+    return None
+
+
+def _finish_rent(item: dict, cost: float, monthly: float, *, source: str, province: bool,
+                 stated: bool = False, eur_m2: float | None = None, area_used: float | None = None,
+                 town_monthly: float | None = None) -> dict | None:
+    """The yield of `monthly` on `cost`, after the planning haircut for running
+    costs and empty months. `stated` is a lease the ad names, not a town average."""
+    if monthly <= 0 or cost <= 0:
+        return None
+    import prices
+    country = (item.get("country") or "PT").upper()
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    population = prices.population_of(country, place)
+    vacancy = _liquidity_vacancy(population)
+    net_share = 1 - RENT_RUNNING_SHARE - vacancy
+    gross = 1200 * monthly / cost
+    kept = monthly * net_share
+    if kept <= 0:
+        return None
+    pop_note = f"pop. {population:,}" if population else "population unknown"
+    trusted = not (stated and gross > STATED_YIELD_MAX)
+    if stated:
+        note = f"€{monthly:,.0f} a month stated in the ad"
+        if town_monthly:
+            note += f" (the town average is about €{town_monthly:,.0f})"
+        if not trusted:
+            note += " — far above the price, so check it before treating it as the rent"
+    else:
+        where = f"{place} ({source})"
+        if province:
+            where += "; province average, counted at half — check rents in the village"
+        note = f"€{eur_m2:.2f}/m² a month in {where}, over {area_used:.0f} m²"
+    note += (f"; {RENT_RUNNING_SHARE:.0%} running costs, {vacancy:.0%} vacancy ({pop_note}), "
+             f"before income tax. Gross, before those, is {round(gross, 1)}%")
+    return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
+            "province_average": province, "stated": stated, "trusted": trusted,
+            "population": population,
+            "yield_pct": round(gross, 1), "net_yield_pct": round(gross * net_share, 1),
+            "payback_years": round(cost / (12 * kept), 1),
+            "note": note}
+
+
 def rent(item: dict, cost: float) -> dict | None:
     """What a home would rent for, from the rent per m² in its municipality
     (Portugal: INE's median of new leases; France: the carte des loyers), and
@@ -421,28 +513,8 @@ def rent(item: dict, cost: float) -> dict | None:
     if province:
         eur_m2 = eur_m2 / 2
     monthly = round(used * eur_m2)
-    if monthly <= 0:
-        return None
-
-    population = prices.population_of(country, place)
-    vacancy = _liquidity_vacancy(population)
-    net_share = 1 - RENT_RUNNING_SHARE - vacancy
-
-    gross = 1200 * monthly / cost
-    kept = monthly * net_share
-    where = f"{place} ({source})"
-    if province:
-        where += "; province average, counted at half — check rents in the village"
-    pop_note = f"pop. {population:,}" if population else "population unknown"
-    return {"monthly": monthly, "eur_m2": eur_m2, "source": source,
-            "province_average": province,
-            "population": population,
-            "yield_pct": round(gross, 1), "net_yield_pct": round(gross * net_share, 1),
-            "payback_years": round(cost / (12 * kept), 1),
-            "note": f"€{eur_m2:.2f}/m² a month in {where}, "
-                    f"over {used:.0f} m²; {RENT_RUNNING_SHARE:.0%} running costs, "
-                    f"{vacancy:.0%} vacancy ({pop_note}), before income tax. "
-                    f"Gross, before those, is {round(gross, 1)}%"}
+    return _finish_rent(item, cost, monthly, source=source, province=province,
+                        eur_m2=eur_m2, area_used=used)
 
 
 def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) -> dict | None:
@@ -481,7 +553,13 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     if work:
         out["all_in"] = {"low": value + fee_total + work["low"], "high": value + fee_total + work["high"]}
     cost = (out["all_in"]["low"] + out["all_in"]["high"]) / 2 if work else out["total"]
-    out["rent"] = rent(item, cost)
+    town = rent(item, cost)
+    stated = stated_monthly_rent(f"{item.get('title') or ''} {item.get('description') or ''}")
+    if stated:
+        out["rent"] = _finish_rent(item, cost, stated, source="stated in the ad", province=False,
+                                   stated=True, town_monthly=(town or {}).get("monthly"))
+    else:
+        out["rent"] = town
     return out
 
 

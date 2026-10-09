@@ -116,6 +116,49 @@ def test_outcome_detail_fields_and_api(client, db, add):
     assert "Moradia" not in csv_body
 
 
+def test_a_won_purchase_records_what_it_returned(client, db, add):
+    add("citius", "w1", title="Moradia", price=40000, area_m2=100, concelho="Porto",
+        raw_json=json.dumps({"processo": "2/10", "tribunal": "X", "modalidade": "Carta fechada",
+                             "agente_email": "ae@solic.pt"}))
+    sent = client.post("/api/offers/sent", json={"id": "citius:w1", "bid": "20.000,00",
+                                                 "checklist_override": "checked at the court"}).get_json()
+    log_id = sent["log_id"]
+    bad = client.patch(f"/api/carta-log/{log_id}", json={"months_held": 9000})
+    assert bad.status_code == 400
+    ok = client.patch(f"/api/carta-log/{log_id}", json={
+        "outcome": "won", "all_in_cost": 100000, "monthly_rent": 500,
+        "sale_price": 121000, "months_held": 24}).get_json()
+    assert ok["offer"]["monthly_rent"] == 500 and ok["offer"]["sale_price"] == 121000
+    data = client.get("/api/analytics").get_json()
+    assert data["returns"]["median_rent_yield_pct"] == 6.0
+    assert data["returns"]["median_sale_annual_pct"] == 10.0
+    recorded = [{"outcome": "won", "rent_yield_pct": 6.0, "sale_annual_pct": 10.0,
+                 "bid_value_band": "unknown", "score": 40} for _ in range(3)]
+    text = " ".join(f["text"] for f in analytics.feedback_for_scoring(recorded))
+    assert "Weights are not changed" in text and "6.0%" in text
+    page = client.get("/outcomes").get_data(as_text=True)
+    assert "What purchases returned" in page and "Rent you receive" not in page
+    offers = client.get("/offers").get_data(as_text=True)
+    assert "Rent you receive" in offers and "Months held" in offers
+    # A sale too far from the cost is kept as a multiple and not annualised.
+    assert analytics.sale_return(10_000_000, 100_000, 1)["sale_annual_pct"] is None
+    assert analytics.sale_return(121_000, 100_000, 24)["sale_annual_pct"] == 10.0
+
+
+def test_a_version_18_database_gets_the_return_columns(tmp_path):
+    path = str(tmp_path / "v18.db")
+    conn = connect(path)
+    for col in ("monthly_rent", "sale_price", "months_held"):
+        conn.execute(f"ALTER TABLE carta_log DROP COLUMN {col}")
+    conn.execute("PRAGMA user_version = 18")
+    conn.commit()
+    conn.close()
+    conn = connect(path)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(carta_log)")}
+    assert {"monthly_rent", "sale_price", "months_held"} <= have
+    conn.close()
+
+
 def test_a_version_11_database_gets_the_outcome_detail_columns(tmp_path):
     path = str(tmp_path / "v11.db")
     conn = connect(path)

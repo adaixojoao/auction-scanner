@@ -349,7 +349,14 @@ function outcomeCard(c) {
         <input id="oc_access" placeholder="ok / blocked / …" value="${AS.esc(o.access_found || "")}"></div>
       <div class="field"><label>Condition after purchase</label>
         <input id="oc_cond" placeholder="good / needs work / ruin" value="${AS.esc(o.condition_after || "")}"></div>
+      <div class="field"><label>Rent you receive (€/month)</label>
+        <input id="oc_rent" type="number" min="0" step="10" value="${o.monthly_rent != null ? AS.esc(String(o.monthly_rent)) : ""}"></div>
+      <div class="field"><label>Sale price, if you sold</label>
+        <input id="oc_sale" type="number" min="0" step="100" value="${o.sale_price != null ? AS.esc(String(o.sale_price)) : ""}"></div>
+      <div class="field"><label>Months held</label>
+        <input id="oc_months" type="number" min="0" max="600" step="1" value="${o.months_held != null ? AS.esc(String(o.months_held)) : ""}"></div>
     </div>
+    <p class="small muted">After a win: what came back. The rent is what you receive a month, before income tax. Months held runs from when you got it until this rent, or until the sale. Outcomes turns that into a return. It does not change the score.</p>
     <div class="row" style="margin-top:8px"><button class="btn btn-sm" onclick="saveOutcomeDetail(${o.log_id})">Save details</button>
       <span class="small muted">Used on the Outcomes page. No titles or contacts leave this PC.</span></div>` : "";
   return `<details class="panel" open><summary>Outcome</summary>
@@ -505,6 +512,9 @@ async function saveOutcomeDetail(logId) {
     title_found: v("oc_title"),
     access_found: v("oc_access"),
     condition_after: v("oc_cond"),
+    monthly_rent: v("oc_rent") || null,
+    sale_price: v("oc_sale") || null,
+    months_held: v("oc_months") || null,
   };
   await AS.api(`/api/carta-log/${logId}`, {method: "PATCH", body});
   AS.toast("Outcome details saved");

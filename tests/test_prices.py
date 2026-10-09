@@ -126,6 +126,82 @@ def test_a_parish_price_beats_the_municipality_where_ine_has_one(pt_prices, tmp_
     assert any(r.startswith("71% below local prices (INE 2.º Trimestre de 2026)") for r in reasons)
 
 
+def test_ine_keeps_the_previous_quarter_from_the_same_answer():
+    """The earlier period is the one just before the latest, not whichever key
+    happens to sit next to it."""
+    payload = [{**INE_ANSWER[0], "Dados": {
+        "2.º Trimestre de 2026": [{"geocod": "1690907", "geodsg": "Guarda", "dim_3": "T",
+                                   "dim_3_t": "Total", "valor": "742"}],
+        "4.º Trimestre de 2025": [{"geocod": "1690907", "geodsg": "Guarda", "dim_3": "T",
+                                   "dim_3_t": "Total", "valor": "600"}],
+        "1.º Trimestre de 2026": [{"geocod": "1690907", "geodsg": "Guarda", "dim_3": "T",
+                                   "dim_3_t": "Total", "valor": "700"}],
+    }}]
+    rows, period, _ = update_prices.parse_ine(payload)
+    assert period == "2.º Trimestre de 2026"
+    assert rows[0]["prev_eur_m2"] == 700 and rows[0]["prev_period"] == "1.º Trimestre de 2026"
+
+
+def test_a_refresh_keeps_the_previous_figure_of_the_same_series(tmp_path):
+    path = tmp_path / "prices.csv"
+    update_prices._write(str(path), [
+        {"municipality": "Guarda", "eur_m2": 700, "period": "1.º Trimestre de 2026", "source": "INE"}])
+    update_prices._write(str(path), [
+        {"municipality": "Guarda", "eur_m2": 742, "period": "2.º Trimestre de 2026", "source": "INE"},
+        {"municipality": "Sabugal", "eur_m2": 310, "period": "2.º Trimestre de 2026", "source": "INE"}])
+    rows = {r["municipality"]: r for r in csv.DictReader(path.open(encoding="utf-8"))}
+    assert rows["Guarda"]["prev_eur_m2"] == "700"
+    assert rows["Guarda"]["prev_period"] == "1.º Trimestre de 2026"
+    assert rows["Sabugal"]["prev_eur_m2"] == ""
+    update_prices._write(str(path), [
+        {"municipality": "Guarda", "eur_m2": 742, "period": "2.º Trimestre de 2026", "source": "INE"}])
+    again = next(csv.DictReader(path.open(encoding="utf-8")))
+    assert again["prev_eur_m2"] == "700"                         # same quarter rewritten: the older one stays
+    update_prices._write(str(path), [
+        {"municipality": "Guarda", "eur_m2": 800, "period": "2.º Trimestre de 2026", "source": "DVF"}])
+    other = next(csv.DictReader(path.open(encoding="utf-8")))
+    assert "prev_eur_m2" not in other                            # a different source is not the previous quarter
+
+
+def test_a_move_in_sold_prices_is_shown_and_does_not_change_the_score(tmp_path, monkeypatch):
+    path = tmp_path / "pt.csv"
+
+    def write(prev):
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            fields = ["municipality", "eur_m2", "period", "source"]
+            row = {"municipality": "Sabugal", "eur_m2": 310, "period": "2.º Trimestre de 2026", "source": "INE"}
+            if prev:
+                fields += ["prev_eur_m2", "prev_period"]
+                row["prev_eur_m2"], row["prev_period"] = prev
+            w = csv.DictWriter(handle, fieldnames=fields)
+            w.writeheader()
+            w.writerow(row)
+
+    monkeypatch.setattr(prices, "PT_FILE", str(path))
+    home = {"source": "eleiloes", "country": "PT", "title": "Moradia em bom estado", "description": "",
+            "concelho": "Sabugal", "area_m2": 100, "price": 9000}
+
+    def scored(mode="home"):
+        prices._load.cache_clear()
+        return score(home, mode=mode)
+
+    write(None)
+    quiet, quiet_why = scored()
+    quiet_invest = scored("invest")[0]
+    assert not any("sold prices here" in r for r in quiet_why)
+    write((280, "1.º Trimestre de 2026"))
+    moved, why = scored()
+    assert moved == quiet
+    assert any(r == "sold prices here up 11% since 1.º Trimestre de 2026 (INE 2.º Trimestre de 2026)"
+               for r in why)
+    invested, invest_why = scored("invest")
+    assert invested == quiet_invest
+    assert any("sold prices here up 11%" in r for r in invest_why)
+    write((307, "1.º Trimestre de 2026"))          # under 2%: not mentioned
+    assert not any("sold prices here" in r for r in scored()[1])
+    assert prices.sale_move("PT", "Sabugal")["change_pct"] == pytest.approx((310 - 307) / 307 * 100)
+
+
 def test_ine_answer_gives_the_parishes_under_their_municipality():
     answer = [{**INE_ANSWER[0], "Dados": {"2.º Trimestre de 2026": INE_ANSWER[0]["Dados"]["2.º Trimestre de 2026"] + [
         {"geocod": "169091405", "geodsg": "União das freguesias de Sortelha e Malcata", "dim_3": "H1",

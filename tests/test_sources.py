@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 77
+    assert len(REGISTRY) == 88
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -23,7 +23,7 @@ def test_registry_is_complete():
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY", "GR", "RO"} | {"EU"}
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY", "GR"} | {"EU"}
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name
@@ -648,6 +648,15 @@ def test_aliseda_gives_price_position_and_possession(db, fake_http):
     row = parse_aliseda(land, "terreno")
     assert row["area_m2"] == 28_000
     assert json.loads(row["raw_json"])["area_feed_m2"] == 1_350_000
+    from scoring import property_kind
+    rustic = {**ALISEDA_ITEM, "id": "tab0000063350", "SupParcela": 3962.2, "SuperficieTotal": 3962.2,
+              "Description": "Conjunto de 7 parcelas en Centro Pumariño. Suman 3.962 m2.",
+              "suelonave": {"SubUso": "RÚstico"}}
+    row = parse_aliseda(rustic, "terreno")
+    assert row["description"].startswith("Terreno rústico.")
+    assert property_kind(row) == "rural_plot"
+    residential = {**rustic, "suelonave": {"SubUso": "Residencial"}}
+    assert property_kind(parse_aliseda(residential, "terreno")) == "urban_plot"
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"data": [ALISEDA_ITEM], "last_page": 1}))
     assert scrape_aliseda(db, max_price=50000) == 2        # the same fake item as a home and as land
     assert {c[2]["params"]["precio"] for c in session.calls} == {"0-50000", "0-100000"}      # homes; land up to the land limit

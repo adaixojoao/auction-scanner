@@ -187,6 +187,8 @@ def test_no_price_without_an_offer_sale_is_capped():
     # Commercial space is not a home, even when the platform lists it as vastgoed.
     assert property_kind(item(title="Warffum, Noorderstraat 11 (Bedrijfsruimte)",
                               description="Type: Bedrijfsruimte")) == "other"
+    assert property_kind(item(title="Huis te koop in Trazegnies", country="BE")) == "home"
+    assert property_kind(item(title="Bungalow 3 chambres à Huy", country="BE")) == "home"
     assert condition(item(title="Vlaardingen, Diepenbrockstraat 5 (Kluswoning)")) == "some"
 
 
@@ -690,7 +692,7 @@ def test_a_ruin_cannot_rank_as_an_investment_just_because_it_is_cheap():
     shown, reasons = score(ruin, mode="invest")
     raw, _ = score_detail(ruin, mode="invest")
     assert "needs heavy work" in " ".join(reasons)
-    assert "town rent not counted" in " ".join(reasons)
+    assert "the rent is not counted" in " ".join(reasons)
     assert raw <= 45 and shown == 0
     home_shown, home_reasons = score(item(title="Casa en ruinas", price=3500, area_m2=90, concelho="Lugo"))
     assert "needs heavy work" in " ".join(home_reasons) and home_shown == 0

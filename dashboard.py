@@ -936,6 +936,9 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
                    "bid_cap_note": offer.get("bid_cap_note") or "",
                    "winning_bid": offer.get("winning_bid"),
                    "all_in_cost": offer.get("all_in_cost"),
+                   "monthly_rent": offer.get("monthly_rent"),
+                   "sale_price": offer.get("sale_price"),
+                   "months_held": offer.get("months_held"),
                    "lost_reason": offer.get("lost_reason") or "",
                    "diligence_blocker": offer.get("diligence_blocker"),
                    "occupancy_found": offer.get("occupancy_found") or "",
@@ -1606,7 +1609,8 @@ def update_carta_log(log_id):
             db.commit()
             row = db.execute("SELECT * FROM carta_log WHERE id=?", (log_id,)).fetchone()
         detail_keys = ("winning_bid", "all_in_cost", "lost_reason", "diligence_blocker",
-                       "occupancy_found", "title_found", "access_found", "condition_after")
+                       "occupancy_found", "title_found", "access_found", "condition_after",
+                       "monthly_rent", "sale_price", "months_held")
         if any(k in data for k in detail_keys):
             try:
                 row = analytics.update_detail(db, log_id, data)
@@ -1624,6 +1628,8 @@ def update_carta_log(log_id):
     return jsonify({"ok": True, "offer": {
         "log_id": row["id"], "outcome": row["outcome"],
         "winning_bid": row["winning_bid"], "all_in_cost": row["all_in_cost"],
+        "monthly_rent": row["monthly_rent"], "sale_price": row["sale_price"],
+        "months_held": row["months_held"],
         "lost_reason": row["lost_reason"] or "", "diligence_blocker": row["diligence_blocker"],
         "occupancy_found": row["occupancy_found"] or "", "title_found": row["title_found"] or "",
         "access_found": row["access_found"] or "", "condition_after": row["condition_after"] or "",

@@ -233,7 +233,15 @@ WEIGHTS = {
     "amoc": "Winter cold if the Atlantic current (AMOC) collapses",
     "price": "Low price",
     "sale": "How it is sold (sealed bids, forced sales, deadline)",
+    "population": "Population scenario to 2050",
 }
+# EUROPOP2019, mentioned only as a long-hold caution. A region projected to grow
+# scores nothing: the scenario is not a reason to buy. Below -10% by 2050 costs
+# a little; below -20% costs a little more. The owner's weight scales both.
+POP_OUTLOOK_FROM = -10
+POP_OUTLOOK_STEEP = -20
+POP_OUTLOOK_MILD = -2
+POP_OUTLOOK_STEEP_POINTS = -4
 _WEIGHTS: contextvars.ContextVar[dict] = contextvars.ContextVar("weights", default={})
 
 
@@ -314,7 +322,7 @@ DWELLING_WORDS = [
     "maison", "appartement", "logement", "pavillon",
     "appartamento", "abitazione", "villetta",
     "wohnung", "haus", "einfamilienhaus", "zweifamilienhaus", "mehrfamilienhaus", "reihenhaus",
-    "doppelhaushälfte", "woning", "woonhuis", "tussenwoning", "kuća", "house", "apartment",
+    "doppelhaushälfte", "woning", "woonhuis", "tussenwoning", "huis", "bungalow", "kuća", "house", "apartment",
 ]
 # Household goods sold at auction ("Mobiliário de habitação", "Mobília de casa")
 # are not homes. A text that names a building first is: "Moradia T3 com mobiliário".
@@ -655,6 +663,24 @@ def local_price(item: dict) -> tuple[float, str] | None:
                               parish=item.get("freguesia") if country == "PT" else None)
 
 
+def _mention_sold_move(item: dict, reasons: list[str]) -> None:
+    """The published sale series moved since its previous figure. Shown only:
+    the discount already uses the latest figure, so this does not change the score."""
+    country = item.get("country") or "PT"
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    move = prices.sale_move(country, place, district=item.get("district"),
+                            parish=item.get("freguesia") if country == "PT" else None)
+    text = prices.sale_move_text(move)
+    if text:
+        reasons.append(text)
+
+
+_OUTLOOK_NOTE = (
+    " The EUROPOP2019 population scenario is only a small caution when a whole region is "
+    "projected to lose many people by 2050: it is a scenario, not a forecast, and not a reason to buy."
+)
+
+
 def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
     """One goal in words, for the AI check: the same rules as score(mode=…).
 
@@ -662,14 +688,14 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
     and a farm plot as if they had to be somewhere to live."""
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
     if mode == "invest":
-        return _INVEST_PRIORITIES
+        return _INVEST_PRIORITIES + _OUTLOOK_NOTE
     if mode == "land":
         return _LAND_PRIORITIES.format(min_m2=f"{t['rural_min_m2']:,.0f}",
                                        max_eur_m2=f"{t['rural_max_eur_m2']:.2f}",
-                                       max_eur_ha=f"{t['rural_max_eur_m2'] * 10000:,.0f}")
+                                       max_eur_ha=f"{t['rural_max_eur_m2'] * 10000:,.0f}") + _OUTLOOK_NOTE
     if mode == "forest":
         return _FOREST_PRIORITIES.format(min_ha=FOREST_MIN_M2 // 10000, roi=f"{FOREST_ROI_TARGET:.0%}",
-                                         years=FOREST_ROI_YEARS)
+                                         years=FOREST_ROI_YEARS) + _OUTLOOK_NOTE
     return (
         "A home (a house or a flat) to live in, at a very low price — not a plot, not a shop or a "
         "garage. A MUST: somewhere to swim (the sea, a lake "
@@ -692,7 +718,7 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         "private-negotiation sale where you name the offer — the listing cannot be judged for "
         "cheapness and stays out of the top. Water is only a plus where the land does not flood; "
         "a home in a flood zone is a risk."
-    )
+    ) + _OUTLOOK_NOTE
 
 
 _INVEST_PRIORITIES = (
@@ -702,8 +728,11 @@ _INVEST_PRIORITIES = (
     "below the local price per m² after those costs; a net rental yield (after running costs and "
     "empty months) worth having; near the sea for a holiday let; a forced sale (court, tax or "
     "social security) or a bank selling what it repossessed, because those must sell. A sitting "
-    "tenant is income from day one but makes it harder to resell and the rent may be below market: "
-    "say which it is here. Okupas, or a bank sale 'sin posesión', are not a tenant: they are out. "
+    "tenant is income only when the ad states the rent: the town average is not the lease, and "
+    "it makes the home harder to resell. Say which it is here. Okupas, or a bank sale "
+    "'sin posesión', are not a tenant: they are out. Homes still listed in that district on the "
+    "sites scanned are supply a later buyer can choose among; say how many if you are told, and "
+    "do not invent how far that cuts the price. "
     "Not wanted: a gap so wide it cannot be real (more than about 70% under the local price, a "
     "share of the property, a ruin sold as a home, an area that is really the plot) — say what to "
     "check, and do not treat that gap as a bargain; a flat too small "
@@ -1295,6 +1324,23 @@ def _rejects_in(text: str) -> tuple:
     return tuple(label for label, pattern in _REJECTS if pattern is not None and pattern.search(text))
 
 
+def _population_outlook_points(item: dict, reasons: list[str]) -> float:
+    """A few points off when the region's population scenario falls hard by 2050.
+
+    Growth adds nothing. The text names the scenario and says it is not a forecast."""
+    import prices
+    country = (item.get("country") or "PT").upper()
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    found = prices.population_outlook(country, place)
+    if not found or found["change_pct"] > POP_OUTLOOK_FROM:
+        return 0.0
+    fewer = -found["change_pct"]
+    reasons.append(f"{found['name']}: about {fewer:.0f}% fewer people by 2050 "
+                   f"({found['label']}) — a weaker place to count on a local buyer decades from now")
+    steep = found["change_pct"] <= POP_OUTLOOK_STEEP
+    return (POP_OUTLOOK_STEEP_POINTS if steep else POP_OUTLOOK_MILD) * w("population")
+
+
 def score_detail(item: dict, now: datetime | None = None,
                  targets: dict | None = None, mode: str = "home") -> tuple[float, list[str]]:
     """The score before it is clamped to 0–100: several listings can reach 100,
@@ -1647,6 +1693,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None,
             caps.append(cap)
     if caps:
         s = min(s, *caps)
+    s += _population_outlook_points(item, reasons)
     return s, reasons
 
 
@@ -1966,6 +2013,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         if market_disc > 0.20:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
             reasons.append(f"{market_disc:.0%} below local prices ({local_price(item)[1]}{adjusted}){skipped}")
+    _mention_sold_move(item, reasons)
     return s
 
 
@@ -2246,6 +2294,10 @@ def _discount_skipped(item: dict, why: list[str]) -> str:
 # rent is known than when nothing about the letting is.
 INVEST_TENANT_WITH_RENT = -8
 INVEST_TENANT_UNKNOWN = -25
+# Other homes still listed in this district, on the sites scanned, before the
+# score mentions them. The mention does not change the points: the count is
+# not the whole market, and there is no measured cut to the exit price.
+INVEST_SUPPLY_NOTE = 8
 
 
 def _occupied(item: dict, full: str) -> bool:
@@ -2309,14 +2361,26 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                            " — check why")
         elif not _discount_skipped(item, why):
             s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
+    _mention_sold_move(item, reasons)
     rent = (est or {}).get("rent")
     state = condition(item)
+    occupied = _occupied(item, full)
     if rent and state == "heavy":
-        reasons.append("town rent not counted — it needs a full rebuild before it can be let")
+        reasons.append("the rent is not counted — it needs a full rebuild before it can be let")
+    elif rent and rent.get("trusted") is False:
+        reasons.append(f"the ad states €{rent['monthly']:,.0f}/month, far above the price — "
+                       "not counted until you check it")
+    elif rent and occupied and not rent.get("stated"):
+        # The town average is not the lease, and you may not receive it.
+        reasons.append(f"town rent about €{rent['monthly']:,.0f}/month ({rent['yield_pct']}% gross) "
+                       "is not counted — someone is in it and the ad does not state the lease")
     elif rent:
         s += curve(rent["net_yield_pct"], INVEST_YIELD_POINTS)
-        reasons.append(f"rent about €{rent['monthly']:,.0f}/month: {rent['net_yield_pct']}% a year net of "
-                       f"running costs and empty months ({rent['yield_pct']}% gross)"
+        head = (f"lease in the ad €{rent['monthly']:,.0f}/month"
+                if rent.get("stated") else f"rent about €{rent['monthly']:,.0f}/month")
+        reasons.append(f"{head}: {rent['net_yield_pct']}% a year net of "
+                       f"running costs and empty months ({rent['yield_pct']}% gross), "
+                       f"paid back in {rent['payback_years']} years"
                        + (" (a province average, halved — check rents in the village)"
                           if rent.get("province_average")
                           else " (a town average — check rents there)" if rent["yield_pct"] > 15 else ""))
@@ -2343,12 +2407,20 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if area and area < 30:
         s -= 10
         reasons.append(f"small ({area:.0f} m²)")
-    if _occupied(item, full):
-        # Not only a penalty: letting it is the point, and a tenant is already paying.
-        s += INVEST_TENANT_WITH_RENT if rent else INVEST_TENANT_UNKNOWN
-        reasons.append("tenanted — rent from day one, but it cannot be shown, the rent may be an old "
-                       "one and a buyer will want it empty" if rent else
-                       "occupied/tenanted, and no rent can be worked out — check the lease")
+    if occupied:
+        # A tenant is income when the ad states the rent. The town average is not
+        # that lease, so it is not counted above.
+        if not rent:
+            s += INVEST_TENANT_UNKNOWN
+            reasons.append("occupied/tenanted, and no rent can be worked out — check the lease")
+        elif rent.get("stated") and state != "heavy" and rent.get("trusted") is not False:
+            s += INVEST_TENANT_WITH_RENT
+            reasons.append("tenanted — the ad states the rent, so that is the income; "
+                           "it cannot be shown and a buyer will want it empty")
+        else:
+            s += INVEST_TENANT_WITH_RENT
+            reasons.append("tenanted — the town rent is not your income until the lease is known; "
+                           "it cannot be shown and a buyer will want it empty")
     c = item.get("climate") or {}
     if floods(c):
         s -= 15 * w("risks")
@@ -2360,10 +2432,16 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if pay and not (item.get("min_price") or 0) and forced_sale(item):
         s += 4
         reasons.append("no minimum bid")
+    others = item.get("open_homes_here") or 0
+    if others >= INVEST_SUPPLY_NOTE:
+        reasons.append(f"{others} other homes still listed in this district on the sites scanned — "
+                       "a later buyer is choosing among them. This is not the whole market, "
+                       "and it is not taken off the price above")
     if pay:
         reasons.append(f"€{pay:,.0f}")
     if caps:
         s = min(s, min(caps))
+    s += _population_outlook_points(item, reasons)
     return max(s, 0.0), reasons
 
 
@@ -2763,4 +2841,5 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         reasons.append(f"€{pay:,.0f}")
     if caps:
         s = min(s, min(caps))
+    s += _population_outlook_points(item, reasons)
     return max(s, 0.0), reasons

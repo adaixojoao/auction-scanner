@@ -34,6 +34,9 @@ def test_letters_follow_how_each_sale_is_bid():
     assert keys(item("veilingnotaris", "NL")) == ["nl_info"]
     assert keys(item("biddit", "BE")) == keys(item("fina", "HR")) == keys(item("greece", "GR")) == []
     assert keys(item("poland", "PL")) == ["generic_offer"]       # no country-specific letters yet
+    assert keys(item("cliveemson", "GB")) == []                  # bid on the auction site
+    assert letters.channel(item("cliveemson", "GB")) == "online"
+    assert "guide price" in letters.guidance(item("cliveemson", "GB"))
 
     assert letters.channel(item("spain", "ES")) == "online"
     assert letters.channel(item("france", "FR")) == "lawyer"

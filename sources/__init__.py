@@ -44,8 +44,8 @@ class SourceUnavailable(RuntimeError):
 
 REGISTRY: dict[str, Source] = {}
 
-_MODULES = ("pt", "es", "fr", "it", "nl", "hr", "de", "gr", "be", "ro", "pl", "cy", "bg", "sk", "lv", "eu",
-            "at", "lu", "ie", "ee", "fi")
+_MODULES = ("pt", "es", "fr", "it", "nl", "hr", "de", "gr", "be", "ro", "pl", "cy", "bg", "sk", "lv", "lt", "eu",
+            "at", "lu", "ie", "ee", "fi", "gb")
 _loaded = False
 
 

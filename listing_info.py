@@ -380,7 +380,13 @@ def official_records(item: dict) -> dict | None:
     except Exception:  # noqa: BLE001
         local = None
     if local:
-        facts.append({"label": "Local median price", "value": f"€{local[0]:,.0f}/m² ({local[1]})"})
+        import prices
+        move = prices.sale_move_text(prices.sale_move(
+            "PT", item.get("concelho"), district=item.get("district"), parish=item.get("freguesia")))
+        value = f"€{local[0]:,.0f}/m² ({local[1]})"
+        if move:
+            value = f"{value}; {move}"
+        facts.append({"label": "Local median price", "value": value})
     if not copy and not facts:
         return None
     parish = item.get("freguesia") or next((e.get("freguesia") for e in entries if e.get("freguesia")), None)

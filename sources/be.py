@@ -1,4 +1,4 @@
-"""Belgium: biddit.be notary auctions."""
+"""Belgium: biddit.be notary auctions, Immoweb, Immovlan and ERA."""
 from __future__ import annotations
 
 import html
@@ -170,3 +170,17 @@ def scrape_immoweb(db, max_price: float = 50000, **_):
             time.sleep(2)
     LOG.info(f"Immoweb: {total} listings")
     return total
+
+
+@register("immovlan", "BE", description="Immovlan — houses, flats and land for sale in Belgium")
+def scrape_immovlan(db, max_price: float = 50000, **_):
+    """Immovlan — houses, flats and land for sale in Belgium."""
+    from sources._market import scrape_named
+    return scrape_named(db, "immovlan", max_price)
+
+
+@register("era", "BE", description="ERA — houses and flats for sale in Belgium")
+def scrape_era(db, max_price: float = 50000, **_):
+    """ERA — houses and flats for sale in Belgium."""
+    from sources._market import scrape_named
+    return scrape_named(db, "era", max_price)

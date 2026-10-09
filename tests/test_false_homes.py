@@ -140,8 +140,7 @@ def test_okupas_are_out_in_every_tab():
     tenant = item(title="Piso en Lugo", price=40000, area_m2=80, concelho="Lugo", district="Lugo",
                   description="Piso reformado, actualmente arrendado.")
     assert score_detail(tenant, mode="invest")[0] > 0
-    assert any("rent from day one" in r or "occupied/tenanted" in r
-               for r in score_detail(tenant, mode="invest")[1])
+    assert any("tenant" in r for r in score_detail(tenant, mode="invest")[1])
 
 
 def test_a_feed_area_much_larger_than_the_ad_is_not_the_plot():

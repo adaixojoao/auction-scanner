@@ -32,12 +32,23 @@ class Portal:
     min_amount: float = 0          # ignore a smaller figure left after the price rule above
 
 
-_LAND = re.compile(r"terreno|terrain|grundst|tontti|parcelle|bauland|baugrund|\bland\b|\bground\b", re.I)
-_TITLE_PREFIX = re.compile(r"^(?:avaa kohteen tiedot|nouvel onglet|\(nouvel onglet\)|photo n[°o]?\s*\d+)\s*:?\s*", re.I)
+_LAND = re.compile(
+    r"terreno|terrain|grundst|tontti|parcelle|bauland|baugrund|grond|\bland\b|\bground\b", re.I)
+# A card that says "Maison … Terrain 2 758 m²" is still a house. The path wins
+# when it names one, and otherwise whichever word comes first.
+_HOME_URL = re.compile(r"/(?:maison|appartement|haeuser|wohnung)(?:/|-)", re.I)
+_HOME_WORD = re.compile(
+    r"\b(?:maison|appartement|logement|pavillon|einfamilienhaus|zweifamilienhaus|"
+    r"mehrfamilienhaus|reihenhaus|doppelhaushälfte|wohnung|haus|huis|woning|house|apartment)\b",
+    re.I)
+_TITLE_PREFIX = re.compile(
+    r"^(?:avaa kohteen tiedot|nouvel onglet|\(nouvel onglet\)|photo n[°o]?\s*\d+|en savoir plus sur)\s*:?\s*",
+    re.I)
 _PATH_SKIP = {"acheter", "en", "buy", "s anzeige", "agence immobiliere", "annonce", "annonces",
               "immobilier", "vente", "kohde", "id"}
 _RENT = re.compile(
-    r"(/location/|zu-vermieten|/mieten\b|-miete-|for-rent|aluguer|arrendamento|/rent/|/prenajom/)",
+    r"(/location/|zu-vermieten|/mieten\b|-miete-|for-rent|aluguer|arrendamento|/rent/|/prenajom/"
+    r"|te-huur|/huur/)",
     re.I)
 _UUID = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 
@@ -138,6 +149,56 @@ PORTALS: dict[str, Portal] = {
         "topreality", "SK", "https://www.topreality.sk",
         ("https://www.topreality.sk/",),
         "", "", parser="topreality"),
+    "immovlan": Portal(
+        "immovlan", "BE", "https://immovlan.be",
+        ("https://immovlan.be/nl/vastgoed?transactiontypes=for-sale&propertytypes=house&maxprice={max}",
+         "https://immovlan.be/nl/vastgoed?transactiontypes=for-sale&propertytypes=apartment&maxprice={max}",
+         "https://immovlan.be/nl/vastgoed?transactiontypes=for-sale&propertytypes=land&maxprice={max}"),
+        r"/detail/", r"/([A-Za-z]{2,4}\d{4,})", id_last=True),
+    # Newest page of houses and of land in departments where prices are still low.
+    # A national search 404s; these department pages were seen in October 2026.
+    "safti": Portal(
+        "safti", "FR", "https://www.safti.fr",
+        tuple(
+            f"https://www.safti.fr/annonces/achat/{kind}/{dept}"
+            for kind in ("maison", "terrain")
+            for dept in ("creuse-23", "lozere-48", "cantal-15", "nievre-58",
+                         "indre-36", "correze-19", "meuse-55", "haute-marne-52",
+                         "ariege-09", "allier-03")),
+        r"/annonces/achat/(?:maison|terrain)/", r"/(\d{6,})", id_last=True),
+    "citya": Portal(
+        "citya", "FR", "https://www.citya.com",
+        ("https://www.citya.com/annonces/vente/maison",),
+        r"/annonces/vente/maison/", r"/(TMAI[A-Z0-9-]+)", id_last=True),
+    # The house search only accepts a few price buckets; €300,000 is one that
+    # answers. The buyer's own ceiling is applied when the row is saved.
+    # Plots honour pma. A stray €120 in a card is not a price.
+    "immoweltat": Portal(
+        "immoweltat", "AT", "https://www.immowelt.at",
+        ("https://www.immowelt.at/suche/kaufen/haus/preis--300000/osterreich/ad02at1",
+         "https://www.immowelt.at/liste/oesterreich/grundstuecke/kaufen?pmi=0&pma={max}"),
+        r"/expose/", _UUID, min_amount=1000),
+    # The results page mixes houses and flats. The path (town/type/slug) is the
+    # site's own id; there is no separate number on the card.
+    "era": Portal(
+        "era", "BE", "https://www.era.be",
+        ("https://www.era.be/fr/a-vendre",),
+        r"/fr/a-vendre/[^/]+/(?:maison|appartement|terrain)/",
+        r"/a-vendre/([^?#]+)"),
+    # prijs_max is the buyer's ceiling. The page is homes for sale; a card
+    # marked sold or "price on request" is not an asking price.
+    "remaxnl": Portal(
+        "remaxnl", "NL", "https://www.remax.nl",
+        ("https://www.remax.nl/koop?prijs_max={max}",),
+        r"/aanbod/", r"-(\d{4,})", id_last=True),
+    # Houses on the first pages start around €500,000. Land is where a plot
+    # under the budget actually appears, including just over the German border.
+    "wortimmo": Portal(
+        "wortimmo", "LU", "https://www.wortimmo.lu",
+        ("https://www.wortimmo.lu/fr/vente/terrain",
+         "https://www.wortimmo.lu/fr/vente/terrain?page=2",
+         "https://www.wortimmo.lu/fr/vente/terrain?page=3"),
+        r"-id_\d+", r"id_(\d+)"),
 }
 
 
@@ -230,7 +291,18 @@ def _image(node) -> str | None:
 
 
 def _tipo(url: str, title: str) -> str:
-    return "terreno" if _LAND.search(f"{url} {title}") else "imovel"
+    """Land when the path or the leading words say so. A house that mentions its plot stays a house."""
+    if _LAND.search(url) and not _HOME_URL.search(url):
+        return "terreno"
+    if _HOME_URL.search(url):
+        return "imovel"
+    home = _HOME_WORD.search(title or "")
+    land = _LAND.search(title or "")
+    if home and (land is None or home.start() < land.start()):
+        return "imovel"
+    if land:
+        return "terreno"
+    return "imovel"
 
 
 def _row(portal: Portal, eid: str, *, title: str, text: str, url: str,
@@ -261,7 +333,10 @@ def parse_links(html: str, portal: Portal) -> list[dict]:
     out, seen = [], set()
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        if not href_re.search(href) or _RENT.search(href) or _RENT.search(a.get_text(" ", strip=True)[:80]):
+        anchor = a.get_text(" ", strip=True)
+        if not href_re.search(href) or _RENT.search(href) or _RENT.search(anchor[:80]):
+            continue
+        if portal.name == "remaxnl" and re.search(r"verkocht|op aanvraag", anchor, re.I):
             continue
         url = _clean_url(href, portal.base)
         if not url:
@@ -295,12 +370,22 @@ def parse_links(html: str, portal: Portal) -> list[dict]:
         if portal.name == "wohnnet" and "deutschland" in path:
             country = "DE"
         town = None
+        if portal.name == "wortimmo":
+            if re.search(r"rheinland-pfalz|saarland", path, re.I):
+                country = "DE"
+            spot = re.search(r"-([A-Za-z]+)-id_\d+", path)
+            if spot:
+                town = spot.group(1).title()
         place = re.search(r"/([^/]+)/id-\d+", path)
         if place and portal.name in {"athome", "immoregion"}:
             town = place.group(1).replace("-", " ").strip().title() or None
-        out.append(_row(
+        row = _row(
             portal, eid, title=title or _path_title(path), text=text, url=url,
-            price=price, concelho=town, image=_image(a.parent or a), country=country))
+            price=price, concelho=town, image=_image(a.parent or a), country=country)
+        # The search is homes for sale, and the card names the street, not the type.
+        if portal.name == "remaxnl" and row["tipo"] == "imovel":
+            row["tipo"] = "woning"
+        out.append(row)
     return out
 
 

@@ -314,16 +314,65 @@ def test_investment_yield_is_net_of_running_costs_and_empty_months():
 
 
 def test_a_tenant_costs_less_when_the_rent_can_be_worked_out():
-    """Letting it is the point: a tenant paying is not the same problem as a
-    listing that only says it is occupied."""
+    """The town average is not the lease. A tenant is income when the ad states
+    the rent, and a listing with no rent figure at all stays the weaker case."""
     from scoring import INVEST_TENANT_UNKNOWN, INVEST_TENANT_WITH_RENT
     assert INVEST_TENANT_WITH_RENT > INVEST_TENANT_UNKNOWN
+    vacant = listing(concelho="Lugo", district="Lugo", area_m2=80, price=40000,
+                     description="Piso reformado")
     known = listing(concelho="Lugo", district="Lugo", area_m2=80, price=40000,
                     description="Piso reformado, actualmente arrendado.")
+    leased = listing(concelho="Lugo", district="Lugo", area_m2=80, price=40000,
+                     description="Piso reformado, arrendado, renda mensal de 450 euros.")
     unknown = listing(concelho="Nowhere", district="Nowhere", area_m2=80, price=40000,
                       description="Piso reformado, actualmente arrendado.")
-    assert any("rent from day one" in r for r in score_detail(known, mode="invest")[1])
+    vacant_reasons = score_detail(vacant, mode="invest")[1]
+    known_reasons = score_detail(known, mode="invest")[1]
+    leased_reasons = score_detail(leased, mode="invest")[1]
+    assert any("a year net of running costs and empty months" in r for r in vacant_reasons)
+    assert any("is not counted" in r for r in known_reasons)
+    assert not any("a year net of running costs and empty months" in r for r in known_reasons)
+    assert any("lease in the ad" in r for r in leased_reasons)
     assert any("no rent can be worked out" in r for r in score_detail(unknown, mode="invest")[1])
+    assert score_detail(vacant, mode="invest")[0] > score_detail(known, mode="invest")[0]
+
+
+def test_the_population_scenario_is_a_small_caution_and_never_a_reason_to_buy():
+    """EUROPOP2019 can only cost a few points, and only where the region is
+    projected to lose many people. A region projected to grow scores nothing."""
+    home = {"source": "eleiloes", "country": "PT", "title": "Moradia T3", "tipo": "moradia",
+            "area_m2": 100, "price": 30000, "description": "Em bom estado"}
+    guarda = {**home, "concelho": "Guarda", "district": "Guarda"}
+    on, reasons = score_detail(guarda)
+    off = score_detail(guarda, targets={"weights": {"population": 0}})[0]
+    assert off - on == 4
+    assert any("fewer people by 2050" in r and "not a forecast" in r for r in reasons)
+    doubled = score_detail(guarda, targets={"weights": {"population": 2}})[0]
+    assert off - doubled == 8
+    porto = {**home, "concelho": "Porto", "district": "Porto"}
+    assert score_detail(porto, targets={"weights": {"population": 0}})[0] - score_detail(porto)[0] == 2
+    lisboa = {**home, "concelho": "Lisboa", "district": "Lisboa"}
+    assert score_detail(lisboa)[0] == score_detail(lisboa, targets={"weights": {"population": 0}})[0]
+    assert not any("EUROPOP" in r for r in score_detail(lisboa)[1])
+    for mode in ("invest", "land"):
+        scored = score_detail(guarda, mode=mode)[0]
+        plain = score_detail(guarda, mode=mode, targets={"weights": {"population": 0}})[0]
+        assert plain - scored == 4, mode
+    plot = {"source": "eleiloes", "country": "PT", "title": "Terreno rústico", "tipo": "terreno",
+            "area_m2": 200000, "price": 20000, "description": "Pinhal",
+            "concelho": "Guarda", "district": "Guarda"}
+    assert (score_detail(plot, mode="forest", targets={"weights": {"population": 0}})[0]
+            - score_detail(plot, mode="forest")[0]) == 4
+
+
+def test_other_homes_still_listed_are_mentioned_and_do_not_change_the_score():
+    one = listing(concelho="Lugo", district="Lugo", area_m2=80, price=40000,
+                  description="Piso reformado")
+    crowded = {**one, "open_homes_here": 12}
+    few = {**one, "open_homes_here": 3}
+    assert score_detail(one, mode="invest")[0] == score_detail(crowded, mode="invest")[0]
+    assert any("other homes still listed" in r for r in score_detail(crowded, mode="invest")[1])
+    assert not any("other homes still listed" in r for r in score_detail(few, mode="invest")[1])
 
 
 def test_each_goal_tells_the_ai_check_its_own_wish():
@@ -336,6 +385,7 @@ def test_each_goal_tells_the_ai_check_its_own_wish():
     assert "at least 20,000 m²" in land and "€0.30/m²" in land and "upside" in land
     assert "forestry project" in forest and "10 ha" in forest
     assert len({home, invest, land, forest}) == 4
+    assert all("EUROPOP2019" in text and "not a forecast" in text for text in (home, invest, land, forest))
 
 
 def test_investment_does_not_believe_an_impossible_discount(monkeypatch):

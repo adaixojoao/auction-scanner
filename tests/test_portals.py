@@ -93,6 +93,39 @@ BAZOS = """<div><a href="/inzerat/196264135/investicny-byt.php">Investicny byt K
 REALITYSK = """<div><a href="/byty/byt-kosice/Ju8uT8slPOU">Byt v Kosiciach</a>
 <span>790 €/m²</span><span>Cena: 84 000 €</span></div>"""
 
+IMMOVLAN = """<a href="https://immovlan.be/nl/detail/huis/te-koop/6183/trazegnies/vbe75212">
+Huis te koop Trazegnies</a><span>99 000 €</span>
+<a href="https://immovlan.be/nl/detail/grond/te-koop/6890/libin/vbe75070">Grond te koop</a>
+<span>42 000 €</span>
+<a href="/nl/detail/huis/te-huur/1000/brussel/vbe10001">Huis te huur</a><span>900 €</span>"""
+
+SAFTI = """<div><a href="/annonces/achat/maison/charron-23700/1724756">Maison - 6 pièces - 154m² Charron ( 23700 ) 86 000 € Terrain 2 758m²</a></div>
+<div><a href="/annonces/achat/terrain/flayat-23260/1725031">Terrain 5 200 m² Flayat 54 500 €</a></div>"""
+
+CITYA = """<a href="/annonces/vente/maison/sedan-08200/TMAI376-965615">
+Vente Maison 5 pièces 98.62m² à Sedan</a><span>122 000 €</span>
+<a href="/annonces/vente/maison">Maisons</a><span>1 €</span>"""
+
+IMMOWELT_AT = """<a href="https://www.immowelt.at/expose/3a8df362-4d8a-489d-9e31-c9d9d5602e3b"
+ title="Einfamilienhaus zum Kauf - Dürnkrut - 69.000 € - 60 m², 612 m² Grundstück">Haus</a>
+<a href="https://www.immowelt.at/expose/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+ title="Hinweis 120 €">Hinweis</a>"""
+
+ERA = """<div><a href="/fr/a-vendre/huy/maison/bungalow-3-chambres-garage">En savoir plus sur Bungalow 3 chambres</a>
+<span>€ 129 000</span></div>
+<div><a href="/fr/a-vendre/libin/terrain/terrain-a-batir">Terrain à bâtir</a><span>€ 42 000</span></div>
+<a href="/fr/a-louer/liege/maison/maison-a-louer">Maison à louer</a><span>€ 900</span>"""
+
+REMAXNL = """<div><a href="/aanbod/geertruidaweg-3-9535">Geertruidaweg 3 SCHERPENISSE € 53.500,- v.o.n. 36 m²</a></div>
+<div><a href="/aanbod/westvlietweg-1234-7937">Westvlietweg DEN HAAG € 145.000,- k.k.</a></div>
+<div><a href="/aanbod/gording-92-4928">Verkocht onder voorbehoud Gording 92 HOORN Prijs op aanvraag</a>
+<span>€ 25.000,-</span></div>"""
+
+WORTIMMO = """<div><a href="/fr/vente-terrain-nord-biwisch-id_572965">Terrain à vendre à Biwisch</a>
+<span>150 000 €</span></div>
+<div><a href="/fr/vente-terrain-rheinland-pfalz-nittel-id_576212">Terrain à vendre à Nittel</a>
+<span>68 000 €</span></div>"""
+
 TOPREALITY = """<div data-ga4-container-item_id="LT_9435745" data-ga4-container-item_name="Rodinny dom"
  data-ga4-container-price="98000" data-ga4-container-currency="EUR"
  data-ga4-container-location_id="Laksarska Nova Ves">
@@ -125,8 +158,15 @@ def test_each_portal_reads_the_card_it_was_built_from():
         "bazos": (BAZOS, "196264135", 49990, None),
         "realitysk": (REALITYSK, "Ju8uT8slPOU", 84000, None),
         "topreality": (TOPREALITY, "LT_9435745", 98000, "Laksarska Nova Ves"),
+        "immovlan": (IMMOVLAN, "vbe75212", 99000, None),
+        "safti": (SAFTI, "1724756", 86000, None),
+        "citya": (CITYA, "TMAI376-965615", 122000, None),
+        "immoweltat": (IMMOWELT_AT, "3a8df362-4d8a-489d-9e31-c9d9d5602e3b", 69000, None),
+        "era": (ERA, "huy/maison/bungalow-3-chambres-garage", 129000, None),
+        "remaxnl": (REMAXNL, "9535", 53500, None),
+        "wortimmo": (WORTIMMO, "572965", 150000, None),
     }
-    assert len(cases) == 20
+    assert len(cases) == 27
     for name, (html, eid, price, district) in cases.items():
         rows = parse_portal(name, html)
         assert rows and rows[0]["external_id"] == eid, name
@@ -158,6 +198,28 @@ def test_portals_skip_a_foreign_willhaben_ad_and_tag_a_french_athome_home():
         "eigentumswohnung-1210-wien", "mehrfamilienhaus-deutschland"))[0]
     assert german["country"] == "DE"
     assert parse_portal("optimhome", OPTIM)[0]["tipo"] == "terreno"
+    assert [r["external_id"] for r in parse_portal("immovlan", IMMOVLAN)] == ["vbe75212", "vbe75070"]
+    assert parse_portal("immovlan", IMMOVLAN)[1]["tipo"] == "terreno"
+    bouw = '<a href="/nl/detail/bouwgrond/te-koop/6698/grand-halleux/vwd12819">Bouwgrond</a><span>44 000 €</span>'
+    assert parse_portal("immovlan", bouw)[0]["tipo"] == "terreno"
+    safti = parse_portal("safti", SAFTI)
+    assert safti[0]["tipo"] == "imovel" and safti[1]["external_id"] == "1725031"
+    assert safti[1]["tipo"] == "terreno" and safti[1]["price"] == 54500
+    assert parse_portal("immoweltat", IMMOWELT_AT)[0]["tipo"] == "imovel"
+    assert len(parse_portal("immoweltat", IMMOWELT_AT)) == 1
+    era = parse_portal("era", ERA)
+    assert era[0]["title"].startswith("Bungalow")
+    assert [r["external_id"] for r in era] == [
+        "huy/maison/bungalow-3-chambres-garage", "libin/terrain/terrain-a-batir"]
+    assert era[1]["tipo"] == "terreno" and era[1]["price"] == 42000
+    remax = parse_portal("remaxnl", REMAXNL)
+    assert [r["external_id"] for r in remax] == ["9535", "7937"]
+    assert remax[0]["tipo"] == "woning" and remax[0]["area_m2"] == 36
+    from scoring import property_kind
+    assert property_kind(remax[0]) == "home"
+    wort = parse_portal("wortimmo", WORTIMMO)
+    assert wort[0]["tipo"] == "terreno" and wort[0]["country"] == "LU" and wort[0]["concelho"] == "Biwisch"
+    assert wort[1]["country"] == "DE" and wort[1]["concelho"] == "Nittel" and wort[1]["price"] == 68000
     assert parse_portal("kvee", KVEE)[0]["area_m2"] == 47.7
     assert parse_portal("willhaben", WILLHABEN)[0]["area_m2"] == 49
 

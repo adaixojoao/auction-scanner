@@ -529,3 +529,17 @@ def scrape_laforet(db, max_price: float = 50000, **_):
     """Laforêt — agency houses and land for sale across France."""
     from sources._market import scrape_named
     return scrape_named(db, "laforet", max_price)
+
+
+@register("safti", "FR", description="SAFTI — houses and land for sale in the cheaper French departments")
+def scrape_safti(db, max_price: float = 50000, **_):
+    """SAFTI — houses and land for sale in the cheaper French departments."""
+    from sources._market import scrape_named
+    return scrape_named(db, "safti", max_price)
+
+
+@register("citya", "FR", description="Citya — houses for sale across France")
+def scrape_citya(db, max_price: float = 50000, **_):
+    """Citya — houses for sale across France."""
+    from sources._market import scrape_named
+    return scrape_named(db, "citya", max_price)

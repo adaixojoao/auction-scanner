@@ -8,8 +8,8 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_area, find_price, land_max_price, make_listing, make_session, normalize, parse_date_dmy,
-                    parse_price, prefer_stated_area, safe_url, stable_id, to_number)
+from common import (LOG, find_area, find_price, has_term, land_max_price, make_listing, make_session, normalize,
+                    parse_date_dmy, parse_price, prefer_stated_area, safe_url, stable_id, to_number)
 from db import upsert_listing
 from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
@@ -778,6 +778,14 @@ def parse_aliseda(item: dict, tipo: str) -> dict | None:
     area = item.get("SupParcela") or item.get("SuperficieTotal") if tipo == "terreno" else \
         item.get("ConstructedArea") or item.get("SuperficieTotal")
     description = item.get("Description") or ""
+    # The search text says "terreno" for every plot. The use (rústico, residencial)
+    # is a separate field, and a plot under 5,000 m² with no rural word was scored
+    # as building land. Pumariño, 2026-10-09: SubUso "RÚstico", €5,460 for 3,962 m².
+    use = str(((item.get("suelonave") or {}).get("SubUso") or "")).strip()
+    if tipo == "terreno" and use and has_term(use, ["rustico", "rustica", "agricola", "forestal"]):
+        raw_use = "Terreno rústico."
+        if raw_use not in description and not has_term(description, ["rustico", "rustica"]):
+            description = f"{raw_use} {description}".strip()
     if tipo == "terreno":
         # The feed's total is often the whole sector (Calella 135 ha; the ad says 0.8–2.8).
         stated, feed = prefer_stated_area(area, description)

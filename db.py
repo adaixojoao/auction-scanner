@@ -34,7 +34,7 @@ STALE_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -447,10 +447,18 @@ def _migrate_v18(db: sqlite3.Connection):
     _add_column(db, "listings", "user_note", "TEXT")
 
 
+def _migrate_v19(db: sqlite3.Connection):
+    """What a won purchase then let for or sold for, and after how many months."""
+    _add_column(db, "carta_log", "monthly_rent", "REAL")
+    _add_column(db, "carta_log", "sale_price", "REAL")
+    _add_column(db, "carta_log", "months_held", "REAL")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
-               15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18}
+               15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
+               19: _migrate_v19}
 
 
 def init_db(db: sqlite3.Connection):
@@ -1066,6 +1074,27 @@ def _save_kept(db, mode: str, new: list) -> None:
         pass                                 # busy (a scan is writing): kept in memory, saved next time
 
 
+def _open_home_supply(rows) -> dict[tuple[str, str], int]:
+    """How many homes are still listed in each district, on the sites scanned.
+
+    {"PT|guarda": 12}. Asking supply the scanner can see, not the whole market.
+    A district with no name is left out: those rows are not one place."""
+    from common import normalize
+    from scoring import property_kind
+    counts: dict[tuple[str, str], int] = {}
+    for r in rows:
+        district = (r["district"] or "").strip()
+        if not district:
+            continue
+        kind = property_kind({"title": r["title"] or "", "description": r["description"] or "",
+                              "tipo": r["tipo"], "area_m2": r["area_m2"], "country": r["country"]})
+        if kind != "home":
+            continue
+        key = ((r["country"] or "PT").upper(), normalize(district))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land_market,
                climate_on, mode="home") -> float:
     """Everything load_listings works out for one listing (kept in the score cache)."""
@@ -1154,7 +1183,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     # scores away: the kept ones stay on show until refresh=True (after each scan).
     context = (now.date().isoformat(), json.dumps(filters or {}, sort_keys=True, default=str), climate_on,
                _code_version())
-    inputs = json.dumps([len(towns), sum(len(v) for v in closes.values()), len(land_market)])
+    # Homes still listed in each district. The investment score mentions the
+    # count and does not change its points for it, so a scan's refresh is enough.
+    supply: dict[tuple[str, str], int] = _open_home_supply(rows) if mode == "invest" else {}
+    supply_fp = ",".join(f"{a}|{b}:{n}" for (a, b), n in sorted(supply.items()))
+    inputs = json.dumps([len(towns), sum(len(v) for v in closes.values()), len(land_market), supply_fp])
     if _SCORED_FOR[0] != context:
         _SCORED.clear()
         _LOADED_MODES.clear()
@@ -1197,6 +1230,12 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             item.update(kept[1])
             sc = item["score"]
         else:
+            if supply:
+                district = (item.get("district") or "").strip()
+                if district:
+                    n = supply.get(((item.get("country") or "PT").upper(), normalize(district)), 0)
+                    if n > 1:
+                        item["open_homes_here"] = n - 1
             sc = _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
                             climate_on, mode)
             data = {k: item[k] for k in _DERIVED}

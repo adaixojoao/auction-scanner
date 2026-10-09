@@ -160,6 +160,15 @@ def test_vacant_listing_not_hidden_by_occupancy_filter(db, add):
     assert visible == {"v"}
 
 
+def test_investment_mentions_homes_still_listed_in_the_district(db, add):
+    for i in range(9):
+        add("citius", f"supply{i}", title="Moradia T2", tipo="moradia", district="Guarda",
+            concelho="Guarda", area_m2=90, price=40000, description="Em bom estado")
+    rows = load_listings(db, filters={"min_score": 0}, mode="invest")
+    assert len(rows) == 9
+    assert all(any("8 other homes still listed" in r for r in it["reasons"]) for it in rows)
+
+
 def test_occupancy_exclude_does_not_hide_an_investment_home(db, add):
     """A sitting tenant is income on Investment home, not a reason to hide the row."""
     add(external_id="o", title="Moradia T2", description="imóvel ocupado, arrendado a inquilino",

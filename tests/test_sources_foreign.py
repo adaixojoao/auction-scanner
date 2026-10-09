@@ -176,3 +176,82 @@ def test_veilingnotaris_and_vastgoedveiling_are_one_platform(db, fake_http):
     assert haarlem["date_end"] == "2026-10-01T07:35:00" and "Bouwjaar 1940" in haarlem["description"]
     assert rows["veilingnotaris:2646"]["country"] == "DE"
     assert rows["veilingnotaris:2580"]["title"] == "Kerkrade, Schifferheidestraat 1 3 (Woonhuis)"
+
+
+STORIA_HOUSE = {
+    "id": 10681692, "title": "Casa la rosu de vanzare - Lipanesti",
+    "slug": "casa-la-rosu-de-vanzare-lipanesti-IDIONm", "hidePrice": False, "estate": "HOUSE",
+    "areaInSquareMeters": 160, "totalPrice": {"value": 72000, "currency": "EUR"},
+    "images": [{"medium": "https://cdn.example/casa.jpg"}],
+    "location": {"reverseGeocoding": {"locations": [
+        {"locationLevel": "county", "name": "Prahova"},
+        {"locationLevel": "commune", "name": "Lipanesti"},
+        {"locationLevel": "village", "name": "Satu"},
+    ]}},
+}
+STORIA_SKIP = [
+    {"id": 2, "title": "Hidden", "slug": "hidden", "hidePrice": True,
+     "totalPrice": {"value": 1000, "currency": "EUR"}},
+    {"id": 3, "title": "Lei", "slug": "lei", "hidePrice": False,
+     "totalPrice": {"value": 50000, "currency": "RON"}, "areaInSquareMeters": 40},
+]
+
+
+def _storia_html(items):
+    blob = {"props": {"pageProps": {"data": {"searchAds": {"items": items}}}}}
+    return '<script id="__NEXT_DATA__" type="application/json">' + json.dumps(blob) + "</script>"
+
+
+def test_storia_keeps_the_euro_house_and_drops_the_rest(db, fake_http):
+    from sources.ro import parse_storia_ad
+    assert parse_storia_ad(STORIA_SKIP[0], "house") is None
+    assert parse_storia_ad(STORIA_SKIP[1], "house") is None
+    land = parse_storia_ad({**STORIA_HOUSE, "terrainAreaInSquareMeters": 1400,
+                            "areaInSquareMeters": 20}, "terreno")
+    assert land["area_m2"] == 1400 and land["tipo"] == "terreno"
+    bait = {**STORIA_HOUSE, "id": 9, "totalPrice": {"value": 16, "currency": "EUR"},
+            "areaInSquareMeters": 2370}
+    assert parse_storia_ad(bait, "terreno") is None
+
+    def handler(method, url, kw):
+        page = (kw.get("params") or {}).get("page")
+        if "/casa/" in url and page == 1:
+            return FakeResponse(_storia_html([STORIA_HOUSE, *STORIA_SKIP]))
+        return FakeResponse(_storia_html([]))
+
+    fake_http(handler)
+    assert REGISTRY["storia"].func(db, max_price=100000) == 1
+    row = db.execute("SELECT * FROM listings").fetchone()
+    assert row["id"] == "storia:10681692" and row["price"] == 72000 and row["area_m2"] == 160
+    assert row["district"] == "Prahova" and row["concelho"] == "Lipanesti" and row["freguesia"] == "Satu"
+    assert row["url"].endswith("/ro/ad/casa-la-rosu-de-vanzare-lipanesti-IDIONm")
+    assert row["image_url"] == "https://cdn.example/casa.jpg"
+
+
+ARUODAS = """
+<div class="list-row-v2" data-uid="11-1449945">
+<h3><a href="https://www.aruodas.lt/sklypai-example-11-1449945/?search_pos=1">Širvintų r. sav., Diržioniškių k.</a></h3>
+<div data-param-label="Plotas"><span class="list-detail-value-v2">10.31 a</span></div>
+<span class="list-item-price-v2">27 000 €</span>
+<img data-src="https://aruodas-img.dgn.lt/plot.jpg" src="https://static.aruodas.lt/nophoto.svg">
+</div>
+<div class="list-row-v2" data-uid="11-9">
+<h3><a href="https://www.aruodas.lt/butai-nuomai-11-9/">Nuoma</a></h3>
+<span class="list-item-price-v2">400 €</span></div>
+"""
+
+
+def test_aruodas_reads_ares_as_square_metres_and_skips_a_rental(db, fake_http):
+    def handler(method, url, kw):
+        if "/sklypai/" in url and "puslapis" not in url:
+            return FakeResponse(ARUODAS)
+        return FakeResponse("<html></html>")
+
+    fake_http(handler)
+    assert REGISTRY["aruodas"].func(db, max_price=100000) == 1
+    row = db.execute("SELECT * FROM listings").fetchone()
+    assert row["id"] == "aruodas:11-1449945" and row["price"] == 27000 and row["area_m2"] == 1031
+    assert row["tipo"] == "terreno" and row["district"] == "Širvintų r. sav."
+    assert row["concelho"] == "Diržioniškių k."
+    assert row["url"] == "https://www.aruodas.lt/sklypai-example-11-1449945/"
+    assert row["image_url"] == "https://aruodas-img.dgn.lt/plot.jpg"
