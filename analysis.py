@@ -15,7 +15,7 @@ import re
 import costs
 from common import LOG, has_term, parse_price, utcnow
 from db import load_best
-from scoring import buyer_priorities, is_fractional_share
+from scoring import buyer_priorities, is_fractional_share, mixed_order
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = "claude-haiku-4-5"
@@ -80,7 +80,7 @@ def analyze_with_llm(db, max_price: float = 50000, category: str = "imoveis",
     if not items:
         LOG.info("No listings to analyze")
         return None
-    items.sort(key=lambda it: -it.get("rank", it["score"]))
+    items.sort(key=mixed_order)
 
     compact = []
     for it in items[:limit]:

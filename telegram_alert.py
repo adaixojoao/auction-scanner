@@ -14,6 +14,7 @@ import requests
 
 from common import FLAGS, days_left, effective_end, parse_dt, utcnow
 from db import alerted_at, load_best, mark_alerted, not_yet_alerted
+from scoring import mixed_order
 
 LOG = logging.getLogger("telegram")
 
@@ -138,7 +139,7 @@ def alert_new_listings(db, cfg: dict, score_fn=None):
     # used to be judged as somewhere to live, and never alerted.
     candidates = [it for it in load_best(db, filters=cfg.get("filters")) if it["score"] >= min_sc]
     fresh_ids = not_yet_alerted(db, CHANNEL, [it["id"] for it in candidates])
-    fresh = sorted((it for it in candidates if it["id"] in fresh_ids), key=lambda it: -it.get("rank", it["score"]))
+    fresh = sorted((it for it in candidates if it["id"] in fresh_ids), key=mixed_order)
     if not fresh:
         return
 

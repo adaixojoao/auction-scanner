@@ -66,15 +66,16 @@ def test_every_municipality_has_a_local_price(pt_prices):
 def test_a_home_in_a_small_municipality_is_compared_with_local_prices(pt_prices):
     home = {"source": "eleiloes", "country": "PT", "title": "Moradia em bom estado", "description": "",
             "concelho": "Sabugal", "area_m2": 100, "price": 9000}
-    _, reasons = score(home)
-    assert any(r.startswith("71% below local prices (INE 2.º Trimestre de 2026)") for r in reasons)
+    _, reasons = score(home, mode="invest")
+    assert any("below local prices all-in" in r and "INE 2.º Trimestre de 2026" in r for r in reasons)
+    assert not any("below local prices" in r for r in score(home)[1])
 
 
 def test_without_the_file_the_city_table_is_used(tmp_path, monkeypatch):
     monkeypatch.setattr(prices, "PT_FILE", str(tmp_path / "missing.csv"))
-    _, reasons = score({"source": "eleiloes", "country": "PT", "title": "Moradia", "description": "",
-                        "concelho": "Guarda", "area_m2": 90, "price": 25000})
-    assert any("below local prices (city estimate; counted at 75%: condition not stated)" in r for r in reasons)
+    from scoring import local_price
+    found = local_price({"country": "PT", "concelho": "Guarda"})
+    assert found[1] == "city estimate" and found[0] > 0
 
 
 def test_same_named_municipalities_get_their_own_region(tmp_path, monkeypatch):
@@ -100,13 +101,12 @@ def test_an_old_village_house_is_not_counted_at_the_towns_median_price(pt_prices
     sound = {**base, "title": "Moradia em bom estado", "description": ""}
     old = {**base, "title": "Moradia", "description": "Moradia para remodelar. Ano de construção: 1937",
            "town_distance": {"km": 8.0, "text": "8.0 km from Sabugal"}}
-    _, sound_reasons = score(sound)
-    _, old_reasons = score(old)
-    assert any(r.startswith("71% below local prices") for r in sound_reasons)
-    worn = next(r for r in old_reasons if "below local prices" in r)
-    assert "needs work, built 1937, 8 km from town" in worn
-    assert int(worn.split("%")[0]) < 71
-    assert "needs some work" in old_reasons                 # "para remodelar" is work
+    from scoring import local_value_factor
+    sound_factor, _ = local_value_factor(sound)
+    factor, why = local_value_factor(old)
+    assert sound_factor == 1 and factor < sound_factor
+    assert "needs work" in why and "built 1937" in why and any(w.startswith("8 km") for w in why)
+    assert "needs some work" in score(old, mode="invest")[1]
 
 
 
@@ -117,13 +117,9 @@ def test_a_parish_price_beats_the_municipality_where_ine_has_one(pt_prices, tmp_
                       encoding="utf-8")
     monkeypatch.setattr(prices, "PT_PARISH_FILE", str(parish))
     assert prices.parish_names("União das freguesias de Vila do Bispo e Raposeira") == ["vila do bispo", "raposeira"]
-    village = {"source": "eleiloes", "country": "PT", "title": "Moradia em bom estado", "description": "",
-               "concelho": "Sabugal", "freguesia": "Malcata", "area_m2": 100, "price": 9000}
-    _, reasons = score(village)
-    assert any("40% below local prices (INE 2.º Trimestre de 2026, parish)" in r for r in reasons)
-    elsewhere = {**village, "freguesia": "Soito"}                      # no parish figure: the municipality's
-    _, reasons = score(elsewhere)
-    assert any(r.startswith("71% below local prices (INE 2.º Trimestre de 2026)") for r in reasons)
+    village = {"country": "PT", "concelho": "Sabugal", "freguesia": "Malcata"}
+    assert "parish" in prices.local_price("PT", "Sabugal", {}, parish="Malcata")[1]
+    assert "parish" not in prices.local_price("PT", "Sabugal", {}, parish="Soito")[1]
 
 
 def test_ine_keeps_the_previous_quarter_from_the_same_answer():

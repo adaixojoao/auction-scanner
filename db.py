@@ -1270,18 +1270,20 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
 
 
 def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw) -> list[dict]:
-    """Every listing scored for the goal it suits best (scoring.MODES), with
+    """Every listing scored for the goal it suits (scoring.FAMILY_GOALS), with
     `mode` and `mode_label` on each.
 
-    Listings pages rank one goal at a time; everything that speaks for the
-    whole app — alerts, the report, the Offers shortlist — asks this instead,
-    so a listing that is only interesting as a let or as a plot is not judged
-    as somewhere to live and silently dropped. `modes` limits which goals
-    compete: Offers passes the ones that can return cash.
+    A home is only My home or Investment home; a plot is only Investment land
+    or Forestry. The shown score picks between those two. Listings pages rank
+    one goal at a time; everything that speaks for the whole app — alerts, the
+    report, the Offers shortlist — asks this instead, so a listing that is
+    only interesting as a let or as a plot is not judged as somewhere to live
+    and silently dropped. `modes` limits which goals compete: Offers passes
+    the ones that can return cash.
     """
     from common import mode_max_price
     from config import load_config
-    from scoring import MODES
+    from scoring import FAMILY_GOALS, MODES, goal_family
     kw.pop("mode", None)
     chosen = tuple(m for m in (modes or MODES) if m in MODES) or tuple(MODES)
     cfg = load_config()
@@ -1293,7 +1295,13 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
             # cannot be bought for it, whatever it scores.
             if budget and (item.get("price") or 0) > budget:
                 continue
+            family = goal_family(item)
+            allowed = FAMILY_GOALS.get(family)
+            if allowed is not None and mode not in allowed:
+                continue
             kept = best.get(item["id"])
-            if kept is None or item.get("rank", item["score"]) > kept.get("rank", kept["score"]):
+            # The shown 0–100 score, not the raw rank: the raw numbers are
+            # not on one scale. On a tie the goal earlier in MODES stays.
+            if kept is None or (item.get("score") or 0) > (kept.get("score") or 0):
                 best[item["id"]] = {**item, "mode": mode, "mode_label": MODES[mode]}
     return list(best.values())

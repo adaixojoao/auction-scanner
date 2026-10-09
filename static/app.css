@@ -254,7 +254,7 @@ tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 .details .contact-table th, .details .contact-table td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--border); }
 .details .contact-table th { font-weight: 600; }
 .details .sv-frame { width: 100%; max-width: 640px; height: 320px; border: 0; border-radius: 6px; margin: 6px 0; }
-.weights { display: grid; gap: 8px; }
+.weight-goal { margin: 16px 0 8px; font-size: 14px; }
 .weight { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 2fr) 48px; align-items: center; gap: 10px; }
 .weight input[type=range] { width: 100%; }
 .weight b { text-align: right; font-variant-numeric: tabular-nums; }

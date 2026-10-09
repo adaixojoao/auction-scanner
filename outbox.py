@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from common import days_left, utcnow, utcnow_iso
 from db import load_best, load_listings, set_listing_status
+from scoring import mixed_order
 
 LOG = logging.getLogger("outbox")
 
@@ -133,7 +134,7 @@ def request_candidates(db, cfg: dict, now=None) -> list[tuple[dict, object]]:
         if not letter.to_email or (letter.processo and letter.processo in written_proc):
             continue
         out.append((it, letter))
-    out.sort(key=lambda pair: -pair[0].get("rank", pair[0]["score"]))
+    out.sort(key=lambda pair: mixed_order(pair[0]))
     return out
 
 

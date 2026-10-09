@@ -175,20 +175,27 @@ def test_investment_land_wants_it_reachable_and_resellable():
     assert score_detail(building, mode="land")[0] > leftover
 
 
-def test_forestry_is_upside_on_a_plot_not_the_only_way_it_can_rank():
-    """A 2 ha plot is too small for forestry but can still be a good buy; a big
-    one says what a project on it would return, and scores a little higher."""
+def test_forestry_is_a_different_goal_from_the_land_investment():
+    """A 2 ha plot is too small for forestry but can still be a good buy. A
+    forestry return does not raise or lower the investment-land rank."""
     small = plot(country="PT", district="Guarda", area_m2=20000, price=2000, land_market=MARKET)
     assert score_detail(small, mode="land")[0] > 40
     assert score_detail(small, mode="forest")[0] == 0
 
     big = plot(country="PT", district="Guarda", title="Terreno rústico florestal", area_m2=400000,
                price=40000, land_market=MARKET,
-               climate={"heat": {"today": 24, "ssp245_2081-2100": 28}, "water_km": 0.2})
+               climate={"hot_days": {"rcp45_2071-2100": 2}, "water_km": 0.2})
+    hot = {**big, "climate": {"hot_days": {"rcp45_2071-2100": 30}, "water_km": 0.2}}
     sc, reasons = score_detail(big, mode="land")
-    assert any("forestry on it would return" in r and "see Forestry" in r for r in reasons)
-    assert sc > score_detail({**big, "climate": {"heat": {"today": 33, "ssp245_2081-2100": 37},
-                                                 "stress": {"stress_2080": 4}}}, mode="land")[0]
+    assert not any("forestry" in r.lower() or "mainland Portugal" in r for r in reasons)
+    assert sc == score_detail(hot, mode="land")[0]
+    dry = {**big, "climate": {"stress": {"stress_2080": 4}}}
+    assert sc > score_detail(dry, mode="land")[0]
+    by_sea = {**big, "beach": {"km": 0.4, "text": "0.4 km from the beach"}}
+    assert sc == score_detail(by_sea, mode="land")[0]
+    trees = {**big, "climate": {"heat": {"today": 24, "ssp245_2081-2100": 28}, "water_km": 0.2}}
+    oven = {**trees, "climate": {"heat": {"today": 33, "ssp245_2081-2100": 37}, "stress": {"stress_2080": 4}}}
+    assert score_detail(trees, mode="forest")[0] != score_detail(oven, mode="forest")[0]
 
 
 def test_what_land_goes_for_is_the_scanners_own_asking_prices():
@@ -375,15 +382,23 @@ def test_the_population_scenario_is_a_small_caution_and_never_a_reason_to_buy():
     lisboa = {**home, "concelho": "Lisboa", "district": "Lisboa"}
     assert score_detail(lisboa)[0] == score_detail(lisboa, targets={"weights": {"population": 0}})[0]
     assert not any("EUROPOP" in r for r in score_detail(lisboa)[1])
-    for mode in ("invest", "land"):
+    for mode in ("invest",):
         scored = score_detail(guarda, mode=mode)[0]
         plain = score_detail(guarda, mode=mode, targets={"weights": {"population": 0}})[0]
         assert plain - scored == 4, mode
+    house = score_detail(guarda, mode="land")
+    assert house[1][0].startswith("a home, not land")
+    assert "fewer people" not in " ".join(house[1])
     plot = {"source": "eleiloes", "country": "PT", "title": "Terreno rústico", "tipo": "terreno",
             "area_m2": 200000, "price": 20000, "description": "Pinhal",
             "concelho": "Guarda", "district": "Guarda"}
+    # A forestry project is not waiting on a local buyer, so the scenario does not move it.
     assert (score_detail(plot, mode="forest", targets={"weights": {"population": 0}})[0]
-            - score_detail(plot, mode="forest")[0]) == 4
+            == score_detail(plot, mode="forest")[0])
+    assert not any("fewer people" in r for r in score_detail(plot, mode="forest")[1])
+    land_on = score_detail(plot, mode="land")[0]
+    land_off = score_detail(plot, mode="land", targets={"weights": {"population": 0}})[0]
+    assert land_off - land_on == 4
 
 
 def test_other_homes_still_listed_are_mentioned_and_do_not_change_the_score():
@@ -403,10 +418,11 @@ def test_each_goal_tells_the_ai_check_its_own_wish():
     assert "to live in" in home and "not a plot" in home and "swim" in home
     assert "all-in" in invest or "transfer tax" in invest
     assert "net rental yield" in invest and "live in" not in invest.split(",")[0]
-    assert "at least 20,000 m²" in land and "€0.30/m²" in land and "upside" in land
-    assert "forestry project" in forest and "10 ha" in forest
+    assert "at least 20,000 m²" in land and "€0.30/m²" in land and "not scored here" in land
+    assert "forestry project" in forest and "10 ha" in forest and "not a plot to resell" in forest
     assert len({home, invest, land, forest}) == 4
-    assert all("EUROPOP2019" in text and "not a forecast" in text for text in (home, invest, land, forest))
+    assert all("EUROPOP2019" in text and "not a forecast" in text for text in (home, invest, land))
+    assert "EUROPOP2019" not in forest
 
 
 def test_investment_does_not_believe_an_impossible_discount(monkeypatch):
@@ -445,9 +461,9 @@ def test_a_province_average_or_an_unseen_house_does_not_count_as_a_discount(monk
     assert any("not counted (a province average" in r for r in province_reasons)
     unseen = {**home, "price": 45000, "raw_json": json.dumps({"photo_check": {"shows_house": False}})}
     monkeypatch.setattr(scoring, "local_price", lambda item: (800, "MIVAU"))
-    hidden, hidden_reasons = score_detail(unseen)
+    hidden, hidden_reasons = score_detail(unseen, mode="invest")
     assert any("not counted (the photos do not show the house)" in r for r in hidden_reasons)
-    seen = score_detail({**home, "price": 45000})[0]
+    seen = score_detail({**home, "price": 45000}, mode="invest")[0]
     assert hidden < seen
 
 
@@ -763,3 +779,35 @@ def test_unreachable_land_gets_no_timber_return():
                                                     "inaccessible": 0.88}})}
     _, reasons = score_detail(plot, mode="forest")
     assert not any("meets the 20% goal" in r for r in reasons)
+
+
+def test_a_listing_only_wins_a_goal_of_its_own_kind():
+    from scoring import goal_family
+    house = listing(area_m2=100, price=30000)
+    field = plot(area_m2=80000, price=12000)
+    assert goal_family(house) == "home"
+    assert goal_family(field) == "land"
+    ruin = listing(title="Quinta com casa em ruínas", description="Prédio rústico com 6 ha.",
+                   area_m2=60000, price=25000)
+    assert goal_family(ruin) == "land"
+
+
+def test_a_river_on_the_map_is_not_also_counted_from_the_words():
+    words = plot(description="Finca junto al río", area_m2=80000, price=20000)
+    mapped = {**plot(area_m2=80000, price=20000), "climate": {"water_km": 0.2}}
+    both = {**words, "climate": {"water_km": 0.2}}
+    assert score_detail(words, mode="land")[0] > score_detail(plot(area_m2=80000, price=20000), mode="land")[0]
+    assert score_detail(both, mode="land")[0] == score_detail(mapped, mode="land")[0]
+
+
+def test_investment_land_does_not_inherit_a_home_sale():
+    """No bids, a deadline, and a person on the land are a home's sale, not a plot's."""
+    from datetime import datetime, timezone
+    base = plot(area_m2=80000, price=20000)
+    now = datetime(2026, 10, 6, tzinfo=timezone.utc)
+    assert score_detail(base, mode="land")[0] == score_detail({**base, "current_bid": 0}, mode="land")[0]
+    soon = {**base, "date_end": "2026-10-08T12:00:00"}
+    assert score_detail(soon, now=now, mode="land")[0] == score_detail(base, now=now, mode="land")[0]
+    taken, reasons = score_detail({**base, "description": "Terreno arrendado."}, mode="land")
+    assert taken > 0 and not any(r.startswith("rejected: occupied") for r in reasons)
+    assert any("someone on the land" in r for r in reasons)

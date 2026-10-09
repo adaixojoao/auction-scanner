@@ -157,11 +157,14 @@ def sources_page():
 @app.route("/settings")
 def settings_page():
     import checklist
-    from scoring import WEIGHTS
+    from scoring import weight_groups
     cfg = _config()
     routes = [(route, label, [(it.key, it.label, it.key in checklist.blocking_keys(route, cfg)) for it in items])
               for route, (label, items) in checklist.TEMPLATES.items()]
-    return _page("settings.html", "settings", "Settings", weights=list(WEIGHTS.items()), checklist_routes=routes)
+    groups = weight_groups()
+    return _page("settings.html", "settings", "Settings", weight_groups=groups,
+                 weight_keys=[(mode, key) for mode, _, dials in groups for key, _ in dials],
+                 checklist_routes=routes)
 
 
 # Old addresses from before the pages were unified.
@@ -953,14 +956,13 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
 def api_offers():
     import checklist
     from letters import channel, classify_property
-    from scoring import EARNING_MODES
+    from scoring import EARNING_MODES, mixed_order
     from source_validation import asking_price
 
     db = get_db()
     try:
-        # Ranked as an investment home, as land, or as a forestry plot. A home
-        # to live in stays on its own tab: its score is climate and a place to
-        # swim, and that used to fill this list.
+        # Ranked as an investment home or as land. A home to live in and a
+        # forestry project stay on their own tabs.
         items = load_best(db, filters=_config().get("filters"), include_hidden=True,
                           modes=EARNING_MODES)
         logs = [dict(r) for r in db.execute("SELECT * FROM carta_log ORDER BY created_at DESC, id DESC")]
@@ -999,9 +1001,9 @@ def api_offers():
                 and classify_property(it.get("title") or "", it.get("description") or "",
                                       it.get("area_m2") or 0) is not None):
             candidates.append(it)
-    candidates.sort(key=lambda it: -it.get("rank", it["score"]))
+    candidates.sort(key=mixed_order)
     review = [_offer_view(it, it["id"], checks=checks, cfg=cfg) for it in
-              sorted(shortlisted, key=lambda it: -it.get("rank", it["score"])) + candidates[:size]]
+              sorted(shortlisted, key=mixed_order) + candidates[:size]]
 
     sent, closed = [], []
     for log in logs:
@@ -1711,10 +1713,18 @@ def api_settings_save():
             changes[section] = vals
     weights = (changes.get("filters") or {}).get("weights")
     if weights is not None:
-        from scoring import WEIGHTS
-        if not isinstance(weights, dict) or any(k not in WEIGHTS or not isinstance(v, (int, float))
-                                                or not 0 <= v <= 2 for k, v in weights.items()):
-            return jsonify({"error": "weights: known names, each 0 to 2"}), 400
+        from scoring import MODE_WEIGHTS, WEIGHTS
+        flat = isinstance(weights, dict) and all(not isinstance(v, dict) for v in weights.values())
+        nested = isinstance(weights, dict) and weights and all(isinstance(v, dict) for v in weights.values())
+        def _dial_ok(name, value, allowed):
+            return name in allowed and isinstance(value, (int, float)) and 0 <= value <= 2
+        if flat and all(_dial_ok(k, v, WEIGHTS) for k, v in weights.items()):
+            pass
+        elif nested and all(mode in MODE_WEIGHTS and all(_dial_ok(k, v, MODE_WEIGHTS[mode]) for k, v in group.items())
+                            for mode, group in weights.items()):
+            pass
+        else:
+            return jsonify({"error": "weights: one dial per goal, each 0 to 2"}), 400
     if not isinstance((changes.get("climate") or {}).get("bid_guardrail", False), bool):
         return jsonify({"error": "climate.bid_guardrail must be true or false"}), 400
     blocking = (changes.get("checklist") or {}).get("blocking")

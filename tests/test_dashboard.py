@@ -148,7 +148,7 @@ def test_offers_rank_court_and_bank_sales_not_portal_ads_or_a_home_to_live_in(cl
     ids = [o["id"] for o in review]
     assert "fotocasa:ad" not in ids
     court = next(o for o in review if o["id"] == "citius:court")
-    assert court["mode"] in ("invest", "land", "forest")
+    assert court["mode"] in ("invest", "land")
     client.post("/api/listings/status", json={"id": "fotocasa:ad", "status": "shortlisted"})
     ids = [o["id"] for o in client.get("/api/offers").get_json()["review"]]
     assert "fotocasa:ad" in ids

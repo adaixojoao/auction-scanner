@@ -17,7 +17,7 @@ from email.mime.text import MIMEText
 
 from common import COUNTRY_NAMES, utcnow
 from db import load_best, mark_alerted, not_yet_alerted
-from scoring import FORCED_SOURCES
+from scoring import FORCED_SOURCES, mixed_order
 
 LOG = logging.getLogger("auction-scanner")
 
@@ -97,7 +97,7 @@ def send_alerts(db, notify_cfg: dict, score_fn=None, max_price: float = 50000,
     if notify_cfg.get("send_on", "new") == "new":
         fresh = not_yet_alerted(db, CHANNEL, [it["id"] for it in alerts])
         alerts = [it for it in alerts if it["id"] in fresh]
-    alerts.sort(key=lambda it: -it.get("rank", it["score"]))
+    alerts.sort(key=mixed_order)
 
     if not alerts:
         LOG.info(f"No listings scoring >= {min_score} to e-mail about")
@@ -166,7 +166,7 @@ def send_weekly_digest(db, notify_cfg: dict, score_fn=None, max_price: float = 5
 
     now = utcnow()
     scored = list(load_best(db, filters=filters, now=now))
-    scored.sort(key=lambda it: -it.get("rank", it["score"]))
+    scored.sort(key=mixed_order)
     top = scored[:top_n]
     if not top:
         LOG.info("Weekly digest: no listings to report")

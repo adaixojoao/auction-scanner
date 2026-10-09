@@ -2,7 +2,7 @@
 import pytest
 
 import dashboard
-from scoring import WEIGHTS, score_detail
+from scoring import score_detail
 
 
 @pytest.fixture
@@ -37,4 +37,18 @@ def test_weights_are_saved_and_checked(client):
     assert client.post("/api/settings", json={"filters": {"weights": {"beach": 3}}}).status_code == 400
     assert client.post("/api/settings", json={"filters": {"weights": {"nope": 1}}}).status_code == 400
     page = client.get("/settings").get_data(as_text=True)
-    assert all(f'id="w_{k}"' in page for k in WEIGHTS)
+    assert 'id="w_home_beach"' in page and 'id="w_invest_beach"' in page and 'id="w_land_price"' in page
+    nested = client.post("/api/settings", json={"filters": {"weights": {"home": {"beach": 0}, "invest": {"beach": 2}}}})
+    assert nested.status_code == 200
+    saved = client.get("/api/settings").get_json()["filters"]["weights"]
+    assert saved["home"]["beach"] == 0 and saved["invest"]["beach"] == 2
+
+
+def test_each_goal_keeps_its_own_dials():
+    """Turning the beach off for a home leaves the holiday-let beach alone."""
+    off_home = score_detail(HOME, targets={"weights": {"home": {"beach": 0}}})[0]
+    loud_invest = score_detail(HOME, mode="invest", targets={"weights": {"invest": {"beach": 2}}})[0]
+    assert off_home == score_detail({**HOME, "beach": None})[0]
+    assert loud_invest > score_detail(HOME, mode="invest")[0]
+    # A flat dict from an older config.json still applies to the goal being scored.
+    assert score_detail(HOME, targets={"weights": {"beach": 0}})[0] == off_home

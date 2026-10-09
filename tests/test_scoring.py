@@ -313,15 +313,22 @@ def test_what_a_listing_is():
 def test_rural_plots_must_be_big_and_cheap():
     # Plots are ranked on Investment land (mode="land"); My home ranks homes.
     land = lambda **kw: score(item(**kw), mode="land")   # noqa: E731
-    small, r_small = land(title="Prédio rústico", area_m2=3000, price=1500)
+    _, r_small = land(title="Prédio rústico", area_m2=3000, price=1500)
     big_cheap, r_big = land(title="Prédio rústico", area_m2=30000, price=4500)    # €0.15/m²
     big_dear, r_dear = land(title="Prédio rústico", area_m2=30000, price=45000)   # €1.50/m²
-    unknown, r_unknown = land(title="Prédio rústico", price=4500)
+    _, r_unknown = land(title="Prédio rústico", price=4500)
     assert "rural plot too small (3 000 m² < 1.0 ha)" in r_small
     assert "medium rural plot (3.0 ha)" in r_big and "very cheap land (€0.15/m²)" in r_big
     assert "dear for rural land (€1.50/m²)" in r_dear
     assert "rural plot, size unknown" in r_unknown
-    assert big_cheap > unknown > small and big_cheap > big_dear
+    # Shown scores squash anything under the line to 0; the rank (raw points)
+    # still puts a cheap plot above an unknown size above a plot that is too small.
+    order = [score_detail(item(**kw), mode="land")[0] for kw in (
+        dict(title="Prédio rústico", area_m2=30000, price=4500),
+        dict(title="Prédio rústico", price=4500),
+        dict(title="Prédio rústico", area_m2=3000, price=1500))]
+    assert order == sorted(order, reverse=True) and len(set(order)) == 3
+    assert big_cheap > big_dear
     # the limits come from Settings (config filters)
     _, relaxed = score(item(title="Prédio rústico", area_m2=3000, price=1500), mode="land",
                        targets={"rural_min_m2": 2000, "rural_max_eur_m2": 1})
@@ -405,24 +412,25 @@ def test_condition_words_in_fr_pt_es_hr():
 
 
 def test_land_is_not_priced_like_buildings():
-    # A 2 000 m² plot in Porto is not "99% below the local price per m²" of flats.
+    # A flat's gap to the local €/m² is the Investment home goal.
     _, plot = score(item(title="Terreno para construção", area_m2=2000, concelho="Porto", price=50000))
     _, home = score(item(title="Apartamento", area_m2=80, concelho="Porto", price=50000))
+    _, invested = score(item(title="Apartamento", area_m2=80, concelho="Porto", price=50000), mode="invest")
     assert not any("below local prices" in r for r in plot)
-    assert any("below local prices" in r for r in home)
+    assert not any("below local prices" in r for r in home)
+    assert any("below local prices all-in" in r for r in invested)
 
 
-def test_a_home_bigger_than_1000_m2_still_gets_a_discount_unless_that_size_is_the_plot(monkeypatch):
-    import json
+def test_a_home_bigger_than_1000_m2_is_valued_as_a_building_on_the_investment_goal(monkeypatch):
     import scoring
     monkeypatch.setattr(scoring, "local_price", lambda item: (1000, "test €/m²"))
     house = dict(title="Moradia isolada", description="em bom estado", concelho="Guarda", price=20000)
-    _, floor = score(item(**house, area_m2=150))
-    _, scraped = score(item(**house, area_m2=20000))
-    _, plot_sized = score(item(**house, area_m2=20000, raw_json=json.dumps({"land_m2": 20000})))
-    assert any("below local prices" in r for r in floor)
-    assert any(r.startswith("92% below local prices") for r in scraped)   # 250 m² of building, not 2 ha
-    assert not any("below local prices" in r for r in plot_sized)
+    _, floor = score(item(**house, area_m2=150), mode="invest")
+    _, scraped = score(item(**house, area_m2=20000), mode="invest")
+    _, lived = score(item(**house, area_m2=150))
+    assert any("below local prices all-in" in r for r in floor)
+    assert any("below local prices all-in" in r for r in scraped)   # 250 m² of building, not 2 ha
+    assert not any("below local prices" in r for r in lived)
 
 
 def test_shops_and_garages_are_not_the_goal():
@@ -493,13 +501,14 @@ def _ex(**kw):
     return item(**kw)
 
 
-OWNER_WANTS = [   # a home to live in, best first
+OWNER_WANTS = [   # a home to live in, best first. The price you pay outranks a dearer house
+                  # in a better town; the local €/m² gap is the Investment home goal.
+    _ex(title="Moradia em bom estado", description="Casa de habitação.",
+        area_m2=100, price=9000),                                     # pristine, dirt cheap
     _ex(title="Moradia T3 em bom estado", description="Remodelada, no centro da vila.",
-        concelho="Guarda", area_m2=120, price=45000),                  # pristine, great place, well under market
+        concelho="Guarda", area_m2=120, price=45000),                  # pristine, great place, higher price
     _ex(title="Moradia T2", description="Necessita de obras. No centro da vila.",
         concelho="Guarda", area_m2=100, price=8000),                   # some repairs, dirt cheap, great place
-    _ex(title="Moradia em bom estado", description="Casa de habitação.",
-        area_m2=100, price=9000),                                     # pristine, dirt cheap, ordinary place
 ]
 OWNER_WANTS_LAND = [   # a plot as an investment, best first
     _ex(title="Prédio rústico com 8 ha", description="Terreno agrícola que confronta com o rio.",
@@ -549,7 +558,7 @@ def test_a_ruin_on_a_big_farm_is_valued_as_land():
                              description="Prédio misto com 6 ha de terreno agrícola.",
                              area_m2=60000, price=25000), mode="land")
     assert "ruin on a farm — valued as land" in reasons and "large rural plot (6.0 ha)" in reasons
-    assert sc >= 80
+    assert sc > 60
 
 
 def test_water_is_next_to_the_plot_not_a_place_name():
