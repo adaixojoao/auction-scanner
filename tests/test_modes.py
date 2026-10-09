@@ -213,6 +213,27 @@ def test_what_land_goes_for_is_the_scanners_own_asking_prices():
     assert land_prices.observed_value({"country": "PT", "land_market": index}) is None
 
 
+def test_official_farm_prices_are_used_only_when_the_ad_names_that_land():
+    """Spain and Italy publish agricultural land. A rustic plot, a wood, or a
+    country with no survey is not given that price."""
+    import land_prices
+    pasture = land_prices.land_value({"country": "ES", "district": "Asturias", "title": "Finca de pastizal"})
+    assert pasture["eur_ha"] == 7316
+    assert "MAPA" in pasture["label"] and "pastizal" in pasture["label"] and "not forest" in pasture["label"]
+    olive = land_prices.land_value({"country": "ES", "district": "Málaga", "title": "Olivar de secano"})
+    assert olive["eur_ha"] == 17029 and "Andalucía" in olive["label"]
+    # Valencia publishes no pastizal price. The national figure is not used.
+    assert land_prices.land_value({"country": "ES", "district": "Valencia", "title": "Pastizal"}) is None
+    assert land_prices.land_value({"country": "ES", "district": "Asturias", "title": "Terreno rústico"}) is None
+    assert land_prices.land_value({"country": "ES", "district": "Asturias",
+                                   "title": "Monte con bosque y pastizal"}) is None
+    sicily = land_prices.land_value({"country": "IT", "district": "Messina", "title": "Terreno agricolo"})
+    assert sicily["eur_ha"] == 10300 and "CREA" in sicily["label"] and "Sicilia" in sicily["label"]
+    assert land_prices.land_value({"country": "IT", "district": "Messina", "title": "Bosco"}) is None
+    assert land_prices.land_value({"country": "IT", "district": "Messina", "title": "Vigneto"}) is None
+    assert land_prices.land_value({"country": "PT", "district": "Guarda", "title": "Terreno de pastagem"}) is None
+
+
 def test_woodland_is_compared_with_the_official_forest_price_where_there_is_one():
     import land_prices
     landes = {"country": "FR", "district": "40", "land_market": {"FR": {"eur_ha": 7000, "plots": 30}}}

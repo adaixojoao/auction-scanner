@@ -744,7 +744,8 @@ _INVEST_PRIORITIES = (
 
 _LAND_PRIORITIES = (
     "A plot bought as an investment, not to live on and not to farm by hand. What matters is the "
-    "price per hectare against what land actually sells for in that district, so say if you think "
+    "price per hectare against what land actually sells for there — an official survey when the ad "
+    "names that kind of land, otherwise the asking prices the scanner has seen — so say if you think "
     "the comparison is wrong. Wanted: at least {min_m2} m², at most €{max_eur_m2}/m² (about "
     "€{max_eur_ha} per hectare); water on or beside it; a road a lorry can use; a town near "
     "enough that somebody will buy it from you; building land (urban, with a licence) is worth "
