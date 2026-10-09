@@ -23,6 +23,7 @@ starting.lock
 reports/
 app.log*
 app-output.log
+app-error.log
 backups/
 .installed-requirements
 .last-update.json
