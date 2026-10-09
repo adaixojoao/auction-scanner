@@ -131,6 +131,9 @@ def test_percent_share_of_solar_or_inmueble_is_caught():
     assert is_percent_share("Transmisión de 3/4 de la finca registral")
     # bare "indiviso" word
     assert is_percent_share("Piso en indiviso, se vende participación")
+    assert is_percent_share("VENDA DE 50% DO DIREITO DA PROPRIEDADE DA MORADIA")
+    assert is_percent_share("Em venda apenas 50% do imóvel")
+    assert not is_percent_share("Abre a 50% do valor base")
 
 
 def test_vacant_is_not_occupied():
@@ -298,6 +301,11 @@ def test_what_a_listing_is():
     assert kind(item(title="Apartamento T2")) == "home"
     assert kind(item(title="Loja no rés-do-chão")) == "other"          # not a home because of "rés-do-chão"
     assert kind(item(title="Garagem no piso -1")) == "other"
+    shop = item(title="EL LOCAL BAJO de la casa número nueve de la calle San Simón",
+                description="Ocupa una superficie de dieciséis metros cuadrados.")
+    assert kind(shop) == "other"
+    assert score(shop)[0] == 0
+    assert kind(item(title="Moradia T3 com loja no rés-do-chão")) == "home"
     assert kind(item(title="Prédio rústico denominado Fontainhas", area_m2=800)) == "rural_plot"
     assert kind(item(title="Terreno para construção")) == "urban_plot"
     assert kind(item(title="Lote 3 - Imóvel")) is None                   # an auction lot, not a building plot

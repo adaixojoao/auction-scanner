@@ -45,7 +45,12 @@ _PERCENT_SHARE = re.compile(
     r"|solar|inmueble|finca|terreno|piso|vivienda|parcela)\b"
     r"|\bproindiviso\b|\bpro indiviso\b|\bindiviso\b|\bparticipaci[oó]n indivisa\b"
     r"|\b\d{1,2}/\d{1,2}\s+(?:de(?:l| la| los| las)?|do|da)\s+"
-    r"(?:indiviso|propiedad|inmueble|finca|terreno|piso|vivienda|parcela|solar)\b")
+    r"(?:indiviso|propiedad|inmueble|finca|terreno|piso|vivienda|parcela|solar)\b"
+    # "venda de 50% do direito da propriedade", "apenas 50% do imóvel".
+    # Not "50% do valor base": that is an auction's opening bid.
+    r"|\b\d{1,2}(?:[.,]\d+)?\s*%\s+(?:do|da|de|del|de la|della|des)\s+"
+    r"(?:direito(?:\s+d[ae]\s+propriedade)?|direitos|propriedade|propiedad|propriete|"
+    r"imovel|moradia|habitacao|fracao|vivienda|inmueble|finca|parcela)\b")
 
 
 # A share named in words in the text: Slovak/Czech, Croatian, Bulgarian court sales.
@@ -426,6 +431,13 @@ RURAL_TYPES = {normalize(t) for t in (
 # A stable, hayloft or shed sold under a "Casa en …" title. A house that also
 # has one ("casa … con cuadra") stays a house: the dwelling word is in the text.
 OUTBUILDING_WORDS = ["cuadra", "pajar", "establo", "cabaña", "cabana", "nave"]
+
+# The thing for sale is a shop. Checked before a house word, so "local bajo
+# de la casa número 9" is the shop. A house that also has a shop is not these.
+_SHOP_SUBJECT = ["local comercial", "local bajo", "bajo comercial", "loja",
+                 "local commercial", "fonds de commerce", "negozio"]
+_CASA_ADDRESS = re.compile(r"\bcasa\s+numero\b")
+
 
 OTHER_WORDS = [   # not a home and not a plot
     "parking", "garagem", "garage", "garaje", "box", "emplacement", "estacionamento",
@@ -938,6 +950,13 @@ def property_kind(item: dict) -> str | None:
         if _is_household_goods(text):
             return "other"
         norm = normalize(text)
+        # A shop sold as the property. "casa número 9" is the building it sits
+        # in, not a house. A moradia that also has a shop stays a house.
+        if has_term(text, _SHOP_SUBJECT, negations=False):
+            homes = [w for w in find_terms(text, DWELLING_WORDS, negations=False)
+                     if w != "casa" or not _CASA_ADDRESS.search(norm)]
+            if not homes:
+                return "other"
         if _PLOT_FOR_A_HOUSE.search(norm) or (_STARTS_AS_LAND.match(norm) and (
                 not has_term(text, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False)
                 # "Prédio rústico …, Casa Caída": a place name, not a house on it
@@ -1528,6 +1547,8 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
             and has_term(full, RURAL_WORDS, negations=False)):
         kind = "rural_plot"
         reasons.append("ruin on a farm — valued as land")
+    if kind == "other":
+        return 0.0, ["shop, garage or not a home or plot — skip"]
 
     if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
         s += _climate_points(item["climate"], kind, reasons, caps)
