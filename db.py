@@ -601,7 +601,9 @@ def _twin_units(rows, dup_of: dict) -> list[list]:
         group = [same[0]]
         for r in same[1:]:
             base = group[0]
+            # Without both sizes two lots cannot be told to be the same flat: keep both.
             if (r["price"] <= base["price"] * (1 + TWIN_UNIT_TOLERANCE)
+                    and r["area_m2"] is not None and base["area_m2"] is not None
                     and abs(r["area_m2"] - base["area_m2"]) <= base["area_m2"] * TWIN_UNIT_TOLERANCE):
                 group.append(r)
             else:
