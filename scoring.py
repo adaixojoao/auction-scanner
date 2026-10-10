@@ -129,7 +129,12 @@ SUBSIDISED_HOUSING = ["vivienda protegida", "vivienda de protección oficial", "
 UNFINISHED_HOUSE = ["vivienda en construcción", "vivienda en construccion", "casa en construcción",
                     "obra parada", "obra sin terminar", "obra inacabada", "construção inacabada",
                     "moradia inacabada", "em construção", "maison inachevée"]
-NO_VIEWING = ["sin visitas previas", "subasta fácil", "subasta facil"]
+NO_VIEWING = ["sin visitas previas", "subasta fácil", "subasta facil", "cesión de remate", "cesion de remate"]
+# The price shown is a down payment: monthly payments for years (or for life) follow.
+INSTALMENT_SALE = ["viager", "vente à terme", "vente a terme"]
+# Not in the land registry: no mortgage, and the title has to be proved first.
+NOT_REGISTERED = ["no está registrada", "no está registrado", "no está inscrita", "no está inscrito",
+                  "sin inscribir", "sin inscripción registral", "não está registad*", "sem registo predial"]
 # A bank flat nobody may visit: in practice someone lives in it.
 NOT_VISITABLE = ["no visitable", "no se puede visitar", "sin posibilidad de visita", "não visitável"]
 
@@ -475,6 +480,13 @@ HEAVY_WORK = [
     "restauración completa", "restauracion completa", "para restarurar", "para restarura",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
     "à réhabiliter", "da ristrutturare", "da ristrutturare integralmente",
+    # Not bare "rénovation totale": "a fait l'objet d'une rénovation totale" is a done job.
+    "nécessite une rénovation*", "rénovation totale à prévoir", "rénovation complète à prévoir",
+    "entièrement à rénover", "tout à rénover", "à rénover entièrement", "à rénover intégralement",
+    # Not bare "non habitable": "combles non habitables" is a room type.
+    "immeuble non-habitable", "maison non-habitable", "logement non-habitable", "bien non-habitable",
+    "actuellement non-habitable",
+    "pra reformar", "pra recuperar", "pra reconstruir",
     "ristrutturazione integrale", "ristrutturazione totale", "necessita di ristrutturazione",
     "rudere", "fatiscente", "inagibile", "non abitabile", "non abitabili",
     "pessimo stato", "in pessimo stato", "pessime condizioni", "in pessime condizioni",
@@ -508,6 +520,15 @@ SOME_WORK = [
     "necesita rehabilitacion", "para finalizar", "por finalizar",
     "travaux à prévoir", "à rafraîchir", "a rafraichir", "en travaux", "partiellement en travaux",
     "travaux à réaliser", "da rimodernare",
+    "travaux sont à prévoir", "travaux de rénovation à prévoir", "prévoir des travaux",
+    "sera à prévoir", "seront à prévoir", "à refaire", "partiellement rénové*",
+    # Imovirtual's state "por renovar"; "partly done" is not done.
+    "por renovar", "parcialmente remodelad*", "parcialmente renovad*", "parcialmente recuperad*",
+    "parcialmente reabilitad*", "parcialmente reformad*", "parzialmente ristrutturat*",
+    # "no está acto para entrar a vivir": Spanish "no" is not a negation word here (Portuguese "no" is "in the").
+    "no está acto", "no esta acto", "no está apto", "no está lista para", "no está listo para",
+    "falta de luz", "falta de agua", "sin luz ni agua", "sin agua ni luz",
+    "sin suministro de agua", "sin suministro eléctrico", "sin suministros",
     "da sistemare", "necessita di lavori", "necessita di interventi", "mediocre stato", "discreto stato",
     "scarsa manutenzione", "manutenzione straordinaria",
     "manutenzione scadente", "stato di manutenzione scadente", "scadente stato di manutenzione",
@@ -778,7 +799,10 @@ _INVEST_PRIORITIES = (
     "share of the property, a ruin sold as a home, an area that is really the plot) — say what to "
     "check, and do not treat that gap as a bargain or work out a rent on that price; a flat too "
     "small "
-    "to let; somewhere the heat by 2071-2100 or a flood zone will take the value away. When the "
+    "to let; somewhere the heat by 2071-2100 or a flood zone will take the value away; in France, "
+    "an energy class (DPE) of G or F, because such homes normally cannot be let on a new lease (G "
+    "since 2025, F from 2028) until energy works are done; a price that is only the down payment of "
+    "a viager or vente à terme. When the "
     "listing does not say the condition, treat it as needing work. Judge the money, not whether "
     "the buyer would enjoy living there."
 )
@@ -922,7 +946,8 @@ _DESC_OPENS_AS_FINCA = re.compile(
     r"|terreno(?: grande| rustico| agrario)?)\b"
     r"|^\W*(?:\w+\W+){0,8}?(?:se vende |vendo )?(?:una )?(?:preciosa |bonita )?parcela rustica\b")
 _SELLS_A_PLOT = re.compile(
-    r"\bse vende (?:una |un )?(?:preciosa |bonita |gran )?(?:parcela|finca rustica|terreno)\b"
+    r"\bse venden? (?:una |un |dos |tres |varias )?(?:preciosa |bonita |gran )?"
+    r"(?:parcelas?|fincas? rusticas?|terrenos?)\b"
     r"|\bactualmente es una parcela\b"
     r"|\bpresentamos (?:esta|una) (?:\w+ )?finca de\b")
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
@@ -1093,6 +1118,29 @@ def built_year(item: dict) -> int | None:
     except (TypeError, ValueError):
         return None
     return year if 1700 <= year <= 2100 else None
+
+
+_DPE = re.compile(r"\b(?:classe\s+(?:energie|energetique|dpe)|dpe)\s*:?\s*([a-g])\b"
+                  r"(?!\s+(?:venir|faire|realiser|prevoir))")     # "DPE à venir"
+# The wording French ads must carry for an F or G home.
+_DPE_EXCESSIVE = ["consommation énergétique excessive", "consommation energetique excessive"]
+
+
+def energy_class(item: dict) -> str | None:
+    """A French home's DPE letter: the portal's field, else the text. "F/G" when
+    the ad only carries the legal "consommation énergétique excessive" line."""
+    letter = str(_raw(item).get("dpe") or "").upper()
+    if letter in ("A", "B", "C", "D", "E", "F", "G"):
+        return letter
+    text = f"{item.get('title') or ''} {item.get('description') or ''}"
+    m = _DPE.search(normalize(text))
+    if m:
+        return m.group(1).upper()
+    return "F/G" if has_term(text, _DPE_EXCESSIVE, negations=False) else None
+
+
+# France bars new leases on G homes from 2025 and on F from 2028 (loi Climat et résilience).
+INVEST_DPE_POINTS = {"G": -12, "F/G": -8, "F": -6}
 
 
 PROVINCE_AVERAGE_VALUE = 0.7   # a village home against its province's average (cities included)
@@ -1415,7 +1463,8 @@ def score_detail(item: dict, now: datetime | None = None,
 def no_possession(item: dict, full: str) -> bool:
     """Okupas, or a bank that does not have the keys. A sitting tenant is not this:
     the ad says arrendado, and Investment home still scores that as a let."""
-    if has_term(full, ["okupad*", "okupa*", "sin posesión", "sin posesion", "sin la posesión"],
+    if has_term(full, ["okupad*", "okupa*", "sin posesión", "sin posesion", "sin la posesión",
+                       "no se contará con la posesión", "no se contara con la posesion"],
                 negations=False):
         return True
     posesion = normalize(str(_raw(item).get("posesion") or ""))
@@ -1451,6 +1500,8 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
         return "subsidised housing (buyer must qualify, resale price capped) — skip"
     if is_timeshare(full):
         return "timeshare (some weeks a year) — skip"
+    if has_term(full, INSTALMENT_SALE):
+        return "viager or vente à terme: the price is only the down payment, monthly payments follow — skip"
     return None
 
 
@@ -1475,6 +1526,9 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
     if has_term(full, NOT_VISITABLE, negations=False):
         caps.append(UNCHECKED_CAP)
         reasons.append("cannot be visited — usually means someone lives there; ask before bidding")
+    if has_term(full, NOT_REGISTERED, negations=False):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("not in the land registry — normally no mortgage; have a lawyer check the title")
     if item.get("place_conflict"):
         # The title names a town far from where the listing is placed: the
         # climate and distances belong to the wrong place.
@@ -2616,6 +2670,11 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     s += {"good": 5, "some": -5, "heavy": -15}.get(state, -3)
     reasons.append({"good": "good condition", "some": "needs some work", "heavy": "needs heavy work"}.get(
         state, "condition not stated"))
+    dpe = energy_class(item) if item.get("country") == "FR" else None
+    if dpe in INVEST_DPE_POINTS:
+        s += INVEST_DPE_POINTS[dpe]
+        reasons.append(f"energy class {dpe}: in France a G home normally cannot be let on a new lease "
+                       "since 2025, an F one from 2028 — budget energy works before letting (check the DPE)")
     if area and area < 30:
         s -= 10
         reasons.append(f"small ({area:.0f} m²)")

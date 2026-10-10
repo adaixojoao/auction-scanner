@@ -262,6 +262,8 @@ def parse_bienici(ad: dict) -> dict | None:
     blur = ad.get("blurInfo") or {}
     pos = blur.get("position") or {}
     raw: dict = {"land_m2": ad.get("landSurfaceArea")}
+    if ad.get("energyClassification") in ("A", "B", "C", "D", "E", "F", "G"):
+        raw["dpe"] = ad["energyClassification"]
     if pos.get("lat") and pos.get("lon"):
         raw["geo"] = {"lat": float(pos["lat"]), "lon": float(pos["lon"]),
                       "precision": "street" if blur.get("type") == "exact" else "village"}
@@ -269,9 +271,12 @@ def parse_bienici(ad: dict) -> dict | None:
     town = ad.get("city")
     kind = "Terrain" if land else "Maison"
     extra = f" · terrain {ad['landSurfaceArea']:.0f} m²" if ad.get("landSurfaceArea") and not land else ""
+    # Agents paste HTML: "travaux sont<br>à prévoir" must read as one phrase.
+    text = html.unescape(re.sub(r"<[^>]+>", " ", ad.get("description") or ""))
+    text = re.sub(r"[ \t\xa0]+", " ", text).strip()
     return make_listing(
         "bienici", ad["id"], "FR", title=f"{kind} à {town}" + (f" ({ad.get('postalCode')})" if ad.get("postalCode") else ""),
-        description=((ad.get("title") or "") + " · " + (ad.get("description") or "") + extra)[:3000].strip(" ·"),
+        description=((ad.get("title") or "") + " · " + text + extra)[:3000].strip(" ·"),
         tipo="terrain" if land else "maison",
         area_m2=(ad.get("landSurfaceArea") or ad.get("surfaceArea")) if land else ad.get("surfaceArea"),
         price=float(price), min_price=float(price), district=ad.get("departmentCode"), concelho=town,
