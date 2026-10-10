@@ -601,7 +601,9 @@ def _twin_units(rows, dup_of: dict) -> list[list]:
         group = [same[0]]
         for r in same[1:]:
             base = group[0]
+            # Without both sizes two lots cannot be told to be the same flat: keep both.
             if (r["price"] <= base["price"] * (1 + TWIN_UNIT_TOLERANCE)
+                    and r["area_m2"] is not None and base["area_m2"] is not None
                     and abs(r["area_m2"] - base["area_m2"]) <= base["area_m2"] * TWIN_UNIT_TOLERANCE):
                 group.append(r)
             else:
@@ -624,7 +626,7 @@ def _phrases(text: str | None) -> set[str]:
 
 
 def _same_house_elsewhere(a, b) -> bool:
-    if not (a["area_m2"] >= 40 and b["area_m2"] >= 40):
+    if not ((a["area_m2"] or 0) >= 40 and (b["area_m2"] or 0) >= 40):   # a size is needed to match
         return False
     if abs(a["area_m2"] - b["area_m2"]) > CROSS_SITE_AREA * max(a["area_m2"], b["area_m2"]):
         return False

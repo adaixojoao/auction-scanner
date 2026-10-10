@@ -560,7 +560,8 @@ def _needle(term: str) -> str:
 
 
 NEGATIONS = {"nao", "sem", "not", "non", "livre", "libre", "free", "nicht",
-             "kein", "keine", "ni", "senza", "geen"}
+             "kein", "keine", "ni", "senza", "geen",
+             "aucun", "aucune", "aucuns", "rien", "sans", "pas"}   # "aucun travaux à prévoir"
 
 
 def _negated(norm: str, start: int) -> bool:
