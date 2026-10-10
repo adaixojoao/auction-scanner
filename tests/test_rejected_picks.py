@@ -37,6 +37,7 @@ def test_uninhabitable_building_but_not_an_uninhabitable_attic():
 def test_partly_done_is_not_done():
     assert condition(item(source="imovirtual", country="PT", title="Casa de Aldeia parcialmente remodelada")) == "some"
     assert condition(item(source="imovirtual", country="PT", title="CASA pra reformar ALDEIA")) == "heavy"
+    assert condition(item(source="imovirtual", country="PT", title="Duas moradias antigas para restauro")) == "heavy"
 
 
 def test_french_works_phrased_around_the_verb():

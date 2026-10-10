@@ -487,6 +487,7 @@ HEAVY_WORK = [
     "immeuble non-habitable", "maison non-habitable", "logement non-habitable", "bien non-habitable",
     "actuellement non-habitable",
     "pra reformar", "pra recuperar", "pra reconstruir",
+    "para restauro", "precisa de restauro", "necessita de restauro", "a necessitar de restauro",
     "ristrutturazione integrale", "ristrutturazione totale", "necessita di ristrutturazione",
     "rudere", "fatiscente", "inagibile", "non abitabile", "non abitabili",
     "pessimo stato", "in pessimo stato", "pessime condizioni", "in pessime condizioni",

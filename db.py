@@ -624,7 +624,7 @@ def _phrases(text: str | None) -> set[str]:
 
 
 def _same_house_elsewhere(a, b) -> bool:
-    if not (a["area_m2"] >= 40 and b["area_m2"] >= 40):
+    if not ((a["area_m2"] or 0) >= 40 and (b["area_m2"] or 0) >= 40):   # a size is needed to match
         return False
     if abs(a["area_m2"] - b["area_m2"]) > CROSS_SITE_AREA * max(a["area_m2"], b["area_m2"]):
         return False
