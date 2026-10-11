@@ -783,6 +783,11 @@ def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
     assert parse_bienici({**BIENICI_AD, "price": [None, 38000]})["price"] == 38000
     land = parse_bienici({**BIENICI_AD, "propertyType": "terrain", "landSurfaceArea": 20000})
     assert land["tipo"] == "terrain" and land["area_m2"] == 20000
+    html_ad = parse_bienici({**BIENICI_AD, "energyClassification": "G",
+                             "description": "<p>Des travaux sont<br>à prévoir&nbsp;: toiture.</p>"})
+    assert "<" not in html_ad["description"] and "travaux sont à prévoir" in html_ad["description"]
+    assert json.loads(html_ad["raw_json"])["dpe"] == "G"
+    assert "dpe" not in json.loads(parse_bienici({**BIENICI_AD, "energyClassification": "NS"})["raw_json"])
     session = fake_http(lambda m, url, kw: FakeResponse(json_data={"total": 1, "realEstateAds": [BIENICI_AD]}))
     assert scrape_bienici(db, max_price=50000) == 4          # houses in 3 price bands, then land
     sent = [json.loads(c[2]["params"]["filters"]) for c in session.calls]

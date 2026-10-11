@@ -444,7 +444,7 @@ def test_a_home_bigger_than_1000_m2_is_valued_as_a_building_on_the_investment_go
 def test_shops_and_garages_are_not_the_goal():
     shop, r_shop = score(item(title="Loja comercial", price=10000))
     home, _ = score(item(title="Moradia", price=10000))
-    assert "not a home or plot" in r_shop and home - shop >= 30
+    assert any("not a home or plot" in r for r in r_shop) and home - shop >= 30
 
 
 def test_cheaper_is_better():

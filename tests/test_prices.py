@@ -117,7 +117,6 @@ def test_a_parish_price_beats_the_municipality_where_ine_has_one(pt_prices, tmp_
                       encoding="utf-8")
     monkeypatch.setattr(prices, "PT_PARISH_FILE", str(parish))
     assert prices.parish_names("União das freguesias de Vila do Bispo e Raposeira") == ["vila do bispo", "raposeira"]
-    village = {"country": "PT", "concelho": "Sabugal", "freguesia": "Malcata"}
     assert "parish" in prices.local_price("PT", "Sabugal", {}, parish="Malcata")[1]
     assert "parish" not in prices.local_price("PT", "Sabugal", {}, parish="Soito")[1]
 

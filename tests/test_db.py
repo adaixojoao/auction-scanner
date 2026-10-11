@@ -249,6 +249,19 @@ def test_duplicates_deduped_when_one_side_has_no_area(db, add):
     assert flagged == "citius:b"
 
 
+def test_a_listing_with_no_size_does_not_stop_the_cross_site_check(db, add):
+    # Two portals, prices €3,000 apart: the cross-site check ran and crashed on the missing size.
+    add("licitor", "a", "FR", title="Maison", price=20000, area_m2=None, concelho="Vierzon")
+    add("bienici", "b", "FR", title="Maison à Vierzon", price=23000, area_m2=90, concelho="Vierzon")
+    assert mark_duplicates(db) == 0
+    # Two lots of one court sale, neither with a size: not twins, and no crash.
+    add("licitor", "c", "FR", title="Une maison", description="Maison à vendre", price=10000, area_m2=None,
+        concelho="Bourges")
+    add("licitor", "d", "FR", title="Une maison", description="Maison à vendre", price=10500, area_m2=None,
+        concelho="Bourges")
+    assert mark_duplicates(db) == 0
+
+
 def test_two_houses_in_one_village_are_not_twins(db, add):
     add("fotocasa", "a", "ES", title="Casa en Castropodame", price=22000, area_m2=158, concelho="Castropodame",
         description="Amplia casa en el centro de Calamocos para reforma integral")

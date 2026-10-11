@@ -128,7 +128,8 @@ def test_compare_and_record_keep_the_difference(client, db, add):
     raw = {"processo": "1/10.0TBXXX", "tribunal": "Juízo", "modalidade": "Carta fechada",
            "agente_email": "ae@solic.pt"}
     add("citius", "b1", title="Moradia em bom estado", description="Habitação em bom estado",
-        price=80000, area_m2=100, concelho="Porto", raw_json=json.dumps(raw))
+        # Not Porto: €800/m² there is so far under its price that it scores 0 and leaves the list.
+        price=80000, area_m2=100, concelho="Guarda", raw_json=json.dumps(raw))
     lid = "citius:b1"
     detail = client.get(f"/api/listing?id={lid}").get_json()
     assert detail["bid_cap"]["recommended_bid"] and detail["bid_cap"]["waterfall"]
