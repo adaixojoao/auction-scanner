@@ -103,8 +103,52 @@ def test_renovation_is_banded_by_what_the_listing_admits_to(title, low, high):
 def test_renovation_only_for_a_home_whose_size_is_known():
     assert costs.renovation(home(kind="rural_plot", title="Terreno rústico")) is None
     assert costs.renovation(home(area_m2=0)) is None
-    assert costs.renovation(home(area_m2=5000)) is None      # that is the plot, not the building
+    assert costs.renovation(home(area_m2=0, title="Maison", description="terrain 1034 m²")) is None
     assert costs.estimate(home(area_m2=0))["all_in"] is None
+    # A stored area past the building cap is the plot. Renovate the building only,
+    # the same cap the investment score uses, so the cash check cannot skip the work.
+    from scoring import INVEST_VALUE_MAX_M2
+    low, high = costs.RENOVATION_EUR_M2["unknown"]
+    work = costs.renovation(home(area_m2=5000))
+    assert (work["low"], work["high"]) == (INVEST_VALUE_MAX_M2 * low, INVEST_VALUE_MAX_M2 * high)
+    assert "plot" in work["note"]
+
+
+def test_a_stored_area_the_notice_calls_land_is_not_a_floor():
+    # The only size is the plot. Renovation, rent and cash then have no floor
+    # to price — the same figure, not a guessed one.
+    only = home(area_m2=150, description="casa de habitação com quintal, área total do terreno de 150m2")
+    assert costs.building_m2(only) == (0.0, "")
+    assert costs.renovation(only) is None
+    assert costs.estimate(only)["all_in"] is None
+    # The footprint is not the floor. The gross construction area is.
+    beside = (
+        "área total do terreno de 150m2 área de implantação do edifício de 47,05m2 "
+        "área bruta de construção de 85,45m2 e área bruta privativa de 85,45m2")
+    assert costs.building_m2(home(area_m2=150, description=beside)) == (85.45, "notice")
+    # Land and a footprint, and no floor: still unknown. Repairs are not priced
+    # on the ground the house covers.
+    assert costs.building_m2(home(
+        area_m2=150,
+        description="área total do terreno de 150m2 área de implantação do edifício de 47,05m2")) == (0.0, "")
+    # On the real floor the middle of the repairs is over the cash, and so is the low end.
+    priced = home(area_m2=150, price=23880, description=beside)
+    low, high = costs.RENOVATION_EUR_M2["unknown"]
+    work = costs.renovation(priced)
+    assert (work["low"], work["high"]) == (round(85.45 * low), round(85.45 * high))
+    assert costs.over_cash(priced, 40000, typical=True)
+    assert costs.money_out(priced, typical=False)["amount"] > 40000
+    # The stored size is itself the floor, and a different plot is named too.
+    assert costs.building_m2(home(area_m2=90, description="moradia de 90 m2 com terreno de 400 m2")) == (90.0, "stored")
+    # The notice never mentions the stored size: it stays the floor.
+    assert costs.building_m2(home(area_m2=80, description="terreno de 500 m2")) == (80.0, "stored")
+
+
+def test_a_floor_area_written_only_in_the_notice_is_renovated():
+    work = costs.renovation(home(area_m2=0, title="Maison d'habitation de 80 m²"))
+    low, high = costs.RENOVATION_EUR_M2["unknown"]
+    assert (work["low"], work["high"]) == (80 * low, 80 * high)
+    assert "notice" in work["note"]
 
 
 def test_all_in_adds_the_work_to_the_price_and_the_fees():

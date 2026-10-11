@@ -198,7 +198,7 @@ def api_heartbeat():
 # ─── Listings ────────────────────────────────────────────────────────
 
 def _mode(args) -> str:
-    """Which goal the list is ranked for: home, invest or forest (scoring.MODES)."""
+    """Which goal the list is ranked for (scoring.MODES)."""
     from scoring import MODES
     mode = args.get("mode", "home")
     return mode if mode in MODES else "home"

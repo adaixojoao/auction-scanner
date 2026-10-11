@@ -123,6 +123,57 @@ def test_no_climate_libraries_means_no_climate_not_a_failed_scan(layers, db, add
     assert climate.for_item(items[0]) is None
 
 
+def test_exact_seaside_homes_are_read_before_a_missing_grade_rejects_them(layers, db, add, monkeypatch):
+    """Live and invest must not be the first time a seaside house is judged.
+
+    A home the score filter left out of the queue is still read when its pin is
+    the building and the sea is within 1.5 km. A town pin is not, and neither
+    is a plot. One already read does not use up the budget. A missing grade
+    stays unknown: it does not pass, and it is not called poor."""
+    import json
+
+    import geo
+    from scoring import score_detail
+    add("citius", "inland", title="Moradia no interior", tipo="moradia", area_m2=90, price=20000,
+        raw_json=json.dumps({"lat": 40.50, "lon": -7.50}))
+    add("citius", "sea", title="Moradia pela praia", tipo="moradia", area_m2=90, price=20000,
+        raw_json=json.dumps({"lat": 40.60, "lon": -7.60}))
+    add("citius", "town", title="Moradia na vila", tipo="moradia", area_m2=90, price=20000,
+        raw_json=json.dumps({"geo": {"lat": 40.70, "lon": -7.70, "precision": "municipality"}}))
+    add("citius", "plot", title="Terreno rustico", tipo="terreno", area_m2=20000, price=9000,
+        raw_json=json.dumps({"lat": 40.80, "lon": -7.80}))
+
+    def fake_beach(item, path=None, towns=None):
+        title = item.get("title") or ""
+        if "praia" in title or "Terreno" in title:
+            return {"km": 0.4, "approx": item.get("title", "").startswith("Moradia na"), "name": "Praia"}
+        if "vila" in title:
+            return {"km": 0.4, "approx": True, "name": "Praia"}
+        return {"km": 12.0, "approx": False, "name": "Praia"}
+
+    monkeypatch.setattr(geo, "nearest_beach", fake_beach)
+    inland = dict(db.execute("SELECT * FROM listings WHERE id = ?", ("citius:inland",)).fetchone())
+    assert climate.assess_pending(db, [inland], {}, limit=1, seaside_first=True) == 1
+    sea = dict(db.execute("SELECT * FROM listings WHERE id = ?", ("citius:sea",)).fetchone())
+    town = dict(db.execute("SELECT * FROM listings WHERE id = ?", ("citius:town",)).fetchone())
+    plot = dict(db.execute("SELECT * FROM listings WHERE id = ?", ("citius:plot",)).fetchone())
+    inland = dict(db.execute("SELECT * FROM listings WHERE id = ?", ("citius:inland",)).fetchone())
+    assert climate.stored(sea) is not None
+    assert climate.stored(inland) is None
+    assert climate.stored(town) is None
+    assert climate.stored(plot) is None
+    # Already read: the one slot goes to the inland house, not to the sea again.
+    assert climate.assess_pending(db, [inland], {}, limit=1, seaside_first=True) == 1
+    inland = dict(db.execute("SELECT * FROM listings WHERE id = ?", ("citius:inland",)).fetchone())
+    assert climate.stored(inland) is not None
+    unread = {"title": "Moradia T3", "tipo": "moradia", "area_m2": 90, "price": 20000,
+              "description": "moradia em bom estado", "source": "citius", "country": "PT",
+              "beach": {"km": 0.4, "approx": False},
+              "raw_json": json.dumps({"lat": 40.60, "lon": -7.60})}
+    assert score_detail(unread, mode="both")[0] == 0
+    assert score_detail(unread, mode="both")[1][0].startswith("climate unknown")
+
+
 def test_the_scan_stores_the_climate_and_the_list_only_reads_it(layers, db, add):
     import json
 

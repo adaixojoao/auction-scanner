@@ -16,6 +16,7 @@
 </div>
 
 <div class="tabs" id="modes" role="tablist" aria-label="What to rank for">
+  <button data-mode="both" role="tab">Live and invest</button>
   <button data-mode="home" role="tab">My home</button>
   <button data-mode="invest" role="tab">Investment home</button>
   <button data-mode="land" role="tab">Investment land</button>
@@ -92,13 +93,14 @@ const $ = id => document.getElementById(id);
 
 // Each goal ranked on its own (scoring.MODES).
 const MODE_NOTE = {
-  home: "A home to live in — not a plot: somewhere to swim within 1.5 km, your five wishes, mild winters if the Atlantic current fails.",
+  both: "Homes that pass as a place to live and as an investment: the pin is the house, the sea is within 1.5 km, the climate is good or excellent, the floor area is real, and the all-in cost fits your cash. Ranked by the worse of the two scores. An empty list is the honest one.",
+  home: "A home to live in — not a plot: the sea within 1.5 km, not a poor climate, your five wishes, mild winters if the Atlantic current fails.",
   invest: "Homes to make money on: far below the local price all-in (taxes, fees and the work), a net rental yield, by the beach, forced or bank sales.",
   land: "Plots as an investment: cheap per hectare against what land goes for there, big enough, reachable, water on it — with the forestry upside on top.",
   forest: "Land for a forestry project: the cheaper the hectare, the better, and the sooner the sale can close. 10 ha is the project, 5 ha can be a first plot. Portugal first — you can visit it. No deadline of this year.",
 };
-let mode = "home";
-try { mode = localStorage.getItem("listings-mode") || "home"; } catch (e) { /* private window */ }
+let mode = "both";
+try { mode = localStorage.getItem("listings-mode") || "both"; } catch (e) { /* private window */ }
 if (!MODE_NOTE[mode]) mode = "home";
 function showMode() {
   document.querySelectorAll("#modes button").forEach(b => {

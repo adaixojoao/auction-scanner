@@ -331,7 +331,7 @@ DEEP_FLOOD_M = 1.0
 # not the goal, so their score stays under the default minimum score (45) and
 # they are hidden unless you shortlist them.
 NOT_THE_GOAL_CAP = {"not a home or plot": 35, "unclear what it is": 40, "needs heavy work": 40,
-                    "isolated location": 40, "rejected:": 30,
+                    "isolated location": 40, "rejected:": 30, "not by the beach": 30,
                     # …and what belongs to another goal: each tab ranks one thing.
                     "a plot, not a place to live": 40, "a home, not land": 40}
 
@@ -761,6 +761,17 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
     The check used to be told a single mixed wish, so it judged a buy-to-let
     and a farm plot as if they had to be somewhere to live."""
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
+    if mode == "both":
+        return (
+            "A home that is worth living in and worth the money. It has to pass every check: "
+            "the pin is the house, not the town; the sea is within 1.5 km of that pin (a lake or "
+            "a river is not the sea); the climate grade is good or excellent, not merely caution "
+            "or unknown; the floor area is a real floor between 40 and 250 m², not the plot and "
+            "not missing; and the all-in cost fits the cash set aside, using the middle of the "
+            "repair range when the condition is not stated. Rank it by the worse of the living "
+            "score and the investment score. A beach flat with no resale case, and a cheap home "
+            "that is not by the sea, both fail."
+        ) + _OUTLOOK_NOTE
     if mode == "invest":
         return _INVEST_PRIORITIES + _OUTLOOK_NOTE
     if mode == "land":
@@ -773,8 +784,9 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
                                          years=FOREST_ROI_YEARS)
     return (
         "A home (a house or a flat) to live in, at a very low price — not a plot, not a shop or a "
-        "garage. A MUST: somewhere to swim (the sea, a lake "
-        "or a real river, not a stream) within 1.5 km. Prefer western continental Europe "
+        "garage. A MUST: by the beach, the sea within 1.5 km. A lake or a river you could swim in "
+        "is not a substitute, and a poor climate (extreme heat, a flood at the house, repeated "
+        "fires, or severe water stress) is not a place to live. Prefer western continental Europe "
         "(mainland Portugal, Spain, France, Benelux, Germany, Austria, Switzerland, Italy); "
         "islands (Azores, Madeira, Canaries, Balearics, Corsica, Sicily, Sardinia) and "
         "Central/Eastern Europe sit a flat step below an otherwise equal listing. In order of "
@@ -1538,12 +1550,61 @@ def score_detail(item: dict, now: datetime | None = None,
             return _score_land(item, now, targets)
         if mode == "forest":
             return _score_forest(item, now, targets)
+        if mode == "both":
+            return _score_both(item, now, targets)
         # A place to live. Investment land used to share this scorer, so a plot
         # picked up Portugal, summer heat and a cheap total in euros.
         return _score_detail(item, now, targets)
     finally:
         _WEIGHTS.reset(token)
         _MODE.reset(mode_token)
+
+
+def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
+    """A home worth living in and worth the money, or nothing.
+
+    The pin has to be the house, the sea within 1.5 km of that pin, the climate
+    good or excellent, and the floor area a real floor. It is then the worse of
+    the living score and the investment score, so a beach flat with no resale
+    case and a cheap inland yield both stay off this list.
+    """
+    import geo
+    from costs import building_m2
+
+    title = item.get("title") or ""
+    full = f"{title} {item.get('description') or ''}"
+    skip = _skip_reason(item, title, full)
+    if skip:
+        return 0.0, [skip]
+    if property_kind(item) != "home":
+        return 0.0, ["not a home — a plot is Investment land or Forestry"]
+    blocked = []
+    pos = geo.position(item) or {}
+    if pos.get("precision") not in geo.EXACT_ENOUGH:
+        blocked.append("position is the town, not the house — the beach and the climate are not this building's")
+    beach = item.get("beach") or {}
+    km = beach.get("km")
+    if km is None or beach.get("approx") or km > SWIM_MAX_KM:
+        if km is None or beach.get("approx"):
+            blocked.append("not by the beach — the distance is not the house's")
+        else:
+            blocked.append(f"not by the beach ({km:.1f} km)")
+    grade = climate_score(item["climate"], "home")["grade"] if item.get("climate") else "unknown"
+    if grade not in ("good", "excellent"):
+        blocked.append(f"climate {grade} — living here needs a good or excellent grade")
+    area, source = building_m2(item)
+    if source not in ("stored", "notice") or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
+        blocked.append("floor area unknown, or the figure is the plot rather than the building")
+    if blocked:
+        return 0.0, blocked
+    home_raw, home_why = _score_detail(item, now, targets)
+    inv_raw, inv_why = _score_invest(item, now, targets)
+    weaker = home_why if home_raw <= inv_raw else inv_why
+    return min(home_raw, inv_raw), [
+        f"the worse of the two ({display_score(home_raw):.0f} to live in, "
+        f"{display_score(inv_raw):.0f} as an investment)",
+        *weaker[:6],
+    ]
 
 
 def no_possession(item: dict, full: str) -> bool:
@@ -1913,6 +1974,11 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if has_term(full, ["inacabad*", "em tosco", "por acabar"], negations=False) and kind == "home":
         reasons.append("needs heavy work (unfinished)")
 
+    # The climate grade is a place to live or it is not. Investment home still
+    # judges the money, including in a poor climate.
+    if kind == "home" and item.get("climate") and climate_score(item["climate"], "home")["grade"] == "poor":
+        reasons.append("rejected: poor climate")
+
     for label, cap in NOT_THE_GOAL_CAP.items():
         if any(r.startswith(label) for r in reasons):
             caps.append(cap)
@@ -2193,6 +2259,12 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         s += NO_SWIM * w("beach")
         reasons.append(f"nowhere to swim within {SWIM_MAX_KM:g} km"
                        + (f" (nearest: {swim[1]} {swim[0]:.1f} km)" if swim else ""))
+
+    # A home to live in is by the sea. A river, a lake, or a town 8 km inland is not.
+    # Unknown distance is left alone: that is a missing position, already capped.
+    beach_km = (item.get("beach") or {}).get("km")
+    if beach_km is not None and beach_km > SWIM_MAX_KM:
+        reasons.append(f"not by the beach ({beach_km:.1f} km)")
 
     for key, points in (("beach", BEACH_POINTS), ("airport", AIRPORT_POINTS), ("station", STATION_POINTS)):
         near = item.get(key)
@@ -2594,18 +2666,21 @@ def wishes(item: dict) -> list[dict]:
 
 
 # ─── The owner's goals, each ranked on its own (2026-10-05) ──────────
-#   home    — a place to live: a home, not a plot (swim, five wishes, AMOC…);
+#   home    — a place to live: a home, not a plot, by the beach, not a poor climate;
 #   invest  — a home to make money on: far below the local price after the
 #             taxes and the work, a net rental yield, a forced or bank sale;
+#   both    — the two at once: the gates of a home to live in, then the worse
+#             of the two scores. A listings tab, not a fifth competing label;
 #   land    — a plot as an investment: cheap per hectare against what land
 #             sells for there, big enough, reachable. Not a forestry return;
 #   forest  — a forestry project the owner will run on that land: 10 ha or
 #             more, a climate trees will stand, timber and crops. Not a resale.
-MODES = {"home": "My home", "invest": "Investment home", "land": "Investment land",
-         "forest": "Forestry"}
+MODES = {"both": "Live and invest", "home": "My home", "invest": "Investment home",
+         "land": "Investment land", "forest": "Forestry"}
 # A home is only ever My home or Investment home. A plot is only ever
-# Investment land or Forestry. Raw points are not compared across those pairs:
-# each scorer has its own scale.
+# Investment land or Forestry. Live and invest is the intersection, shown on
+# its own tab; it does not compete here, because its score is the worse of
+# the two and would never win a higher-score tie except when they are equal.
 FAMILY_GOALS = {"home": ("home", "invest"), "land": ("land", "forest")}
 # Offers are the two investment goals. A home to live in and a forestry project
 # stay on their own tabs: their scores are a life, not a resale.

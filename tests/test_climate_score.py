@@ -127,7 +127,7 @@ def test_the_ai_check_applies_the_guardrail_only_when_it_is_on(client, add, monk
 def test_listings_filter_by_climate_grade_and_exact_data(client, add):
     add(external_id="cool", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
         raw_json=_stored({**MILD, "water_km": 0.2}))
-    # poor (arid by 2080) but not rejected by the score, so it is listed
+    # poor climate (arid by 2080): still listed, but not as a home to live in
     add(external_id="hot", title="Moradia T2", tipo="moradia", area_m2=120, price=20000,
         raw_json=_stored({"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": -1}, "water_km": 1.0}))
     add(external_id="town", title="Moradia T4", tipo="moradia", area_m2=120, price=20000,
@@ -138,13 +138,16 @@ def test_listings_filter_by_climate_grade_and_exact_data(client, add):
         items = client.get("/api/listings", query_string=q).get_json()["items"]
         return {it["id"].split(":")[1] for it in items}
 
-    assert ids() == {"cool", "hot", "town", "none"}
+    assert ids() == {"cool", "town", "none"}
     assert ids(climate="good") == {"cool", "town"}
-    assert ids(climate="poor") == {"hot"}
+    assert ids(climate="poor") == set()
     assert ids(climate="unknown") == {"none"}
-    assert ids(climate_exact=1) == {"cool", "hot"}
+    assert ids(climate_exact=1) == {"cool"}
+    hidden = client.get("/api/listings", query_string={"show_hidden": "1", "min_score": 0}).get_json()["items"]
+    hot = next(it for it in hidden if it["id"].endswith(":hot"))
+    assert hot["score"] == 0 and hot["climate_grade"] == "poor"
     grades = {it["id"]: it["climate_grade"] for it in client.get("/api/listings").get_json()["items"]}
-    assert grades["eleiloes:hot"] == "poor" and grades["eleiloes:none"] == "unknown"
+    assert grades["eleiloes:none"] == "unknown"
 
 
 def test_the_panel_says_what_is_missing(client, add):
