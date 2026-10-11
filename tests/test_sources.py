@@ -696,6 +696,46 @@ def test_altamira_gives_price_position_and_link(db, fake_http):
     assert geo.position(item)["precision"] == "street"
 
 
+# The listing page of an Altamira home (excerpt, 2026-10): the card said only the address.
+ALTAMIRA_PAGE = """<html><body>
+<div class="marcas_agua"> <div class="marca mrcCondesp">Condiciones especiales</div>
+ <div class="marca ocupado">Ocupado</div> </div>
+<section class="descripcion"> <h3>Descripción</h3> <div id="capaDescripcion"> <div class="capaDescrHeight">
+<p>Altamira pone a la venta una casa de pueblo de dos plantas. Se trata de una vivienda unifamiliar para
+rehabilitar, tiene una superficie total de 190 metros cuadrados. Actualmente se encuentra di&aacute;fana,
+sin separacion entre plantas.</p></div></div></section>
+<div id="modal_full_2" class="condesp"> <div id="modal_2" class="condicionespeciales"> <div class="generic_modal_2">
+<div id="modal_contenido_2"> <h4 class="titulo">Condiciones Especiales</h4>
+<p>El inmueble se encuentra ocupado ilegalmente por terceros y sin los suministros debidamente contratados.</p>
+</div></div></div></div></body></html>"""
+
+
+def test_altamira_reads_the_listing_page_once(db, fake_http):
+    from db import load_listings
+    from scoring import score_detail
+    from sources.es import altamira_detail, scrape_altamira
+    detail = altamira_detail(ALTAMIRA_PAGE)
+    assert detail["occupied"] is True and "para rehabilitar" in detail["description"]
+    assert detail["conditions"].startswith("El inmueble se encuentra ocupado ilegalmente")
+
+    def handler(method, url, kw):
+        if method == "POST":
+            return FakeResponse(json_data={"totalResultados": "1", "minifichas": [ALTAMIRA_CARD]})
+        return FakeResponse(ALTAMIRA_PAGE)
+    session = fake_http(handler)
+    scrape_altamira(db, max_price=50000)
+    pages = [c for c in session.calls if c[0] == "GET"]
+    assert len(pages) == 1                                         # homes only, once
+    row = db.execute("SELECT description, raw_json FROM listings WHERE id = 'altamira:01402631'").fetchone()
+    assert "para rehabilitar" in row[0] and json.loads(row[1])["occupation"] == "occupied"
+    scrape_altamira(db, max_price=50000)                           # the next scan keeps what the page said
+    assert len([c for c in session.calls if c[0] == "GET"]) == 1
+    item = load_listings(db, include_hidden=True)[0]
+    assert "para rehabilitar" in item["description"]
+    sc, why = score_detail(item)
+    assert sc == 0 and "possession" in why[0]
+
+
 IMOVIRTUAL_AD = {"id": 19285780, "title": "Olival com cerca de 200 oliveiras e água de nascente",
                  "slug": "olival-com-agua-de-nascente-ID1iW6Y", "estate": "TERRAIN", "areaInSquareMeters": 10296,
                  "totalPrice": {"value": 30000}, "hidePrice": False, "isPrivateOwner": True,
@@ -726,6 +766,38 @@ def test_imovirtual_reads_the_page_data(db, fake_http, monkeypatch):
     assert land and all(c[2]["params"]["areaMin"] == 10000 and c[2]["params"]["priceMax"] == 50000 for c in land)
 
 
+# A home's listing page (trimmed, 2026-10): the results card had no text at all.
+IMOVIRTUAL_HOME = {**IMOVIRTUAL_AD, "id": 19157575, "estate": "HOUSE", "areaInSquareMeters": 212,
+                   "title": "Casa / Villa T2 em Portela de 212 m2", "slug": "casa-villa-t2-em-portela-ID1inL9"}
+IMOVIRTUAL_PAGE_AD = {
+    "description": "Oportunidade de Investimento: Moradia para Renovação em Portela!<br/>\n<br/>\n"
+                   " - A propriedade necessita de total reabilitação para atingir o seu potencial m&aacute;ximo.",
+    "target": {"Build_year": "1937", "Energy_certificate": ["f"]},
+    "enrichment": {"aiParamsList": [{"key": "construction_status", "value": "to_renovation", "rejected": False}]}}
+
+
+def test_imovirtual_reads_a_home_page_once(db, fake_http):
+    from scoring import built_year, condition
+    from sources.pt import imovirtual_detail, scrape_imovirtual
+    page = ('<html><script id="__NEXT_DATA__" type="application/json">'
+            + json.dumps({"props": {"pageProps": {"ad": IMOVIRTUAL_PAGE_AD}}}) + "</script></html>")
+    detail = imovirtual_detail(page)
+    assert detail["construction_status"] == "to_renovation" and detail["ano_construcao"] == 1937
+    assert "<br" not in detail["description"] and "potencial máximo" in detail["description"]
+
+    def handler(method, url, kw):
+        return FakeResponse(page if "/anuncio/" in url else _imovirtual_html([IMOVIRTUAL_HOME]))
+    session = fake_http(handler)
+    scrape_imovirtual(db, max_price=50000)
+    assert len([c for c in session.calls if "/anuncio/" in c[1]]) == 1
+    row = dict(db.execute("SELECT * FROM listings WHERE id = 'imovirtual:19157575'").fetchone())
+    assert "necessita de total reabilitação" in row["description"]
+    assert condition(row) == "heavy" and built_year(row) == 1937
+    scrape_imovirtual(db, max_price=50000)
+    assert len([c for c in session.calls if "/anuncio/" in c[1]]) == 1
+    assert "necessita" in db.execute("SELECT description FROM listings WHERE id = 'imovirtual:19157575'").fetchone()[0]
+
+
 FOTOCASA_AD = {"id": 187909805, "rawPrice": 45000, "accuracy": False, "isOccupied": False,
                "buildingSubtype": "House_Chalet", "location": "ALTO DE URBIES, Zona Rural",
                "description": "Casa en una parcela de 200 m², 80 m² construidos, junto al río.",
@@ -754,6 +826,10 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     assert json.loads(taken["raw_json"])["occupation"] == "occupied"
     bare = parse_fotocasa({**FOTOCASA_AD, "isBareOwnership": True}, "vivienda")
     assert json.loads(bare["raw_json"])["nuda_propiedad"] is True
+    assert json.loads(row["raw_json"])["rooms"] == 2
+    reform = parse_fotocasa({**FOTOCASA_AD, "features": FOTOCASA_AD["features"] + [
+        {"key": "conservationStatus", "value": 4}, {"key": "bathrooms", "value": 1}]}, "vivienda")
+    assert json.loads(reform["raw_json"])["conservation"] == 4 and json.loads(reform["raw_json"])["bathrooms"] == 1
     assert bare["description"].endswith("nuda propiedad")
     assert "Casa en una parcela" in bare["description"]
     # two pages of one ad each, then done

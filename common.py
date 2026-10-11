@@ -381,6 +381,26 @@ def find_area(text) -> float | None:
     return found[0] if found else None
 
 
+# A size the text gives the land, not the house: "un terrain de 400 m²", "parcela de 767 m2".
+_LAND_BEFORE_AREA = re.compile(
+    r"\b(?:terrain|terreno|terrenos|parcela|parcelle|jardin|jard[ií]n|garden|plot|lote|solar|finca|"
+    r"quintal|logradouro|land|grundst\w*|giardino|cour|courette|patio)\b[^.;,\d]{0,20}$", re.I)
+
+
+def find_floor_area(text) -> float | None:
+    """The first size in a text that is not the land's: the floor area a rent or
+    a value can be worked on. A plot sold as "Maison" with only "terrain 1034 m²"
+    has none, which is better than a rent on a hectare."""
+    text = str(text or "")
+    for m in _AREA_RE.finditer(text):
+        if _LAND_BEFORE_AREA.search(text[max(0, m.start() - 40):m.start()]):
+            continue
+        value = _area_value(m.group(1), m.group(2))
+        if value:
+            return value
+    return None
+
+
 _AREA_UNIT_FIRST_RE = re.compile(r"\bmq\.?\s*(\d{1,6}(?:,\d{1,2})?)\b", re.I)
 
 # "Parcelas de 0,8 a 2,8 ha": the plots for sale, not the development they sit in.

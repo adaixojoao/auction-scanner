@@ -31,6 +31,9 @@ DB_PATH = os.environ.get("AUCTION_SCANNER_DB") or os.path.join(
 # A listing is hidden as "stale" once its source has had a successful scrape
 # this long after the listing was last seen (i.e. it is gone from the site).
 STALE_AFTER = timedelta(days=3)
+# A source that fails (or is not scanned) never makes its listings stale, so a
+# sold house stays on show. Past this, the score says it is unconfirmed.
+UNCONFIRMED_AFTER = timedelta(days=5)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
@@ -1221,12 +1224,15 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 reason = f"stale: gone from {item['source']} since {seen:%Y-%m-%d}"
             elif item["status"] != "shortlisted":
                 reason = filter_reason(item, filters, mode)
+            if seen and now - seen > UNCONFIRMED_AFTER:
+                item["unconfirmed_since"] = f"{seen:%Y-%m-%d}"
 
         if reason and not include_hidden:
             continue
 
         row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],
-                                     item["offer_outcome"], context)).encode()).hexdigest()
+                                     item["offer_outcome"], context,
+                                     item.get("unconfirmed_since"))).encode()).hexdigest()
         kept = _SCORED.get((mode, item["id"]))
         if kept and kept[0] == row_key and not (refresh and kept[2] != inputs):
             item.update(kept[1])

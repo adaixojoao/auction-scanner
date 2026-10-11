@@ -858,6 +858,43 @@ ALTAMIRA_API = "https://www.altamirainmuebles.com/nodejs/getResultados"
 ALTAMIRA_SITE = "https://www.altamirainmuebles.com"
 ALTAMIRA_TYPES = {1: "vivienda", 9: "terreno"}
 ALTAMIRA_PAGE = 100
+# The results card is only the address: the state, "Ocupado" and the special
+# conditions ("ocupado ilegalmente por terceros") are on the listing page, read
+# once per home, a few dozen a scan.
+ALTAMIRA_DETAILS_PER_SCAN = 150
+
+
+def altamira_detail(html: str) -> dict:
+    """The full text, the special conditions and the "Ocupado" mark of a listing page."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    out: dict = {}
+    body = soup.select_one("section.descripcion #capaDescripcion") or soup.select_one("section.descripcion")
+    if body:
+        text = re.sub(r"\s+", " ", body.get_text(" ", strip=True))
+        if text:
+            out["description"] = text
+    special = soup.select_one(".condicionespeciales #modal_contenido_2")
+    if special:
+        text = re.sub(r"^Condiciones Especiales\s*", "", re.sub(r"\s+", " ", special.get_text(" ", strip=True)),
+                      flags=re.I)
+        if text:
+            out["conditions"] = text
+    if soup.select_one(".marcas_agua .marca.ocupado"):
+        out["occupied"] = True
+    return out
+
+
+def with_altamira_detail(row: dict, detail: dict) -> dict:
+    """The card's row with what the listing page adds."""
+    raw = json.loads(row.get("raw_json") or "{}")
+    raw["detail_checked"] = 1
+    if detail.get("occupied"):
+        raw["occupation"] = "occupied"
+    parts = (detail.get("description"),
+             f"Condiciones especiales: {detail['conditions']}" if detail.get("conditions") else None,
+             row.get("description"))
+    return {**row, "description": " · ".join(p for p in parts if p)[:3000],
+            "raw_json": json.dumps(raw, ensure_ascii=False)}
 
 
 def _slug(text: str) -> str:
@@ -894,6 +931,9 @@ def scrape_altamira(db, max_price: float = 50000, config: dict | None = None, **
     """altamira — bank and fund repossessions (homes and land) with map positions."""
     session = make_session(timeout=30)
     total = 0
+    read = {r[0] for r in db.execute(
+        """SELECT external_id FROM listings WHERE source = 'altamira' AND raw_json LIKE '%"detail_checked"%'""")}
+    budget = ALTAMIRA_DETAILS_PER_SCAN
     for code, tipo in ALTAMIRA_TYPES.items():
         limit = land_max_price(config, max_price) if tipo == "terreno" else max_price
         page, seen = 1, 0
@@ -909,9 +949,24 @@ def scrape_altamira(db, max_price: float = 50000, config: dict | None = None, **
             cards = data.get("minifichas") or []
             for card in cards:
                 row = parse_altamira(card, tipo)
-                if row and row["price"] <= limit:
-                    upsert_listing(db, row)
-                    total += 1
+                if not row or row["price"] > limit:
+                    continue
+                if row["external_id"] in read:
+                    row["description"] = None          # keep the listing page's text and marks
+                    row["raw_json"] = None
+                elif tipo == "vivienda" and budget > 0:
+                    budget -= 1
+                    try:
+                        got = session.get(row["url"])
+                        detail = altamira_detail(got.text) if got.status_code < 400 else {}
+                    except Exception:  # noqa: BLE001 — the card alone is still worth keeping
+                        detail = {}
+                    if detail.get("description"):
+                        row = with_altamira_detail(row, detail)
+                        read.add(row["external_id"])
+                    time.sleep(0.4)
+                upsert_listing(db, row)
+                total += 1
             db.commit()
             seen += len(cards)
             if not cards or seen >= int(data.get("totalResultados") or 0) or page >= 50:
@@ -957,6 +1012,12 @@ def parse_fotocasa(ad: dict, tipo: str) -> dict | None:
     feats = {f.get("key"): f.get("value") for f in ad.get("features") or []}
     town = re.sub(r"\s*\(.*?\)\s*$", "", addr.get("municipality") or addr.get("city") or "") or None
     raw: dict = {"occupation": "occupied"} if ad.get("isOccupied") or ad.get("isRentedWithTenants") else {}
+    # The card's own state ("A reformar" = 4) and rooms: "0 rooms, 0 bathrooms" is land.
+    if isinstance(feats.get("conservationStatus"), int):
+        raw["conservation"] = feats["conservationStatus"]
+    for key in ("rooms", "bathrooms"):
+        if isinstance(feats.get(key), int):
+            raw[key] = feats[key]
     coords = ad.get("coordinates") or {}
     if coords.get("latitude") and coords.get("longitude"):
         raw["geo"] = {"lat": float(coords["latitude"]), "lon": float(coords["longitude"]),

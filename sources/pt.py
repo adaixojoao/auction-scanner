@@ -5,6 +5,7 @@ import json
 import re
 import time
 import urllib.parse
+from html import unescape as _unescape
 import warnings
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -1608,6 +1609,49 @@ IMOVIRTUAL_PLACES = ("viana-do-castelo", "braga", "vila-real", "porto", "aveiro"
                      "ilha-de-santa-maria", "ilha-graciosa", "ilha-das-flores", "ilha-da-madeira")
 IMOVIRTUAL_SEARCHES = (("moradia", None), ("terreno", 10000))      # homes; land from 1 ha
 IMOVIRTUAL_MAX_PAGES = 15
+# The results card has no text at all: the description ("necessita de total
+# reabilitação"), the build year and the state are on the listing page, read
+# once per home, a few hundred a scan.
+IMOVIRTUAL_DETAILS_PER_SCAN = 300
+
+
+def imovirtual_detail(page: str) -> dict:
+    """The text, build year and construction state of a listing page."""
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', page or "", re.S)
+    if not m:
+        return {}
+    try:
+        ad = json.loads(m.group(1))["props"]["pageProps"].get("ad") or {}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return {}
+    out: dict = {}
+    text = re.sub(r"<[^>]+>", " ", ad.get("description") or "")
+    text = re.sub(r"\s+", " ", _unescape(text)).strip()
+    if text:
+        out["description"] = text
+    target = ad.get("target") or {}
+    status = target.get("Construction_status")
+    if isinstance(status, list):
+        status = status[0] if status else None
+    if not status:
+        # The portal's own guess when the agent left it blank (it marks these as AI-filled).
+        for param in (ad.get("enrichment") or {}).get("aiParamsList") or []:
+            if param.get("key") == "construction_status" and not param.get("rejected"):
+                status = param.get("value")
+    if status:
+        out["construction_status"] = status
+    year = str(target.get("Build_year") or "")
+    if year.isdigit():
+        out["ano_construcao"] = int(year)
+    return out
+
+
+def with_imovirtual_detail(row: dict, detail: dict) -> dict:
+    raw = json.loads(row.get("raw_json") or "{}")
+    raw.update({k: detail[k] for k in ("construction_status", "ano_construcao") if k in detail})
+    raw["detail_checked"] = 1
+    text = " · ".join(p for p in (detail.get("description"), row.get("description")) if p)
+    return {**row, "description": text[:3000], "raw_json": json.dumps(raw, ensure_ascii=False)}
 
 
 def imovirtual_page(html: str) -> tuple[list[dict], int]:
@@ -1650,6 +1694,9 @@ def scrape_imovirtual(db, max_price: float = 50000, **_):
     """imovirtual — private homes and land (1 ha+) in the north, the Azores and Madeira."""
     session = make_session(timeout=30)
     total = 0
+    read = {r[0] for r in db.execute(
+        """SELECT external_id FROM listings WHERE source = 'imovirtual' AND raw_json LIKE '%"detail_checked"%'""")}
+    budget = IMOVIRTUAL_DETAILS_PER_SCAN
     for place in IMOVIRTUAL_PLACES:
         for estate, min_area in IMOVIRTUAL_SEARCHES:
             params = {"priceMax": int(max_price)}
@@ -1668,9 +1715,24 @@ def scrape_imovirtual(db, max_price: float = 50000, **_):
                 ads, pages = imovirtual_page(resp.text)
                 for ad in ads:
                     row = parse_imovirtual(ad)
-                    if row and row["price"] <= max_price:
-                        upsert_listing(db, row)
-                        total += 1
+                    if not row or row["price"] > max_price:
+                        continue
+                    if row["external_id"] in read:
+                        row["description"] = None      # keep the listing page's text
+                        row["raw_json"] = None
+                    elif estate == "moradia" and budget > 0 and row.get("url"):
+                        budget -= 1
+                        try:
+                            got = session.get(row["url"])
+                            detail = imovirtual_detail(got.text) if got.status_code < 400 else {}
+                        except Exception:  # noqa: BLE001 — the card alone is still worth keeping
+                            detail = {}
+                        if detail.get("description"):
+                            row = with_imovirtual_detail(row, detail)
+                            read.add(row["external_id"])
+                        time.sleep(0.4)
+                    upsert_listing(db, row)
+                    total += 1
                 db.commit()
                 if page >= pages:
                     break
