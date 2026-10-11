@@ -259,6 +259,21 @@ def make_looker(cfg: dict):
     return looker
 
 
+def queue(db, cfg: dict) -> list[dict]:
+    """Homes to look at, best score first, across My home and Investment home."""
+    from db import load_listings
+    best: dict[str, dict] = {}
+    for mode in ("home", "invest"):
+        for it in load_listings(db, filters=cfg.get("filters"), mode=mode):
+            if it.get("kind") != "home":
+                continue
+            rank = it.get("rank", it["score"])
+            old = best.get(it["id"])
+            if old is None or rank > old.get("rank", -1):
+                best[it["id"]] = it
+    return sorted(best.values(), key=lambda it: -it.get("rank", it["score"]))
+
+
 def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, looker=None) -> int:
     """Look at the photos of the best homes not looked at yet, once each."""
     ai = cfg.get("ai") or {}

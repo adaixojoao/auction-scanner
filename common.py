@@ -208,13 +208,38 @@ def to_number(value) -> float | None:
     return parse_price(value)
 
 
+# On an asking-price portal these words mean the figure in the price field is a
+# deposit or a minimum bid (a court sale advertised on fotocasa), not what buys the house.
+PORTAL_NOT_A_PRICE = ("subasta", "leilao", "vente aux encheres", "asta")
+
+
+def portal_price_unusable(item: dict) -> str | None:
+    """Why the portal's price must not be treated as the purchase price, or None."""
+    import source_validation
+    if not source_validation.asking_price(item.get("source")):
+        return None
+    text = f"{item.get('title') or ''} {item.get('description') or ''}"
+    hits = find_terms(text, PORTAL_NOT_A_PRICE, negations=False)
+    if not hits:
+        return None
+    return ("the listed price is a deposit or a minimum bid, not the purchase price "
+            f"(the ad says {hits[0]})")
+
+
 def price_to_pay(item: dict) -> float:
     """What you would realistically pay for a listing: the current bid, else the
     minimum accepted, else the base value. A bid below the minimum accepted does
     not buy it (e-leilões opens at 50% but accepts from 85%), so the minimum
     wins then. A floor under 20% of the base value is a bidding step (Spain's
     "puja mínima" of €1,743 on a €174,300 flat), not a price that buys it. One
-    definition, used by the scorer, the round matcher, the cost estimate and Offers."""
+    definition, used by the scorer, the round matcher, the cost estimate and Offers.
+
+    A portal advert that says it is an auction does not have a purchase price:
+    the field is the deposit or the opening bid."""
+    note = portal_price_unusable(item)
+    if note:
+        item["price_unusable"] = note
+        return 0.0
     bid = item.get("current_bid") or 0
     floor = item.get("min_price") or 0
     base = item.get("price") or 0

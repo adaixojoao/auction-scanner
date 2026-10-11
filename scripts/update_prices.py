@@ -608,6 +608,62 @@ def update_rents_es(path: str) -> int:
     return 0
 
 
+# OMI quotations: Loc_min / Loc_max are €/m² a month. Residential rows only;
+# the comune's figure is the median of the zone mid-points in normal condition.
+_OMI_HOME = "abitaz"
+
+
+def parse_omi_rents(rows, period: str) -> list[dict]:
+    """Comune → median monthly €/m² from an OMI quotations CSV (one row per zone)."""
+    import statistics
+    by_place: dict[str, list[float]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        kind = (row.get("Descr_Tipologia") or row.get("descr_tipologia") or "").lower()
+        state = (row.get("Stato") or row.get("stato") or "").lower()
+        if _OMI_HOME not in kind:
+            continue
+        if state and "normal" not in state:
+            continue
+        name = (row.get("Comune_descrizione") or row.get("comune_descrizione")
+                or row.get("Comune") or "").strip()
+        try:
+            low = float(str(row.get("Loc_min") or row.get("loc_min") or "").replace(",", "."))
+            high = float(str(row.get("Loc_max") or row.get("loc_max") or "").replace(",", "."))
+        except (TypeError, ValueError):
+            continue
+        if not name or low <= 0 or high <= 0:
+            continue
+        by_place.setdefault(name, []).append((low + high) / 2)
+    out = []
+    for name, values in sorted(by_place.items()):
+        out.append({"municipality": name, "eur_m2": round(statistics.median(values), 2),
+                    "period": period, "source": "OMI (Agenzia Entrate)"})
+    return out
+
+
+def update_rents_it(path: str, period: str) -> int:
+    """An OMI quotations CSV (the semester file from the Agenzia delle Entrate)
+    → data/it_rents.csv, one row per comune."""
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        sample = f.read(4096)
+        f.seek(0)
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
+        rows = list(csv.DictReader(f, dialect=dialect))
+    found = parse_omi_rents(rows, period)
+    print(f"OMI rents: {len(found)} comunes")
+    if len(found) < 1000:
+        print("Fewer than 1,000 comunes: probably not the quotations file. Nothing written.")
+        return 1
+    with open(RENT_FILES["IT"], "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(found)
+    print(f"Written to {RENT_FILES['IT']}")
+    return 0
+
+
 def main(argv=None) -> int:
     import requests
 
@@ -617,6 +673,8 @@ def main(argv=None) -> int:
     ap.add_argument("--rents", action="store_true", help="the monthly rents per m², into data/pt_rents.csv")
     ap.add_argument("--rents-fr", action="store_true", help="France's rents per m² per commune, into data/fr_rents.csv")
     ap.add_argument("--rents-es", metavar="XLSX", help="Spain's SERPAVI workbook → data/es_rents.csv")
+    ap.add_argument("--rents-it", nargs=2, metavar=("CSV", "PERIOD"),
+                    help="OMI quotations CSV and its period (e.g. 2025-H1) → data/it_rents.csv")
     ap.add_argument("--prices-fr", action="store_true", help="France's €/m² per commune (DVF) → data/fr_home_prices.csv")
     ap.add_argument("--prices-nl", action="store_true", help="the Netherlands' prices per gemeente (CBS) → data/nl_home_prices.csv")
     ap.add_argument("--prices-lu", action="store_true", help="Luxembourg's asking €/m² per commune → data/lu_home_prices.csv")
@@ -630,6 +688,8 @@ def main(argv=None) -> int:
         return update_rents_fr(requests)
     if args.rents_es:
         return update_rents_es(args.rents_es)
+    if args.rents_it:
+        return update_rents_it(args.rents_it[0], args.rents_it[1])
     if args.prices_fr:
         return update_prices_fr(requests)
     if args.prices_nl:

@@ -31,7 +31,7 @@
 <table class="list">
   <thead><tr>
     <th>Source</th><th></th><th>Kind</th><th>Access</th><th>State</th>
-    <th>Last run</th><th>Last count</th><th>Runs without results</th><th>Last OK</th><th>Stored</th>
+    <th>Last run</th><th>Last count</th><th>Runs without results</th><th>Last good read</th><th>Stored</th>
     <th>Message</th><th></th>
   </tr></thead>
   <tbody id="rows"></tbody>
@@ -94,7 +94,7 @@ async function load() {
     <td class="small nowrap">${AS.ago(h.last_run)}</td>
     <td>${h.last_count ?? "–"}</td>
     <td>${h.failing_runs}</td>
-    <td class="small nowrap">${h.last_ok ? AS.ago(h.last_ok) : "–"}</td>
+    <td class="small nowrap ${h.attention ? "bad" : ""}" title="${AS.esc(h.attention || "")}">${h.last_ok ? AS.ago(h.last_ok) : "–"}${h.attention ? `<div class="small">${AS.esc(h.attention)}</div>` : ""}</td>
     <td>${h.listings}</td>
     <td class="small muted" style="max-width:280px">${AS.esc(h.last_message || "")}</td>
     <td class="row" style="gap:4px;flex-wrap:wrap">

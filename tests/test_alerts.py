@@ -160,6 +160,16 @@ def test_source_alarm_only_for_this_scan_and_can_be_off(db, sent, monkeypatch):
     assert "has not worked yet" in sent[-1]
 
 
+def test_a_source_unread_for_days_is_mentioned_once(db, add, sent):
+    from db import record_scrape
+    add("fotocasa", "1", "ES", title="Casa en Ferrol", price=20000)
+    record_scrape(db, "fotocasa", count=40, status="ok", timestamp="2026-10-01T12:00:00+00:00")
+    now = datetime(2026, 10, 11, tzinfo=timezone.utc)
+    assert telegram_alert.alert_quiet_sources(db, CFG, now=now) == 1
+    assert "fotocasa" in sent[0] and "2026-10-01" in sent[0]
+    assert telegram_alert.alert_quiet_sources(db, CFG, now=now) == 0
+
+
 # ─── Price cuts ──────────────────────────────────────────────────────
 
 def house(price, **over):

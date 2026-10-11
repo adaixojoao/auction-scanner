@@ -992,6 +992,54 @@ FOTOCASA_PROVINCES = (   # all of Spain: the score decides, not the region (owne
 )
 FOTOCASA_SEARCHES = (("viviendas", None), ("terrenos", 10000))     # homes; land from 1 ha
 FOTOCASA_MAX_PAGES = 25
+FOTOCASA_DETAILS_PER_SCAN = 300
+
+
+def fotocasa_detail(html: str) -> dict:
+    """The full text, the portal's own state and the photos of a listing page.
+
+    The search card keeps a short description. The listing page is the same
+    JSON the card uses, under the page's own props."""
+    m = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html or "", re.S)
+    if not m:
+        return {}
+    try:
+        page = json.loads(m.group(1))["props"]["pageProps"]
+    except (ValueError, KeyError, TypeError):
+        return {}
+    ad = page.get("realEstate") or page.get("realEstateAd") or {}
+    if not isinstance(ad, dict):
+        return {}
+    out: dict = {}
+    text = ad.get("description") or ""
+    if isinstance(text, dict):
+        text = text.get("es-ES") or next((v for v in text.values() if isinstance(v, str)), "")
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if text:
+        out["description"] = text
+    feats = {f.get("key"): f.get("value") for f in ad.get("features") or [] if isinstance(f, dict)}
+    if isinstance(feats.get("conservationStatus"), int):
+        out["conservation"] = feats["conservationStatus"]
+    images = [img.get("src") for img in ad.get("multimedia") or []
+              if isinstance(img, dict) and img.get("src")]
+    if images:
+        out["fotos"] = images
+    return out
+
+
+def with_fotocasa_detail(row: dict, detail: dict) -> dict:
+    raw = json.loads(row.get("raw_json") or "{}")
+    if detail.get("conservation") is not None and "conservation" not in raw:
+        raw["conservation"] = detail["conservation"]
+    if detail.get("fotos"):
+        raw["fotos"] = detail["fotos"]
+    raw["detail_checked"] = 1
+    description = row.get("description") or ""
+    if len(detail.get("description") or "") > len(description):
+        description = detail["description"][:3000]
+    image = row.get("image_url") or (detail["fotos"][0] if detail.get("fotos") else None)
+    return {**row, "description": description or None, "image_url": image,
+            "raw_json": json.dumps(raw, ensure_ascii=False)}
 
 
 def fotocasa_page(html: str) -> tuple[list[dict], int]:
@@ -1047,6 +1095,10 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
     """fotocasa — private homes and land (1 ha+) all over Spain."""
     session = make_session(timeout=30)
     total = 0
+    read = {r[0] for r in db.execute(
+        """SELECT external_id FROM listings WHERE source = 'fotocasa'
+           AND raw_json LIKE '%"detail_checked"%'""")}
+    budget = FOTOCASA_DETAILS_PER_SCAN
     for province in FOTOCASA_PROVINCES:
         for kind, min_surface in FOTOCASA_SEARCHES:
             limit = land_max_price(config, max_price) if kind == "terrenos" else max_price
@@ -1069,6 +1121,17 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
                 for ad in ads:
                     row = parse_fotocasa(ad, "terreno" if kind == "terrenos" else "vivienda")
                     if row and row["price"] <= limit:
+                        if row["external_id"] not in read and budget > 0 and row.get("url"):
+                            budget -= 1
+                            try:
+                                got = session.get(row["url"])
+                                detail = fotocasa_detail(got.text) if got.status_code < 400 else {}
+                            except Exception:  # noqa: BLE001 — the card is still worth keeping
+                                detail = {}
+                            if detail:
+                                row = with_fotocasa_detail(row, detail)
+                                read.add(row["external_id"])
+                            time.sleep(0.4)
                         upsert_listing(db, row)
                         total += 1
                 db.commit()
@@ -1257,6 +1320,11 @@ def pisos_detail(html: str) -> dict:
     m = re.search(r"latitude=(-?\d+\.\d+)&(?:amp;)?longitude=(-?\d+\.\d+)", html)
     if m:
         out["geo"] = {"lat": float(m.group(1)), "lon": float(m.group(2)), "precision": "street"}
+    images = [img.get("src") for img in soup.select(".detail-gallery img[src], .gallery img[src]") if img.get("src")]
+    if images:
+        out["fotos"] = images
+    if out:
+        out["detail_checked"] = 1
     return out
 
 
@@ -1275,7 +1343,13 @@ def pisos_municipality(town: str | None) -> str | None:
 
 def parse_pisos(card: dict, tipo: str, province: str, detail: dict | None = None) -> dict:
     detail = detail or {}
-    raw = {"geo": detail["geo"]} if detail.get("geo") else {}
+    raw = {}
+    if detail.get("geo"):
+        raw["geo"] = detail["geo"]
+    if detail.get("fotos"):
+        raw["fotos"] = detail["fotos"]
+    if detail.get("detail_checked"):
+        raw["detail_checked"] = 1
     return make_listing(
         "pisos", card["id"], "ES", title=card["title"], tipo=tipo,
         description=(detail.get("description") or card["excerpt"] or "")[:3000] or None,
@@ -1293,8 +1367,8 @@ def scrape_pisos(db, max_price: float = 50000, config: dict | None = None, **_):
     # Listings whose detail page was read (it holds the map position); the rest
     # are read as the budget allows, a few hundred a scan.
     read = {r[0] for r in db.execute(
-        """SELECT external_id FROM listings WHERE source = 'pisos' AND raw_json LIKE '%"geo"%'
-           AND description NOT LIKE '%...'""")}           # only the preview line was kept: read again
+        """SELECT external_id FROM listings WHERE source = 'pisos'
+           AND raw_json LIKE '%"detail_checked"%'""")}
     budget, total = PISOS_DETAILS_PER_SCAN, 0
     seen: set[str] = set()   # a thin province's pages are padded with houses from elsewhere
     for province in PISOS_PROVINCES:
@@ -1328,7 +1402,7 @@ def scrape_pisos(db, max_price: float = 50000, config: dict | None = None, **_):
                     if detail is None:
                         row.pop("raw_json", None)          # never drop a position read earlier
                     upsert_listing(db, row)
-                    if detail and detail.get("geo"):
+                    if detail and detail.get("detail_checked"):
                         read.add(card["id"])
                     total += 1
                 db.commit()

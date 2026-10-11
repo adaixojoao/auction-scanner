@@ -1359,7 +1359,7 @@ def excellent(item: dict, score: float, reasons: list[str]) -> list[str] | None:
         return None
     pay = _pay(item)
     likely = item.get("predicted_final")
-    if likely and likely["price"] > pay:
+    if likely and not item.get("price_unusable") and likely["price"] > pay:
         pay = likely["price"]
     if not pay or pay > EXCELLENT_MAX_PAY:
         return None
@@ -1710,7 +1710,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     title_n = normalize(title)
     pay     = _pay(item)
     likely = item.get("predicted_final")
-    if likely and likely["price"] > pay * 1.02:
+    if likely and not item.get("price_unusable") and likely["price"] > pay * 1.02:
         pay = likely["price"]                     # what it will probably take, not the base
         reasons.append(likely["text"])
     kind    = property_kind(item)
@@ -1881,8 +1881,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         # Climate and location alone used to push Dutch/German cards with no
         # figure into the top 20; without a price the cheapness goal cannot be
         # checked, so they stay under the board until one appears.
+        # A portal auction's figure is the same: it is not what the house costs.
         caps.append(NO_PRICE_CAP)
-        reasons.append("price unknown — cannot judge cheapness")
+        reasons.append(item.get("price_unusable") or "price unknown — cannot judge cheapness")
     elif min_p and price and price > 1000 and min_p < price and curve(min_p, LOW_MIN_BID_POINTS) > 0:
         s += curve(min_p, LOW_MIN_BID_POINTS)
         reasons.append(f"min bid only €{min_p:.0f}")
@@ -2317,7 +2318,7 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
     title_n = normalize(title)
     pay = _pay(item)
     likely = item.get("predicted_final")
-    if likely and likely["price"] > pay * 1.02:
+    if likely and not item.get("price_unusable") and likely["price"] > pay * 1.02:
         pay = likely["price"]
         reasons.append(likely["text"])
     kind = property_kind(item)
@@ -2424,7 +2425,7 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
         reasons.append("no price — you set your offer")
     elif not pay:
         caps.append(NO_PRICE_CAP)
-        reasons.append("price unknown — cannot judge cheapness")
+        reasons.append(item.get("price_unusable") or "price unknown — cannot judge cheapness")
     elif min_p and price and price > 1000 and min_p < price and curve(min_p, LOW_MIN_BID_POINTS) > 0:
         s += curve(min_p, LOW_MIN_BID_POINTS)
         reasons.append(f"min bid only €{min_p:.0f}")
@@ -2719,9 +2720,12 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     area = item.get("area_m2") or find_floor_area(title) or find_floor_area(desc) or 0
     pay = _pay(item)
     likely = item.get("predicted_final")
-    if likely and likely["price"] > pay * 1.02:
+    if likely and not item.get("price_unusable") and likely["price"] > pay * 1.02:
         pay = likely["price"]
         reasons.append(likely["text"])
+    if item.get("price_unusable"):
+        caps.append(NO_PRICE_CAP)
+        reasons.append(item["price_unusable"])
     _doubts(item, kind, pay, area, full, reasons, caps)
     if item.get("unlocated"):
         caps.append(UNCHECKED_CAP)
@@ -3100,6 +3104,9 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         caps.append(FOREST_STARTER_CAP)
         reasons.append(f"{_ha(area)} — a first plot, under 10 ha")
     pay = _pay(item)
+    if item.get("price_unusable"):
+        caps.append(NO_PRICE_CAP)
+        reasons.append(item["price_unusable"])
     s += _forest_sooner(item, now, reasons)
     _doubts(item, kind, pay, area, full, reasons, caps, land_floor=FOREST_DOUBTFUL_EUR_M2)
     if item.get("unlocated"):

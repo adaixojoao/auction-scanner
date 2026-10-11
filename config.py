@@ -121,6 +121,8 @@ DEFAULTS = {
         "while_app_open": True,
         "pt_every_hours": 168,        # once a week
         "eu_every_hours": 336,        # every other country, once a fortnight
+        "retry_every_hours": 2,       # sources whose last scrape failed
+        "fotocasa_every_hours": 168,  # fotocasa, in full, every week
         "backup_every_hours": 24,
         "check_times": ["08:00", "20:00"],
         "weekly_report": "mon 08:00",

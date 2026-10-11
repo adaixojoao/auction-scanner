@@ -20,8 +20,10 @@ share scheduler.lock. A scrape does not: it has scan.lock, and the timetable
 keeps running those short jobs while a scan is going.
 
 Timetable (config.json → "schedule"; these are the defaults):
-  pt_every_hours  168      PT sources, once a week
-  eu_every_hours  336      every other country, once a fortnight
+  pt_every_hours       168    PT sources, once a week
+  eu_every_hours       336    every other country, once a fortnight
+  retry_every_hours      2    sources whose last scrape failed
+  fotocasa_every_hours 168    fotocasa, all of it, at least once a week
   check_times     ["08:00", "20:00"]   deadline alerts
   weekly_report   "mon 08:00"
 """
@@ -51,14 +53,16 @@ LOG = logging.getLogger("scheduler")
 DEFAULT_SCHEDULE = {
     "pt_every_hours": 168,
     "eu_every_hours": 336,
+    "retry_every_hours": 2,          # a source that failed, on the next short scan
+    "fotocasa_every_hours": 168,     # the largest source, in full, every week
     "backup_every_hours": 24,
     "check_times": ["08:00", "20:00"],
     "weekly_report": "mon 08:00",
     "closing_every_minutes": 25,     # every tick (30 min): the e-leilões sales ending now (outcomes.py)
 }
 _WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-JOBS = ("pt", "eu", "backup", "morning", "report", "closing")
-SCAN_JOBS = ("pt", "eu")   # long scrapes: their own lock, so a tick is not stuck behind one
+JOBS = ("pt", "eu", "retry", "fotocasa", "backup", "morning", "report", "closing")
+SCAN_JOBS = ("pt", "eu", "retry", "fotocasa")   # long scrapes: their own lock, so a tick is not stuck behind one
 _scan_guard = threading.Lock()
 _scan_thread: threading.Thread | None = None
 
@@ -95,6 +99,7 @@ def due_jobs(now: datetime, last_runs: dict, schedule: dict | None = None) -> li
     due = []
 
     for job, key in (("pt", "pt_every_hours"), ("eu", "eu_every_hours"),
+                     ("retry", "retry_every_hours"), ("fotocasa", "fotocasa_every_hours"),
                      ("backup", "backup_every_hours")):
         every = sched.get(key)
         if not every:
@@ -132,10 +137,10 @@ def due_jobs(now: datetime, last_runs: dict, schedule: dict | None = None) -> li
 
 # ─── Jobs ────────────────────────────────────────────────────────────
 
-def _scan(countries, label):
+def _scan(countries, label, source_names=None):
     from pipeline import ScanBusy, run_scan
     try:
-        run_scan(countries=countries, label=label)
+        run_scan(countries=countries, source_names=source_names, label=label)
     except ScanBusy:
         LOG.info(f"{label}: another scan is running, skipped")
         return False   # still due: the scan that is running will record its own job
@@ -154,16 +159,42 @@ def run_eu_scrape():
     _scan([c for c in COUNTRY_NAMES if c != "PT"], "other countries (scheduled)")
 
 
+def run_retry():
+    """Sources whose latest scrape failed, without waiting for the weekly scan."""
+    from db import connect, source_health
+    from sources import load_all
+    LOG.info("=== Retry of failed sources ===")
+    db = connect()
+    try:
+        names = [h["source"] for h in source_health(db, load_all())
+                 if h["state"] in ("error", "broken", "blocked")]
+    finally:
+        db.close()
+    if not names:
+        LOG.info("Retry: nothing failed")
+        return True
+    LOG.info(f"Retry: {', '.join(names)}")
+    return _scan(None, "failed sources", source_names=names)
+
+
+def run_fotocasa():
+    """fotocasa in full, once a week. The EU scan is every fortnight."""
+    LOG.info("=== Fotocasa weekly scan ===")
+    return _scan(None, "fotocasa (weekly)", source_names=["fotocasa"])
+
+
 def run_morning_checks():
     LOG.info("=== Deadline checks ===")
     from config import load_config
     from db import connect
-    from telegram_alert import alert_carta_deadlines, alert_last_calls, alert_shortlist_reminders
+    from telegram_alert import alert_carta_deadlines, alert_last_calls, alert_quiet_sources, alert_shortlist_reminders
     db = connect()
     try:
-        alert_carta_deadlines(db, load_config())
-        alert_shortlist_reminders(db, load_config())
-        alert_last_calls(db, load_config())
+        cfg = load_config()
+        alert_carta_deadlines(db, cfg)
+        alert_shortlist_reminders(db, cfg)
+        alert_last_calls(db, cfg)
+        alert_quiet_sources(db, cfg)
     finally:
         db.close()
 
@@ -234,6 +265,8 @@ JOB_FUNCS = {
     "closing": run_closing_watch,
     "pt": run_pt_scrape,
     "eu": run_eu_scrape,
+    "retry": run_retry,
+    "fotocasa": run_fotocasa,
     "backup": run_backup,
     "morning": run_morning_checks,
     "report": run_weekly_report,

@@ -268,3 +268,6 @@ tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 .w-part { color: var(--yellow); border-color: rgba(234,179,8,.45); background: rgba(234,179,8,.08); }
 .w-no { color: var(--red); border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.06); }
 .w-unknown { color: var(--faint); }
+
+#dismiss-dialog { border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: var(--card, #fff); }
+#dismiss-dialog select { margin-top: 8px; width: 100%; }

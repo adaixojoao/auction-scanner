@@ -279,13 +279,16 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         LOG.exception("Site check failed")
                     _set_state(db, current="photo check")
                     try:
-                        import photos                    # the photos of the best homes (needs an API key)
-                        from db import load_listings
-                        best = sorted(load_listings(db, filters=cfg.get("filters")),
-                                      key=lambda it: -it.get("rank", it["score"]))
-                        photos.check_pending(db, cfg, best)
+                        import photos                    # the photos of the best homes (needs a looker)
+                        photos.check_pending(db, cfg, photos.queue(db, cfg))
                     except Exception:  # noqa: BLE001 — a photo check must never fail the scan
                         LOG.exception("Photo check failed")
+                    _set_state(db, current="checking links")
+                    try:
+                        import confirm                   # sold and reserved pages leave the top
+                        confirm.check_top(db, cfg, make_session())
+                    except Exception:  # noqa: BLE001 — a dead link must never fail the scan
+                        LOG.exception("Link check failed")
             finally:
                 finished_at = utcnow_iso()
                 if not stopped:

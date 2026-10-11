@@ -41,6 +41,8 @@
     "while_app_open": true,
     "pt_every_hours": 2,
     "eu_every_hours": 6,
+    "retry_every_hours": 2,
+    "fotocasa_every_hours": 168,
     "check_times": ["08:00", "20:00"],
     "weekly_report": "mon 08:00"
   },

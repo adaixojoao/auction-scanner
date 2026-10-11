@@ -488,7 +488,8 @@ async function logOnline() {
 }
 async function reject() {
   const c = current();
-  await AS.api("/api/listings/status", {method: "POST", body: {id: c.id, status: "dismissed"}});
+  const ok = await AS.dismiss(c.id);
+  if (!ok) return;
   AS.toast("Rejected", "warn"); sel = null; load();
 }
 async function unshortlist() {

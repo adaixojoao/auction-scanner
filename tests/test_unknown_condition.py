@@ -128,17 +128,34 @@ def test_unconfirmed_listing_says_so():
 
 def test_load_listings_marks_a_listing_its_site_has_not_shown(db, add):
     from datetime import datetime, timezone
-    from db import load_listings
+    from db import load_listings, record_scrape
     add("solvia", "t1", "ES", title="Casa en Torrelavega", price=25000, area_m2=124)
     db.execute("UPDATE listings SET last_seen = '2026-10-05T09:44:21+00:00'")
     db.commit()
     now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    # Not read is not a failure: fotocasa sits unread between fortnightly scans.
+    unread = load_listings(db, include_hidden=True, now=now, apply_min_score=False)[0]
+    assert not unread.get("unconfirmed_since")
+    record_scrape(db, "solvia", count=0, status="error", message="could not connect",
+                  timestamp="2026-10-06T20:48:00+00:00")
     got = load_listings(db, include_hidden=True, now=now, apply_min_score=False)[0]
     assert got["unconfirmed_since"] == "2026-10-05"
     assert any("not seen on solvia" in r for r in got["reasons"])
     fresh = load_listings(db, include_hidden=True, now=datetime(2026, 10, 7, tzinfo=timezone.utc),
                           apply_min_score=False)[0]
     assert not fresh.get("unconfirmed_since")
+
+
+def test_a_source_that_was_read_is_not_unconfirmed(db, add):
+    from datetime import datetime, timezone
+    from db import load_listings, record_scrape
+    add("fotocasa", "f1", "ES", title="Casa en Ferrol", price=25000, area_m2=80)
+    db.execute("UPDATE listings SET last_seen = '2026-10-06T18:00:00+00:00'")
+    db.commit()
+    record_scrape(db, "fotocasa", count=100, status="ok", timestamp="2026-10-06T18:30:00+00:00")
+    got = load_listings(db, include_hidden=True, now=datetime(2026, 10, 11, 12, tzinfo=timezone.utc),
+                        apply_min_score=False)[0]
+    assert not got.get("unconfirmed_since")
 
 
 def test_rent_is_not_worked_out_on_the_land():
@@ -153,6 +170,13 @@ def test_rent_is_not_worked_out_on_the_land():
     assert not any(r.startswith("rent about") for r in why)
 
 
-def test_a_portal_home_with_no_description_is_held_back():
+def test_a_portal_auction_price_is_not_the_purchase_price():
+    ad = item(title="APARTAMENTO EN SUBASTA", price=27000, area_m2=70,
+              description="APARTAMENTO EN SUBASTA. Depósito 2.700 €.")
+    sc, why = score_detail(ad, mode="invest")
+    assert any("not the purchase price" in r for r in why)
+    assert sc <= 55
+    court = {**ad, "source": "spain", "title": "Vivienda en subasta"}
+    assert not any("not the purchase price" in r for r in score_detail(court)[1])
     sc, why = score_detail(item(title="Casa en Barbate", price=20000, area_m2=570, description="."))
     assert sc <= UNCHECKED_CAP and any("no description" in r for r in why)

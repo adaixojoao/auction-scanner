@@ -454,6 +454,47 @@ def _source_key(h: dict) -> str:
     return f"src:{h['source']}@{h['last_ok'] or 'never'}"
 
 
+def alert_quiet_sources(db, cfg: dict, now=None) -> int:
+    """Tell Telegram when a source has listings but no good read for days.
+
+    Two failures in a row are alert_source_failures. This is the other gap:
+    a source that was not tried again (the fortnightly scan) and went quiet.
+    One message per quiet stretch, keyed by the last good read.
+    """
+    from datetime import datetime, timezone
+    tg = _tg(cfg)
+    if not tg or not tg.get("source_alerts", True):
+        return 0
+    now = now or datetime.now(timezone.utc)
+    from db import QUIET_AFTER, parse_dt, source_health
+    quiet = []
+    for h in source_health(db):
+        if (h.get("failing_runs") or 0) >= SOURCE_FAILS_BEFORE_ALARM:
+            continue
+        if not h.get("listings") or not h.get("last_ok"):
+            continue
+        ok = parse_dt(h["last_ok"])
+        if ok and now - ok > QUIET_AFTER:
+            quiet.append(h)
+    if not quiet:
+        return 0
+    keys = [f"quiet:{h['source']}@{h['last_ok'][:10]}" for h in quiet]
+    fresh = not_yet_alerted(db, SOURCE_CHANNEL, keys)
+    new = [h for h, key in zip(quiet, keys) if key in fresh]
+    if not new:
+        return 0
+    lines = [f"⚠️ <b>{len(new)} source(s) have not been read for days</b>\n"]
+    for h in sorted(new, key=lambda h: h["source"]):
+        lines.append(f"• <b>{_esc(h['source'])}</b> — last good read {h['last_ok'][:10]} "
+                     f"({h['listings']} listings still stored)")
+    lines.append(f"\nSources page: {_dashboard_url(cfg, '/sources')}")
+    if not send_telegram(tg["token"], tg["chat_id"], "\n".join(lines)):
+        return 0
+    mark_alerted(db, SOURCE_CHANNEL, [f"quiet:{h['source']}@{h['last_ok'][:10]}" for h in new])
+    LOG.info(f"Telegram: quiet sources {[h['source'] for h in new]}")
+    return len(new)
+
+
 def alert_source_failures(db, cfg: dict, scanned: list[str]) -> int:
     """Tell Telegram about sources from this scan that broke, and ones that
     work again after an alarm. Returns how many sources were mentioned."""

@@ -29,7 +29,8 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 import geo
 from common import COUNTRY_NAMES, FLAGS, make_session, mode_max_price, price_to_pay, safe_url
 from locks import lock_holder
-from db import connect, hidden_category, load_best, load_listings, set_listing_status, source_health
+from db import (DISMISS_REASONS, attention_reason, connect, hidden_category, load_best,
+                 load_listings, set_listing_status, source_health)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -403,10 +404,14 @@ def api_listings():
         else:
             items = [it for it in loaded if not it["hidden_reason"]]
 
-        # Only the best N (Settings → Show at most), then sorted as asked.
+        # Only the best N (Settings → Show at most). On the two home goals an
+        # unseen home does not take a place ahead of one whose photos were read.
         found = len(items)
         cap = max(1, _num(_config().get("max_listings"), 100, int))
-        items = sorted(items, key=SORT_KEYS["score"], reverse=True)[:cap]
+        from tops import place_unseen_homes_after
+        ranked = sorted(items, key=SORT_KEYS["score"], reverse=True)
+        ranked = place_unseen_homes_after(ranked, mode)
+        items = ranked[:cap]
         items.sort(key=SORT_KEYS.get(sort, SORT_KEYS["score"]), reverse=(direction == "desc"))
         total = len(items)
         page_items = [_with_fees(it) for it in items[(page - 1) * per_page:page * per_page]]
@@ -435,6 +440,7 @@ def api_listings():
             "shortlisted": sum(1 for it in visible if it["status"] == "shortlisted"),
             "hidden": dict(hidden_counts),
             "sources_failing": sum(1 for h in health if h["state"] in ("error", "broken", "blocked")),
+            "sources_quiet": sum(1 for h in health if attention_reason(h)),
         },
         "last_scrape": last_scrape,
         "cash": _cash_public(),
@@ -585,12 +591,14 @@ def api_listing_status():
     data = request.get_json(silent=True) or {}
     if not data.get("id"):
         return jsonify({"error": "id required"}), 400
+    if data.get("status") == "dismissed" and data.get("reason") not in DISMISS_REASONS:
+        return jsonify({"error": "choose why you are dismissing it"}), 400
     db = get_db()
     try:
         if not db.execute("SELECT 1 FROM listings WHERE id = ?", (data["id"],)).fetchone():
             return jsonify({"error": "no such listing"}), 404
         try:
-            set_listing_status(db, data["id"], data.get("status"))
+            set_listing_status(db, data["id"], data.get("status"), data.get("reason"))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
     finally:
@@ -746,6 +754,7 @@ def api_health():
         h["description"] = src.description if src else None
         enriched = source_validation.enrich_health_row(h, src)
         h.update(enriched)
+        h["attention"] = attention_reason(h)
     return jsonify(health)
 
 
@@ -1659,7 +1668,8 @@ EDITABLE = {
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
                 "rural_max_eur_m2", "weights"),
     "proponente": PROPONENTE_KEYS,
-    "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours"),
+    "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours",
+                 "retry_every_hours", "fotocasa_every_hours"),
     "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score", "source_alerts",
                  "cut_min_pct", "cut_min_score"),
     "notifications": ("enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_password",
