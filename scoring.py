@@ -16,7 +16,7 @@ import math
 import re
 from datetime import datetime
 
-from common import (days_left, effective_end, find_area, find_terms, has_term, normalize,
+from common import (days_left, effective_end, find_area, find_floor_area, find_terms, has_term, normalize,
                     price_to_pay as _pay, term_regex, utcnow)
 import prices
 from prices import place_key as _place_key
@@ -134,7 +134,9 @@ NO_VIEWING = ["sin visitas previas", "subasta fácil", "subasta facil", "cesión
 INSTALMENT_SALE = ["viager", "vente à terme", "vente a terme"]
 # Not in the land registry: no mortgage, and the title has to be proved first.
 NOT_REGISTERED = ["no está registrada", "no está registrado", "no está inscrita", "no está inscrito",
-                  "sin inscribir", "sin inscripción registral", "não está registad*", "sem registo predial"]
+                  "sin inscribir", "sin inscripción registral", "não está registad*", "sem registo predial",
+                  "no tiene título de propiedad", "sin título de propiedad", "no tiene escrituras",
+                  "sin escrituras", "hay que acomodar los papeles"]
 # A bank flat nobody may visit: in practice someone lives in it.
 NOT_VISITABLE = ["no visitable", "no se puede visitar", "sin posibilidad de visita", "não visitável"]
 
@@ -488,6 +490,14 @@ HEAVY_WORK = [
     "actuellement non-habitable",
     "pra reformar", "pra recuperar", "pra reconstruir",
     "para restauro", "precisa de restauro", "necessita de restauro", "a necessitar de restauro",
+    "total reabilitação", "necessita de reabilitação", "necessita de total*",
+    "necesita reformar", "necesitan reformar", "necesita rehabilitarse", "necesitan rehabilitarse",
+    "necesita rehabilitar*", "necesidad de reforma", "daños ocasionados por terceros",
+    # French: the house is not a home yet.
+    "sinistré", "sinistrée", "détruit par un incendie", "détruits par un incendie", "détruit par incendie",
+    "détruits par incendie", "accès condamné", "raccordements à prévoir", "raccordement à prévoir",
+    "pas de fosse septique", "sans fosse septique", "à une rénovation totale", "pour une rénovation totale",
+    "à une rénovation complète", "pour une rénovation complète",
     "ristrutturazione integrale", "ristrutturazione totale", "necessita di ristrutturazione",
     "rudere", "fatiscente", "inagibile", "non abitabile", "non abitabili",
     "pessimo stato", "in pessimo stato", "pessime condizioni", "in pessime condizioni",
@@ -530,6 +540,8 @@ SOME_WORK = [
     "no está acto", "no esta acto", "no está apto", "no está lista para", "no está listo para",
     "falta de luz", "falta de agua", "sin luz ni agua", "sin agua ni luz",
     "sin suministro de agua", "sin suministro eléctrico", "sin suministros",
+    "proyecto de renovación", "proyecto de reforma", "necesita una reforma", "para renovação",
+    "doivent être remises en service", "doit être remise en service",
     "da sistemare", "necessita di lavori", "necessita di interventi", "mediocre stato", "discreto stato",
     "scarsa manutenzione", "manutenzione straordinaria",
     "manutenzione scadente", "stato di manutenzione scadente", "scadente stato di manutenzione",
@@ -770,7 +782,10 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         "location at a higher price; a house needing some repairs, dirt cheap, in a great "
         "location. How far the price sits under the local price per m² is the Investment home "
         "goal, not this one. When the listing does not say "
-        "the condition, treat it as needing work (not as a sound home). A plot is judged on the "
+        "the condition, treat it as needing work (not as a sound home); on a sale portal or a bank's "
+        "site a low price with no word on the state usually hides work, occupants or that it is not a "
+        "home at all, so say what to check. Good condition said of one part — the roof, the bathroom, "
+        "the common parts — is not the home's condition. A plot is judged on the "
         "Investment land goal instead, where land of at least "
         f"{t['rural_min_m2']:,.0f} m² at most €{t['rural_max_eur_m2']:.2f}/m² (about "
         f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare) is what counts. Not wanted: small or partial homes; "
@@ -804,7 +819,9 @@ _INVEST_PRIORITIES = (
     "an energy class (DPE) of G or F, because such homes normally cannot be let on a new lease (G "
     "since 2025, F from 2028) until energy works are done; a price that is only the down payment of "
     "a viager or vente à terme. When the "
-    "listing does not say the condition, treat it as needing work. Judge the money, not whether "
+    "listing does not say the condition, treat it as needing work; on a sale portal or a bank's site "
+    "a price far below the local one with no word on the state is a warning, not a bargain. Do not "
+    "work out a rent on a plot's area. Judge the money, not whether "
     "the buyer would enjoy living there."
 )
 
@@ -933,7 +950,12 @@ _VILLA_PLACE = re.compile(r"\b(C\.\s?C\.|loc\.|localit[aà]|frazione|fraz\.|comu
 # beats a portal category that says home (Astalegale files it under "Abitazione").
 _DESC_OPENS_AS_OTHER = re.compile(
     r"^\W*(?:[a-z]\W+)?(?:(?:diritto di |la )?(?:piena |intera |ed |e )*proprieta (?:di|su|del|della) "
-    r"(?:un[oa']? ?)?)?(?:ufficio|uffici|negozio|magazzino|capannone|laboratorio|box auto|garage|posto auto)\b")
+    r"(?:un[oa']? ?)?)?(?:ufficio|uffici|negozio|magazzino|capannone|laboratorio|box auto|garage|posto auto)\b"
+    # "Se vende local de 54 m2 … es un almacén", "Local comercial de 76 m2 con posibilidad de vivienda"
+    r"|^\W*(?:se vende |vendo |venta de )?(?:un |el )?(?:local|almacen|nave)\b"
+    r"|^\W*local commercial\b")
+# Fotocasa's shop template: "situado a pie de calle, 1 escaparates, actividad comercial: almacén".
+_SHOP_TEMPLATE = re.compile(r"\bactividad comercial\s*:")
 
 
 # Portals title everything "Casa en X" / "Maison à X"; the first words of the
@@ -950,8 +972,22 @@ _SELLS_A_PLOT = re.compile(
     r"\bse venden? (?:una |un |dos |tres |varias )?(?:preciosa |bonita |gran )?"
     r"(?:parcelas?|fincas? rusticas?|terrenos?)\b"
     r"|\bactualmente es una parcela\b"
-    r"|\bpresentamos (?:esta|una) (?:\w+ )?finca de\b")
+    r"|\bpresentamos (?:esta|una) (?:\w+ )?finca de\b"
+    r"|\b(?:dos|tres|\d+) fincas? rusticas?\b|\bfincas? rusticas? de uso agricola\b")
 _FINCA_WITH_HOUSE = re.compile(r"\b(?:con|y|incluye) (?:una |la |su )?(?:casa|vivienda|edificacion)")
+# A building that is not a home yet, said anywhere in the text. Counts only when the
+# text names no room a home has: "maison avec grange, 3 chambres" stays a house.
+OUTBUILDING_SUBJECT = ["grange", "granges", "écurie", "écuries", "étable", "bergerie", "hangar", "hangars",
+                       "dépendances à usage agricole", "à usage agricole", "cave troglodyte", "caves troglodytes",
+                       "réhabilitation en logement", "changement de destination"]
+HOME_ROOMS = ["chambre*", "salle de bain*", "salle d'eau", "cuisine", "séjour", "salon", "pièce*",
+              "dormitorio*", "habitaci*", "baño*", "aseo*", "cocina", "salón", "quarto*", "cozinha",
+              "casa de banho", "sala", "camera da letto", "camere", "bagno", "cucina", "slaapkamer*", "badkamer*"]
+# A plot with a building permit sold as "Maison": the house is a drawing.
+NEW_BUILD_PROJECT = ["projet de construction neuf", "projet de construction", "proyecto de obra nueva",
+                     "projeto de construção"]
+# thinkSPAIN's card for land filed as a country house.
+_NO_ROOMS = re.compile(r"\b0 bedrooms?, 0 bathrooms?\b")
 
 
 def _sold_as_outbuilding(desc: str) -> bool:
@@ -1017,6 +1053,16 @@ def property_kind(item: dict) -> str | None:
     # "Vivienda en Villaviciosa" whose text is only "antigua cuadra y pajar".
     if _sold_as_outbuilding(desc):
         return "other"
+    if _SHOP_TEMPLATE.search(ndesc):
+        return "other"
+    if has_term(desc, NEW_BUILD_PROJECT, negations=False):
+        return "urban_plot"
+    raw = _raw(item)
+    if _NO_ROOMS.search(ndesc) or (raw.get("rooms") == 0 and raw.get("bathrooms") == 0):
+        return "rural_plot" if area >= 5000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
+    # "Maison à vendre … ce Garage/Grange", "dépendances à usage agricole", "caves troglodytes".
+    if has_term(desc, OUTBUILDING_SUBJECT, negations=False) and not has_term(desc, HOME_ROOMS, negations=False):
+        return "other"
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
         # The portal says land (or "Lote Moradia"): a plot, whatever house word follows.
@@ -1066,20 +1112,59 @@ _PHOTO_ROOF_SOME = ["uralita", "asbestos", "fibre-cement", "fiber-cement", "fibr
                     "fiber cement", "fibrocement"]
 
 
+# "Toiture en très bon état", "salle de bains rénové", "elementos comunes reformados":
+# one part of the building, not the home. Checked in the words just before.
+_PART_OF_HOUSE = re.compile(
+    r"\b(?:toiture|toit|couverture|charpente|gros (?:oe|œ)uvre|structure|murs?|facade|menuiseries|fenetres|"
+    r"salle de bains?|salle d'eau|cuisine|chaudiere|tejado|cubierta|estructura|fachada|ventanas|"
+    r"elementos comunes|zonas comunes|portal|bano|cocina|telhado|cobertura|estrutura|caixilharia|janelas|"
+    r"partes comuns|casa de banho|cozinha|tetto|copertura|facciata|infissi|bagno|parti comuni)\b"
+    r"[^.;,]{0,25}$")
+# The portal's own state, when the text says nothing: fotocasa's conservationStatus
+# (1 casi nuevo, 2 muy bien, 3 bien, 4 a reformar, 8 reformado — read off its pages,
+# 2026-10) and imovirtual's construction_status.
+PORTAL_CONDITION = {1: "good", 2: "good", 3: "good", 4: "some", 8: "good",
+                    "ready_to_use": "good", "to_renovation": "some", "to_completion": "heavy"}
+
+
+def _whole_house_good(text: str) -> bool:
+    """A good-condition word that is about the home, not one part of it."""
+    norm = normalize(text)
+    for term in GOOD_CONDITION:
+        if not has_term(norm, [term]):
+            continue
+        for m in term_regex(term).finditer(norm):
+            if not _PART_OF_HOUSE.search(norm[max(0, m.start() - 45):m.start()]):
+                return True
+    return False
+
+
+def portal_condition(item: dict) -> str | None:
+    raw = _raw(item)
+    return PORTAL_CONDITION.get(raw.get("conservation")) or PORTAL_CONDITION.get(raw.get("construction_status"))
+
+
 def condition(item: dict) -> str:
     """"heavy", "some", "good" or "unknown": how much work the listing admits
-    to, else what its photos show (photos.py) when the text says nothing.
+    to, else the portal's own state field, else what its photos show
+    (photos.py) when neither says anything.
 
     A fallen roof or fibre-cement sheets in the photos raise the estimate even
     when the ad says the house is sound. A barn photo that does not say so
-    still says nothing about the house."""
+    still says nothing about the house. A portal that files the home as "a
+    reformar" outranks an agent's "lista para entrar a vivir"."""
     text = f"{item.get('title') or ''} {item.get('description') or ''}"
+    portal = portal_condition(item)
     if has_term(text, HEAVY_WORK):
         state = "heavy"
     elif has_term(text, SOME_WORK):
         state = "some"
-    elif has_term(text, GOOD_CONDITION):
+    elif portal in ("some", "heavy"):
+        state = portal
+    elif has_term(text, GOOD_CONDITION) and _whole_house_good(text):
         state = "good"
+    elif portal:
+        state = portal
     else:
         seen = photo_condition(item)
         state = seen["condition"] if seen else "unknown"
@@ -1465,7 +1550,8 @@ def no_possession(item: dict, full: str) -> bool:
     """Okupas, or a bank that does not have the keys. A sitting tenant is not this:
     the ad says arrendado, and Investment home still scores that as a let."""
     if has_term(full, ["okupad*", "okupa*", "sin posesión", "sin posesion", "sin la posesión",
-                       "no se contará con la posesión", "no se contara con la posesion"],
+                       "no se contará con la posesión", "no se contara con la posesion",
+                       "ocupado ilegalmente", "ocupada ilegalmente", "ocupación ilegal"],
                 negations=False):
         return True
     posesion = normalize(str(_raw(item).get("posesion") or ""))
@@ -1506,6 +1592,41 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
     return None
 
 
+# Hand-checked in 2026-10: of the portal and bank homes that ranked high with no
+# word on their state, none could be lived in after light work (ruins, barns,
+# plots, squatters). On an asking-price site a low price with a silent ad is
+# the warning; at a court sale it is the forced sale, so those keep their score.
+# Not a hard cap: these stay on the lists (where the photo check can still read
+# their state) and keep their order, but above SOFT_CEILING (raw points; it
+# shows as 40) only a fifth of their points count, so a home that states its
+# condition ranks above them.
+SOFT_CEILING = 70.0
+SOFT_CEILING_SHARE = 0.2
+NO_TEXT_CHARS = 10          # fewer letters than this is no description at all
+
+
+def _soft_ceiling_reasons(item: dict, kind: str | None) -> list[str]:
+    """Why a home's score is held under the soft ceiling: the ad hides its state
+    on a portal or bank site, or its site has not shown it for days."""
+    import source_validation
+    why = []
+    if kind == "home" and condition(item) == "unknown" and \
+            (source_validation.CATALOG.get(item.get("source")) or {}).get("kind") in ("aggregator", "bank"):
+        why.append("the ad does not say its state — on a sale portal a price this low usually hides work, "
+                   "occupants or that it is not a home; check the photos and ask before trusting the score")
+    if item.get("unconfirmed_since"):
+        why.append(f"not seen on {item.get('source')} since {item['unconfirmed_since']} — it may be sold; "
+                   "scan again or check the link")
+    return why
+
+
+def _soft_ceiling(s: float, why: list[str], reasons: list[str]) -> float:
+    reasons.extend(why)
+    if not why or s <= SOFT_CEILING:
+        return s
+    return SOFT_CEILING + (s - SOFT_CEILING) * SOFT_CEILING_SHARE
+
+
 def _doubtful_home_eur(item: dict) -> float:
     if item.get("source") in BANK_PORTALS:
         return DOUBTFUL_BANK_HOME_EUR
@@ -1530,6 +1651,10 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
     if has_term(full, NOT_REGISTERED, negations=False):
         caps.append(UNCHECKED_CAP)
         reasons.append("not in the land registry — normally no mortgage; have a lawyer check the title")
+    if (kind == "home" and item.get("source") in SALE_PORTALS
+            and len(re.sub(r"[\W\d_]", "", item.get("description") or "")) < NO_TEXT_CHARS):
+        caps.append(UNCHECKED_CAP)
+        reasons.append("no description — check it is a house at all (a big area is often the plot)")
     if item.get("place_conflict"):
         # The title names a town far from where the listing is placed: the
         # climate and distances belong to the wrong place.
@@ -1604,6 +1729,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append("ruin on a farm — valued as land")
     if kind == "other":
         return 0.0, ["shop, garage or not a home or plot — skip"]
+    if kind == "home" and not item.get("area_m2"):
+        # A home is sized by its floor, not by "terrain 1034 m²" in the text.
+        area = find_floor_area(title) or find_floor_area(desc) or 0
 
     if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
         s += _climate_points(item["climate"], kind, reasons, caps)
@@ -1787,6 +1915,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     for label, cap in NOT_THE_GOAL_CAP.items():
         if any(r.startswith(label) for r in reasons):
             caps.append(cap)
+    s = _soft_ceiling(s, _soft_ceiling_reasons(item, kind), reasons)
     if caps:
         s = min(s, *caps)
     s += _population_outlook_points(item, reasons)
@@ -2014,8 +2143,9 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     under local prices and not expensive."""
     s = 0.0
     state = condition(item)
-    seen = " (from the photos)" if state != "unknown" and not has_term(
-        full, HEAVY_WORK + SOME_WORK + GOOD_CONDITION) else ""
+    said = has_term(full, HEAVY_WORK + SOME_WORK) or (has_term(full, GOOD_CONDITION) and _whole_house_good(full))
+    seen = ("" if state == "unknown" or said
+            else " (the portal's own field)" if portal_condition(item) else " (from the photos)")
     if state == "heavy":
         s -= 25
         caps.append(40)   # a cheap ruin must not outrank a house you can live in
@@ -2532,10 +2662,18 @@ def price_too_far_below(item: dict, all_in: float) -> bool:
     found = local_price(item)
     if not found:
         return False
-    factor, why = local_value_factor(item)
+    _, why = local_value_factor(item)
     if _discount_skipped(item, why):
         return False
-    mv = found[0] * min(float(area), INVEST_VALUE_MAX_M2) * factor
+    return _too_far_below(item, area, all_in, found[0])
+
+
+def _too_far_below(item: dict, area: float, all_in: float, eur_m2: float) -> bool:
+    """Whether a gap is believable is judged against the home done up. Counting
+    a silent ad at 75% for its unknown state made it look like a bargain while
+    the same price with "good condition" was a warning (Siero, 2026-10)."""
+    done, _ = local_value_factor(item, "good")
+    mv = eur_m2 * min(float(area), INVEST_VALUE_MAX_M2) * done
     return mv > 0 and (mv - all_in) / mv > INVEST_DISCOUNT_TRUST
 
 
@@ -2577,7 +2715,8 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if kind != "home":
         return 0.0, ["not a home — see Investment land"]
     s, reasons, caps = 50.0, [], []
-    area = item.get("area_m2") or find_area(title) or find_area(desc) or 0
+    # The floor is what is valued and let: "terrain 1034 m²" in the text is not it.
+    area = item.get("area_m2") or find_floor_area(title) or find_floor_area(desc) or 0
     pay = _pay(item)
     likely = item.get("predicted_final")
     if likely and likely["price"] > pay * 1.02:
@@ -2609,14 +2748,15 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         factor, why = local_value_factor(item)
         mv = found[0] * min(area, INVEST_VALUE_MAX_M2) * factor
         disc = (mv - all_in) / mv
+        too_far = _too_far_below(item, area, all_in, found[0])
         if disc > 0.1:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
             skipped = _discount_skipped(item, why)
             # The wide-gap case has its own reason just below.
-            if skipped and disc <= INVEST_DISCOUNT_TRUST:
+            if skipped and not too_far:
                 adjusted += skipped
             reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
-        if disc > INVEST_DISCOUNT_TRUST:
+        if too_far:
             # Shown, but not rewarded: a gap this wide is usually a share, a tenant or a wrong area.
             unbelievable = True
             s += INVEST_TOO_CHEAP
@@ -2715,6 +2855,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                        "and it is not taken off the price above")
     if pay:
         reasons.append(f"€{pay:,.0f}")
+    s = _soft_ceiling(s, _soft_ceiling_reasons(item, kind), reasons)
     if caps:
         s = min(s, min(caps))
     s += _population_outlook_points(item, reasons)
