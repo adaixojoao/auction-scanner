@@ -461,14 +461,17 @@ def test_other_homes_still_listed_are_mentioned_and_do_not_change_the_score():
 def test_each_goal_tells_the_ai_check_its_own_wish():
     from scoring import MODES, buyer_priorities
     targets = {"rural_min_m2": 20000, "rural_max_eur_m2": 0.3}
-    home, invest, land, forest = (buyer_priorities(targets, m) for m in MODES)
-    assert "to live in" in home and "not a plot" in home and "swim" in home
+    texts = {m: buyer_priorities(targets, m) for m in MODES}
+    home, invest, land, forest, both = (texts[m] for m in ("home", "invest", "land", "forest", "both"))
+    assert "to live in" in home and "not a plot" in home and "by the beach" in home
     assert "all-in" in invest or "transfer tax" in invest
     assert "net rental yield" in invest and "live in" not in invest.split(",")[0]
     assert "at least 20,000 m²" in land and "€0.30/m²" in land and "not scored here" in land
     assert "forestry project" in forest and "10 ha" in forest and "not a plot to resell" in forest
-    assert len({home, invest, land, forest}) == 4
-    assert all("EUROPOP2019" in text and "not a forecast" in text for text in (home, invest, land))
+    assert "worth living in" in both and "worse of the living score" in both and "1.5 km" in both
+    assert len(set(texts.values())) == len(MODES)
+    assert all("EUROPOP2019" in texts[m] and "not a forecast" in texts[m]
+               for m in ("home", "invest", "land", "both"))
     assert "EUROPOP2019" not in forest
 
 
@@ -608,12 +611,14 @@ def test_eu_trees4f_decides_which_crops_still_suit_the_place():
 def test_map_and_climate_lookups_take_the_best_of_every_tab_in_turn(monkeypatch):
     import db
     import pipeline
-    lists = {"home": [{"id": "h1", "score": 90}, {"id": "both", "score": 80}],
-             "invest": [{"id": "both", "score": 70}],
+    lists = {"both": [{"id": "live", "score": 88}],
+             "home": [{"id": "h1", "score": 90}, {"id": "shared", "score": 80}],
+             "invest": [{"id": "shared", "score": 70}],
              "land": [{"id": "l1", "score": 75}],
              "forest": [{"id": "f1", "score": 85}, {"id": "f2", "score": 60}]}
     monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home": lists[mode])
-    assert [it["id"] for it in pipeline.enrich_order(None, {})] == ["h1", "both", "l1", "f1", "f2"]
+    assert [it["id"] for it in pipeline.enrich_order(None, {})] == [
+        "live", "h1", "shared", "l1", "f1", "f2"]
 
 
 def test_site_check_queue_puts_forestry_ahead_of_other_land(monkeypatch):

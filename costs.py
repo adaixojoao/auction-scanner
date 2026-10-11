@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import re
 
-from common import normalize, parse_price, price_to_pay
-from scoring import categorize, condition, property_kind
+from common import find_floor_area, footprint_figure, land_figure, normalize, parse_price, price_to_pay
+from scoring import INVEST_VALUE_MAX_M2, categorize, condition, property_kind
 
 IMT_YEAR = 2025
 
@@ -316,17 +316,52 @@ def imt(value: float, kind: str | None, *, own_home: bool = False) -> tuple[floa
     return 0.0, ""
 
 
+def building_m2(item: dict) -> tuple[float, str]:
+    """(m² of building to renovate and let, where the figure came from).
+
+    The stored area, otherwise the first size in the title or the description
+    that is not the land or the footprint. A stored area the notice calls land
+    or implantação is not the floor: the floor is then the notice's own floor
+    figure, or unknown when that is the only size. Nothing is invented. At most
+    INVEST_VALUE_MAX_M2: a bigger number is the plot, and pricing all of it
+    would treat the land as floor space. The source is "stored", "notice" or
+    "capped" ("" when there is no floor).
+    """
+    stored = float(item.get("area_m2") or 0)
+    title, desc = item.get("title"), item.get("description")
+    notice = find_floor_area(title) or find_floor_area(desc) or 0
+    text = f"{title or ''}\n{desc or ''}"
+    if stored and (land_figure(text, stored) or footprint_figure(text, stored)):
+        if not notice:
+            return 0.0, ""
+        raw, source = float(notice), "notice"
+    elif stored:
+        raw, source = stored, "stored"
+    else:
+        raw, source = float(notice), "notice" if notice else ""
+    if not raw:
+        return 0.0, ""
+    if raw > INVEST_VALUE_MAX_M2:
+        return float(INVEST_VALUE_MAX_M2), "capped"
+    return float(raw), source
+
+
 def renovation(item: dict) -> dict | None:
-    """{"low", "high", "eur_m2", "note"} for a home whose area is known, else None."""
+    """{"low", "high", "eur_m2", "note"} for a home whose floor area is known, else None."""
     if (item.get("kind") or property_kind(item)) != "home":
         return None
-    area = item.get("area_m2") or 0
-    if not area or area > MAX_HOME_M2:
+    area, source = building_m2(item)
+    if not area:
         return None
     state = condition(item)
     low, high = RENOVATION_EUR_M2[state]
+    where = f"{area:,.0f} m²".replace(",", " ")
+    if source == "notice":
+        where += " (the size in the notice)"
+    elif source == "capped":
+        where += " of building — a larger area is the plot, not floor space"
     return {"low": round(area * low), "high": round(area * high), "eur_m2": (low, high),
-            "note": f"{CONDITION_NOTE[state]}; €{low}–{high}/m² over {area:,.0f} m²".replace(",", " ")}
+            "note": f"{CONDITION_NOTE[state]}; €{low}–{high}/m² over {where}"}
 
 
 def bands_text() -> str:
@@ -498,8 +533,8 @@ def rent(item: dict, cost: float) -> dict | None:
     if (item.get("kind") or property_kind(item)) != "home":
         return None
     country = (item.get("country") or "PT").upper()
-    area = item.get("area_m2") or 0
-    if not area or area > MAX_HOME_M2 or cost <= 0:
+    area, _source = building_m2(item)
+    if not area or cost <= 0:
         return None
     import prices
     place = item.get("concelho") or (item.get("district") if country != "PT" else None)
@@ -570,27 +605,36 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     return out
 
 
-def money_out(item: dict, *, bid: float | None = None) -> dict | None:
+def money_out(item: dict, *, bid: float | None = None, typical: bool = False) -> dict | None:
     """What one purchase takes from cash you can lose.
 
     {"amount", "detail", "estimate"}. The amount is the low end of the all-in
-    figure when the floor area is known, otherwise the price plus taxes and
-    fees. Repairs are left out of that second case, and the detail says so.
+    figure when the floor area is known — stored, or written in the notice —
+    otherwise the price plus taxes and fees. `typical` uses the middle of the
+    repair range, for a home whose condition was not stated. A stored area
+    larger than the building cap counts only that much floor. Repairs are left
+    out when there is no floor area, and the detail says so.
     """
     est = estimate(item, bid=bid)
     if not est:
         return None
     if est["all_in"]:
-        amount = est["all_in"]["low"]
-        detail = (f"price, taxes, fees and the low end of repairs"
-                  f" (high end about €{est['all_in']['high']:,.0f})")
+        low, high = est["all_in"]["low"], est["all_in"]["high"]
+        if typical:
+            amount = (low + high) / 2
+            detail = (f"price, taxes, fees and the middle of the repair range"
+                      f" (€{low:,.0f}–€{high:,.0f})")
+        else:
+            amount = low
+            detail = (f"price, taxes, fees and the low end of repairs"
+                      f" (high end about €{high:,.0f})")
     else:
         amount = est["total"]
         detail = "price, taxes and fees — repairs are not included (no floor area, or not a home)"
     return {"amount": round(amount), "detail": detail, "estimate": est}
 
 
-def over_cash(item: dict, cash: float, *, bid: float | None = None) -> str | None:
+def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: bool = False) -> str | None:
     """Why this purchase is over the cash you can lose, or None.
 
     A cash figure of 0 is not set, and hides nothing: the Offers page refuses
@@ -598,7 +642,7 @@ def over_cash(item: dict, cash: float, *, bid: float | None = None) -> str | Non
     """
     if not cash or cash <= 0:
         return None
-    out = money_out(item, bid=bid)
+    out = money_out(item, bid=bid, typical=typical)
     if not out or out["amount"] <= cash:
         return None
     return f"cash €{out['amount']:,.0f} all-in is over the €{cash:,.0f} you can lose ({out['detail']})"

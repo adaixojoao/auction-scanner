@@ -37,7 +37,9 @@ def test_the_beach_bonus_is_big_and_fades_with_distance():
     ranks = [score_detail(home(km))[0] for km in (0.5, 2, 5, 10, 30)]
     assert ranks == sorted(ranks, reverse=True) and ranks[0] - ranks[-1] >= 24
     assert "0.5 km from the beach (X)" in score_detail(home(0.5))[1]
-    assert not any("beach" in r for r in score_detail(home(30))[1])
+    far = score_detail(home(30))[1]
+    assert any(r.startswith("not by the beach") for r in far)
+    assert not any("km from the beach" in r for r in far)
     approx = {**home(0.5), "beach": {**home(0.5)["beach"], "approx": True}}
     assert score_detail(home(30))[0] < score_detail(approx)[0] < score_detail(home(0.5))[0]
 
@@ -121,11 +123,14 @@ def test_somewhere_to_swim_within_1_5_km_is_a_must():
     from scoring import SWIM_MAX_KM
     by_sea, reasons = score_detail(home(0.5))
     assert "somewhere to swim 0.5 km away (the sea)" in reasons
+    assert not any(r.startswith("not by the beach") for r in reasons)
     lake, reasons = score_detail({**home(30), "climate": {"water_km": 1.2}})
     assert "somewhere to swim 1.2 km away (river)" in reasons
+    assert any(r.startswith("not by the beach") for r in reasons)
     dry, reasons = score_detail({**home(8), "climate": {}})
     assert f"nowhere to swim within {SWIM_MAX_KM:g} km (nearest: the sea 8.0 km)" in reasons
-    assert dry < lake and dry < by_sea
+    assert any(r.startswith("not by the beach") for r in reasons)
+    assert by_sea > lake and by_sea > dry and lake <= 30 and dry <= 30
     stream = {**home(8), "climate": {}, "raw_json": '{"water_check": {"radius_m": 300, "found": [{"kind": "stream"}]}}'}
     assert any(r.startswith("nowhere to swim") for r in score_detail(stream)[1])     # a stream is not a swim
 
@@ -143,24 +148,38 @@ def test_a_town_or_village_pin_without_a_water_check_is_not_penalised_for_swimmi
     assert not any(r.startswith("nowhere to swim") for r in village_reasons)
     street, street_reasons = score_detail(pinned("street"))
     assert any(r.startswith("nowhere to swim") for r in street_reasons)
-    assert street < town and street < village
+    # Eight kilometres inland is not a home to live in, town pin or not.
+    assert street <= 30 and town <= 30 and village <= 30
+    assert score_detail(home(0.5))[0] > town
     # A check that looked and found nothing is a result, even from a town pin.
     checked, checked_reasons = score_detail(pinned("municipality", water_check=True))
     assert any(r.startswith("nowhere to swim") for r in checked_reasons)
-    assert checked < town
+    assert checked <= 30
     close = {**home(0.5), "climate": {}, "raw_json": json.dumps(
         {"geo": {"lat": 41.0, "lon": -8.6, "precision": "village"}})}
     assert "somewhere to swim 0.5 km away (the sea)" in score_detail(close)[1]
 
 
-def test_sea_beats_lake_beats_river():
+def test_the_sea_beats_a_lake_or_a_river_that_is_not_on_the_coast():
     def at(kind):
         if kind == "the sea":
             return {**home(0.5), "climate": {}}
         raw = '{"water_check": {"radius_m": 500, "found": [{"kind": "%s"}]}}' % kind
         return {**home(40), "climate": {}, "raw_json": raw}
-    sea, lake, river = (score_detail(at(k))[0] for k in ("the sea", "lake", "river"))
-    assert sea > lake > river
+    sea, sea_why = score_detail(at("the sea"))
+    lake, lake_why = score_detail(at("lake"))
+    river, river_why = score_detail(at("river"))
+    assert sea > lake and sea > river
+    assert any(r.startswith("not by the beach") for r in lake_why + river_why)
+    assert not any(r.startswith("not by the beach") for r in sea_why)
+
+
+def test_a_poor_climate_is_not_a_home_to_live_in_and_can_still_be_an_investment():
+    poor = {**home(0.4), "climate": {"hot_days": {"rcp45_2071-2100": 30}}}
+    raw, reasons = score_detail(poor)
+    assert any(r.startswith("rejected: poor climate") for r in reasons) and raw <= 30
+    invested, inv_reasons = score_detail(poor, mode="invest")
+    assert invested > raw and not any(r.startswith("rejected: poor climate") for r in inv_reasons)
 
 
 def test_water_by_the_open_sea_is_a_ria_not_a_river():

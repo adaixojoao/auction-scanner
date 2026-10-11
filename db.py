@@ -1330,12 +1330,16 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if not include_hidden:
                 continue
 
-        # Price plus taxes, fees and the low end of repairs, against cash you
-        # can lose. A shortlisted listing stays: you picked it on purpose.
+        # Price plus taxes, fees and repairs, against cash you can lose.
+        # Live and invest uses the middle of the repair range unless the
+        # notice says the building is in good condition. The other tabs keep
+        # the low end. A shortlisted listing stays: you picked it on purpose.
         # Cash of 0 is not set and hides nothing.
         if reason is None and cash and item["status"] != "shortlisted":
             import costs
-            over = costs.over_cash(item, cash)
+            from scoring import condition as _condition
+            typical = mode == "both" and _condition(item) != "good"
+            over = costs.over_cash(item, cash, typical=typical)
             if over:
                 reason = over
                 if not include_hidden:
@@ -1366,9 +1370,14 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
     from scoring import FAMILY_GOALS, MODES, goal_family
     kw.pop("mode", None)
     chosen = tuple(m for m in (modes or MODES) if m in MODES) or tuple(MODES)
+    # Live and invest is a tab. It is the worse of two scores, so it is not a
+    # label that competes with My home or Investment home.
+    family_modes = {m for goals in FAMILY_GOALS.values() for m in goals}
     cfg = load_config()
     best: dict[str, dict] = {}
     for mode in chosen:
+        if mode not in family_modes:
+            continue
         budget = mode_max_price(cfg, mode, cfg.get("max_price") or 0)
         for item in load_listings(db, mode=mode, **kw):
             # Each goal pays its own price: a listing over this goal's budget

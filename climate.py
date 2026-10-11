@@ -352,12 +352,74 @@ def stored(item: dict) -> dict | None:
     return (geo._raw(item).get("climate") or {}).get("result")
 
 
-def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000) -> int:
+def _exact_seaside_home(item: dict, towns: dict) -> bool:
+    """A home whose pin is the building, with the sea within WATER_KM of that pin.
+
+    A town pin does not count, and neither does a river or a lake: the distance
+    is the sea beach, and only when it is this building's."""
+    import geo
+    from scoring import property_kind
+    pos = geo.position(item)
+    if not pos or pos.get("precision") not in geo.EXACT_ENOUGH:
+        return False
+    if property_kind(item) != "home":
+        return False
+    beach = item.get("beach")
+    if not isinstance(beach, dict):
+        beach = geo.nearest_beach(item, towns=towns) or {}
+    km = beach.get("km")
+    return km is not None and not beach.get("approx") and km <= WATER_KM
+
+
+def _still_for_sale(item: dict, today: str) -> bool:
+    if item.get("duplicate_of"):
+        return False
+    end = str(item.get("date_end") or "")[:10]
+    return not end or end >= today
+
+
+def _seaside_ahead(db, items: list[dict], towns: dict) -> list[dict]:
+    """Exact seaside homes first, including ones a score filter left out of `items`.
+
+    Live and invest rejects a climate that was never read. That rejection has to
+    follow a reading. Poor and caution still fail; a missing lookup does not
+    pass and is not graded as poor."""
+    from common import utcnow
+    today = utcnow().date().isoformat()
+    seaside: list[dict] = []
+    seen: set = set()
+    # The row on disk, not the copy taken before this scan's geocoding: that
+    # copy can still say the pin is the town after the street was found.
+    for row in db.execute("SELECT * FROM listings"):
+        item = dict(row)
+        blob = item.get("raw_json") or ""
+        if "lat" not in blob and "geo" not in blob:
+            continue
+        if not _still_for_sale(item, today) or not _exact_seaside_home(item, towns):
+            continue
+        seaside.append(item)
+        seen.add(item["id"])
+    for it in items:
+        if it.get("id") not in seen and _exact_seaside_home(it, towns):
+            seaside.append(it)
+            seen.add(it["id"])
+    return seaside + [it for it in items if it.get("id") not in seen]
+
+
+def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
+                   seaside_first: bool = False) -> int:
     """Read the climate layers for the listings whose stored result is missing
-    or out of date (moved, or the layers were rebuilt)."""
+    or out of date (moved, or the layers were rebuilt).
+
+    `seaside_first` reads exact seaside homes before the rest of `items`, so a
+    scan's budget of `limit` is not spent inland while Live and invest still
+    has no grade for the houses by the sea. A single listing (a position just
+    verified) leaves this off."""
     if not available():
         return 0
     import geo
+    if seaside_first:
+        items = _seaside_ahead(db, items, towns)
     stamp, done = _layers_stamp(), 0
     for item in items:
         if done >= limit:

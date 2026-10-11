@@ -19,6 +19,46 @@ def client(db, monkeypatch):
     return dashboard.app.test_client()
 
 
+def test_a_floor_only_in_the_notice_or_a_plot_sized_area_counts_toward_the_cash():
+    # 200 m² with the condition unstated is €40,000 of repairs before the price.
+    notice = {"title": "Moradia de 200 m²", "kind": "home", "country": "PT",
+              "source": "citius", "price": 20000}
+    assert costs.over_cash(notice, 40000)
+    # The stored area is the plot. Repairs are priced on the building cap, not skipped.
+    plot = {"title": "Casa", "kind": "home", "country": "ES", "source": "fotocasa",
+            "price": 19900, "area_m2": 1787}
+    assert costs.over_cash(plot, 40000)
+    land = {"title": "Maison", "description": "terrain 1034 m²", "kind": "home",
+            "country": "FR", "source": "france", "price": 15000}
+    assert costs.over_cash(land, 40000) is None
+
+
+def test_live_and_invest_uses_the_middle_of_the_repair_range(db, add, monkeypatch):
+    """Condition unstated: the low end can fit the cash while the middle does not."""
+    house = {"title": "Moradia T3", "kind": "home", "country": "PT", "source": "citius",
+             "price": 15000, "area_m2": 80}
+    low = costs.money_out(house)["amount"]
+    mid = costs.money_out(house, typical=True)["amount"]
+    assert low < mid
+    assert costs.over_cash(house, low) is None
+    assert costs.over_cash(house, low, typical=True)
+    assert "middle of the repair range" in costs.money_out(house, typical=True)["detail"]
+
+    config.save_config({"cash_on_hand": 40000})
+    add("eleiloes", "mid", title="Moradia", price=15000, area_m2=80)
+    seen = []
+
+    def spy(item, cash, **kw):
+        seen.append((item["id"], kw.get("typical", False)))
+        return None
+
+    monkeypatch.setattr(costs, "over_cash", spy)
+    load_listings(db, filters={"min_score": 0}, mode="both")
+    load_listings(db, filters={"min_score": 0}, mode="home")
+    assert ("eleiloes:mid", True) in seen
+    assert ("eleiloes:mid", False) in seen
+
+
 def test_the_low_end_of_repairs_counts_toward_the_cash():
     house = {"title": "Moradia T3", "kind": "home", "country": "PT", "source": "citius",
              "price": 20000, "area_m2": 100}

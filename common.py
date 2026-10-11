@@ -410,20 +410,60 @@ def find_area(text) -> float | None:
 _LAND_BEFORE_AREA = re.compile(
     r"\b(?:terrain|terreno|terrenos|parcela|parcelle|jardin|jard[ií]n|garden|plot|lote|solar|finca|"
     r"quintal|logradouro|land|grundst\w*|giardino|cour|courette|patio)\b[^.;,\d]{0,20}$", re.I)
+# The footprint on the ground, not the floor: "área de implantação do edifício de 47 m²".
+_FOOTPRINT_BEFORE_AREA = re.compile(
+    r"\b(?:implanta\w*|emprise|footprint)\b[^.;,\d]{0,24}$", re.I)
+
+
+def _area_introduced_by(text: str, area: float, pattern: re.Pattern) -> bool:
+    """True when `area` occurs in `text` and `pattern` introduces every time."""
+    try:
+        area = float(area)
+    except (TypeError, ValueError):
+        return False
+    if area <= 0:
+        return False
+    hits = marked = 0
+    window = 48
+    for m in _AREA_RE.finditer(text):
+        value = _area_value(m.group(1), m.group(2))
+        if value is None or abs(value - area) > 0.05:
+            continue
+        hits += 1
+        if pattern.search(text[max(0, m.start() - window):m.start()]):
+            marked += 1
+    return hits > 0 and marked == hits
 
 
 def find_floor_area(text) -> float | None:
-    """The first size in a text that is not the land's: the floor area a rent or
-    a value can be worked on. A plot sold as "Maison" with only "terrain 1034 m²"
-    has none, which is better than a rent on a hectare."""
+    """The first size in a text that is not the land's or the footprint: the
+    floor area a rent or a value can be worked on. A plot sold as "Maison"
+    with only "terrain 1034 m²", or only "área de implantação", has none,
+    which is better than a rent on the land or on the ground it covers."""
     text = str(text or "")
     for m in _AREA_RE.finditer(text):
-        if _LAND_BEFORE_AREA.search(text[max(0, m.start() - 40):m.start()]):
+        before = text[max(0, m.start() - 48):m.start()]
+        if _LAND_BEFORE_AREA.search(before) or _FOOTPRINT_BEFORE_AREA.search(before):
             continue
         value = _area_value(m.group(1), m.group(2))
         if value:
             return value
     return None
+
+
+def land_figure(text, area: float) -> bool:
+    """True when `area` is written in `text` and a land word introduces every time.
+
+    The same window as find_floor_area. A size that is also given as floor
+    ("casa de 90 m², terreno de 90 m²") is not only land."""
+    return _area_introduced_by(str(text or ""), area, _LAND_BEFORE_AREA)
+
+
+def footprint_figure(text, area: float) -> bool:
+    """True when `area` is written in `text` and every time it is the footprint.
+
+    "Área de implantação" is how much ground the building covers, not the floor."""
+    return _area_introduced_by(str(text or ""), area, _FOOTPRINT_BEFORE_AREA)
 
 
 _AREA_UNIT_FIRST_RE = re.compile(r"\bmq\.?\s*(\d{1,6}(?:,\d{1,2})?)\b", re.I)
