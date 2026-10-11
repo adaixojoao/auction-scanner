@@ -491,7 +491,8 @@ def _finish_rent(item: dict, cost: float, monthly: float, *, source: str, provin
 
 def rent(item: dict, cost: float) -> dict | None:
     """What a home would rent for, from the rent per m² in its municipality
-    (Portugal: INE's median of new leases; France: the carte des loyers), and
+    (Portugal: INE's median of new leases; France: the carte des loyers;
+    Spain: SERPAVI; Italy: OMI quotations by comune), and
     the yield on `cost` (what it takes to own it, with the work), net of the
     default running costs and empty months. None without an area or a figure."""
     if (item.get("kind") or property_kind(item)) != "home":

@@ -138,6 +138,8 @@
   <div class="form-grid" style="margin-top:12px">
     <div class="field"><label>Portugal every (hours, 168 = a week)</label><input type="number" id="pt_every_hours" min="0" step="1"></div>
     <div class="field"><label>Other countries every (hours, 336 = two weeks, 0 = never)</label><input type="number" id="eu_every_hours" min="0" step="1"></div>
+    <div class="field"><label>Retry a failed source every (hours)</label><input type="number" id="retry_every_hours" min="0" step="1"></div>
+    <div class="field"><label>Fotocasa, in full, every (hours, 168 = a week)</label><input type="number" id="fotocasa_every_hours" min="0" step="1"></div>
   </div>
   <div style="margin-top:14px" id="background">
     <label class="check"><input type="checkbox" id="bg_enabled"> Keep scanning when the app is closed (Windows background task, every 30 min when something is due)</label>
@@ -308,6 +310,7 @@ async function load() {
   setv("exclude_keywords", (f.exclude_keywords || []).join("\n"));
   ["nome", "nif", "email", "telefone", "localidade", "morada"].forEach(k => setv("p_" + k, p[k]));
   setv("while_app_open", s.while_app_open); setv("pt_every_hours", s.pt_every_hours); setv("eu_every_hours", s.eu_every_hours);
+  setv("retry_every_hours", s.retry_every_hours ?? 2); setv("fotocasa_every_hours", s.fotocasa_every_hours ?? 168);
   ["enabled", "token", "chat_id", "min_score", "deadline_min_score"].forEach(k => setv("tg_" + k, t[k]));
   setv("tg_cut_min_pct", t.cut_min_pct ?? 5); setv("tg_cut_min_score", t.cut_min_score ?? 60);
   $("tg_source_alerts").checked = t.source_alerts !== false;
@@ -436,7 +439,8 @@ async function save() {
       exclude_keywords: $("exclude_keywords").value.split("\n").map(s => s.trim()).filter(Boolean),
     },
     proponente: Object.fromEntries(["nome", "nif", "email", "telefone", "localidade", "morada"].map(k => [k, $("p_" + k).value.trim()])),
-    schedule: {while_app_open: $("while_app_open").checked, pt_every_hours: num("pt_every_hours"), eu_every_hours: num("eu_every_hours")},
+    schedule: {while_app_open: $("while_app_open").checked, pt_every_hours: num("pt_every_hours"), eu_every_hours: num("eu_every_hours"),
+               retry_every_hours: num("retry_every_hours"), fotocasa_every_hours: num("fotocasa_every_hours")},
     telegram: {enabled: $("tg_enabled").checked, token: $("tg_token").value.trim(), chat_id: $("tg_chat_id").value.trim(),
                min_score: num("tg_min_score"), deadline_min_score: num("tg_deadline_min_score"),
                cut_min_pct: num("tg_cut_min_pct"), cut_min_score: num("tg_cut_min_score"),

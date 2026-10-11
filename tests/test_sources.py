@@ -840,6 +840,23 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     assert all(c[2]["params"] == {"maxPrice": 100000, "minSurface": 10000} for c in land)
 
 
+def test_fotocasa_detail_page_keeps_the_full_text():
+    from sources.es import fotocasa_detail, with_fotocasa_detail, parse_fotocasa
+    page = {"props": {"pageProps": {"realEstate": {
+        "description": "Casa para reformar por completo, tejado hundido, en una parcela.",
+        "features": [{"key": "conservationStatus", "value": 4}],
+        "multimedia": [{"src": "https://static.fotocasa.es/full.jpg"}],
+    }}}}
+    html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(page)}</script>'
+    detail = fotocasa_detail(html)
+    assert detail["conservation"] == 4 and "tejado hundido" in detail["description"]
+    row = with_fotocasa_detail(parse_fotocasa(FOTOCASA_AD, "vivienda"), detail)
+    assert "tejado hundido" in row["description"]
+    raw = json.loads(row["raw_json"])
+    assert raw["detail_checked"] == 1 and raw["conservation"] == 4
+    assert raw["fotos"] == ["https://static.fotocasa.es/full.jpg"]
+
+
 BIENICI_AD = {"id": "ag1-2", "propertyType": "house", "price": 42000, "city": "Huelgoat", "postalCode": "29690",
               "departmentCode": "29", "surfaceArea": 90, "landSurfaceArea": 1500, "title": "Longère",
               "description": "Longère en pierre au bord de la rivière.", "isInTourismResidence": False,
@@ -973,6 +990,7 @@ def test_pisos_reads_cards_and_the_detail_page():
     assert row["description"].startswith("Gran oportunidad en Barbos, Ortigueira")
     assert '"lat": 43.688' in row["raw_json"]
     assert row["url"] == "https://www.pisos.com/comprar/casa_rustica-ortigueira-675_105/"
+    assert '"detail_checked"' in row["raw_json"]
 
 
 THINKSPAIN_LIST = """<script id="item-list-structured-data" type="application/ld+json">

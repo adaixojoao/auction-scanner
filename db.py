@@ -32,15 +32,21 @@ DB_PATH = os.environ.get("AUCTION_SCANNER_DB") or os.path.join(
 # this long after the listing was last seen (i.e. it is gone from the site).
 STALE_AFTER = timedelta(days=3)
 # A source that fails (or is not scanned) never makes its listings stale, so a
-# sold house stays on show. Past this, the score says it is unconfirmed.
+# sold house stays on show. Past this, the score says it is unconfirmed — but
+# only when the source was tried and failed after the listing was last seen.
+# A source that simply has not been read yet (a fortnightly scan) is not a failure.
 UNCONFIRMED_AFTER = timedelta(days=5)
+# Dashboard and Telegram: a source with stored listings and no good read this long.
+QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
+# Why a listing was dismissed. The dashboard asks; a script turns the answers into tests.
+DISMISS_REASONS = ("occupied", "heavy work", "not a home", "sold", "false price", "no papers", "other")
 
 
 # ─── Connection & migrations ─────────────────────────────────────────
@@ -457,11 +463,16 @@ def _migrate_v19(db: sqlite3.Connection):
     _add_column(db, "carta_log", "months_held", "REAL")
 
 
+def _migrate_v20(db: sqlite3.Connection):
+    """Why a listing was dismissed (occupied, heavy work, sold, …)."""
+    _add_column(db, "listing_status", "reason", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
-               19: _migrate_v19}
+               19: _migrate_v19, 20: _migrate_v20}
 
 
 def init_db(db: sqlite3.Connection):
@@ -762,16 +773,32 @@ def set_job_last_run(db: sqlite3.Connection, job: str, when: datetime | None = N
     db.commit()
 
 
-def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | None):
-    """Shortlist or dismiss a listing; None clears the decision."""
+def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | None,
+                       reason: str | None = None):
+    """Shortlist or dismiss a listing; None clears the decision.
+
+    A dismissal can carry a reason from DISMISS_REASONS. Omitting it is allowed
+    for older callers (the Telegram buttons); the dashboard always sends one.
+    """
     if status is None:
         db.execute("DELETE FROM listing_status WHERE listing_id = ?", (listing_id,))
     elif status in STATUSES:
-        db.execute("INSERT OR REPLACE INTO listing_status (listing_id, status, updated_at) VALUES (?,?,?)",
-                   (listing_id, status, utcnow_iso()))
+        if status != "dismissed":
+            reason = None
+        elif reason is not None and reason not in DISMISS_REASONS:
+            raise ValueError(f"unknown dismiss reason {reason!r}")
+        db.execute(
+            "INSERT OR REPLACE INTO listing_status (listing_id, status, updated_at, reason) "
+            "VALUES (?,?,?,?)",
+            (listing_id, status, utcnow_iso(), reason))
     else:
         raise ValueError(f"unknown status {status!r}")
     db.commit()
+
+
+def dismiss_reasons(db: sqlite3.Connection) -> dict[str, str]:
+    return {lid: reason for lid, reason in db.execute(
+        "SELECT listing_id, reason FROM listing_status WHERE reason IS NOT NULL")}
 
 
 def get_kv(db: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
@@ -880,6 +907,39 @@ def last_ok_by_source(db: sqlite3.Connection) -> dict[str, datetime]:
     return out
 
 
+def latest_failure(db: sqlite3.Connection) -> dict[str, datetime]:
+    """When a source's newest scrape failed, that time.
+
+    Absent when the newest scrape returned listings: the source is being read,
+    and a listing it has not shown is stale, not unconfirmed.
+    """
+    out = {}
+    rows = db.execute(
+        "SELECT s.source, s.timestamp, s.count, s.status FROM scrape_log s "
+        "JOIN (SELECT source, MAX(id) AS id FROM scrape_log GROUP BY source) last "
+        "ON s.id = last.id")
+    for r in rows:
+        failed = r["status"] in ("error", "blocked", "empty") or not (r["count"] or 0)
+        if not failed:
+            continue
+        dt = parse_dt(r["timestamp"])
+        if dt:
+            out[r["source"]] = dt
+    return out
+
+
+def attention_reason(row: dict, now: datetime | None = None) -> str | None:
+    """Why a source needs a look: two failures in a row, or no good read for days."""
+    now = now or utcnow()
+    parts = []
+    if row.get("state") in ("error", "broken", "blocked") and (row.get("failing_runs") or 0) >= 2:
+        parts.append(f"failed {row['failing_runs']} times in a row")
+    ok = parse_dt(row.get("last_ok")) if row.get("last_ok") else None
+    if row.get("listings") and ok and now - ok > QUIET_AFTER:
+        parts.append(f"no good read since {ok:%Y-%m-%d}")
+    return "; ".join(parts) or None
+
+
 # ─── Reading: the one loader ─────────────────────────────────────────
 
 def _cash_on_hand() -> float:
@@ -934,7 +994,7 @@ def hidden_category(reason: str | None) -> str | None:
     if not reason:
         return None
     for prefix, label in (("dismissed", "dismissed"), ("expired", "expired"), ("duplicate", "duplicate"),
-                          ("stale", "stale"), ("score", "low score"), ("cash", "over cash")):
+                          ("gone", "gone"), ("stale", "stale"), ("score", "low score"), ("cash", "over cash")):
         if reason.startswith(prefix):
             return label
     return "filtered"
@@ -1173,8 +1233,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     # A scan touches last_seen on every listing it sees; the score never reads it.
     scored_cols = [i for i, k in enumerate(rows[0].keys()) if k not in _UNSCORED] if rows else []
 
+    from confirm import gone_reason
     last_ok = last_ok_by_source(db)
+    failed_at = latest_failure(db)
     statuses = listing_statuses(db)
+    why_dismissed = dismiss_reasons(db)
     offers = latest_offers(db)
     # first prices; rounds (all listings: they span sites and dates); where each
     # municipality's town is; what ended sales closed at. Shared, rebuilt when their tables change.
@@ -1212,7 +1275,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
 
         end = effective_end(item.get("date_end"))
         if item["status"] == "dismissed":
-            reason = "dismissed"
+            why = why_dismissed.get(item["id"])
+            item["dismiss_reason"] = why
+            reason = f"dismissed: {why}" if why else "dismissed"
         elif end is not None and end <= now:
             reason = "expired"
         elif item.get("duplicate_of"):
@@ -1220,11 +1285,18 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         else:
             seen = parse_dt(item.get("last_seen"))
             ok = last_ok.get(item["source"])
-            if seen and ok and ok - seen > STALE_AFTER:
+            gone = gone_reason(item)
+            if gone:
+                reason = f"gone: {gone}"
+            elif seen and ok and ok - seen > STALE_AFTER:
                 reason = f"stale: gone from {item['source']} since {seen:%Y-%m-%d}"
             elif item["status"] != "shortlisted":
                 reason = filter_reason(item, filters, mode)
-            if seen and now - seen > UNCONFIRMED_AFTER:
+            # Unconfirmed only after a failed read of this source, later than
+            # the listing was last shown. Not being on this week's timetable
+            # is not a failure.
+            failed = failed_at.get(item["source"])
+            if seen and failed and failed > seen and now - seen > UNCONFIRMED_AFTER:
                 item["unconfirmed_since"] = f"{seen:%Y-%m-%d}"
 
         if reason and not include_hidden:

@@ -31,6 +31,24 @@
 </header>
 {% block body %}<main class="page">{% block content %}{% endblock %}</main>{% endblock %}
 <div id="toast"></div>
+<dialog id="dismiss-dialog">
+  <form method="dialog">
+    <p><b>Why are you rejecting this?</b></p>
+    <select id="dismiss-reason">
+      <option value="occupied">Occupied</option>
+      <option value="heavy work">Heavy work</option>
+      <option value="not a home">Not a home</option>
+      <option value="sold">Sold</option>
+      <option value="false price">False price</option>
+      <option value="no papers">No papers</option>
+      <option value="other">Other</option>
+    </select>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" type="button" value="cancel">Cancel</button>
+      <button class="btn btn-primary" id="dismiss-ok" type="button" value="ok">Reject</button>
+    </div>
+  </form>
+</dialog>
 <script>window.FLAGS = {{ flags|tojson }};</script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% block scripts %}{% endblock %}

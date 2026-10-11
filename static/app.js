@@ -214,6 +214,28 @@ const AS = (() => {
     } catch (e) {}
   }
 
+  function dismiss(id) {
+    const dlg = document.getElementById("dismiss-dialog");
+    const reject = document.getElementById("dismiss-ok");
+    if (!dlg || !dlg.showModal || !reject) return Promise.resolve(false);
+    return new Promise(resolve => {
+      const finish = (ok) => {
+        reject.removeEventListener("click", onOk);
+        dlg.removeEventListener("close", onClose);
+        if (!ok) { resolve(false); return; }
+        const reason = document.getElementById("dismiss-reason").value;
+        api("/api/listings/status", {method: "POST", body: {id, status: "dismissed", reason}})
+          .then(() => resolve(true))
+          .catch(() => resolve(false));
+      };
+      const onOk = () => dlg.close("ok");
+      const onClose = () => finish(dlg.returnValue === "ok");
+      reject.addEventListener("click", onOk);
+      dlg.addEventListener("close", onClose);
+      dlg.showModal();
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     initMenus();
     pollScan();
@@ -222,5 +244,5 @@ const AS = (() => {
     announceUpdate();
   });
 
-  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, stopScan, pollScan};
+  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, stopScan, pollScan, dismiss};
 })();

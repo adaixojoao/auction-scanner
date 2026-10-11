@@ -12,12 +12,14 @@ def at(y, mo, d, h, mi=0):
 
 
 def test_everything_due_on_first_run():
-    assert due_jobs(at(2026, 9, 28, 9), {}) == ["pt", "eu", "backup", "closing", "morning", "report"]  # a Monday
+    assert due_jobs(at(2026, 9, 28, 9), {}) == [
+        "pt", "eu", "retry", "fotocasa", "backup", "closing", "morning", "report"]  # a Monday
 
 
 def test_intervals_with_slack():
     now = at(2026, 9, 24, 12, 0)
     last = {"pt": now - timedelta(hours=1, minutes=55), "eu": now - timedelta(hours=3),
+            "retry": now, "fotocasa": now,
             "backup": now - timedelta(hours=3), "morning": now - timedelta(hours=1),
             "report": now - timedelta(days=1), "closing": now - timedelta(minutes=5)}
     short = {"pt_every_hours": 2, "eu_every_hours": 6}
@@ -27,14 +29,16 @@ def test_intervals_with_slack():
 
 def test_check_times_catch_up_once():
     now = at(2026, 9, 24, 21, 0)                  # slept through 08:00 and 20:00
-    last = {"pt": now, "eu": now, "backup": now, "report": now, "closing": now, "morning": at(2026, 9, 23, 20, 5)}
+    last = {"pt": now, "eu": now, "retry": now, "fotocasa": now, "backup": now, "report": now,
+            "closing": now, "morning": at(2026, 9, 23, 20, 5)}
     assert due_jobs(now, last) == ["morning"]
     last["morning"] = now
     assert due_jobs(now + timedelta(minutes=30), last) == ["closing"]     # the closing watch, every tick
 
 
 def test_weekly_report_after_monday_slot():
-    last = {"pt": at(2026, 9, 28, 9), "eu": at(2026, 9, 28, 9), "backup": at(2026, 9, 28, 9),
+    last = {"pt": at(2026, 9, 28, 9), "eu": at(2026, 9, 28, 9), "retry": at(2026, 9, 28, 9),
+            "fotocasa": at(2026, 9, 28, 9), "backup": at(2026, 9, 28, 9),
             "morning": at(2026, 9, 28, 9), "report": at(2026, 9, 21, 8, 1)}
     assert "report" not in due_jobs(at(2026, 9, 28, 7, 59), last)
     assert "report" in due_jobs(at(2026, 9, 28, 8, 0), last)
@@ -44,7 +48,8 @@ def test_weekly_report_after_monday_slot():
 
 
 def test_schedule_can_disable_jobs():
-    off = {"eu_every_hours": 0, "backup_every_hours": 0, "check_times": [], "weekly_report": "",
+    off = {"eu_every_hours": 0, "retry_every_hours": 0, "fotocasa_every_hours": 0,
+           "backup_every_hours": 0, "check_times": [], "weekly_report": "",
            "closing_every_minutes": 0}
     assert due_jobs(at(2026, 9, 24, 9), {}, off) == ["pt"]
 
@@ -71,8 +76,8 @@ def test_tick_skips_short_jobs_when_the_timetable_lock_is_held(db, monkeypatch, 
     monkeypatch.setattr(scheduler, "JOB_FUNCS", {j: (lambda j=j: called.append(j)) for j in scheduler.JOBS})
     import config
     monkeypatch.setattr(config, "load_config", lambda: {"schedule": {}})
-    assert scheduler.tick() == ["pt", "eu"]          # a scrape has its own lock
-    assert called == ["pt", "eu"]                    # deadlines and the backup wait
+    assert scheduler.tick() == ["pt", "eu", "retry", "fotocasa"]          # a scrape has its own lock
+    assert called == ["pt", "eu", "retry", "fotocasa"]                    # deadlines and the backup wait
 
 
 def test_a_scan_does_not_hold_the_timetable_lock(db, monkeypatch):
@@ -102,7 +107,8 @@ def test_a_skipped_scan_stays_due(db, monkeypatch):
     monkeypatch.setattr(scheduler, "JOB_FUNCS", {**{j: (lambda: None) for j in scheduler.JOBS}, "pt": pt})
     import config
     monkeypatch.setattr(config, "load_config", lambda: {"schedule": {
-        "eu_every_hours": 0, "backup_every_hours": 0, "check_times": [],
+        "eu_every_hours": 0, "retry_every_hours": 0, "fotocasa_every_hours": 0,
+        "backup_every_hours": 0, "check_times": [],
         "weekly_report": "", "closing_every_minutes": 0}})
     assert scheduler.tick() == []
     assert scheduler.tick() == []
@@ -123,7 +129,8 @@ def test_the_open_app_keeps_checking_while_a_scan_runs(db, monkeypatch):
     monkeypatch.setattr(scheduler, "JOB_FUNCS", {**{j: (lambda: None) for j in scheduler.JOBS}, "pt": pt})
     import config
     monkeypatch.setattr(config, "load_config", lambda: {"schedule": {
-        "eu_every_hours": 0, "backup_every_hours": 0, "check_times": [],
+        "eu_every_hours": 0, "retry_every_hours": 0, "fotocasa_every_hours": 0,
+        "backup_every_hours": 0, "check_times": [],
         "weekly_report": "", "closing_every_minutes": 0}})
     try:
         assert scheduler.tick(block_scans=False) == ["pt"]

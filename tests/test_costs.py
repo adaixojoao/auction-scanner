@@ -182,6 +182,25 @@ def test_a_home_shows_what_it_would_rent_for_and_the_yield(pt_rents):
     assert wild["rent"]["trusted"] is False
 
 
+def test_omi_rent_is_the_median_of_the_zones():
+    import sys
+    sys.path.insert(0, "scripts")
+    import update_prices
+    rows = [
+        {"Comune_descrizione": "Perugia", "Descr_Tipologia": "Abitazioni civili", "Stato": "NORMALE",
+         "Loc_min": "5,0", "Loc_max": "7,0"},
+        {"Comune_descrizione": "Perugia", "Descr_Tipologia": "Abitazioni civili", "Stato": "NORMALE",
+         "Loc_min": "8", "Loc_max": "10"},
+        {"Comune_descrizione": "Perugia", "Descr_Tipologia": "Negozi", "Stato": "NORMALE",
+         "Loc_min": "20", "Loc_max": "30"},
+        {"Comune_descrizione": "Terni", "Descr_Tipologia": "Abitazioni di tipo economico", "Stato": "SCADENTE",
+         "Loc_min": "1", "Loc_max": "2"},
+    ]
+    found = {r["municipality"]: r["eur_m2"] for r in update_prices.parse_omi_rents(rows, "2025-H1")}
+    assert found == {"Perugia": 7.5}
+    assert update_prices.parse_omi_rents(rows, "2025-H1")[0]["source"] == "OMI (Agenzia Entrate)"
+
+
 def test_rents_keep_their_cents():
     import sys
     sys.path.insert(0, "scripts")
@@ -202,7 +221,7 @@ def test_a_french_house_rents_at_the_communes_carte_des_loyers(tmp_path, monkeyp
              "district": "Aast", "area_m2": 100, "price": 20000}
     rent = costs.estimate(house)["rent"]
     assert rent["monthly"] == 974 and "Aast (Carte des loyers 2025)" in rent["note"]
-    assert costs.estimate({**house, "country": "IT"})["rent"] is None       # no table for Italy
+    assert costs.estimate({**house, "country": "BE"})["rent"] is None       # no table for Belgium
 
 
 def test_the_carte_des_loyers_csv_is_read():

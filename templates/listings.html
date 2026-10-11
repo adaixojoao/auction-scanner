@@ -150,6 +150,7 @@ function renderStats(s) {
     <div class="stat"><div class="label">New (24 h)</div><div class="value ok">${s.new_today}</div></div>
     <div class="stat"><div class="label">On Offers</div><div class="value">${s.shortlisted}</div></div>
     <div class="stat"><div class="label">Sources failing</div><div class="value ${s.sources_failing ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_failing}</a></div></div>
+    <div class="stat"><div class="label">No good read</div><div class="value ${s.sources_quiet ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_quiet || 0}</a></div></div>
     ${hidden ? `<div class="stat"><div class="label">Hidden</div><div class="small muted" style="margin-top:6px">${AS.esc(hidden)}</div></div>` : ""}`;
 }
 
@@ -432,8 +433,15 @@ function countText() {
 function go(p) { page = p; load(); window.scrollTo(0, 0); }
 
 async function setStatus(id, status) {
+  if (status === "dismissed") {
+    const ok = await AS.dismiss(id);
+    if (!ok) return;
+    AS.toast("Dismissed");
+    load();
+    return;
+  }
   await AS.api("/api/listings/status", {method: "POST", body: {id, status}});
-  AS.toast(status === "shortlisted" ? "Added to Offers" : status === "dismissed" ? "Dismissed" : "Restored");
+  AS.toast(status === "shortlisted" ? "Added to Offers" : "Restored");
   load();
 }
 

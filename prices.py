@@ -31,9 +31,11 @@ PT_RENT_FILE = os.path.join(HERE, "data", "pt_rents.csv")
 # Other countries, where an official table per municipality can be had
 # (scripts/update_prices.py): France's "carte des loyers" (houses, per commune),
 # Spain's SERPAVI (tax returns, per municipio, with the provinces as "prov:<name>"
-# for villages too small to have a figure).
+# for villages too small to have a figure), Italy's OMI quotations (Agenzia
+# delle Entrate, €/m² a month by comune).
 RENT_FILES = {"FR": os.path.join(HERE, "data", "fr_rents.csv"),
-              "ES": os.path.join(HERE, "data", "es_rents.csv")}
+              "ES": os.path.join(HERE, "data", "es_rents.csv"),
+              "IT": os.path.join(HERE, "data", "it_rents.csv")}
 EU_POPULATION_FILE = os.path.join(HERE, "data", "eu_population.csv")
 # Eurostat EUROPOP2019 baseline, NUTS 3, 1 January 2019 and 2050 (scripts/update_population_outlook.py).
 # A scenario, not a forecast. place_nuts3.csv attaches a municipality name to one region

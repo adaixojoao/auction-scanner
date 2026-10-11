@@ -77,7 +77,9 @@ def test_shortlist_and_dismiss(client, add):
     add(external_id="a", title="Moradia", price=20000)
     add(external_id="b", title="Moradia", price=20000)
     assert client.post("/api/listings/status", json={"id": "eleiloes:a", "status": "shortlisted"}).status_code == 200
-    assert client.post("/api/listings/status", json={"id": "eleiloes:b", "status": "dismissed"}).status_code == 200
+    assert client.post("/api/listings/status", json={"id": "eleiloes:b", "status": "dismissed"}).status_code == 400
+    assert client.post("/api/listings/status", json={
+        "id": "eleiloes:b", "status": "dismissed", "reason": "occupied"}).status_code == 200
     assert client.post("/api/listings/status", json={"id": "eleiloes:a", "status": "bogus"}).status_code == 400
     assert client.post("/api/listings/status", json={"id": "nope", "status": None}).status_code == 404
 
@@ -135,7 +137,7 @@ def test_shortlisted_listing_joins_offers_even_below_the_candidate_score(client,
     client.post("/api/listings/status", json={"id": "zvg:k1", "status": "shortlisted"})
     review = client.get("/api/offers").get_json()["review"]
     assert [o["id"] for o in review] == ["zvg:k1"]
-    client.post("/api/listings/status", json={"id": "zvg:k1", "status": "dismissed"})
+    client.post("/api/listings/status", json={"id": "zvg:k1", "status": "dismissed", "reason": "not a home"})
     offers = client.get("/api/offers").get_json()
     assert offers["review"] == [] and [o["id"] for o in offers["rejected"]] == ["zvg:k1"]
 
