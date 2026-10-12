@@ -1,4 +1,6 @@
 """Heat in 50-70 years, water, fire and flood where a listing is (climate.py, scoring)."""
+import sys
+
 import numpy as np
 import pytest
 import rasterio
@@ -187,3 +189,127 @@ def test_the_scan_stores_the_climate_and_the_list_only_reads_it(layers, db, add)
     listed = load_listings(db, filters={}, apply_min_score=False)[0]
     assert listed["climate"]["heat"] == {"ssp245_2081-2100": 33.3}
     assert any("33.3 °C summer max by 2081-2100" in r for r in listed["reasons"])
+
+
+def write_gpkg(path, layers):
+    """A GeoPackage written by hand, {layer: [(geometry, {column: value})]} in
+    EPSG:4326: every other geometry carries an envelope, as GDAL may write it."""
+    import sqlite3
+    import struct
+
+    import shapely
+    db = sqlite3.connect(path)
+    db.executescript("""
+        CREATE TABLE gpkg_spatial_ref_sys (srs_name TEXT, srs_id INTEGER PRIMARY KEY, organization TEXT,
+                                           organization_coordsys_id INTEGER, definition TEXT, description TEXT);
+        INSERT INTO gpkg_spatial_ref_sys VALUES ('WGS 84', 4326, 'EPSG', 4326, 'undefined', NULL);
+        CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT, srs_id INTEGER);
+        CREATE TABLE gpkg_geometry_columns (table_name TEXT, column_name TEXT, geometry_type_name TEXT,
+                                            srs_id INTEGER, z INTEGER, m INTEGER);
+    """)
+    for layer, rows in layers.items():
+        columns = sorted({c for _, attrs in rows for c in attrs})
+        names, marks = "".join(f', "{c}"' for c in columns), ", ?" * len(columns)
+        db.execute(f'CREATE TABLE "{layer}" (fid INTEGER PRIMARY KEY, geom BLOB{names})')
+        db.execute("INSERT INTO gpkg_contents VALUES (?, 'features', 4326)", (layer,))
+        db.execute("INSERT INTO gpkg_geometry_columns VALUES (?, 'geom', 'GEOMETRY', 4326, 0, 0)", (layer,))
+        for i, (geom, attrs) in enumerate(rows):
+            if i % 2:
+                header = b"GP" + bytes([0, 0b001]) + struct.pack("<i", 4326)
+            else:
+                minx, miny, maxx, maxy = geom.bounds
+                header = b"GP" + bytes([0, 0b011]) + struct.pack("<i4d", 4326, minx, maxx, miny, maxy)
+            db.execute(f'INSERT INTO "{layer}" (geom{names}) VALUES (?{marks})',
+                       (header + shapely.to_wkb(geom), *(attrs.get(c) for c in columns)))
+    db.commit()
+    db.close()
+
+
+@pytest.fixture
+def vector_layers(layers, monkeypatch):
+    """The burnt areas and the Aqueduct basins, with pyogrio and fiona unable to
+    load, as when Windows Smart App Control refuses their GDAL DLLs."""
+    from shapely.geometry import box
+    monkeypatch.setitem(sys.modules, "pyogrio", None)
+    monkeypatch.setitem(sys.modules, "fiona", None)
+    write_gpkg(layers / "layers" / "burnt_areas.gpkg", {"burnt_areas": [
+        (box(-7.41, 40.49, -7.40, 40.50), {"year": 2017}),       # where the house is
+        (box(-7.39, 40.49, -7.38, 40.50), {"year": 2022}),       # 1.3 km east
+        (box(-7.00, 40.00, -6.99, 40.01), {"year": 2019})]})     # far away
+    basin = box(-8, 40, -7, 41)
+    write_gpkg(layers / "layers" / "aqueduct_europe.gpkg", {
+        "baseline_annual": [(basin, {"bws_cat": 3.0, "drr_cat": 2.0, "name_0": "Portugal"})],
+        "baseline_monthly": [(basin, {"bws_01_cat": 4.0})],
+        "future_annual": [(basin, {"bau50_ws_x_c": 4.0, "bau80_ws_x_c": 4.0})]})
+    climate._fires.cache_clear()
+    climate._basins.cache_clear()
+    yield layers
+    climate._fires.cache_clear()
+    climate._basins.cache_clear()
+
+
+def test_fire_and_water_layers_are_read_without_gdal(vector_layers):
+    assert climate.fires_near(40.495, -7.405) == {"count": 2, "years": [2017, 2022], "burnt_here": True, "km": 2.0}
+    assert climate.water_stress(40.495, -7.405) == {"stress_now": 3, "drought": 2,
+                                                    "stress_2050": 4, "stress_2080": 4}
+    got = climate.assess(40.495, -7.405)
+    assert got["fire"]["burnt_here"] and got["stress"]["stress_2080"] == 4
+    gdf = climate._read_gpkg(str(vector_layers / "layers" / "aqueduct_europe.gpkg"), layer="baseline_annual")
+    assert list(gdf.columns) == ["bws_cat", "drr_cat", "name_0", "geometry"]       # no fid, as read_file
+    assert gdf.crs.to_epsg() == 4326
+
+
+def test_a_layer_that_cannot_be_read_stores_nothing(layers, db, add, monkeypatch):
+    """A reading without its fire layer looks safer than the place is: it is
+    not stored, the panel says why, and the next scan reads it again."""
+    import json
+
+    import listing_info
+    from db import load_listings
+    add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
+        raw_json=json.dumps({"lat": 40.495, "lon": -7.405}))
+    add("citius", "c2", title="Moradia T2", tipo="moradia", area_m2=80, price=15000,
+        raw_json=json.dumps({"lat": 40.30, "lon": -7.30}))
+    calls = []
+
+    def blocked(lat, lon):
+        calls.append((lat, lon))
+        raise ImportError("DLL load failed while importing _io: An Application Control policy has blocked this file.")
+
+    def rows():
+        return [dict(r) for r in db.execute("SELECT * FROM listings ORDER BY id")]
+
+    monkeypatch.setattr(climate, "fires_near", blocked)
+    assert climate.assess_pending(db, rows(), {}) == 0
+    assert len(calls) == 1                       # the library will not load: no other place is tried
+    assert all("climate" not in json.loads(it["raw_json"]) for it in rows())
+    assert climate.for_item(rows()[0]) is None
+    assert "fire: ImportError" in climate.problem()
+    listed = load_listings(db, filters={}, apply_min_score=False)[0]
+    assert listed["climate"] is None
+    assert "could not be read" in listing_info.climate_panel(listed)["missing"]
+
+    def odd(lat, lon):
+        calls.append((lat, lon))
+        raise ValueError("a burnt area without a year")
+
+    calls.clear()
+    monkeypatch.setattr(climate, "fires_near", odd)
+    assert climate.assess_pending(db, rows(), {}) == 0
+    assert len(calls) == 2                       # one odd place does not stop the others
+    assert all("climate" not in json.loads(it["raw_json"]) for it in rows())
+
+    monkeypatch.setattr(climate, "fires_near",
+                        lambda lat, lon: {"count": 0, "years": [], "burnt_here": False, "km": 2.0})
+    assert climate.assess_pending(db, rows(), {}) == 2
+    assert all(climate.stored(it)["fire"]["count"] == 0 for it in rows())
+    assert climate.problem() is None
+
+
+def test_a_layer_not_on_this_pc_is_skipped_not_a_failure(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "rasterio", None)          # would not even load
+    climate._raster.cache_clear()
+    try:
+        assert climate._raster(str(tmp_path / "not-here.tif")) is None
+    finally:
+        climate._raster.cache_clear()

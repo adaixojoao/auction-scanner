@@ -2,7 +2,8 @@
 # without the climate data folder, listings are scored without the climate.
 # Kept out of requirements.txt so the updater does not reinstall a heavy geo
 # stack on every PC. Building the layers (scripts/update_climate.py) also
-# needs pandas, xarray, netCDF4 and cdsapi.
+# needs pandas, xarray, netCDF4 and cdsapi. fiona is for building only: the
+# app reads the GeoPackages with sqlite3 and shapely (climate._read_gpkg).
 numpy>=2.0
 rasterio>=1.4
 geopandas>=1.0

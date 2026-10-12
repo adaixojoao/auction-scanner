@@ -199,6 +199,9 @@ def climate_panel(item: dict) -> dict:
                    "municipality.")
     elif "climate" in raw_of(item):
         missing = "Outside the climate maps' coverage."
+    elif climate.problem():
+        missing = (f"A climate layer could not be read on this PC ({climate.problem()}), so nothing was "
+                   "stored rather than a grade without it. The next scan reads it again.")
     else:
         missing = "Not read yet: the next scan reads the climate layers for it."
     return {**out, "missing": missing}

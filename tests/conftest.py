@@ -30,6 +30,7 @@ def no_climate_data(tmp_path, monkeypatch):
     import climate
     monkeypatch.setattr(climate, "data_dir", lambda cfg=None: str(tmp_path / "no-climate-data"))
     climate._CACHE.clear()
+    climate._PROBLEM.clear()
 
 
 @pytest.fixture(autouse=True)
