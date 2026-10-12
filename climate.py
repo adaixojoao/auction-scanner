@@ -16,7 +16,8 @@ the climate data folder, config climate.data_dir):
 
 `assess(item)` returns a dict of what is known (layers not on this PC are
 skipped); load_listings stores it in item["climate"] and scoring.py turns it
-into points. Results are cached per position, rounded to ~100 m.
+into points. Results are kept per position to about a metre: a house 40 m
+away can be on the other side of a river basin's edge or of the 2 km fire limit.
 
 A layer that is on this PC but cannot be read (a library Windows would not
 load, a damaged file) raises `Unreadable`, and nothing is stored: the listing
@@ -350,7 +351,7 @@ def _read(layer: str, fn, lat: float, lon: float):
 def assess(lat: float, lon: float) -> dict:
     """Every layer on this PC at the position. Raises Unreadable rather than
     return a reading with a layer missing."""
-    key = f"{lat:.3f},{lon:.3f}"
+    key = _spot({"lat": lat, "lon": lon})
     if key in _CACHE:
         return _CACHE[key]
     out: dict = {}
@@ -414,14 +415,21 @@ def as_json(result: dict | None) -> str:
 # ─── Stored per listing ─────────────────────────────────────────────
 # Reading the layers takes ~0.1 s a place: fine once, far too slow for every
 # page load. The scan stores the result in raw["climate"] with the position
-# it was read at; load_listings only reads it back. A listing that moved
-# (a better position found later) or a rebuilt layer set is read again.
+# it was read at; load_listings only reads it back. A listing that moved, even
+# a few metres (a better position found later), or a rebuilt layer set is read
+# again.
 
 VERSION = 3   # 3: water searched to 1.5 km
 
 
 def _place_key(pos: dict) -> str:
+    """Where a reading was taken, to ~100 m ("at"): site_check and forestry use it as the position."""
     return f"{pos['lat']:.3f},{pos['lon']:.3f}"
+
+
+def _spot(pos: dict) -> str:
+    """The same to ~1 m ("spot"): whether the stored reading is this position's."""
+    return f"{pos['lat']:.5f},{pos['lon']:.5f}"
 
 
 def _layers_stamp() -> str:
@@ -446,8 +454,9 @@ def remember(item: dict, result: dict) -> None:
     import geo
     pos = geo._place(item, None) or {}
     raw = dict(geo._raw(item))
-    at = _place_key(pos) if pos.get("lat") is not None and pos.get("lon") is not None else ""
-    raw["climate"] = {"at": at, "v": VERSION, "layers": _layers_stamp(), "result": result}
+    placed = pos.get("lat") is not None and pos.get("lon") is not None
+    raw["climate"] = {"at": _place_key(pos) if placed else "", "spot": _spot(pos) if placed else "",
+                      "v": VERSION, "layers": _layers_stamp(), "result": result}
     item["raw_json"] = json.dumps(raw, ensure_ascii=False)
     item["_climate_write"] = True
 
@@ -533,7 +542,8 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
             continue
         raw = geo._raw(item)
         kept = raw.get("climate") or {}
-        if kept.get("at") == _place_key(pos) and kept.get("v") == VERSION and kept.get("layers") == stamp:
+        if (kept.get("at") == _place_key(pos) and kept.get("spot") == _spot(pos)
+                and kept.get("v") == VERSION and kept.get("layers") == stamp):
             continue
         try:
             result = assess(pos["lat"], pos["lon"]) or {}
@@ -543,7 +553,8 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
                 break
             continue
         result = {**result, "approx": pos.get("precision") not in geo.EXACT_ENOUGH} if result else None
-        raw["climate"] = {"at": _place_key(pos), "v": VERSION, "layers": stamp, "result": result}
+        raw["climate"] = {"at": _place_key(pos), "spot": _spot(pos), "v": VERSION, "layers": stamp,
+                          "result": result}
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
         done += 1
         if done % 200 == 0:
