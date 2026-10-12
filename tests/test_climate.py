@@ -313,3 +313,44 @@ def test_a_layer_not_on_this_pc_is_skipped_not_a_failure(tmp_path, monkeypatch):
         assert climate._raster(str(tmp_path / "not-here.tif")) is None
     finally:
         climate._raster.cache_clear()
+
+
+def test_a_reading_belongs_to_its_own_spot_not_its_100_m_cell(vector_layers, db, add):
+    """The burnt area's east edge is at -7.400. A pin 17 m inside it and one
+    17 m outside are in the same ~100 m cell, but not in the same fire."""
+    import json
+    inside, outside = -7.4002, -7.3998
+    assert climate._place_key({"lat": 40.495, "lon": inside}) == climate._place_key({"lat": 40.495, "lon": outside})
+    assert climate.assess(40.495, inside)["fire"]["burnt_here"] is True
+    assert climate.assess(40.495, outside)["fire"]["burnt_here"] is False       # not the neighbour's reading
+
+    add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
+        raw_json=json.dumps({"lat": 40.495, "lon": inside}))
+
+    def row():
+        return dict(db.execute("SELECT * FROM listings WHERE id = 'citius:c1'").fetchone())
+
+    assert climate.assess_pending(db, [row()], {}) == 1
+    assert climate.stored(row())["fire"]["burnt_here"] is True
+    at = json.loads(row()["raw_json"])["climate"]["at"]
+    raw = json.loads(row()["raw_json"])
+    raw["lon"] = outside                                   # a better pin, 34 m east
+    db.execute("UPDATE listings SET raw_json = ? WHERE id = 'citius:c1'", (json.dumps(raw),))
+    db.commit()
+    assert climate.assess_pending(db, [row()], {}) == 1                  # moved: read again
+    assert climate.stored(row())["fire"]["burnt_here"] is False
+    assert json.loads(row()["raw_json"])["climate"]["at"] == at          # site_check keeps its position
+    assert climate.assess_pending(db, [row()], {}) == 0                  # up to date
+
+
+def test_a_reading_stored_before_spots_is_read_once_more(layers, db, add):
+    import json
+    add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
+        raw_json=json.dumps({"lat": 40.495, "lon": -7.405, "climate": {
+            "at": "40.495,-7.405", "v": climate.VERSION, "layers": climate._layers_stamp(),
+            "result": {"heat": {"ssp245_2081-2100": 30.0}}}}))
+    items = [dict(r) for r in db.execute("SELECT * FROM listings")]
+    assert climate.assess_pending(db, items, {}) == 1
+    items = [dict(r) for r in db.execute("SELECT * FROM listings")]
+    assert climate.stored(items[0])["heat"] == {"ssp245_2081-2100": 33.3}
+    assert climate.assess_pending(db, items, {}) == 0
