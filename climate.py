@@ -352,6 +352,20 @@ def stored(item: dict) -> dict | None:
     return (geo._raw(item).get("climate") or {}).get("result")
 
 
+def remember(item: dict, result: dict) -> None:
+    """Keep a climate just read on the listing, in the same shape as a scan.
+
+    The next load uses it and does not read the layers again. Nothing is written
+    here: the caller saves `raw_json` when `_climate_write` is set."""
+    import geo
+    pos = geo._place(item, None) or {}
+    raw = dict(geo._raw(item))
+    at = _place_key(pos) if pos.get("lat") is not None and pos.get("lon") is not None else ""
+    raw["climate"] = {"at": at, "v": VERSION, "layers": _layers_stamp(), "result": result}
+    item["raw_json"] = json.dumps(raw, ensure_ascii=False)
+    item["_climate_write"] = True
+
+
 def _exact_seaside_home(item: dict, towns: dict) -> bool:
     """A home whose pin is the building, with the sea within WATER_KM of that pin.
 

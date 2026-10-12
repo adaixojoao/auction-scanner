@@ -78,7 +78,14 @@ def scrape_max_price(config: dict | None, max_price: float) -> float:
 
 def mode_max_price(config: dict | None, mode: str, max_price: float) -> float:
     """The budget of one goal (scoring.MODES): what that tab, its alerts and
-    its report section may show."""
+    its report section may show.
+
+    Live and invest has no asking-price cap. A €19,000 ruin can cost far more
+    to repair than a sound house at €35,000. The ceiling is the all-in estimate
+    against the cash (costs.over_cash), so this returns 0 and the listings page
+    does not filter on the asking price."""
+    if mode == "both":
+        return 0.0
     if mode == "invest":
         return invest_max_price(config, max_price)
     if mode in ("land", "forest"):

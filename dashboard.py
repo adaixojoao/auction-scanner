@@ -379,7 +379,10 @@ def api_listings():
     climate_exact = args.get("climate_exact", "0") == "1"
     sort = args.get("sort", "score")
     mode = _mode(args)
-    if max_price:      # each goal has its own budget: land and lets cost more
+    if mode == "both":
+        # The all-in estimate against the cash is the ceiling, not the asking price.
+        max_price = 0
+    elif max_price:      # each goal has its own budget: land and lets cost more
         max_price = max(max_price, mode_max_price(_config(), mode, _config().get("max_price") or max_price))
     direction = args.get("dir", "desc")
     page = max(1, _num(args.get("page"), 1, int))

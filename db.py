@@ -1017,7 +1017,7 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 # The shared lookups are rebuilt only when their tables change.
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
             "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
-            "reasons", "wishes", "excellent", "category", "kind")
+            "reasons", "wishes", "excellent", "category", "kind", "live_score", "invest_score")
 _SCORED: dict[tuple[str, str], tuple] = {}     # (mode, listing id) → (row key, results, inputs)
 _UNSCORED = {"last_seen", "is_new"}
 _SCORED_FOR: list = [None]
@@ -1182,6 +1182,15 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
     item["station"] = geo.nearest_hub(item, "station", towns=towns)
     item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
     item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
+    item["live_score"] = None
+    item["invest_score"] = None
+    # Live and invest cannot judge a climate that was never read. An exact
+    # seaside home is read here, once, and kept on the listing.
+    if mode == "both" and not item["climate"] and _both_worth_reading(item):
+        fresh = climate.for_item(item)
+        if fresh:
+            item["climate"] = fresh
+            climate.remember(item, fresh)
     item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
     item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
     item["land_market"] = land_market        # what land goes for here (land_prices.py)
@@ -1196,6 +1205,20 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
     item["category"] = categorize(item)
     item["kind"] = property_kind(item) if item["category"] == "imoveis" else None
     return sc
+
+
+def _both_worth_reading(item: dict) -> bool:
+    """An exact pin, the sea within 1.5 km of it, and a house: worth a climate read."""
+    import geo
+    from scoring import SWIM_MAX_KM, property_kind
+    if property_kind(item) != "home":
+        return False
+    pos = geo.position(item) or {}
+    if pos.get("precision") not in geo.EXACT_ENOUGH:
+        return False
+    beach = item.get("beach") or {}
+    km = beach.get("km")
+    return km is not None and not beach.get("approx") and km <= SWIM_MAX_KM
 
 
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
@@ -1213,7 +1236,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     stale (gone from its source), excluded by config filters, below
     filters.min_score, over config.cash_on_hand (price, taxes, fees and the
     low end of repairs). A shortlisted listing ignores the last three: the user
-    picked it on purpose. Cash of 0 is not set and hides nothing.
+    picked it on purpose. Cash of 0 is not set and hides nothing. Live and
+    invest has no asking-price cap: the all-in estimate against the cash is
+    the ceiling, using the middle of the repairs unless the condition is good.
     """
     now = now or utcnow()
     sql = "SELECT * FROM listings"
@@ -1262,6 +1287,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         _SCORED_FOR[0] = context
     _load_kept(db, mode)
     new_scores = []
+    climate_writes = []
 
     items = []
     for r in rows:
@@ -1324,16 +1350,25 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 data["area_note"] = item["area_note"]
             _SCORED[(mode, item["id"])] = (row_key, data, inputs)
             new_scores.append((item["id"], row_key, inputs, data))
+            if item.get("_climate_write"):
+                climate_writes.append((item["raw_json"], item["id"]))
+                item.pop("_climate_write", None)
 
-        if reason is None and min_score and sc < min_score and item["status"] != "shortlisted":
-            reason = f"score {sc:.0f} < filters.min_score {min_score}"
-            if not include_hidden:
-                continue
+        if reason is None and min_score and item["status"] != "shortlisted":
+            # Live and invest shows the worse of the two goals. Hide it when
+            # it is not a place to live, and keep it when the investment side
+            # is the weaker number.
+            bar = item.get("live_score") if mode == "both" and item.get("live_score") is not None else sc
+            if bar < min_score:
+                reason = f"score {bar:.0f} < filters.min_score {min_score}"
+                if not include_hidden:
+                    continue
 
         # Price plus taxes, fees and repairs, against cash you can lose.
         # Live and invest uses the middle of the repair range unless the
-        # notice says the building is in good condition. The other tabs keep
-        # the low end. A shortlisted listing stays: you picked it on purpose.
+        # notice or the photos say the building is in good condition, and
+        # that all-in figure is the ceiling: over it, the home is hidden.
+        # The other tabs keep the low end. A shortlisted listing stays.
         # Cash of 0 is not set and hides nothing.
         if reason is None and cash and item["status"] != "shortlisted":
             import costs
@@ -1349,6 +1384,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         seen_first = parse_dt(item.get("first_seen"))
         item["is_recent"] = bool(seen_first and now - seen_first <= RECENT)
         items.append(item)
+    if climate_writes:
+        db.executemany("UPDATE listings SET raw_json = ? WHERE id = ?", climate_writes)
+        db.commit()
     _save_kept(db, mode, new_scores)
     return items
 
