@@ -14,9 +14,14 @@ the climate data folder, config climate.data_dir):
          fire danger in 2079-2098 (Copernicus fire danger indicators, RCP4.5).
 - flood: water depth of the 100-year river flood at the spot (JRC).
 
-`assess(item)` returns a dict of what is known (missing layers are skipped);
-load_listings stores it in item["climate"] and scoring.py turns it into points.
-Results are cached per position, rounded to ~100 m.
+`assess(item)` returns a dict of what is known (layers not on this PC are
+skipped); load_listings stores it in item["climate"] and scoring.py turns it
+into points. Results are cached per position, rounded to ~100 m.
+
+A layer that is on this PC but cannot be read (a library Windows would not
+load, a damaged file) raises `Unreadable`, and nothing is stored: the listing
+stays "not read yet" and a later scan reads it again. A reading without its
+fire or water layer looks safer than the place is.
 """
 from __future__ import annotations
 
@@ -24,6 +29,8 @@ import functools
 import json
 import math
 import os
+import sqlite3
+from contextlib import closing
 
 SCENARIOS = ("ssp245", "ssp585")
 PERIODS = ("2061-2080", "2081-2100")
@@ -49,8 +56,59 @@ def _layers() -> str:
 
 @functools.lru_cache(maxsize=256)   # Forestry reads ~30 tree maps per place
 def _raster(path: str):
+    if not os.path.exists(path):
+        return None                  # not on this PC: skipped, not a failure
     import rasterio
-    return rasterio.open(path) if os.path.exists(path) else None
+    return rasterio.open(path)
+
+
+# ─── GeoPackages, read without GDAL ─────────────────────────────────
+# A GeoPackage is an SQLite file. pyogrio and fiona bring their own GDAL DLLs,
+# which Windows Smart App Control refuses to load (no known publisher), and the
+# fire and water layers could not be read. sqlite3 and shapely read them.
+
+_GPKG_ENVELOPE = {0: 0, 1: 32, 2: 48, 3: 48, 4: 64}   # bytes after the header, by its envelope code
+
+
+def _gpkg(path: str):
+    from pathlib import Path
+    return sqlite3.connect(Path(os.path.abspath(path)).as_uri() + "?mode=ro", uri=True)
+
+
+def _gpkg_layers(path: str) -> list[str]:
+    with closing(_gpkg(path)) as db:
+        return [r[0] for r in db.execute("SELECT table_name FROM gpkg_contents WHERE data_type = 'features'")]
+
+
+def _gpkg_wkb(blob) -> bytes | None:
+    """The WKB in a GeoPackage geometry: after the 8-byte "GP" header and its envelope."""
+    if blob is None:
+        return None
+    b = bytes(blob)
+    if b[:2] != b"GP":
+        raise ValueError("not a GeoPackage geometry")
+    return b[8 + _GPKG_ENVELOPE[(b[3] >> 1) & 0b111]:]
+
+
+def _read_gpkg(path: str, layer: str | None = None):
+    """A layer as geopandas.read_file gives it: the attribute columns (not the
+    fid), then `geometry`, in the layer's CRS. Without `layer`, the first one."""
+    import geopandas as gpd
+    import pandas as pd
+    import shapely
+    layer = layer or _gpkg_layers(path)[0]
+    table = layer.replace('"', '""')
+    with closing(_gpkg(path)) as db:
+        geom, srs_id = db.execute("SELECT column_name, srs_id FROM gpkg_geometry_columns WHERE table_name = ?",
+                                  (layer,)).fetchone()
+        org, code, wkt = db.execute("SELECT organization, organization_coordsys_id, definition "
+                                    "FROM gpkg_spatial_ref_sys WHERE srs_id = ?", (srs_id,)).fetchone()
+        columns = [c[1] for c in db.execute(f'PRAGMA table_info("{table}")') if c[1] != geom and not c[5]]
+        picked = ", ".join('"' + c.replace('"', '""') + '"' for c in [*columns, geom])
+        rows = db.execute(f'SELECT {picked} FROM "{table}"').fetchall()
+    crs = f"EPSG:{code}" if str(org).upper() == "EPSG" else (wkt if wkt and wkt != "undefined" else None)
+    return gpd.GeoDataFrame(pd.DataFrame([r[:-1] for r in rows], columns=columns),
+                            geometry=shapely.from_wkb([_gpkg_wkb(r[-1]) for r in rows]), crs=crs)
 
 
 def _sample(path: str, lat: float, lon: float) -> float | None:
@@ -133,8 +191,7 @@ def _fires():
     path = os.path.join(_layers(), "burnt_areas.gpkg")
     if not os.path.exists(path):
         return None
-    import geopandas as gpd
-    gdf = gpd.read_file(path).to_crs(3035)           # metres, equal-area Europe
+    gdf = _read_gpkg(path).to_crs(3035)              # metres, equal-area Europe
     gdf.sindex
     return gdf
 
@@ -158,11 +215,9 @@ def _basins():
     path = os.path.join(_layers(), "aqueduct_europe.gpkg")
     if not os.path.exists(path):
         return None
-    import fiona
-    import geopandas as gpd
     layers = {}
-    for name in fiona.listlayers(path):
-        gdf = gpd.read_file(path, layer=name)
+    for name in _gpkg_layers(path):
+        gdf = _read_gpkg(path, layer=name)
         gdf.sindex
         layers[name] = gdf
     return layers
@@ -265,31 +320,59 @@ def amoc_cold(lat: float, lon: float) -> dict:
             "local": local is not None}
 
 
+class Unreadable(RuntimeError):
+    """A layer is on this PC but could not be read. `everywhere` when a library
+    or file would not even load (Windows refused a DLL, say): no other position
+    can be read then either."""
+
+    def __init__(self, layer: str, error: Exception):
+        super().__init__(f"{layer}: {type(error).__name__}: {error}")
+        self.everywhere = isinstance(error, (ImportError, OSError))
+
+
+_PROBLEM: list[str] = []     # why the last reading in this process failed; a full reading clears it
+
+
+def problem() -> str | None:
+    """Why the climate could not be read just now, for the listing's panel."""
+    return _PROBLEM[-1] if _PROBLEM else None
+
+
+def _read(layer: str, fn, lat: float, lon: float):
+    try:
+        return fn(lat, lon)
+    except Exception as e:  # noqa: BLE001 — any failure: the reading is incomplete
+        err = Unreadable(layer, e)
+        _PROBLEM[:] = [str(err)]
+        raise err from e
+
+
 def assess(lat: float, lon: float) -> dict:
+    """Every layer on this PC at the position. Raises Unreadable rather than
+    return a reading with a layer missing."""
     key = f"{lat:.3f},{lon:.3f}"
     if key in _CACHE:
         return _CACHE[key]
     out: dict = {}
-    h = heat(lat, lon)
+    h = _read("heat", heat, lat, lon)
     if h:
         out["heat"] = h
-    d = hot_days(lat, lon)
+    d = _read("hot days", hot_days, lat, lon)
     if d:
         out["hot_days"] = d
-    a = amoc_cold(lat, lon)
+    a = _read("AMOC cold", amoc_cold, lat, lon)
     if a:
         out["amoc_cold10"] = a
-    dry = _sample(os.path.join(_layers(), "amoc_dry_change.tif"), lat, lon)
+    dry = _read("AMOC dry", lambda la, lo: _sample(os.path.join(_layers(), "amoc_dry_change.tif"), la, lo),
+                lat, lon)
     if dry is not None:
         out["amoc_dry_mm"] = round(dry)
     for name, fn in (("flood_m", flood_depth), ("water_km", permanent_water_km), ("fire", fires_near),
                      ("stress", water_stress), ("fire_danger", fire_danger)):
-        try:
-            v = fn(lat, lon)
-        except Exception:  # noqa: BLE001 — one layer broken must not hide the others
-            v = None
+        v = _read(name, fn, lat, lon)
         if v is not None:
             out[name] = v
+    _PROBLEM.clear()
     _CACHE[key] = out
     return out
 
@@ -315,7 +398,10 @@ def for_item(item: dict, towns: dict | None = None) -> dict | None:
     pos = geo._place(item, towns)
     if not pos:
         return None
-    out = assess(pos["lat"], pos["lon"])
+    try:
+        out = assess(pos["lat"], pos["lon"])
+    except Unreadable:
+        return None                  # unknown, never a reading with a layer missing
     if not out:
         return None
     return {**out, "approx": pos.get("precision") not in geo.EXACT_ENOUGH}
@@ -428,10 +514,14 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
     `seaside_first` reads exact seaside homes before the rest of `items`, so a
     scan's budget of `limit` is not spent inland while Live and invest still
     has no grade for the houses by the sea. A single listing (a position just
-    verified) leaves this off."""
+    verified) leaves this off.
+
+    A reading with a layer that could not be read is not stored: the listing
+    stays unread and the next scan tries again."""
     if not available():
         return 0
     import geo
+    from common import LOG
     if seaside_first:
         items = _seaside_ahead(db, items, towns)
     stamp, done = _layers_stamp(), 0
@@ -445,7 +535,13 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
         kept = raw.get("climate") or {}
         if kept.get("at") == _place_key(pos) and kept.get("v") == VERSION and kept.get("layers") == stamp:
             continue
-        result = assess(pos["lat"], pos["lon"]) or {}
+        try:
+            result = assess(pos["lat"], pos["lon"]) or {}
+        except Unreadable as e:
+            LOG.warning(f"Climate not stored for {item.get('id')}: {e}. A later scan reads it again.")
+            if e.everywhere:
+                break
+            continue
         result = {**result, "approx": pos.get("precision") not in geo.EXACT_ENOUGH} if result else None
         raw["climate"] = {"at": _place_key(pos), "v": VERSION, "layers": stamp, "result": result}
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
