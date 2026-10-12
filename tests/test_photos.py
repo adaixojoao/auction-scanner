@@ -191,3 +191,16 @@ def test_photos_of_only_a_barn_are_flagged_and_not_used_for_condition():
     it = {**make_listing("eleiloes", "9", **HOUSE), "raw_json": raw}
     assert condition(it) == "unknown"
     assert "the photos don't show the house itself — ask the seller for photos" in score_detail(it)[1]
+
+
+def test_exact_beach_homes_are_photographed_first(monkeypatch):
+    sea = {"id": "a", "kind": "home", "rank": 10, "score": 10,
+           "beach": {"km": 0.4, "approx": False}}
+    inland = {"id": "b", "kind": "home", "rank": 90, "score": 90,
+              "beach": {"km": 12.0, "approx": False}}
+
+    def fake_load(db, filters=None, mode="home", **_):
+        return [inland, sea] if mode == "home" else []
+
+    monkeypatch.setattr("db.load_listings", fake_load)
+    assert [it["id"] for it in photos.queue(None, {})][0] == "a"

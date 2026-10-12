@@ -763,14 +763,15 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
     t = {k: (targets or {}).get(k) or v for k, v in TARGET_DEFAULTS.items()}
     if mode == "both":
         return (
-            "A home that is worth living in and worth the money. It has to pass every check: "
-            "the pin is the house, not the town; the sea is within 1.5 km of that pin (a lake or "
-            "a river is not the sea); the climate grade is good or excellent, not merely caution "
-            "or unknown; the floor area is a real floor between 40 and 250 m², not the plot and "
-            "not missing; and the all-in cost fits the cash set aside, using the middle of the "
-            "repair range when the condition is not stated. Rank it by the worse of the living "
-            "score and the investment score. A beach flat with no resale case, and a cheap home "
-            "that is not by the sea, both fail."
+            "A home that is worth living in and worth the money. It has to be a house or a flat "
+            "whose pin is the house, not the town, with the sea within 1.5 km of that pin (a lake "
+            "or a river is not the sea), a climate grade of good or excellent, and a real floor "
+            "between 40 and 250 m². The asking price is not the cap: the all-in cost against "
+            "the cash is, using the middle of the repair range when the condition is not stated. "
+            "Rank a priced home by the worse of the living score and the investment score. When "
+            "no local sale price exists, the rank is the living score and the investment is not "
+            "priced. A beach flat with no resale case still ranks low. A cheap home that is not "
+            "by the sea fails."
         ) + _OUTLOOK_NOTE
     if mode == "invest":
         return _INVEST_PRIORITIES + _OUTLOOK_NOTE
@@ -1560,6 +1561,18 @@ def score_detail(item: dict, now: datetime | None = None,
         _MODE.reset(mode_token)
 
 
+def _investment_unpriced(item: dict) -> bool:
+    """No sale price for this place, or only a province average that includes its cities.
+
+    Either way a low investment score would mean "we cannot price it", and that
+    must not push a home you could live in off the list."""
+    found = local_price(item)
+    if not found:
+        return True
+    label = found[1]
+    return "province average" in label and "rest of province" not in label
+
+
 def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     """A home worth living in and worth the money, or nothing.
 
@@ -1599,6 +1612,14 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         return 0.0, blocked
     home_raw, home_why = _score_detail(item, now, targets)
     inv_raw, inv_why = _score_invest(item, now, targets)
+    item["live_score"] = display_score(home_raw)
+    if _investment_unpriced(item):
+        item["invest_score"] = None
+        return home_raw, [
+            "no local sale price — the investment is not priced, so this rank is the living score",
+            *home_why[:6],
+        ]
+    item["invest_score"] = display_score(inv_raw)
     weaker = home_why if home_raw <= inv_raw else inv_why
     return min(home_raw, inv_raw), [
         f"the worse of the two ({display_score(home_raw):.0f} to live in, "

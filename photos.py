@@ -259,19 +259,43 @@ def make_looker(cfg: dict):
     return looker
 
 
+def _exact_sea(item: dict) -> bool:
+    """The pin is the building and the sea is within 1.5 km. Photos of these come first."""
+    from scoring import SWIM_MAX_KM
+    beach = item.get("beach") or {}
+    km = beach.get("km")
+    return km is not None and not beach.get("approx") and km <= SWIM_MAX_KM
+
+
 def queue(db, cfg: dict) -> list[dict]:
-    """Homes to look at, best score first, across My home and Investment home."""
+    """Homes to look at. Exact beach homes first, then the best of each home goal.
+
+    Unknown condition is what makes the all-in estimate too wide to trust. The
+    photos are how that gets settled, so a house by the sea is looked at before
+    an inland one with a higher score."""
     from db import load_listings
     best: dict[str, dict] = {}
-    for mode in ("home", "invest"):
+
+    def keep(it: dict) -> None:
+        if it.get("kind") != "home":
+            return
+        rank = it.get("rank", it["score"])
+        old = best.get(it["id"])
+        if old is None or rank > old.get("rank", -1):
+            best[it["id"]] = it
+
+    for mode in ("both", "home", "invest"):
         for it in load_listings(db, filters=cfg.get("filters"), mode=mode):
-            if it.get("kind") != "home":
-                continue
-            rank = it.get("rank", it["score"])
-            old = best.get(it["id"])
-            if old is None or rank > old.get("rank", -1):
-                best[it["id"]] = it
-    return sorted(best.values(), key=lambda it: -it.get("rank", it["score"]))
+            keep(it)
+    # Hidden only because the all-in uses the middle of an unknown repair
+    # range. A photo that shows a sound house uses the low end instead.
+    for it in load_listings(db, filters=cfg.get("filters"), mode="both", include_hidden=True):
+        reason = it.get("hidden_reason") or ""
+        if reason and not reason.startswith("cash "):
+            continue
+        if _exact_sea(it):
+            keep(it)
+    return sorted(best.values(), key=lambda it: (not _exact_sea(it), -it.get("rank", it["score"])))
 
 
 def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, looker=None) -> int:

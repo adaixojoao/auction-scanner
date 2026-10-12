@@ -33,8 +33,10 @@ GEOCODE_CATCHUP_WHEN = 120   # pending addressable listings that trigger catch-u
 COUNTRY_CODES = {"PT": "pt", "ES": "es", "FR": "fr", "IT": "it", "NL": "nl", "DE": "de", "BE": "be",
                  "HR": "hr", "GR": "gr", "RO": "ro", "PL": "pl", "CY": "cy",
                  "BG": "bg", "SK": "sk", "LV": "lv"}
-_STREET = re.compile(r"\b((?:Rua|Travessa|Avenida|Av\.|Largo|Estrada|Caminho|Praceta|Beco|Canada|Calçada|Alameda|"
-                     r"Praça|Quinta|Bairro|Urbaniza[çc][ãa]o)\s+[^,.;:()]{2,60})", re.I)
+_STREET = re.compile(
+    r"\b((?:Rua|Rúa|Travessa|Avenida|Av\.|Largo|Estrada|Caminho|Praceta|Beco|Canada|Calçada|Alameda|"
+    r"Praça|Quinta|Bairro|Urbaniza[çc][ãa]o|Calle|Carrer|Rue|Chemin|Impasse|Boulevard|"
+    r"Via|Viale|Piazza|Corso|Stra(?:ße|sse)|Weg)\s+[^,.;:()]{2,60})", re.I)
 _LUGAR = re.compile(r"\b(?:lugar|sitio|sítio)\s+(?:de|do|da|dos|das)\s+([^,.;:()]{2,40})", re.I)
 _PLACE_OF = {"road": "street", "house_number": "street", "building": "street", "residential": "street",
              "hamlet": "village", "village": "village", "isolated_dwelling": "village", "locality": "village",
@@ -222,6 +224,17 @@ def geocode(session, item: dict, towns: dict | None = None) -> dict | None:
     return None
 
 
+def street_query(item: dict) -> str | None:
+    """The most exact address query that names a street or a lugar, or None.
+
+    A town pin can be replaced with this. A lookup that only names the town cannot."""
+    for q in queries(item):
+        head = q.split(",")[0]
+        if _STREET.search(head) or _LUGAR.search(head):
+            return q
+    return None
+
+
 def _should_geocode(item: dict, raw: dict) -> bool:
     """Whether this listing still needs an OpenStreetMap lookup.
 
@@ -230,10 +243,18 @@ def _should_geocode(item: dict, raw: dict) -> bool:
     scrape or parser fix made the town readable, the queries change and we ask
     again. A stored pin whose query named another town is also redone
     (`stale_lookup`)."""
-    if position(item):
-        return False
     q = queries(item)
     if not q:
+        return False
+    pos = position(item)
+    upgrade = street_query(item)
+    # A sale, street, cadastre or verified pin is the building. A town or
+    # village pin is not, and a street in the notice is worth one more lookup.
+    if pos and pos.get("precision") in EXACT_ENOUGH:
+        return False
+    if pos and upgrade and raw.get("geo_street_tried") != upgrade:
+        return True
+    if pos:
         return False
     if not raw.get("geo_checked"):
         return True
@@ -264,11 +285,47 @@ def geocode_budget(items: list[dict], limit: int | None = None) -> int:
     return GEOCODE_PER_SCAN
 
 
+def _street_upgrades(db, already: set[str], limit: int) -> list[dict]:
+    """Town, village and parish pins that name a street, even when they are not
+    on a shortlist. A town pin scores as nowhere, so it would never be looked
+    up again, and the beach distance would stay the town's."""
+    if limit <= 0:
+        return []
+    try:
+        cur = db.execute(
+            "SELECT id, source, country, external_id, title, description, tipo, area_m2, "
+            "price, current_bid, min_price, district, concelho, freguesia, url, raw_json "
+            "FROM listings WHERE (price IS NULL OR price <= 80000) AND ("
+            "raw_json LIKE '%\"precision\": \"municipality\"%' OR "
+            "raw_json LIKE '%\"precision\": \"village\"%' OR "
+            "raw_json LIKE '%\"precision\": \"parish\"%') "
+            "AND raw_json NOT LIKE '%geo_street_tried%' "
+            "ORDER BY last_seen DESC LIMIT 500")
+    except Exception:  # noqa: BLE001 — an older database still geocodes the shortlist
+        return []
+    cols = [d[0] for d in cur.description]
+    out = []
+    for rec in cur:
+        item = dict(zip(cols, rec))
+        if item["id"] in already:
+            continue
+        if street_query(item) and _should_geocode(item, _raw(item)):
+            out.append(item)
+            if len(out) >= limit:
+                break
+    return out
+
+
 def geocode_pending(db, session, items: list[dict], limit: int | None = None,
                     towns: dict | None = None) -> int:
     """Look up the listings (best first) that have no position yet, once each
-    set of address queries."""
+    set of address queries. A town pin with a street in the notice is looked
+    up even when that listing is not on the shortlist."""
     limit = geocode_budget(items, limit)
+    items = _street_upgrades(db, {it.get("id") for it in items}, limit) + list(items)
+    # Street upgrades first: a town pin with a street in the notice can become
+    # the building, and only then can the beach and the climate be that house's.
+    items = sorted(items, key=lambda it: street_query(it) is None or not _should_geocode(it, _raw(it)))
     done = 0
     for item in items:
         if done >= limit:
@@ -283,6 +340,9 @@ def geocode_pending(db, session, items: list[dict], limit: int | None = None,
             break
         raw["geo_checked"] = True
         raw["geo_tried"] = queries(item)
+        upgrade = street_query(item)
+        if upgrade:
+            raw["geo_street_tried"] = upgrade
         if geo:
             raw["geo"] = geo
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))

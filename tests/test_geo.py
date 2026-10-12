@@ -87,6 +87,37 @@ def test_a_failed_lookup_is_retried_when_the_town_becomes_readable(db, add):
     assert geo.geocode_pending(db, session, load_listings(db, include_hidden=True)) == 0
 
 
+def test_a_town_pin_with_a_street_is_looked_up_as_the_building(db, add):
+    from db import load_listings
+    add("citius", "1", title="Casa na Rua do Eiró, freguesia de Longa", freguesia="Longa",
+        concelho="Tabuaço", price=20000,
+        raw_json=json.dumps({"geo": {"lat": 41.06, "lon": -7.59, "precision": "municipality",
+                                     "query": "Tabuaço"},
+                             "geo_checked": True, "geo_tried": ["Tabuaço"]}))
+    hit = [{"lat": "41.061", "lon": "-7.592", "addresstype": "road"}]
+    session = FakeSession(lambda m, url, kw: FakeResponse(json_data=hit))
+    assert geo.geocode_pending(db, session, load_listings(db, include_hidden=True)) == 1
+    kept = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='citius:1'").fetchone()[0])
+    assert kept["geo"]["precision"] == "street"
+    assert kept["geo_street_tried"].startswith("Rua do Eiró")
+    assert geo.geocode_pending(db, session, load_listings(db, include_hidden=True)) == 0
+
+
+def test_a_street_on_a_town_pin_is_looked_up_even_off_the_shortlist(db, add):
+    add("citius", "2", country="ES", title="Vivienda en Calle San José 12", district="Cudillero",
+        price=19000,
+        raw_json=json.dumps({"geo": {"lat": 43.56, "lon": -6.15, "precision": "municipality",
+                                     "query": "Cudillero"},
+                             "geo_checked": True, "geo_tried": ["Cudillero"]}))
+    hit = [{"lat": "43.567", "lon": "-6.151", "addresstype": "road",
+            "display_name": "Calle San José, Cudillero, Spain"}]
+    session = FakeSession(lambda m, url, kw: FakeResponse(json_data=hit))
+    assert geo.geocode_pending(db, session, []) == 1
+    kept = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='citius:2'").fetchone()[0])
+    assert kept["geo"]["precision"] == "street"
+    assert geo.geocode_pending(db, session, []) == 0
+
+
 def test_saint_abbreviations_match_the_municipality_table(tmp_path, monkeypatch):
     """Banks write 'S. João da Pesqueira'; INE and OSM use the full word."""
     import csv
