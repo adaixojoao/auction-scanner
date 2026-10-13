@@ -403,6 +403,28 @@ def test_a_reading_belongs_to_its_own_spot_not_its_100_m_cell(vector_layers, db,
     assert climate.assess_pending(db, [row()], {}) == 0                  # up to date
 
 
+def test_a_pin_moved_on_disk_is_read_again_from_the_old_copy(vector_layers, db, add):
+    """Geocoding writes the new pin and leaves the list this scan already
+    built pointing at the old one. The climate is read for the pin on disk."""
+    import json
+    inside, outside = -7.4002, -7.3998
+    add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
+        raw_json=json.dumps({"lat": 40.495, "lon": inside}))
+
+    def row():
+        return dict(db.execute("SELECT * FROM listings WHERE id = 'citius:c1'").fetchone())
+
+    old = row()
+    assert climate.assess_pending(db, [old], {}) == 1
+    raw = json.loads(row()["raw_json"])
+    raw["lon"] = outside
+    db.execute("UPDATE listings SET raw_json = ? WHERE id = 'citius:c1'", (json.dumps(raw),))
+    db.commit()
+    assert climate.stored(row()) is None                               # that reading is the old pin's
+    assert climate.assess_pending(db, [old], {}) == 1                  # the copy from before the move
+    assert climate.stored(row())["fire"]["burnt_here"] is False
+
+
 def test_a_reading_stored_before_spots_is_read_once_more(layers, db, add):
     import json
     add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,

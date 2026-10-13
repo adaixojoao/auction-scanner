@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 import time
 from datetime import timedelta
 
@@ -27,6 +28,28 @@ STALE_SCAN = timedelta(hours=3)
 
 class ScanBusy(Exception):
     """Another scan (app, scheduler or command line) is already running."""
+
+
+# Below the programs in front (Cursor, a browser). Windows only; the call
+# is paired so the thread is back to normal when the scan ends.
+_BACKGROUND_BEGIN = 0x00010000
+_BACKGROUND_END = 0x00020000
+
+
+@contextlib.contextmanager
+def _below_other_programs():
+    """While a scan runs, Windows puts the programs the owner is using first."""
+    if sys.platform != "win32":
+        yield
+        return
+    import ctypes
+    kernel = ctypes.windll.kernel32
+    began = bool(kernel.SetThreadPriority(kernel.GetCurrentThread(), _BACKGROUND_BEGIN))
+    try:
+        yield
+    finally:
+        if began:
+            kernel.SetThreadPriority(kernel.GetCurrentThread(), _BACKGROUND_END)
 
 
 @contextlib.contextmanager
@@ -213,7 +236,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
     own_db = db is None
     db = db or connect()
     try:
-        with scan_lock():
+        with scan_lock(), _below_other_programs():
             _set_state(db, running=1, stop=0, label=label, total=len(chosen), done=0, current=None,
                        started_at=utcnow_iso(), finished_at=None, summary=None)
             results = []

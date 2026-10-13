@@ -803,11 +803,16 @@ def _keep_citius_details(db, listing_id: str, f: dict) -> dict:
 
 
 def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> int:
-    """Read the full description of sales not read yet (one request each)."""
-    rows = db.execute("""
+    """Read the full description of sales not read yet (one request each).
+
+    A sale whose list page already shows a price over the cap is not opened."""
+    from db import still_worth_a_page_sql
+    clause, extra = still_worth_a_page_sql()
+    rows = db.execute(f"""
         SELECT id, raw_json FROM listings WHERE source = 'citius'
           AND raw_json LIKE '%"html_id"%' AND raw_json NOT LIKE '%"detail_checked": ' || ? || '%'
-        ORDER BY last_seen DESC LIMIT ?""", (CITIUS_DETAIL_VERSION, limit)).fetchall()
+          {clause}
+        ORDER BY last_seen DESC LIMIT ?""", (CITIUS_DETAIL_VERSION, *extra, limit)).fetchall()
     done = 0
     for listing_id, raw_text in rows:
         raw = json.loads(raw_text)
@@ -1453,10 +1458,13 @@ def _keep_original(db, row: dict) -> dict:
 
 
 def resolve_imobancos_originals(db, session, limit: int = IMOBANCOS_ORIGINALS_PER_SCAN) -> int:
-    rows = db.execute("""
+    from db import still_worth_a_page_sql
+    clause, extra = still_worth_a_page_sql()
+    rows = db.execute(f"""
         SELECT id, raw_json FROM listings WHERE source='imobancos'
           AND (raw_json IS NULL OR raw_json NOT LIKE '%"original_checked"%')
-        ORDER BY last_seen DESC LIMIT ?""", (limit,)).fetchall()
+          {clause}
+        ORDER BY last_seen DESC LIMIT ?""", (*extra, limit)).fetchall()
     found = 0
     for listing_id, raw_text in rows:
         eid = listing_id.split(":", 1)[1]

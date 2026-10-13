@@ -66,10 +66,13 @@ another window.
 | **Settings** | What you are looking for (rural plot size and price), a budget per goal (a home to live in, a home to let or resell, land), what to hide, your details for letters, alerts, automatic scanning. |
 
 **Scan now** (top right) scans Portugal or every country; progress shows
-next to it. While the app is open it also scans on the timetable in
-Settings (Portugal every 2 h, other countries every 6 h). Tick *Keep scanning
-when the app is closed* to install a quiet Windows background task that does
-the same when the app is closed.
+next to it. On Windows the scan runs at a lower priority, so the programs
+you are using stay ahead of it. While the app is open it also scans on the
+timetable in Settings (Portugal every 2 h, other countries every 6 h). Tick
+*Keep scanning when the app is closed* to install a quiet Windows background
+task that does the same when the app is closed. When the app starts it scores
+Live and invest and My home, and writes to its log how much memory that used
+and how much was still free. The other goals are scored when you open them.
 
 ### Offers, step by step
 
@@ -199,9 +202,12 @@ goal: a plot is not a bad home, it is somewhere else on the board.
 **What a listing is worth checking** (Settings → Budget). Over *Ignore
 listings over* (€100,000) a listing is kept only so the scanner knows it: it is
 never scored, checked or shown, and no budget goes higher (a ☆ one, or one you
-made an offer on, stays). From *Light checks first from* (€50,000) the climate
-maps and the photos are read for Live and invest only when the price, taxes and
-fees fit the cash you can lose.
+made an offer on, stays). Once a list page already shows a price over that
+line, the scanner does not open the listing's own page. Listings says how many
+were left that way, for example *1,234 over €100,000, not checked*, so the
+cutoff can be raised in Settings if it removes too much. From *Light checks
+first from* (€50,000) the climate maps and the photos are read for Live and
+invest only when the price, taxes and fees fit the cash you can lose.
 
 On **My home** the order of preference is:
 
@@ -475,11 +481,13 @@ it then scores listings without the climate.
 The **Climate** panel (listing details and Offers) grades a place excellent /
 good / caution / poor from those maps: heat by 2071-2100, the 100-year flood,
 permanent water (a benefit only where it does not flood), water stress, past
-fires and fire danger. From a town or parish position it says "approximate"
-and never grades poor on local risks. It is a planning risk indicator, not a
-survey, an insurance assessment, or legal or environmental due diligence. The
-optional bid guardrail (Settings → Climate) lowers an AI-suggested bid for a
-caution or poor grade at an exact position; it never changes an amount you type.
+fires and fire danger. A reading belongs to the pin it was taken at. When that
+pin moves, the next scan reads the climate again for the new spot. From a town
+or parish position it says "approximate" and never grades poor on local risks.
+It is a planning risk indicator, not a survey, an insurance assessment, or
+legal or environmental due diligence. The optional bid guardrail
+(Settings → Climate) lowers an AI-suggested bid for a caution or poor grade at
+an exact position; it never changes an amount you type.
 
 Every listing's ⓘ panel says how exact its **location** is: exact (the sale's
 coordinates, the cadastre, or a position you verified), street, village or
@@ -528,6 +536,7 @@ show it on homes and urban plots.
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access
+                             # includes a start on 20,000 listings under a memory limit
 python -m pyflakes *.py sources/ tests/ scripts/
 ```
 

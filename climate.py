@@ -556,9 +556,19 @@ def _layers_stamp() -> str:
 
 
 def stored(item: dict) -> dict | None:
-    """The climate stored for a listing by the scan, if any."""
+    """The climate stored for this listing's current pin.
+
+    A reading taken somewhere else — the pin has moved, or it was stored before
+    readings named their spot — is not this pin's, so the score does not use it."""
     import geo
-    return (geo._raw(item).get("climate") or {}).get("result")
+    kept = geo._raw(item).get("climate") or {}
+    result = kept.get("result")
+    if not isinstance(result, dict) or not result:
+        return None
+    pos = geo.position(item)
+    if pos and kept.get("spot") != _spot(pos):
+        return None
+    return result
 
 
 def remember(item: dict, result: dict) -> None:
@@ -668,6 +678,11 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
     for item in items:
         if done >= limit:
             break
+        # Geocoding in this same scan writes the new pin to the database and
+        # leaves this copy where it was. Compare the pin that is stored now.
+        fresh = db.execute("SELECT raw_json FROM listings WHERE id = ?", (item.get("id"),)).fetchone()
+        if fresh and fresh[0]:
+            item = {**dict(item), "raw_json": fresh[0]}
         pos = geo._place(item, towns)
         if not pos:
             continue

@@ -882,6 +882,7 @@ def verify_location(db, item: dict, pos: dict, method: str, text: str) -> dict:
             "method": method, "input": (text or "").strip()[:200], "at": utcnow_iso()}
     raw["verified_geo"] = mine
     raw.pop("water_check", None)             # ask the map about water again, at the new spot
+    raw.pop("climate", None)                 # the stored reading is the old pin's
     _save_raw(db, item, raw)
     _log_check(db, item, "verified", mine, method, mine["input"])
     db.commit()

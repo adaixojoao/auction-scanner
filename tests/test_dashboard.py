@@ -43,6 +43,14 @@ def test_listings_api_uses_shared_scoring_and_sanitises(client, db, add):
     assert data["stats"]["new_today"] == 1   # the legacy row was first seen in January
 
 
+def test_the_list_says_how_many_listings_were_left_over_the_cap(client, add):
+    add("eleiloes", "dear", title="Moradia cara", tipo="moradia", price=150000, area_m2=120)
+    add("eleiloes", "cheap", title="Moradia", tipo="moradia", price=40000, area_m2=90)
+    data = client.get("/api/listings").get_json()
+    assert data["stats"]["unchecked"] == 1 and data["stats"]["check_max_price"] == 100000
+    assert all(it["id"] != "eleiloes:dear" for it in data["items"])
+
+
 def test_hidden_view_shows_only_hidden_with_reasons(client, add):
     add(external_id="old", title="Moradia", price=20000, date_end="2000-01-01T10:00:00")
     add(external_id="live", title="Moradia", price=20000)
