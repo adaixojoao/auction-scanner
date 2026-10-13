@@ -568,12 +568,33 @@ def test_only_the_goals_asked_for_last_stay_in_memory(client, monkeypatch):
         for mode in ("forest", "land", "home"):
             assert dashboard.all_listings(mode) == [{"id": mode}]
         assert set(dashboard._LISTS) == {"land", "home"}
-        assert dbmod._KEEP[0] == {"land", "home"}                         # their scores stay, not forest's
+        assert dbmod._KEEP[0] == set()                                     # kept scores stay on disk
         dashboard.all_listings("land")                                     # asked for again: the most recent
         dashboard.all_listings("both")
         assert set(dashboard._LISTS) == {"land", "both"}
-        assert dbmod._KEEP[0] == {"land", "both"}
     finally:
         dashboard.app.config["TESTING"] = True
         dashboard._LISTS.clear()
         dashboard._LISTS_USED.clear()
+
+
+def test_a_page_of_hidden_listings_shows_them_in_full(client, db, add, monkeypatch):
+    """The kept list holds a hidden listing slim (db._SLIM); the page reads it
+    again in full, so what is shown is the same as without the slim list."""
+    add(external_id="seen", title="Moradia T3", tipo="moradia", price=20000, area_m2=160,
+        description="Moradia em bom estado, perto da praia")
+    add(external_id="low", title="Garagem", tipo="garagem", price=900, area_m2=12, description="Garagem fechada")
+    queries = ("/api/listings?max_price=100000", "/api/listings?max_price=100000&show_hidden=1",
+               "/api/listings?max_price=100000&show_hidden=1&search=garagem", "/api/listings?show_hidden=1&sort=price")
+    client.get(queries[0])            # scored now; both lists below read the kept scores
+    plain = [client.get(q).get_json() for q in queries]
+    monkeypatch.setattr(dashboard, "all_listings", lambda mode: dashboard._build_list(mode))   # the app's kept list
+    try:
+        kept = [client.get(q).get_json() for q in queries]
+        assert any(it.get("_slim") for it in dashboard._LISTS["home"][1])
+    finally:
+        dashboard._LISTS.clear()
+        dashboard._LISTS_USED.clear()
+    for a, b in zip(plain, kept):
+        assert a["items"] == b["items"] and a["stats"] == b["stats"]
+    assert plain[1]["items"] and plain[1]["items"][0]["reasons"]            # a hidden row, in full

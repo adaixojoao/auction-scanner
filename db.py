@@ -1022,6 +1022,14 @@ _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "pl
             "reasons", "excellent", "category", "kind", "live_score", "invest_score")
 _SCORED: dict[str, dict[str, tuple]] = {}      # mode → {listing id → (row key, results, inputs)}
 _UNSCORED = {"last_seen", "is_new"}
+# What a hidden listing keeps when load_listings(slim_hidden=True): what a list
+# filters, searches, sorts and counts it by (dashboard.api_listings, the
+# report's counts, load_best's choice of goal). 99.7% of each goal's listings
+# are hidden, and full rows for all of them did not fit a 6 GB PC; a page that
+# shows hidden ones reads those rows in full (dashboard._full_rows).
+_SLIM = ("id", "source", "country", "tipo", "title", "description", "concelho", "district", "price",
+         "current_bid", "area_m2", "date_end", "first_seen", "raw_json", "status", "hidden_reason",
+         "score", "rank", "category", "kind", "climate", "is_recent")
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
 
@@ -1133,11 +1141,22 @@ def _score_db(db) -> sqlite3.Connection | None:
     return conn
 
 
+def _unpack(data: bytes) -> dict | None:
+    import pickle
+    try:
+        results = pickle.loads(data)
+    except (pickle.PickleError, EOFError, AttributeError, ValueError, TypeError):
+        return None                          # scored again
+    results.pop("wishes", None)              # kept before the wishes moved to the page
+    return results
+
+
 def _load_kept(db, mode: str, ids: list[str] | None = None) -> dict:
     """A goal's kept scores, read from the scores file the first time: all of
     them, or only those of `ids` when they are few and the goal is not kept in
-    memory (one listing's panel must not read 140,000 scores)."""
-    import pickle
+    memory (one listing's panel must not read 140,000 scores). They stay packed
+    until a listing uses one (load_listings), so reading a goal costs the bytes,
+    not 140,000 unpacked results at once."""
     kept = _SCORED.setdefault(mode, {})
     if mode in _LOADED_MODES:
         return kept
@@ -1157,10 +1176,8 @@ def _load_kept(db, mode: str, ids: list[str] | None = None) -> dict:
                                    (mode,)).fetchall()
         for lid, key, inputs, data in rows:
             if lid not in kept:
-                results = pickle.loads(data)
-                results.pop("wishes", None)      # kept before the wishes moved to the page
-                kept[lid] = (key, results, inputs)
-    except (sqlite3.Error, pickle.PickleError, EOFError, AttributeError):
+                kept[lid] = (key, bytes(data), inputs)
+    except sqlite3.Error:
         pass                                 # only a speed-up
     return kept
 
@@ -1264,13 +1281,15 @@ def _both_worth_reading(item: dict) -> bool:
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
                   where: str = "", params=(), apply_min_score: bool = True, mode: str = "home",
-                  refresh: bool = False) -> list[dict]:
+                  refresh: bool = False, slim_hidden: bool = False) -> list[dict]:
     """Every listing a view should consider, scored, with hidden ones removed.
 
     Each item gains: score, reasons, category, hidden_reason (None if visible),
     price_drop_pct, earlier_round (rounds.py), town_distance (geo.py), is_recent, status
     (shortlisted/dismissed/None) and offer_outcome (latest carta_log outcome, or None). `where`/`params` are extra SQL conditions on the
     listings table for cheap pre-filtering (country, source, search...).
+    With `slim_hidden`, a hidden listing keeps only the fields in _SLIM and
+    `_slim`: True; the same call with where="id IN (...)" gives its full row.
 
     Hidden, in order of precedence: dismissed by the user, expired, duplicate,
     stale (gone from its source), excluded by config filters, below
@@ -1309,6 +1328,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     first_price, cases, towns, closes, land_market = _shared_lookups(db, now)
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     climate_on = climate.available()
+    maps_before = climate.maps_loaded()
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
     cash = _cash_on_hand()
     # A new day or new filters (with the weights) score again; new towns, auction
@@ -1372,8 +1392,15 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                                      item["offer_outcome"], context,
                                      item.get("unconfirmed_since"))).encode()).hexdigest()
         kept = scored.get(item["id"])
+        results = None
         if kept and kept[0] == row_key and not (refresh and kept[2] != inputs):
-            item.update(kept[1])
+            results = kept[1]
+            if isinstance(results, bytes):           # as read from the scores file
+                results = _unpack(results)
+                if results is not None and _kept_in_memory(mode):
+                    scored[item["id"]] = (kept[0], results, kept[2])
+        if results is not None:
+            item.update(results)
             sc = item["score"]
         else:
             if supply:
@@ -1423,6 +1450,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["hidden_reason"] = reason
         seen_first = parse_dt(item.get("first_seen"))
         item["is_recent"] = bool(seen_first and now - seen_first <= RECENT)
+        if reason and slim_hidden:
+            item = {**{k: item[k] for k in _SLIM if k in item}, "_slim": True}
         items.append(item)
     if climate_writes:
         db.executemany("UPDATE listings SET raw_json = ? WHERE id = ?", climate_writes)
@@ -1430,6 +1459,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     _save_kept(db, mode, new_scores)
     if not _kept_in_memory(mode):
         _release(mode)               # the items hold what they need; the scores file keeps the rest
+    if not maps_before and climate.maps_loaded():
+        climate.release_maps()       # a seaside home read for Live and invest: not kept for the life of the app
     return items
 
 

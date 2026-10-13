@@ -277,6 +277,23 @@ def _fire_danger():
     return tree, {k: v.ravel() for k, v in data.items()}
 
 
+_MAPS = (_fires, _basins, _fire_danger)
+
+
+def maps_loaded() -> bool:
+    """A map is in memory (a cached "not on this PC" is not)."""
+    return any(load.cache_info().currsize and load() is not None for load in _MAPS)
+
+
+def release_maps() -> None:
+    """Let go of the burnt areas, the basins and the fire danger grid: about
+    500 MB that otherwise stayed in memory for as long as the app ran. The
+    next reading loads them again (~20 s); a reading already under way keeps
+    the copy it has."""
+    for load in _MAPS:
+        load.cache_clear()
+
+
 def fire_danger(lat: float, lon: float) -> dict | None:
     """Days a year with high (FWI > 30) and very high (> 45) fire danger, now
     (1981-2005) and in 2079-2098 (RCP4.5, and RCP8.5 as the worst case):
@@ -533,6 +550,7 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
     from common import LOG
     if seaside_first:
         items = _seaside_ahead(db, items, towns)
+    loaded_before = maps_loaded()
     stamp, done = _layers_stamp(), 0
     for item in items:
         if done >= limit:
@@ -560,4 +578,6 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
         if done % 200 == 0:
             db.commit()
     db.commit()
+    if not loaded_before:
+        release_maps()               # loaded for this batch: not kept for the life of the app
     return done
