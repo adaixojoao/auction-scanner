@@ -29,8 +29,10 @@ def test_a_scan_runs_below_other_programs_on_windows(monkeypatch):
             calls.append(level)
             return 1
 
+    # Linux has no ctypes.windll, so the stand-in is installed on the module.
+    windll = type("windll", (), {"kernel32": Kernel()})()
     monkeypatch.setattr(pipeline.sys, "platform", "win32")
-    monkeypatch.setattr(ctypes.windll, "kernel32", Kernel(), raising=False)
+    monkeypatch.setattr(ctypes, "windll", windll, raising=False)
     with pipeline._below_other_programs():
         assert calls == [pipeline._BACKGROUND_BEGIN]
     assert calls == [pipeline._BACKGROUND_BEGIN, pipeline._BACKGROUND_END]
