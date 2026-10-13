@@ -354,3 +354,22 @@ def test_a_reading_stored_before_spots_is_read_once_more(layers, db, add):
     items = [dict(r) for r in db.execute("SELECT * FROM listings")]
     assert climate.stored(items[0])["heat"] == {"ssp245_2081-2100": 33.3}
     assert climate.assess_pending(db, items, {}) == 0
+
+
+def test_the_maps_a_batch_loaded_are_let_go_after_it(vector_layers, db, add):
+    """The burnt areas and the basins are ~500 MB: kept for the life of the app
+    they filled a 6 GB PC. A batch that loaded them lets them go."""
+    import json
+    add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
+        raw_json=json.dumps({"lat": 40.495, "lon": -7.405}))
+    items = [dict(r) for r in db.execute("SELECT * FROM listings")]
+    assert not climate.maps_loaded()
+    assert climate.assess_pending(db, items, {}) == 1
+    assert climate.stored([dict(r) for r in db.execute("SELECT * FROM listings")][0])["fire"]["burnt_here"]
+    assert not climate.maps_loaded()
+    climate._fires()                                       # loaded by someone else: theirs to let go
+    climate._CACHE.clear()
+    add("citius", "c2", title="Moradia T2", tipo="moradia", area_m2=80, price=15000,
+        raw_json=json.dumps({"lat": 40.30, "lon": -7.30}))
+    assert climate.assess_pending(db, [dict(r) for r in db.execute("SELECT * FROM listings")], {}) == 1
+    assert climate.maps_loaded()

@@ -272,9 +272,11 @@ _LISTS: dict = {}            # mode -> (built at, items)
 _LISTS_BUILDING: set = set()
 _LISTS_LOCK = threading.Lock()
 _BUILD_LOCKS: dict = {}      # mode -> lock: one build at a time, every window waits for the same one
-# At 140,000 listings one goal's list and kept scores take about 0.7 GB, and a
-# 6 GB PC froze holding all five. Only the goals asked for last stay in memory;
-# opening another reads its scores back from the scores file (db.keep_scores_for).
+# At 140,000 listings a 6 GB PC froze holding every goal's full list and kept
+# scores. Only the goals asked for last keep a list; in it a hidden listing
+# (99.7% of them) keeps only what the list filters, sorts and counts by
+# (db._SLIM), and a page that shows hidden ones reads those rows in full
+# (_full_rows). Kept scores stay in the scores file (db.keep_scores_for).
 MAX_LISTS = 2
 _LISTS_USED: dict = {}       # mode -> when a page last asked for it (a count: Windows' clock ticks in 15 ms)
 _USE_ORDER = itertools.count(1)
@@ -282,15 +284,12 @@ _LISTS_ACTIVE: set = set()   # modes being built right now
 
 
 def _keep_only_recent() -> None:
-    """Let go of the lists beyond MAX_LISTS, the least recently asked for first,
-    and keep in memory only the scores of the goals still held."""
+    """Let go of the lists beyond MAX_LISTS, the least recently asked for first."""
     with _LISTS_LOCK:
         recent = sorted(_LISTS, key=lambda m: _LISTS_USED.get(m, 0), reverse=True)
         for mode in recent[MAX_LISTS:]:
             if mode not in _LISTS_ACTIVE:
                 _LISTS.pop(mode, None)
-        held = set(_LISTS) | _LISTS_ACTIVE
-    keep_scores_for(held)
 
 
 def _scan_busy() -> bool:
@@ -318,12 +317,12 @@ def _build_list(mode: str, tag: str | None = None) -> list:
             return kept[1]
         with _LISTS_LOCK:
             _LISTS_ACTIVE.add(mode)
-            held = set(_LISTS) | _LISTS_ACTIVE
         try:
-            keep_scores_for(held)
+            keep_scores_for(())
             db = get_db()
             try:
-                items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+                items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode,
+                                      slim_hidden=True)
             finally:
                 db.close()
             with _LISTS_LOCK:
@@ -339,11 +338,24 @@ def _build_list(mode: str, tag: str | None = None) -> list:
 
 def score_only(mode: str) -> None:
     """Score a goal so its scores are on disk, without keeping its list in memory."""
+    keep_scores_for(())
     db = get_db()
     try:
-        load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+        load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode, slim_hidden=True)
     finally:
         db.close()
+
+
+def _full_rows(db, items: list, mode: str) -> list:
+    """The rows a page shows, in full: a hidden listing kept slim in the list
+    (db._SLIM) is read again, the same way, by its id."""
+    slim = [it["id"] for it in items if it.get("_slim")]
+    if not slim:
+        return items
+    full = {it["id"]: it for it in load_listings(db, filters=_config().get("filters"), include_hidden=True,
+                                                 mode=mode, where=f"id IN ({','.join('?' * len(slim))})",
+                                                 params=tuple(slim))}
+    return [full.get(it["id"], it) for it in items]
 
 
 def refresh_cached_lists(finished_at: str) -> None:
@@ -460,7 +472,7 @@ def api_listings():
         items = ranked[:cap]
         items.sort(key=SORT_KEYS.get(sort, SORT_KEYS["score"]), reverse=(direction == "desc"))
         total = len(items)
-        page_items = [_with_fees(it) for it in items[(page - 1) * per_page:page * per_page]]
+        page_items = [_with_fees(it) for it in _full_rows(db, items[(page - 1) * per_page:page * per_page], mode)]
         visible = [it for it in loaded if not it["hidden_reason"]]
         health = source_health(db, _registry())
         last_scrape = db.execute("SELECT MAX(timestamp) FROM scrape_log").fetchone()[0]

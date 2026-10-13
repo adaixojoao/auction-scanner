@@ -219,7 +219,8 @@ def generate_report(db, max_price: float = 50000, max_bid: float | None = None, 
     max_bid = max_price if max_bid is None else max_bid
     out_dir = out_dir or HERE
 
-    everything = load_best(db, filters=filters, include_hidden=True, now=now)
+    # The hidden ones are only counted: kept slim (db._SLIM), 140,000 full rows did not fit a 6 GB PC.
+    everything = load_best(db, filters=filters, include_hidden=True, now=now, slim_hidden=True)
     items = [it for it in everything if not it["hidden_reason"]]
     hidden_counts = Counter(hidden_category(it["hidden_reason"]) for it in everything
                             if it["hidden_reason"])

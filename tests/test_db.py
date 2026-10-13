@@ -373,3 +373,24 @@ def test_the_five_wishes_are_not_kept_with_the_scores(db):
     item = load_listings(db, apply_min_score=False)[0]
     assert "wishes" not in item
     assert "wishes" not in dbmod._SCORED["home"]["eleiloes:1"][1]
+
+
+def test_a_hidden_listing_kept_slim_is_the_same_listing_read_in_full(db):
+    from common import make_listing
+    from db import _SLIM, load_listings, upsert_listing
+    upsert_listing(db, make_listing("eleiloes", "1", title="Moradia T3", price=20000, area_m2=120,
+                                    description="Casa em bom estado"))
+    upsert_listing(db, make_listing("eleiloes", "2", title="Garagem", price=900, area_m2=12))
+    db.commit()
+    full = {it["id"]: it for it in load_listings(db, include_hidden=True, filters={"min_score": 99})}
+    slim = {it["id"]: it for it in load_listings(db, include_hidden=True, filters={"min_score": 99},
+                                                 slim_hidden=True)}
+    assert all(it["hidden_reason"] for it in full.values())
+    for lid, it in slim.items():
+        assert it["_slim"] and set(it) <= set(_SLIM) | {"_slim"}
+        assert {k: v for k, v in it.items() if k != "_slim"} == {k: full[lid][k] for k in _SLIM if k in full[lid]}
+    # Read again by its id, from the kept score, it is the listing a full list gives from the kept scores
+    # (a list scored just now also carries the shared land_market table).
+    from_kept = {it["id"]: it for it in load_listings(db, include_hidden=True, filters={"min_score": 99})}
+    again = load_listings(db, include_hidden=True, filters={"min_score": 99}, where="id = ?", params=("eleiloes:2",))
+    assert again[0] == from_kept["eleiloes:2"]
