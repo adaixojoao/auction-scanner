@@ -196,6 +196,13 @@ goal: a plot is not a bad home, it is somewhere else on the board.
 | **Investment land** | A plot as an investment: cheap per hectare against what land goes for in that district, big enough, reachable, water on it — with the forestry upside counted on top. | *land* |
 | **Forestry** | A forestry project: cheap per hectare, and a sale that can close sooner. 10 ha is the project, from 5 ha a first plot. Portugal first, because you can visit it. No deadline of this year. | *land* |
 
+**What a listing is worth checking** (Settings → Budget). Over *Ignore
+listings over* (€100,000) a listing is kept only so the scanner knows it: it is
+never scored, checked or shown, and no budget goes higher (a ☆ one, or one you
+made an offer on, stays). From *Light checks first from* (€50,000) the climate
+maps and the photos are read for Live and invest only when the price, taxes and
+fees fit the cash you can lose.
+
 On **My home** the order of preference is:
 
 1. a house in good condition, in a great location, well under market price;

@@ -17,8 +17,15 @@ DEFAULTS = {
     # One budget per goal (common.py). A scrape keeps anything under the
     # highest of them; each tab, its alerts and its report section apply their own.
     "max_price": 100000,          # a home to live in
-    "invest_max_price": 150000,   # a home to let or resell
+    "invest_max_price": 100000,   # a home to let or resell
     "land_max_price": 100000,     # a plot (investment land and forestry)
+    # The work spent on a listing (common.check_max_price, light_checks_from):
+    # above check_max_price it is kept only so the scanner knows it, never
+    # scored, checked or shown, and no budget goes above it; from
+    # light_checks_from the heavy checks (climate maps, photos) wait until the
+    # light ones say it can be shown. 0 turns a rule off.
+    "check_max_price": 100000,
+    "light_checks_from": 50000,
     # What you can actually lose on one purchase: price + taxes + fees + the
     # low end of repairs (costs.py). 0 means not set — listings stay visible
     # and an offer is refused until you set it. A shortlisted listing stays

@@ -1723,6 +1723,8 @@ EDITABLE = {
     "invest_max_price": None,
     "land_max_price": None,
     "cash_on_hand": None,         # price + taxes + fees + low end of repairs
+    "check_max_price": None,      # the work spent on a listing (common.py)
+    "light_checks_from": None,
     "max_listings": None,
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
                 "rural_max_eur_m2", "weights"),
@@ -1825,7 +1827,10 @@ def api_settings_save():
     if "cash_on_hand" in changes and (not isinstance(changes["cash_on_hand"], (int, float))
                                      or changes["cash_on_hand"] < 0):
         return jsonify({"error": "cash_on_hand must be a number ≥ 0 (0 means not set)"}), 400
-    if "cash_on_hand" in changes:
+    for key in ("check_max_price", "light_checks_from"):
+        if key in changes and (not isinstance(changes[key], (int, float)) or changes[key] < 0):
+            return jsonify({"error": f"{key} must be a number ≥ 0 (0 turns it off)"}), 400
+    if {"cash_on_hand", "check_max_price"} & set(changes):
         _LISTS.clear()
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):

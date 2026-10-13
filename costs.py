@@ -648,6 +648,16 @@ def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: boo
     return f"cash €{out['amount']:,.0f} all-in is over the €{cash:,.0f} you can lose ({out['detail']})"
 
 
+def over_before_repairs(item: dict, cash: float) -> bool:
+    """The price with its taxes and fees is already over the cash. Repairs only
+    add to it, so over_cash hides the listing whatever the photos or the climate
+    say: a light check that spares the heavy ones (common.light_checks_from)."""
+    if not cash or cash <= 0:
+        return False
+    est = estimate(item)
+    return bool(est) and est["total"] > cash
+
+
 def sealed_cheque(item: dict, amount: float) -> str | None:
     """The usual 5% cheque on a Portuguese sealed offer or e-leilão.
 

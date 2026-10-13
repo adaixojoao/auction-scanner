@@ -91,6 +91,10 @@ def _gpkg_wkb(blob) -> bytes | None:
     return b[8 + _GPKG_ENVELOPE[(b[3] >> 1) & 0b111]:]
 
 
+def _quoted(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _read_gpkg(path: str, layer: str | None = None):
     """A layer as geopandas.read_file gives it: the attribute columns (not the
     fid), then `geometry`, in the layer's CRS. Without `layer`, the first one."""
@@ -98,18 +102,78 @@ def _read_gpkg(path: str, layer: str | None = None):
     import pandas as pd
     import shapely
     layer = layer or _gpkg_layers(path)[0]
-    table = layer.replace('"', '""')
     with closing(_gpkg(path)) as db:
         geom, srs_id = db.execute("SELECT column_name, srs_id FROM gpkg_geometry_columns WHERE table_name = ?",
                                   (layer,)).fetchone()
         org, code, wkt = db.execute("SELECT organization, organization_coordsys_id, definition "
                                     "FROM gpkg_spatial_ref_sys WHERE srs_id = ?", (srs_id,)).fetchone()
-        columns = [c[1] for c in db.execute(f'PRAGMA table_info("{table}")') if c[1] != geom and not c[5]]
-        picked = ", ".join('"' + c.replace('"', '""') + '"' for c in [*columns, geom])
-        rows = db.execute(f'SELECT {picked} FROM "{table}"').fetchall()
+        columns = [c[1] for c in db.execute(f"PRAGMA table_info({_quoted(layer)})") if c[1] != geom and not c[5]]
+        picked = ", ".join(_quoted(c) for c in [*columns, geom])
+        rows = db.execute(f"SELECT {picked} FROM {_quoted(layer)}").fetchall()
     crs = f"EPSG:{code}" if str(org).upper() == "EPSG" else (wkt if wkt and wkt != "undefined" else None)
     return gpd.GeoDataFrame(pd.DataFrame([r[:-1] for r in rows], columns=columns),
                             geometry=shapely.from_wkb([_gpkg_wkb(r[-1]) for r in rows]), crs=crs)
+
+
+# ─── Near a place, through the R-tree ───────────────────────────────
+# GDAL writes an R-tree (rtree_<layer>_<geom>) for every GeoPackage layer.
+# Through it a reading takes the few polygons near the place, not the whole
+# map (~500 MB in memory). The coordinates are reprojected by geopandas' own
+# routine and transformer, so the answers are those of the whole map. Each
+# reading opens the file and closes it again: a map stays free to be rebuilt.
+
+
+@functools.lru_cache(maxsize=16)
+def _gpkg_index(path: str, mtime: float) -> dict | None:
+    """{layer: (geometry column, fid column, attribute columns)} when every
+    feature layer is in EPSG:4326 and has its R-tree; None otherwise."""
+    with closing(_gpkg(path)) as db:
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        layers = {}
+        for layer, geom, srs_id in db.execute(
+                "SELECT g.table_name, g.column_name, g.srs_id FROM gpkg_geometry_columns g "
+                "JOIN gpkg_contents c ON c.table_name = g.table_name WHERE c.data_type = 'features'").fetchall():
+            org, code = db.execute("SELECT organization, organization_coordsys_id FROM gpkg_spatial_ref_sys "
+                                   "WHERE srs_id = ?", (srs_id,)).fetchone()
+            if f"rtree_{layer}_{geom}" not in tables or str(org).upper() != "EPSG" or int(code) != 4326:
+                return None
+            info = list(db.execute(f"PRAGMA table_info({_quoted(layer)})"))
+            layers[layer] = (geom, next(c[1] for c in info if c[5]),
+                             [c[1] for c in info if c[1] != geom and not c[5]])
+    return layers
+
+
+def _index_of(path: str) -> dict | None:
+    return _gpkg_index(path, os.path.getmtime(path)) if os.path.exists(path) else None
+
+
+def _near_rows(con, layer: str, index: dict, box: tuple) -> tuple[list[dict], object]:
+    """(attributes, geometries) of the features whose envelope meets `box`
+    (minx, miny, maxx, maxy in degrees), in fid order."""
+    import shapely
+    geom, fid, columns = index[layer]
+    picked = ", ".join(_quoted(c) for c in [*columns, geom])
+    rows = con.execute(
+        f"SELECT {picked} FROM {_quoted(layer)} WHERE {_quoted(fid)} IN (SELECT id FROM "
+        f"{_quoted(f'rtree_{layer}_{geom}')} WHERE maxx >= ? AND minx <= ? AND maxy >= ? AND miny <= ?) "
+        f"ORDER BY {_quoted(fid)}", (box[0], box[2], box[1], box[3])).fetchall()
+    return [dict(zip(columns, r[:-1])) for r in rows], shapely.from_wkb([_gpkg_wkb(r[-1]) for r in rows])
+
+
+@functools.lru_cache(maxsize=4)
+def _transformer(src: str, dst: str):
+    """geopandas' own cached transformer (what GeoDataFrame.to_crs uses)."""
+    from geopandas.array import TransformerFromCRS
+    from pyproj import CRS
+    return TransformerFromCRS(CRS.from_user_input(src), CRS.from_user_input(dst), always_xy=True)
+
+
+def _box_4326(zone, margin: float = 0.02) -> tuple:
+    """A lon/lat box around a shape in EPSG:3035, with a margin (~2 km): the
+    straight edges in metres bow a little in degrees."""
+    xs, ys = zone.exterior.coords.xy
+    lons, lats = _transformer("EPSG:3035", "EPSG:4326").transform(list(xs), list(ys))
+    return min(lons) - margin, min(lats) - margin, max(lons) + margin, max(lats) + margin
 
 
 def _sample(path: str, lat: float, lon: float) -> float | None:
@@ -198,15 +262,31 @@ def _fires():
 
 
 def fires_near(lat: float, lon: float, km: float = FIRE_KM) -> dict | None:
+    """Burnt areas meeting the `km` zone around the place (EPSG:3035, metres).
+    Through the map's R-tree only the areas near the place are read; the
+    whole map (~270 MB in memory) is loaded only when the file has no index."""
+    import shapely
+    from shapely.geometry import Point
+    path = os.path.join(_layers(), "burnt_areas.gpkg")
+    x, y = _transformer("EPSG:4326", "EPSG:3035").transform(lon, lat)
+    here = Point(x, y)
+    zone = here.buffer(km * 1000)
+    index = _index_of(path)
+    if index:
+        from geopandas.array import transform
+        with closing(_gpkg(path)) as con:
+            attrs, shapes = _near_rows(con, next(iter(index)), index, _box_4326(zone))
+        if len(shapes):
+            shapes = transform(shapes, _transformer("EPSG:4326", "EPSG:3035").transform)
+        meets = shapely.intersects(shapes, zone)
+        years = [a["year"] for a, m in zip(attrs, meets) if m]
+        return {"count": len(years), "years": sorted({int(y) for y in years}),
+                "burnt_here": bool(shapely.intersects(shapes[meets], here).any()) if years else False, "km": km}
     gdf = _fires()
     if gdf is None:
         return None
-    from pyproj import Transformer
-    from shapely.geometry import Point
-    x, y = Transformer.from_crs(4326, 3035, always_xy=True).transform(lon, lat)
-    zone = Point(x, y).buffer(km * 1000)
     hits = gdf.iloc[list(gdf.sindex.query(zone, predicate="intersects"))]
-    inside = hits[hits.intersects(Point(x, y))]
+    inside = hits[hits.intersects(here)]
     return {"count": int(len(hits)), "years": sorted({int(y) for y in hits["year"]}),
             "burnt_here": bool(len(inside)), "km": km}
 
@@ -224,8 +304,8 @@ def _basins():
     return layers
 
 
-def _category(row, prefix: str):
-    for col in row.index:
+def _category(row: dict, prefix: str):
+    for col in row:
         c = col.lower()
         if c.startswith(prefix) and c.endswith("_cat"):
             try:
@@ -235,25 +315,43 @@ def _category(row, prefix: str):
     return None
 
 
-def water_stress(lat: float, lon: float) -> dict | None:
-    """Aqueduct categories (0 low … 4 extremely high; -1 arid & low water use)."""
-    layers = _basins()
-    if not layers:
-        return None
+def _basins_at(lat: float, lon: float):
+    """(layer, the sub-basin's attributes) for each Aqueduct layer with a
+    basin at the place. Through the map's R-tree only the basins there are
+    read; the whole map (~250 MB in memory) is loaded only without an index."""
+    import shapely
     from shapely.geometry import Point
     pt = Point(lon, lat)
-    out = {}
-    for name, gdf in layers.items():
+    path = os.path.join(_layers(), "aqueduct_europe.gpkg")
+    index = _index_of(path)
+    if index:
+        found = []
+        with closing(_gpkg(path)) as con:
+            for name in index:
+                if "annual" not in name.lower():
+                    continue                 # monthly: water_stress reads only the annual layers
+                attrs, shapes = _near_rows(con, name, index, (lon, lat, lon, lat))
+                first = next((a for a, m in zip(attrs, shapely.intersects(shapes, pt)) if m), None)
+                if first is not None:
+                    found.append((name, first))
+        yield from found
+        return
+    for name, gdf in (_basins() or {}).items():
         hits = gdf.iloc[list(gdf.sindex.query(pt, predicate="intersects"))]
-        if not len(hits):
-            continue
-        row = hits.iloc[0]
+        if len(hits):
+            yield name, hits.iloc[0].to_dict()
+
+
+def water_stress(lat: float, lon: float) -> dict | None:
+    """Aqueduct categories (0 low … 4 extremely high; -1 arid & low water use)."""
+    out = {}
+    for name, row in _basins_at(lat, lon):
         low = name.lower()
         if "baseline" in low and "annual" in low:
             out["stress_now"] = _category(row, "bws")
             out["drought"] = _category(row, "drr")
         elif "future" in low and "annual" in low:
-            for col in row.index:
+            for col in row:
                 c = col.lower()
                 # e.g. bau50_ws_x_c / bau80_ws_x_c (business as usual, 2050 / 2080)
                 if c in ("bau50_ws_x_c", "bau80_ws_x_c"):
@@ -509,9 +607,18 @@ def _seaside_ahead(db, items: list[dict], towns: dict) -> list[dict]:
 
     Live and invest rejects a climate that was never read. That rejection has to
     follow a reading. Poor and caution still fail; a missing lookup does not
-    pass and is not graded as poor."""
-    from common import utcnow
+    pass and is not graded as poor.
+
+    A row on disk over common.check_max_price is not read, and from
+    common.light_checks_from neither is one already over the cash before any
+    repair (db.heavy_checks_spared): Live and invest could never show it. One
+    in `items` can be shown elsewhere, and is read."""
+    import db as dbmod
+    from common import price_to_pay, utcnow
     today = utcnow().date().isoformat()
+    statuses, offers = dbmod.listing_statuses(db), dbmod.latest_offers(db)
+    cash = dbmod._cash_on_hand()
+    cap, light_from = dbmod._work_limits()
     seaside: list[dict] = []
     seen: set = set()
     # The row on disk, not the copy taken before this scan's geocoding: that
@@ -521,7 +628,13 @@ def _seaside_ahead(db, items: list[dict], towns: dict) -> list[dict]:
         blob = item.get("raw_json") or ""
         if "lat" not in blob and "geo" not in blob:
             continue
+        item["status"] = statuses.get(item["id"])
+        mine = item["status"] == "shortlisted" or item["id"] in offers
+        if cap and not mine and price_to_pay(dict(item)) > cap:
+            continue
         if not _still_for_sale(item, today) or not _exact_seaside_home(item, towns):
+            continue
+        if dbmod.heavy_checks_spared(item, cash, light_from):
             continue
         seaside.append(item)
         seen.add(item["id"])
