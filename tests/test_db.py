@@ -333,3 +333,43 @@ def test_a_scan_that_only_sees_a_listing_again_keeps_its_score(db, monkeypatch):
     db.commit()
     load_listings(db, apply_min_score=False)
     assert calls == []
+
+
+def test_a_goal_not_kept_in_memory_is_read_back_from_the_scores_file(db, monkeypatch):
+    """The app keeps only the goals it has open (dashboard.MAX_LISTS). Another
+    goal's scores are read back from disk, never scored again, and let go after."""
+    import db as dbmod
+    from common import make_listing
+    from db import keep_scores_for, load_listings, upsert_listing
+    for n in range(3):
+        upsert_listing(db, make_listing("eleiloes", str(n), title="Moradia T3", price=20000 + n, area_m2=120,
+                                        description="Casa com terreno e poço"))
+    db.commit()
+
+    def scores(**kw):
+        return {it["id"]: (it["score"], it["reasons"])
+                for it in load_listings(db, apply_min_score=False, mode="land", **kw)}
+
+    first = scores()
+    keep_scores_for({"home"})
+    assert "land" not in dbmod._SCORED                         # let go at once
+    calls = []
+    real = dbmod._score_one
+    monkeypatch.setattr(dbmod, "_score_one", lambda *a, **k: calls.append(1) or real(*a, **k))
+    assert scores() == first and calls == []                   # read back, not scored again
+    assert "land" not in dbmod._SCORED                         # and let go after the call
+    one = scores(where="id = ?", params=("eleiloes:1",))
+    assert one == {"eleiloes:1": first["eleiloes:1"]} and calls == []
+    load_listings(db, apply_min_score=False, mode="home")
+    assert "home" in dbmod._SCORED                             # a goal on screen stays
+
+
+def test_the_five_wishes_are_not_kept_with_the_scores(db):
+    import db as dbmod
+    from common import make_listing
+    from db import load_listings, upsert_listing
+    upsert_listing(db, make_listing("eleiloes", "1", title="Moradia T3", price=20000, area_m2=160))
+    db.commit()
+    item = load_listings(db, apply_min_score=False)[0]
+    assert "wishes" not in item
+    assert "wishes" not in dbmod._SCORED["home"]["eleiloes:1"][1]

@@ -73,3 +73,16 @@ def test_one_copy_starts_at_a_time(tmp_path, monkeypatch):
     assert app.claim_start() is True           # a lock left behind by a crash is taken over
     app.release_start()
     assert not os.path.exists(app.STARTING_LOCK)
+
+
+def test_the_warm_up_scores_every_goal_in_order_and_holds_two(monkeypatch):
+    """Live and invest goes first: it reads the climate of seaside homes, which
+    the other goals then see. Every goal is scored; only two lists stay in memory."""
+    import dashboard
+    from scoring import MODES
+    done = []
+    monkeypatch.setattr(dashboard, "_build_list", lambda mode, tag=None: done.append(("held", mode)))
+    monkeypatch.setattr(dashboard, "score_only", lambda mode: done.append(("scored", mode)))
+    app.warm_up()
+    assert [mode for _, mode in done] == list(MODES)
+    assert [mode for how, mode in done if how == "held"] == ["both", "home"]
