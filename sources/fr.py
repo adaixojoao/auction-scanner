@@ -183,12 +183,17 @@ def parse_licitor_annonce(html: str) -> dict:
 def enrich_france_details(db, session, limit: int = 60):
     """Open the annonce page of licitor listings not checked yet, newest
     first: hearing date (so past sales expire), tribunal, mise à prix, the
-    lawyer's name and e-mail for letters, occupancy for the score."""
-    rows = db.execute("""
+    lawyer's name and e-mail for letters, occupancy for the score.
+
+    A listing whose list page already shows a price over the cap is not opened."""
+    from db import still_worth_a_page_sql
+    clause, extra = still_worth_a_page_sql()
+    rows = db.execute(f"""
         SELECT * FROM listings WHERE source='france' AND url IS NOT NULL
           AND (raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
+          {clause}
         ORDER BY first_seen DESC LIMIT ?
-    """, (limit,)).fetchall()
+    """, (*extra, limit)).fetchall()
     for row in rows:
         item = dict(row)
         try:

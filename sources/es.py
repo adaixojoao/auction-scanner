@@ -374,11 +374,16 @@ def parse_catastro(payload: dict) -> dict | None:
 
 
 def fetch_catastro(db, session, limit: int = CATASTRO_PER_SCAN) -> int:
-    """Look up BOE sales with a referencia catastral in Catastro, once each."""
-    rows = db.execute("""
+    """Look up BOE sales with a referencia catastral in Catastro, once each.
+
+    A sale whose price is already over the cap is not looked up."""
+    from db import still_worth_a_page_sql
+    clause, extra = still_worth_a_page_sql()
+    rows = db.execute(f"""
         SELECT id, raw_json FROM listings WHERE source = 'spain'
           AND raw_json LIKE '%"referencia_catastral"%' AND raw_json NOT LIKE '%"catastro_checked"%'
-        ORDER BY last_seen DESC LIMIT ?""", (limit,)).fetchall()
+          {clause}
+        ORDER BY last_seen DESC LIMIT ?""", (*extra, limit)).fetchall()
     done = 0
     for listing_id, raw_text in rows:
         raw = json.loads(raw_text)
@@ -413,13 +418,17 @@ def enrich_spain_details(db, session, limit: int = 300):
     court's name and e-mail for letters, occupancy for the score.
 
     Never-checked sales go first: re-reading the same unpriced ones every scan
-    left 3 of 4 open sales without a price (shown as €0)."""
-    rows = db.execute("""
+    left 3 of 4 open sales without a price (shown as €0). A sale whose price
+    is already known and over the cap is not opened."""
+    from db import still_worth_a_page_sql
+    clause, extra = still_worth_a_page_sql()
+    rows = db.execute(f"""
         SELECT * FROM listings WHERE source='spain'
           AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
           AND (date_end IS NULL OR date_end >= ?)
+          {clause}
         ORDER BY (raw_json LIKE '%"detail_checked"%'), date_end IS NULL, date_end LIMIT ?
-    """, (datetime.now().strftime("%Y-%m-%d"), limit)).fetchall()
+    """, (datetime.now().strftime("%Y-%m-%d"), *extra, limit)).fetchall()
     if not rows:
         return 0
 

@@ -31,7 +31,7 @@ import geo
 from common import COUNTRY_NAMES, FLAGS, make_session, mode_max_price, price_to_pay, safe_url
 from locks import lock_holder
 from db import (DISMISS_REASONS, attention_reason, connect, hidden_category, keep_scores_for, load_best,
-                 load_listings, set_listing_status, source_health)
+                 load_listings, set_listing_status, source_health, unchecked_over_cap)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -476,6 +476,7 @@ def api_listings():
         visible = [it for it in loaded if not it["hidden_reason"]]
         health = source_health(db, _registry())
         last_scrape = db.execute("SELECT MAX(timestamp) FROM scrape_log").fetchone()[0]
+        unchecked_n, unchecked_cap = unchecked_over_cap(db)
     finally:
         db.close()
 
@@ -499,6 +500,8 @@ def api_listings():
             "hidden": dict(hidden_counts),
             "sources_failing": sum(1 for h in health if h["state"] in ("error", "broken", "blocked")),
             "sources_quiet": sum(1 for h in health if attention_reason(h)),
+            "unchecked": unchecked_n,
+            "check_max_price": unchecked_cap,
         },
         "last_scrape": last_scrape,
         "cash": _cash_public(),

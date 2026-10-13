@@ -389,6 +389,21 @@ def test_spain_enrichment_fills_letters_and_scoring(db, add, fake_http):
     assert enrich_spain_details(db, session) == 0 and len(session.calls) == 3   # checked once
 
 
+def test_a_spain_sale_over_the_cap_is_not_opened(db, add, fake_http):
+    from db import set_listing_status, unchecked_over_cap
+    from sources.es import enrich_spain_details
+    add("spain", "DEAR", "ES", title="Casa cara", price=150000, date_end="2099-01-01")
+    add("spain", "CHEAP", "ES", title="Casa", price=40000, date_end="2099-01-01")
+    add("spain", "UNKNOWN", "ES", title="Casa sem preco", date_end="2099-01-01")
+    add("spain", "MINE", "ES", title="A minha", price=180000, date_end="2099-01-01")
+    set_listing_status(db, "spain:MINE", "shortlisted")
+    session = fake_http(lambda m, url, kw: FakeResponse("<html></html>"))
+    enrich_spain_details(db, session)
+    opened = {c[2]["params"]["idSub"] for c in session.calls}
+    assert "DEAR" not in opened and {"CHEAP", "UNKNOWN", "MINE"} <= opened
+    assert unchecked_over_cap(db) == (1, 100000)
+
+
 BOE_LOTS_GENERAL = """<html><body><table>
 <tr><th>Lotes</th><td>3</td></tr>
 <tr><th>Valor subasta</th><td>Ver valor de subasta en cada lote (los lotes se subastan de forma independiente)</td></tr>

@@ -959,6 +959,47 @@ def _work_limits() -> tuple[float, float]:
     return check_max_price(cfg), light_checks_from(cfg)
 
 
+def list_price_sql(table: str = "") -> str:
+    """SQL for the price on the list page (common.price_to_pay, without debts
+    or a portal note). A minimum under 20% of the base is a bidding step."""
+    p = f"{table}." if table else ""
+    price, bid, floor = (f"COALESCE({p}{name}, 0)" for name in ("price", "current_bid", "min_price"))
+    real_floor = f"CASE WHEN {price} > 0 AND {floor} > 0 AND {floor} < 0.2 * {price} THEN 0 ELSE {floor} END"
+    return (f"CASE WHEN {bid} > 0 THEN MAX({bid}, {real_floor}) "
+            f"WHEN {real_floor} > 0 THEN {real_floor} ELSE {price} END")
+
+
+def still_worth_a_page_sql(table: str = "") -> tuple[str, tuple]:
+    """An AND-clause: the list page does not already show a price over the cap.
+
+    A price not known yet is still opened. A shortlisted listing, or one an
+    offer was made on, is still opened. ("", ()) when the cap is off."""
+    cap = _work_limits()[0]
+    if not cap:
+        return "", ()
+    p = f"{table}." if table else ""
+    kept = (f"{p}id IN (SELECT listing_id FROM listing_status WHERE status = 'shortlisted')"
+            f" OR {p}id IN (SELECT listing_id FROM carta_log WHERE is_offer = 1)")
+    return f"AND (({list_price_sql(table)}) <= ? OR {kept})", (cap,)
+
+
+def unchecked_over_cap(db: sqlite3.Connection) -> tuple[int, float]:
+    """How many stored listings the cap leaves unchecked, and the cap.
+
+    (0, 0) when the cap is off. One you shortlisted or made an offer on is
+    still checked, so it is not in the count."""
+    cap = _work_limits()[0]
+    if not cap:
+        return 0, 0.0
+    n = db.execute(
+        f"SELECT COUNT(*) FROM listings WHERE ({list_price_sql()}) > ?"
+        " AND id NOT IN (SELECT listing_id FROM listing_status WHERE status = 'shortlisted')"
+        " AND id NOT IN (SELECT listing_id FROM carta_log WHERE is_offer = 1)",
+        (cap,),
+    ).fetchone()[0]
+    return int(n), cap
+
+
 def heavy_checks_spared(item: dict, cash: float, light_from: float) -> bool:
     """From common.light_checks_from, the light checks come first: a listing
     whose price, taxes and fees are already over the cash can never be shown

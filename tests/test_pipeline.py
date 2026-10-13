@@ -17,6 +17,25 @@ def test_run_scan_records_progress_and_summary(db, fake_http):
     assert not os.path.exists(pipeline.LOCK_PATH)
 
 
+def test_a_scan_runs_below_other_programs_on_windows(monkeypatch):
+    import ctypes
+    calls = []
+
+    class Kernel:
+        def GetCurrentThread(self):
+            return 1
+
+        def SetThreadPriority(self, handle, level):
+            calls.append(level)
+            return 1
+
+    monkeypatch.setattr(pipeline.sys, "platform", "win32")
+    monkeypatch.setattr(ctypes.windll, "kernel32", Kernel(), raising=False)
+    with pipeline._below_other_programs():
+        assert calls == [pipeline._BACKGROUND_BEGIN]
+    assert calls == [pipeline._BACKGROUND_BEGIN, pipeline._BACKGROUND_END]
+
+
 def test_only_one_scan_at_a_time(db):
     with pipeline.scan_lock():
         with pytest.raises(pipeline.ScanBusy):

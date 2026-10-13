@@ -61,14 +61,14 @@ def test_coordinates_are_read_from_text_or_a_maps_link():
 
 def test_a_verified_position_comes_first_keeps_the_sales_and_survives_a_rescrape(client, db, add):
     add("eleiloes", "v1", "ES", title="Casa", concelho="Zalla", price=20000,
-        raw_json=json.dumps({**SALE, "water_check": {"found": []}}))
+        raw_json=json.dumps({**SALE, "water_check": {"found": []}, "climate": {"result": {"heat": {}}}}))
     r = client.post("/api/listing/location", json={"id": "eleiloes:v1", "method": "coordinates",
                                                    "value": "38.1234, -7.4567"}).get_json()
     assert r["ok"] and r["location"]["level"] == "exact" and r["location"]["verified"]
     assert r["location"]["scanner"]["lat"] == 38.12            # the sale's own position is kept
     raw = _raw(db, "eleiloes:v1")
     assert raw["lat"] == 38.12 and raw["verified_geo"]["lat"] == 38.1234
-    assert "water_check" not in raw                             # asked again at the new spot
+    assert "water_check" not in raw and "climate" not in raw   # asked again at the new spot
 
     # the next scrape brings fresh raw data: yours is carried over
     upsert_listing(db, make_listing("eleiloes", "v1", "ES", title="Casa", raw_json=json.dumps(SALE)))

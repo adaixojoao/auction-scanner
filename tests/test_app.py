@@ -75,14 +75,47 @@ def test_one_copy_starts_at_a_time(tmp_path, monkeypatch):
     assert not os.path.exists(app.STARTING_LOCK)
 
 
-def test_the_warm_up_scores_every_goal_in_order_and_holds_two(monkeypatch):
-    """Live and invest goes first: it reads the climate of seaside homes, which
-    the other goals then see. Every goal is scored; only two lists stay in memory."""
+def test_the_warm_up_scores_the_open_goals_and_leaves_the_rest(monkeypatch):
+    """Live and invest goes first: it reads the climate of seaside homes. The
+    other goals wait until their tab is opened."""
     import dashboard
     from scoring import MODES
     done = []
-    monkeypatch.setattr(dashboard, "_build_list", lambda mode, tag=None: done.append(("held", mode)))
+    monkeypatch.setattr(dashboard, "_build_list", lambda mode, tag=None: done.append(mode))
     monkeypatch.setattr(dashboard, "score_only", lambda mode: done.append(("scored", mode)))
     app.warm_up()
-    assert [mode for _, mode in done] == list(MODES)
-    assert [mode for how, mode in done if how == "held"] == ["both", "home"]
+    assert done == list(MODES)[:dashboard.MAX_LISTS] == ["both", "home"]
+
+
+def test_the_warm_up_logs_the_peak_and_the_memory_still_free(monkeypatch, caplog):
+    import logging
+    import dashboard
+    monkeypatch.setattr(dashboard, "_build_list", lambda mode, tag=None: None)
+    monkeypatch.setattr(dashboard, "score_only", lambda mode: None)
+    monkeypatch.setattr(app, "memory_use", lambda: (900 * 1024 ** 2, 2 * 1024 ** 3))
+    with caplog.at_level(logging.INFO, logger="app"):
+        app.warm_up()
+    assert any(r.message == "Memory peaked at 900 MB, 2.0 GB free" for r in caplog.records)
+    assert not any("Warm-up skipped" in r.message for r in caplog.records)
+
+
+def test_the_warm_up_still_finishes_when_memory_cannot_be_read(monkeypatch, caplog):
+    import logging
+    import dashboard
+    monkeypatch.setattr(dashboard, "_build_list", lambda mode, tag=None: None)
+    monkeypatch.setattr(dashboard, "score_only", lambda mode: None)
+    monkeypatch.setattr(app, "memory_use", lambda: None)
+    with caplog.at_level(logging.INFO, logger="app"):
+        app.warm_up()
+    assert any(r.message == "List warmed up" for r in caplog.records)
+    assert any(r.message == "Memory could not be read" for r in caplog.records)
+
+
+def test_memory_use_reads_the_peak_and_what_is_free():
+    import sys
+    got = app.memory_use()
+    if sys.platform not in ("win32", "linux"):
+        assert got is None
+        return
+    peak, free = got
+    assert peak >= 1024 ** 2 and free >= 1024 ** 2

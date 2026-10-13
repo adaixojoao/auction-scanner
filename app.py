@@ -260,24 +260,101 @@ def open_window(url: str):
     webbrowser.open(url)
 
 
-def warm_up():
-    """Score the list once in the background at start: the first page view then
-    finds every score kept (db.load_listings' score cache; cold, 15,000 listings take ~40-90 s).
+def _mem_text(n: int) -> str:
+    gb = 1024 ** 3
+    if n >= gb:
+        return f"{n / gb:.1f} GB"
+    return f"{round(n / 1024 ** 2)} MB"
 
-    Every goal is scored, so its scores are on disk, in the order of MODES:
-    Live and invest reads the climate of seaside homes, which the other goals
-    then see. Only the first dashboard.MAX_LISTS (Live and invest, My home: the
-    default tab) keep their list in memory."""
+
+def memory_use() -> tuple[int, int] | None:
+    """The most RAM this process has held, and how much is still free, in bytes.
+
+    None when this platform will not say. Read once the first scoring has
+    finished, so the log shows whether that start fitted on the PC."""
+    try:
+        if sys.platform == "win32":
+            return _memory_windows()
+        if sys.platform.startswith("linux"):
+            return _memory_linux()
+    except Exception:
+        LOG.exception("Could not read memory")
+    return None
+
+
+def _memory_windows() -> tuple[int, int]:
+    import ctypes
+    from ctypes import wintypes
+
+    class Counters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    class Status(ctypes.Structure):
+        _fields_ = [
+            ("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+            ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+    psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+    kernel32.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(Status)]
+    kernel32.GlobalMemoryStatusEx.restype = wintypes.BOOL
+
+    counters = Counters()
+    counters.cb = ctypes.sizeof(counters)
+    if not psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+        raise ctypes.WinError(ctypes.get_last_error())
+    status = Status()
+    status.dwLength = ctypes.sizeof(status)
+    if not kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return int(counters.PeakWorkingSetSize), int(status.ullAvailPhys)
+
+
+def _memory_linux() -> tuple[int, int]:
+    def _kb(path: str, name: str) -> int:
+        with open(path, encoding="ascii") as f:
+            for line in f:
+                if line.startswith(name):
+                    return int(line.split()[1]) * 1024
+        raise OSError(name)
+
+    return _kb("/proc/self/status", "VmHWM:"), _kb("/proc/meminfo", "MemAvailable:")
+
+
+def warm_up():
+    """Score the open goals once in the background at start, so the first page
+    view finds them ready.
+
+    Live and invest and My home (the first dashboard.MAX_LISTS, and the
+    default tab) are scored, and their lists stay in memory. Live and invest
+    goes first: it reads the climate of seaside homes. The other goals are
+    scored when their tab is opened. The log then records the most memory the
+    process has held and how much is still free."""
     try:
         import dashboard
         from scoring import MODES
-        held = list(MODES)[:dashboard.MAX_LISTS]
-        for mode in MODES:
-            if mode in held:
-                dashboard._build_list(mode)     # kept in memory for the pages (dashboard.all_listings)
-            else:
-                dashboard.score_only(mode)
+        for mode in list(MODES)[:dashboard.MAX_LISTS]:
+            dashboard._build_list(mode)         # kept in memory for the pages (dashboard.all_listings)
         LOG.info("List warmed up")
+        used = memory_use()
+        if used is None:
+            LOG.info("Memory could not be read")
+        else:
+            peak, free = used
+            LOG.info(f"Memory peaked at {_mem_text(peak)}, {_mem_text(free)} free")
     except Exception as e:  # noqa: BLE001 — only a speed-up
         LOG.info(f"Warm-up skipped ({type(e).__name__}: {e})")
 

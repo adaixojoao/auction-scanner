@@ -153,7 +153,8 @@ function renderStats(s) {
     <div class="stat"><div class="label">On Offers</div><div class="value">${s.shortlisted}</div></div>
     <div class="stat"><div class="label">Sources failing</div><div class="value ${s.sources_failing ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_failing}</a></div></div>
     <div class="stat"><div class="label">No good read</div><div class="value ${s.sources_quiet ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_quiet || 0}</a></div></div>
-    ${hidden ? `<div class="stat"><div class="label">Hidden</div><div class="small muted" style="margin-top:6px">${AS.esc(hidden)}</div></div>` : ""}`;
+    ${hidden ? `<div class="stat"><div class="label">Hidden</div><div class="small muted" style="margin-top:6px">${AS.esc(hidden)}</div></div>` : ""}
+    ${s.unchecked ? `<div class="stat"><div class="label">Not checked</div><div class="value">${s.unchecked.toLocaleString("en-GB")}</div><div class="small muted">over €${Math.round(s.check_max_price).toLocaleString("en-GB")}</div></div>` : ""}`;
 }
 
 function renderRows(items, hiddenView) {
