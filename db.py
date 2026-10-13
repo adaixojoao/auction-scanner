@@ -1015,10 +1015,12 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 # so the result is kept per listing, keyed by its row, and thrown away when the
 # day, the filters (with the weights), the known towns or the auction results change.
 # The shared lookups are rebuilt only when their tables change.
+# The five wishes are not kept: only the rows on screen show them
+# (dashboard._public), and they were the largest of these fields.
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
             "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
-            "reasons", "wishes", "excellent", "category", "kind", "live_score", "invest_score")
-_SCORED: dict[tuple[str, str], tuple] = {}     # (mode, listing id) → (row key, results, inputs)
+            "reasons", "excellent", "category", "kind", "live_score", "invest_score")
+_SCORED: dict[str, dict[str, tuple]] = {}      # mode → {listing id → (row key, results, inputs)}
 _UNSCORED = {"last_seen", "is_new"}
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
@@ -1066,6 +1068,31 @@ def forget_scores(db: sqlite3.Connection | None = None) -> None:
 # 60,000 listings again: only listings whose row (or the day, or the filters) changed.
 _LOADED_MODES: set = set()
 
+# Which goals' kept scores stay in memory between calls. None keeps them all
+# (the command line, the tests). The app keeps only the goals whose lists it
+# has open (dashboard.MAX_LISTS): at 140,000 listings one goal's scores take
+# about half a gigabyte, and the report scoring all four filled a 6 GB PC.
+_KEEP: list = [None]
+
+
+def keep_scores_for(modes) -> None:
+    """Keep only these goals' scores in memory. The others are read back from
+    the scores file when a goal is asked for again, which takes seconds."""
+    keep = set(modes)
+    _KEEP[0] = keep
+    for mode in list(_SCORED):
+        if mode not in keep:
+            _release(mode)
+
+
+def _kept_in_memory(mode: str) -> bool:
+    return _KEEP[0] is None or mode in _KEEP[0]
+
+
+def _release(mode: str) -> None:
+    _SCORED.pop(mode, None)
+    _LOADED_MODES.discard(mode)
+
 
 _SCORE_DBS: dict = {}
 
@@ -1106,22 +1133,36 @@ def _score_db(db) -> sqlite3.Connection | None:
     return conn
 
 
-def _load_kept(db, mode: str) -> None:
+def _load_kept(db, mode: str, ids: list[str] | None = None) -> dict:
+    """A goal's kept scores, read from the scores file the first time: all of
+    them, or only those of `ids` when they are few and the goal is not kept in
+    memory (one listing's panel must not read 140,000 scores)."""
     import pickle
+    kept = _SCORED.setdefault(mode, {})
     if mode in _LOADED_MODES:
-        return
-    _LOADED_MODES.add(mode)
+        return kept
+    few = ids is not None and len(ids) <= 500 and not _kept_in_memory(mode)
+    if not few:
+        _LOADED_MODES.add(mode)
     try:
         sdb = _score_db(db)
         if sdb is None:
-            return
+            return kept
         with _SCORE_LOCK:
-            rows = sdb.execute("SELECT id, key, inputs, data FROM score_cache WHERE mode = ?", (mode,)).fetchall()
+            if few:
+                rows = sdb.execute("SELECT id, key, inputs, data FROM score_cache WHERE mode = ? "
+                                   f"AND id IN ({','.join('?' * len(ids))})", (mode, *ids)).fetchall()
+            else:
+                rows = sdb.execute("SELECT id, key, inputs, data FROM score_cache WHERE mode = ?",
+                                   (mode,)).fetchall()
         for lid, key, inputs, data in rows:
-            if (mode, lid) not in _SCORED:
-                _SCORED[(mode, lid)] = (key, pickle.loads(data), inputs)
+            if lid not in kept:
+                results = pickle.loads(data)
+                results.pop("wishes", None)      # kept before the wishes moved to the page
+                kept[lid] = (key, results, inputs)
     except (sqlite3.Error, pickle.PickleError, EOFError, AttributeError):
         pass                                 # only a speed-up
+    return kept
 
 
 def _save_kept(db, mode: str, new: list) -> None:
@@ -1167,7 +1208,7 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
     import geo
     import outcomes
     import rounds
-    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail, wishes
+    from scoring import GUARDA, categorize, display_score, excellent, property_kind, score_detail
     fp = first_price.get(item["id"])
     if fp and item.get("price") and fp > 0 and item["price"] < fp:
         item["price_drop_pct"] = round((fp - item["price"]) / fp * 100, 1)
@@ -1200,7 +1241,6 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
     item["score"] = sc
     item["rank"] = rank          # unclamped: orders listings that all reach 100
     item["reasons"] = reasons
-    item["wishes"] = wishes(item)
     item["excellent"] = excellent(item, sc, reasons)
     item["category"] = categorize(item)
     item["kind"] = property_kind(item) if item["category"] == "imoveis" else None
@@ -1285,7 +1325,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         _SCORED.clear()
         _LOADED_MODES.clear()
         _SCORED_FOR[0] = context
-    _load_kept(db, mode)
+    scored = _load_kept(db, mode, [r["id"] for r in rows] if len(rows) <= 500 else None)
     new_scores = []
     climate_writes = []
 
@@ -1331,7 +1371,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],
                                      item["offer_outcome"], context,
                                      item.get("unconfirmed_since"))).encode()).hexdigest()
-        kept = _SCORED.get((mode, item["id"]))
+        kept = scored.get(item["id"])
         if kept and kept[0] == row_key and not (refresh and kept[2] != inputs):
             item.update(kept[1])
             sc = item["score"]
@@ -1348,7 +1388,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if item.get("area_note"):
                 data["area_m2"] = item["area_m2"]
                 data["area_note"] = item["area_note"]
-            _SCORED[(mode, item["id"])] = (row_key, data, inputs)
+            scored[item["id"]] = (row_key, data, inputs)
             new_scores.append((item["id"], row_key, inputs, data))
             if item.get("_climate_write"):
                 climate_writes.append((item["raw_json"], item["id"]))
@@ -1388,6 +1428,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         db.executemany("UPDATE listings SET raw_json = ? WHERE id = ?", climate_writes)
         db.commit()
     _save_kept(db, mode, new_scores)
+    if not _kept_in_memory(mode):
+        _release(mode)               # the items hold what they need; the scores file keeps the rest
     return items
 
 

@@ -34,6 +34,15 @@ def no_climate_data(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def every_goal_kept():
+    """The app keeps only the goals it has open (db.keep_scores_for): each test starts with all."""
+    import db
+    db._KEEP[0] = None
+    yield
+    db._KEEP[0] = None
+
+
+@pytest.fixture(autouse=True)
 def isolated_files(tmp_path, monkeypatch):
     """Never touch the real config.json, scan lock or reports folder."""
     import config

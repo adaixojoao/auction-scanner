@@ -28,6 +28,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(HERE, "app.log")
 LOG = logging.getLogger("app")
 
+# Memory, before numpy, scipy or rasterio load (2026-10-12, a 6 GB PC froze):
+# each OpenBLAS thread reserves its own buffers (one thread: 470 MB less, and
+# the app does no heavy algebra), and GDAL's raster cache defaults to 5% of the
+# RAM where 64 MB serves point reads as well (280 MB less). Neither changes a
+# value read or computed.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("GDAL_CACHEMAX", "64")
+
 # The window pings every 15 s; minimised windows can be throttled to once a
 # minute, so allow a generous gap before deciding it was closed.
 IDLE_QUIT_AFTER = 180
@@ -254,12 +262,21 @@ def open_window(url: str):
 
 def warm_up():
     """Score the list once in the background at start: the first page view then
-    finds every score kept (db.load_listings' score cache; cold, 15,000 listings take ~40-90 s)."""
+    finds every score kept (db.load_listings' score cache; cold, 15,000 listings take ~40-90 s).
+
+    Every goal is scored, so its scores are on disk, in the order of MODES:
+    Live and invest reads the climate of seaside homes, which the other goals
+    then see. Only the first dashboard.MAX_LISTS (Live and invest, My home: the
+    default tab) keep their list in memory."""
     try:
         import dashboard
         from scoring import MODES
-        for mode in MODES:     # each goal's list, kept in memory for the pages (dashboard.all_listings)
-            dashboard._build_list(mode)
+        held = list(MODES)[:dashboard.MAX_LISTS]
+        for mode in MODES:
+            if mode in held:
+                dashboard._build_list(mode)     # kept in memory for the pages (dashboard.all_listings)
+            else:
+                dashboard.score_only(mode)
         LOG.info("List warmed up")
     except Exception as e:  # noqa: BLE001 — only a speed-up
         LOG.info(f"Warm-up skipped ({type(e).__name__}: {e})")

@@ -546,3 +546,34 @@ def test_listings_above_100_show_their_real_points(client, add):
     assert items[0]["rank"] > items[1]["rank"] > 100
     detail = client.get("/api/listing?id=eleiloes:cheap").get_json()
     assert detail["rank"] == items[0]["rank"]
+
+
+def test_the_wishes_are_worked_out_for_the_rows_on_screen(client, add):
+    add(external_id="w1", title="Moradia T3", tipo="moradia", price=20000, area_m2=160,
+        description="Moradia em bom estado")
+    row = client.get("/api/listings?max_price=100000").get_json()["items"][0]
+    assert [w["key"] for w in row["wishes"]] == ["airport", "space", "swim", "condition", "water"]
+    assert row["wishes"][1]["state"] == "yes"                              # 160 m²
+    detail = client.get("/api/listing?id=eleiloes:w1").get_json()
+    assert detail["wishes"] == row["wishes"]
+
+
+def test_only_the_goals_asked_for_last_stay_in_memory(client, monkeypatch):
+    """At 140,000 listings each goal's list took about 0.7 GB, and all five
+    froze a 6 GB PC: the least recently asked for is let go."""
+    import db as dbmod
+    monkeypatch.setattr(dashboard, "load_listings", lambda db, **kw: [{"id": kw["mode"]}])
+    dashboard.app.config["TESTING"] = False
+    try:
+        for mode in ("forest", "land", "home"):
+            assert dashboard.all_listings(mode) == [{"id": mode}]
+        assert set(dashboard._LISTS) == {"land", "home"}
+        assert dbmod._KEEP[0] == {"land", "home"}                         # their scores stay, not forest's
+        dashboard.all_listings("land")                                     # asked for again: the most recent
+        dashboard.all_listings("both")
+        assert set(dashboard._LISTS) == {"land", "both"}
+        assert dbmod._KEEP[0] == {"land", "both"}
+    finally:
+        dashboard.app.config["TESTING"] = True
+        dashboard._LISTS.clear()
+        dashboard._LISTS_USED.clear()

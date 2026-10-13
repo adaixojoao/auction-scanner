@@ -11,6 +11,7 @@ in (common.safe_url) and everything is escaped on the way out.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import os
@@ -29,7 +30,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 import geo
 from common import COUNTRY_NAMES, FLAGS, make_session, mode_max_price, price_to_pay, safe_url
 from locks import lock_holder
-from db import (DISMISS_REASONS, attention_reason, connect, hidden_category, load_best,
+from db import (DISMISS_REASONS, attention_reason, connect, hidden_category, keep_scores_for, load_best,
                  load_listings, set_listing_status, source_health)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -205,11 +206,14 @@ def _mode(args) -> str:
 
 
 def _public(item: dict) -> dict:
-    """What the browser gets: no raw_json, a short description."""
+    """What the browser gets: no raw_json, a short description, the five wishes
+    (worked out here, for the rows on screen only: db._DERIVED does not keep them)."""
+    from scoring import wishes
     out = {k: v for k, v in item.items() if k != "raw_json"}
     if out.get("description"):
         out["description"] = out["description"][:300]
     out["hidden_category"] = hidden_category(item.get("hidden_reason"))
+    out["wishes"] = wishes(item)
     return out
 
 
@@ -268,6 +272,25 @@ _LISTS: dict = {}            # mode -> (built at, items)
 _LISTS_BUILDING: set = set()
 _LISTS_LOCK = threading.Lock()
 _BUILD_LOCKS: dict = {}      # mode -> lock: one build at a time, every window waits for the same one
+# At 140,000 listings one goal's list and kept scores take about 0.7 GB, and a
+# 6 GB PC froze holding all five. Only the goals asked for last stay in memory;
+# opening another reads its scores back from the scores file (db.keep_scores_for).
+MAX_LISTS = 2
+_LISTS_USED: dict = {}       # mode -> when a page last asked for it (a count: Windows' clock ticks in 15 ms)
+_USE_ORDER = itertools.count(1)
+_LISTS_ACTIVE: set = set()   # modes being built right now
+
+
+def _keep_only_recent() -> None:
+    """Let go of the lists beyond MAX_LISTS, the least recently asked for first,
+    and keep in memory only the scores of the goals still held."""
+    with _LISTS_LOCK:
+        recent = sorted(_LISTS, key=lambda m: _LISTS_USED.get(m, 0), reverse=True)
+        for mode in recent[MAX_LISTS:]:
+            if mode not in _LISTS_ACTIVE:
+                _LISTS.pop(mode, None)
+        held = set(_LISTS) | _LISTS_ACTIVE
+    keep_scores_for(held)
 
 
 def _scan_busy() -> bool:
@@ -293,15 +316,34 @@ def _build_list(mode: str, tag: str | None = None) -> list:
         kept = _LISTS.get(mode)
         if kept and kept[0] >= started:     # built by someone else while we waited
             return kept[1]
-        db = get_db()
-        try:
-            items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
-        finally:
-            db.close()
         with _LISTS_LOCK:
-            _LISTS[mode] = (time.monotonic(), items, tag if tag is not None else _scan_finished_at())
-            _LISTS_BUILDING.discard(mode)
+            _LISTS_ACTIVE.add(mode)
+            held = set(_LISTS) | _LISTS_ACTIVE
+        try:
+            keep_scores_for(held)
+            db = get_db()
+            try:
+                items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+            finally:
+                db.close()
+            with _LISTS_LOCK:
+                _LISTS[mode] = (time.monotonic(), items, tag if tag is not None else _scan_finished_at())
+                _LISTS_USED.setdefault(mode, next(_USE_ORDER))
+                _LISTS_BUILDING.discard(mode)
+        finally:
+            with _LISTS_LOCK:
+                _LISTS_ACTIVE.discard(mode)
+        _keep_only_recent()
     return items
+
+
+def score_only(mode: str) -> None:
+    """Score a goal so its scores are on disk, without keeping its list in memory."""
+    db = get_db()
+    try:
+        load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+    finally:
+        db.close()
 
 
 def refresh_cached_lists(finished_at: str) -> None:
@@ -338,6 +380,7 @@ def all_listings(mode: str) -> list:
             return load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
         finally:
             db.close()
+    _LISTS_USED[mode] = next(_USE_ORDER)
     kept = _LISTS.get(mode)
     if _scan_busy() and kept is not None:
         return kept[1]
@@ -455,6 +498,7 @@ def api_listing_detail():
     """Everything known about one listing, for the detail panel on Listings."""
     import costs
     import listing_info
+    from scoring import wishes
     listing_id = request.args.get("id", "")
     db = get_db()
     try:
@@ -478,7 +522,7 @@ def api_listing_detail():
         "id": it["id"], "title": it.get("title"), "source": it.get("source"),
         "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
         "description": (it.get("description") or "")[:4000],
-        "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [], "wishes": it.get("wishes") or [],
+        "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [], "wishes": wishes(it),
         "excellent": it.get("excellent"),
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),
@@ -606,8 +650,8 @@ def api_listing_status():
             return jsonify({"error": str(e)}), 400
     finally:
         db.close()
-    for mode in list(_LISTS):           # the kept lists show it now, and are rebuilt
-        for it in _LISTS[mode][1]:
+    for mode, kept in list(_LISTS.items()):   # the kept lists show it now, and are rebuilt
+        for it in kept[1]:
             if it["id"] == data["id"]:
                 it["status"] = data.get("status") or None
                 if it["status"] == "dismissed":
