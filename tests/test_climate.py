@@ -191,13 +191,15 @@ def test_the_scan_stores_the_climate_and_the_list_only_reads_it(layers, db, add)
     assert any("33.3 °C summer max by 2081-2100" in r for r in listed["reasons"])
 
 
-def write_gpkg(path, layers):
+def write_gpkg(path, layers, index=True):
     """A GeoPackage written by hand, {layer: [(geometry, {column: value})]} in
-    EPSG:4326: every other geometry carries an envelope, as GDAL may write it."""
+    EPSG:4326: every other geometry carries an envelope, as GDAL may write it,
+    and each layer its R-tree (rtree_<layer>_geom) unless `index` is False."""
     import sqlite3
     import struct
 
     import shapely
+    path.unlink(missing_ok=True)
     db = sqlite3.connect(path)
     db.executescript("""
         CREATE TABLE gpkg_spatial_ref_sys (srs_name TEXT, srs_id INTEGER PRIMARY KEY, organization TEXT,
@@ -213,39 +215,56 @@ def write_gpkg(path, layers):
         db.execute(f'CREATE TABLE "{layer}" (fid INTEGER PRIMARY KEY, geom BLOB{names})')
         db.execute("INSERT INTO gpkg_contents VALUES (?, 'features', 4326)", (layer,))
         db.execute("INSERT INTO gpkg_geometry_columns VALUES (?, 'geom', 'GEOMETRY', 4326, 0, 0)", (layer,))
+        if index:
+            db.execute(f'CREATE VIRTUAL TABLE "rtree_{layer}_geom" USING rtree(id, minx, maxx, miny, maxy)')
         for i, (geom, attrs) in enumerate(rows):
+            minx, miny, maxx, maxy = geom.bounds
             if i % 2:
                 header = b"GP" + bytes([0, 0b001]) + struct.pack("<i", 4326)
             else:
-                minx, miny, maxx, maxy = geom.bounds
                 header = b"GP" + bytes([0, 0b011]) + struct.pack("<i4d", 4326, minx, maxx, miny, maxy)
-            db.execute(f'INSERT INTO "{layer}" (geom{names}) VALUES (?{marks})',
-                       (header + shapely.to_wkb(geom), *(attrs.get(c) for c in columns)))
+            fid = db.execute(f'INSERT INTO "{layer}" (geom{names}) VALUES (?{marks})',
+                             (header + shapely.to_wkb(geom), *(attrs.get(c) for c in columns))).lastrowid
+            if index:
+                db.execute(f'INSERT INTO "rtree_{layer}_geom" VALUES (?, ?, ?, ?, ?)', (fid, minx, maxx, miny, maxy))
     db.commit()
     db.close()
+
+
+def _write_maps(folder, index):
+    from shapely.geometry import box
+    write_gpkg(folder / "burnt_areas.gpkg", {"burnt_areas": [
+        (box(-7.41, 40.49, -7.40, 40.50), {"year": 2017}),       # where the house is
+        (box(-7.39, 40.49, -7.38, 40.50), {"year": 2022}),       # 1.3 km east
+        (box(-7.00, 40.00, -6.99, 40.01), {"year": 2019})]}, index=index)     # far away
+    basin = box(-8, 40, -7, 41)
+    write_gpkg(folder / "aqueduct_europe.gpkg", {
+        "baseline_annual": [(basin, {"bws_cat": 3.0, "drr_cat": 2.0, "name_0": "Portugal"})],
+        "baseline_monthly": [(basin, {"bws_01_cat": 4.0})],
+        "future_annual": [(basin, {"bau50_ws_x_c": 4.0, "bau80_ws_x_c": 4.0})]}, index=index)
+    for cache in (climate._fires, climate._basins, climate._gpkg_index):
+        cache.cache_clear()
 
 
 @pytest.fixture
 def vector_layers(layers, monkeypatch):
     """The burnt areas and the Aqueduct basins, with pyogrio and fiona unable to
     load, as when Windows Smart App Control refuses their GDAL DLLs."""
-    from shapely.geometry import box
     monkeypatch.setitem(sys.modules, "pyogrio", None)
     monkeypatch.setitem(sys.modules, "fiona", None)
-    write_gpkg(layers / "layers" / "burnt_areas.gpkg", {"burnt_areas": [
-        (box(-7.41, 40.49, -7.40, 40.50), {"year": 2017}),       # where the house is
-        (box(-7.39, 40.49, -7.38, 40.50), {"year": 2022}),       # 1.3 km east
-        (box(-7.00, 40.00, -6.99, 40.01), {"year": 2019})]})     # far away
-    basin = box(-8, 40, -7, 41)
-    write_gpkg(layers / "layers" / "aqueduct_europe.gpkg", {
-        "baseline_annual": [(basin, {"bws_cat": 3.0, "drr_cat": 2.0, "name_0": "Portugal"})],
-        "baseline_monthly": [(basin, {"bws_01_cat": 4.0})],
-        "future_annual": [(basin, {"bau50_ws_x_c": 4.0, "bau80_ws_x_c": 4.0})]})
-    climate._fires.cache_clear()
-    climate._basins.cache_clear()
+    _write_maps(layers / "layers", index=True)
     yield layers
-    climate._fires.cache_clear()
-    climate._basins.cache_clear()
+    for cache in (climate._fires, climate._basins, climate._gpkg_index):
+        cache.cache_clear()
+
+
+@pytest.fixture
+def unindexed_layers(layers):
+    """The same maps without their R-trees: the whole map is loaded."""
+    _write_maps(layers / "layers", index=False)
+    yield layers
+    for cache in (climate._fires, climate._basins, climate._gpkg_index):
+        cache.cache_clear()
 
 
 def test_fire_and_water_layers_are_read_without_gdal(vector_layers):
@@ -254,9 +273,50 @@ def test_fire_and_water_layers_are_read_without_gdal(vector_layers):
                                                     "stress_2050": 4, "stress_2080": 4}
     got = climate.assess(40.495, -7.405)
     assert got["fire"]["burnt_here"] and got["stress"]["stress_2080"] == 4
+    assert not climate.maps_loaded()                       # through the R-trees: no whole map in memory
     gdf = climate._read_gpkg(str(vector_layers / "layers" / "aqueduct_europe.gpkg"), layer="baseline_annual")
     assert list(gdf.columns) == ["bws_cat", "drr_cat", "name_0", "geometry"]       # no fid, as read_file
     assert gdf.crs.to_epsg() == 4326
+
+
+def test_without_an_index_the_whole_map_gives_the_same_answers(unindexed_layers):
+    assert climate.fires_near(40.495, -7.405) == {"count": 2, "years": [2017, 2022], "burnt_here": True, "km": 2.0}
+    assert climate.water_stress(40.495, -7.405) == {"stress_now": 3, "drought": 2,
+                                                    "stress_2050": 4, "stress_2080": 4}
+    assert climate.maps_loaded()
+
+
+def test_the_index_finds_what_the_whole_map_finds(layers):
+    """300 burnt areas and four basins side by side, 200 places: the areas
+    near the 2 km edge too, read through the R-tree or from the whole map."""
+    import random
+
+    from shapely.geometry import box
+    rnd = random.Random(7)
+    areas = []
+    for _ in range(300):
+        x, y = rnd.uniform(-7.6, -7.2), rnd.uniform(40.3, 40.7)
+        areas.append((box(x, y, x + rnd.uniform(0.001, 0.03), y + rnd.uniform(0.001, 0.03)),
+                      {"year": rnd.randint(2016, 2025)}))
+    strips = [box(-8 + i * 0.25, 40, -8 + (i + 1) * 0.25, 41) for i in range(4)]
+    places = [(rnd.uniform(40.3, 40.7), rnd.uniform(-7.65, -7.15)) for _ in range(200)]
+
+    def answers(index):
+        folder = layers / "layers"
+        write_gpkg(folder / "burnt_areas.gpkg", {"burnt_areas": areas}, index=index)
+        write_gpkg(folder / "aqueduct_europe.gpkg", {
+            "baseline_annual": [(s, {"bws_cat": float(i), "drr_cat": 1.0}) for i, s in enumerate(strips)],
+            "future_annual": [(s, {"bau50_ws_x_c": float(i), "bau80_ws_x_c": 4.0}) for i, s in enumerate(strips)]},
+            index=index)
+        for cache in (climate._fires, climate._basins, climate._gpkg_index):
+            cache.cache_clear()
+        return [(climate.fires_near(lat, lon), climate.water_stress(lat, lon)) for lat, lon in places]
+
+    indexed = answers(True)
+    assert indexed == answers(False)
+    assert sum(1 for fire, _ in indexed if fire["count"]) > 50          # the places do meet burnt areas
+    for cache in (climate._fires, climate._basins, climate._gpkg_index):
+        cache.cache_clear()
 
 
 def test_a_layer_that_cannot_be_read_stores_nothing(layers, db, add, monkeypatch):
@@ -356,9 +416,10 @@ def test_a_reading_stored_before_spots_is_read_once_more(layers, db, add):
     assert climate.assess_pending(db, items, {}) == 0
 
 
-def test_the_maps_a_batch_loaded_are_let_go_after_it(vector_layers, db, add):
-    """The burnt areas and the basins are ~500 MB: kept for the life of the app
-    they filled a 6 GB PC. A batch that loaded them lets them go."""
+def test_the_maps_a_batch_loaded_are_let_go_after_it(unindexed_layers, db, add):
+    """Without their R-trees the burnt areas and the basins are loaded whole
+    (~500 MB): kept for the life of the app they filled a 6 GB PC. A batch
+    that loaded them lets them go."""
     import json
     add("citius", "c1", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
         raw_json=json.dumps({"lat": 40.495, "lon": -7.405}))

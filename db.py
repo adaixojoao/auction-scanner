@@ -951,6 +951,26 @@ def _cash_on_hand() -> float:
         return 0.0
 
 
+def _work_limits() -> tuple[float, float]:
+    """(common.check_max_price, common.light_checks_from) from the settings."""
+    from common import check_max_price, light_checks_from
+    from config import load_config
+    cfg = load_config()
+    return check_max_price(cfg), light_checks_from(cfg)
+
+
+def heavy_checks_spared(item: dict, cash: float, light_from: float) -> bool:
+    """From common.light_checks_from, the light checks come first: a listing
+    whose price, taxes and fees are already over the cash can never be shown
+    where the cash decides (Live and invest), so no climate or photo is read
+    for that. A shortlisted listing is always read."""
+    if not light_from or item.get("status") == "shortlisted":
+        return False
+    import costs
+    from common import price_to_pay
+    return price_to_pay(dict(item)) > light_from and costs.over_before_repairs(dict(item), cash)
+
+
 def filter_reason(item: dict, filters: dict | None, mode: str = "home") -> str | None:
     """Why the user's config filters exclude this listing, or None.
 
@@ -1265,7 +1285,8 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
 
 
 def _both_worth_reading(item: dict) -> bool:
-    """An exact pin, the sea within 1.5 km of it, and a house: worth a climate read."""
+    """An exact pin, the sea within 1.5 km of it, and a house: worth a climate
+    read, unless the light checks already rule it out (heavy_checks_spared)."""
     import geo
     from scoring import SWIM_MAX_KM, property_kind
     if property_kind(item) != "home":
@@ -1275,7 +1296,9 @@ def _both_worth_reading(item: dict) -> bool:
         return False
     beach = item.get("beach") or {}
     km = beach.get("km")
-    return km is not None and not beach.get("approx") and km <= SWIM_MAX_KM
+    if km is None or beach.get("approx") or km > SWIM_MAX_KM:
+        return False
+    return not heavy_checks_spared(item, _cash_on_hand(), _work_limits()[1])
 
 
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
@@ -1331,6 +1354,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     maps_before = climate.maps_loaded()
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
     cash = _cash_on_hand()
+    from common import price_to_pay
+    cap = _work_limits()[0]
     # A new day or new filters (with the weights) score again; new towns, auction
     # results or land prices (a scan adds some every few minutes) do not throw the
     # scores away: the kept ones stay on show until refresh=True (after each scan).
@@ -1357,6 +1382,10 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["status"] = statuses.get(item["id"])
         offer = offers.get(item["id"])
         item["offer_outcome"] = offer["outcome"] if offer else None
+        # Over common.check_max_price: kept so the scanner knows it, never scored,
+        # checked or shown. One you shortlisted or made an offer on stays.
+        if cap and item["status"] != "shortlisted" and offer is None and price_to_pay(dict(item)) > cap:
+            continue
         reason = None
 
         end = effective_end(item.get("date_end"))
@@ -1415,8 +1444,12 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if item.get("area_note"):
                 data["area_m2"] = item["area_m2"]
                 data["area_note"] = item["area_note"]
-            scored[item["id"]] = (row_key, data, inputs)
+            if _kept_in_memory(mode):
+                scored[item["id"]] = (row_key, data, inputs)
             new_scores.append((item["id"], row_key, inputs, data))
+            if len(new_scores) >= 2000:      # saved as they come: 140,000 held to the end did not fit a 6 GB PC
+                _save_kept(db, mode, new_scores)
+                new_scores = []
             if item.get("_climate_write"):
                 climate_writes.append((item["raw_json"], item["id"]))
                 item.pop("_climate_write", None)

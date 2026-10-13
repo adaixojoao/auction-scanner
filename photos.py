@@ -288,12 +288,17 @@ def queue(db, cfg: dict) -> list[dict]:
         for it in load_listings(db, filters=cfg.get("filters"), mode=mode):
             keep(it)
     # Hidden only because the all-in uses the middle of an unknown repair
-    # range. A photo that shows a sound house uses the low end instead.
+    # range. A photo that shows a sound house uses the low end instead; not
+    # when the price, taxes and fees are already over the cash (from
+    # common.light_checks_from: db.heavy_checks_spared), as no photo brings it under.
+    from common import light_checks_from
+    from db import _cash_on_hand, heavy_checks_spared
+    cash, light_from = _cash_on_hand(), light_checks_from(cfg)
     for it in load_listings(db, filters=cfg.get("filters"), mode="both", include_hidden=True):
         reason = it.get("hidden_reason") or ""
         if reason and not reason.startswith("cash "):
             continue
-        if _exact_sea(it):
+        if _exact_sea(it) and not heavy_checks_spared(it, cash, light_from):
             keep(it)
     return sorted(best.values(), key=lambda it: (not _exact_sea(it), -it.get("rank", it["score"])))
 

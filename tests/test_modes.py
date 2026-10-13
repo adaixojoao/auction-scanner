@@ -308,14 +308,26 @@ def test_cheap_rustic_land_is_not_doubtful_for_forestry():
 
 def test_a_scan_keeps_what_any_goal_could_buy_and_each_tab_caps_its_own():
     from common import invest_max_price, land_max_price, mode_max_price, scrape_max_price
-    cfg = {"max_price": 60000, "invest_max_price": 150000, "land_max_price": 120000}
+    cfg = {"max_price": 60000, "invest_max_price": 150000, "land_max_price": 120000,
+           "check_max_price": 0}                                  # no limit on the work: the budgets alone
     # A €150,000 house used to be thrown away at scrape time by the home budget.
     assert scrape_max_price(cfg, cfg["max_price"]) == 150000
     assert [mode_max_price(cfg, m, cfg["max_price"]) for m in ("home", "invest", "land", "forest")] \
         == [60000, 150000, 120000, 120000]
     # Never below the house budget, whatever is configured.
-    assert land_max_price({"land_max_price": 10000}, 60000) == 60000
-    assert invest_max_price({}, 200000) == 200000
+    assert land_max_price({"land_max_price": 10000, "check_max_price": 0}, 60000) == 60000
+    assert invest_max_price({"check_max_price": 0}, 200000) == 200000
+
+
+def test_no_budget_goes_above_what_is_checked():
+    """Over €100,000 a listing is never scored, checked or shown (2026-10-13),
+    so no goal's budget, and no scrape, goes above it."""
+    from common import mode_max_price, scrape_max_price
+    cfg = {"max_price": 60000, "invest_max_price": 150000, "land_max_price": 120000}
+    assert scrape_max_price(cfg, 60000) == 100000
+    assert [mode_max_price(cfg, m, 60000) for m in ("home", "invest", "land")] == [60000, 100000, 100000]
+    assert mode_max_price({**cfg, "max_price": 120000}, "home", 120000) == 100000
+    assert scrape_max_price({**cfg, "check_max_price": 80000}, 60000) == 80000
 
 
 def test_the_scan_asks_the_sources_for_the_highest_of_the_budgets(monkeypatch, db):
@@ -328,7 +340,7 @@ def test_the_scan_asks_the_sources_for_the_highest_of_the_budgets(monkeypatch, d
     monkeypatch.setattr(sources, "load_all", lambda: {"fake": source})
     monkeypatch.setattr(pipeline, "build_report", lambda db, cfg: None)
     pipeline.run_scan(source_names=["fake"], cfg={"max_price": 40000, "invest_max_price": 150000,
-                                                  "land_max_price": 100000},
+                                                  "land_max_price": 100000, "check_max_price": 0},
                       report=False, alerts=False, db=db)
     assert asked == [150000]
 

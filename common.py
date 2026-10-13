@@ -50,14 +50,45 @@ FLAGS = {
 # land ("land_max_price"). A scrape keeps anything under the highest of them,
 # so no goal is thrown away at scrape time; each tab then applies its own.
 LAND_MAX_PRICE = 100_000
-INVEST_MAX_PRICE = 150_000
+INVEST_MAX_PRICE = 100_000
+# The owner's rules for the work spent on a listing (2026-10-13): above
+# CHECK_MAX_PRICE (what you would pay, price_to_pay) a listing is kept only so
+# the scanner knows it, and is never scored, checked or shown; from
+# LIGHT_CHECKS_FROM the light checks come first, and the heavy ones (climate
+# maps, photos) only for a listing that can be shown. No budget goes above
+# CHECK_MAX_PRICE. 0 turns a rule off.
+CHECK_MAX_PRICE = 100_000
+LIGHT_CHECKS_FROM = 50_000
+
+
+def _setting(config: dict | None, key: str, default: float) -> float:
+    try:
+        return max(0.0, float((config or {}).get(key, default) or 0))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def check_max_price(config: dict | None) -> float:
+    """Above this, a listing is never scored, checked or shown (0: no limit)."""
+    return _setting(config, "check_max_price", CHECK_MAX_PRICE)
+
+
+def light_checks_from(config: dict | None) -> float:
+    """From this price, heavy checks wait until the light ones say it can be shown (0: off)."""
+    return _setting(config, "light_checks_from", LIGHT_CHECKS_FROM)
+
+
+def _capped(config: dict | None, budget: float) -> float:
+    cap = check_max_price(config)
+    return min(budget, cap) if cap else budget
 
 
 def _budget(config: dict | None, key: str, default: float, floor: float) -> float:
     try:
-        return max(float(floor), float((config or {}).get(key) or default))
+        budget = max(float(floor), float((config or {}).get(key) or default))
     except (TypeError, ValueError):
-        return max(float(floor), default)
+        budget = max(float(floor), default)
+    return _capped(config, budget)
 
 
 def land_max_price(config: dict | None, max_price: float) -> float:
@@ -90,7 +121,7 @@ def mode_max_price(config: dict | None, mode: str, max_price: float) -> float:
         return invest_max_price(config, max_price)
     if mode in ("land", "forest"):
         return land_max_price(config, max_price)
-    return float(max_price)
+    return _capped(config, float(max_price))
 
 
 def utcnow() -> datetime:
