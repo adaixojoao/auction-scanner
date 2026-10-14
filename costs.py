@@ -819,6 +819,17 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False,
     return out
 
 
+def repair_unresolved(item: dict) -> bool:
+    """A home whose floor is missing, land, or only a building-size cap.
+
+    Repairs priced on that cap would invent a floor. The stored area is not changed.
+    """
+    import scoring
+    if scoring.property_kind(item) != "home":
+        return False
+    return not floor_resolution(item)["established"]
+
+
 def money_out(item: dict, *, bid: float | None = None, typical: bool = False,
               basis: str | None = None) -> dict | None:
     """What one purchase takes from cash you can lose.
@@ -850,24 +861,64 @@ def money_out(item: dict, *, bid: float | None = None, typical: bool = False,
     return {"amount": round(amount), "detail": detail, "estimate": est}
 
 
-def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
-    """Affordability on the same acquisition assumption the both-mode rank uses.
+def selected_planning(item: dict, *, bid: float | None = None,
+                      basis: str | None = None) -> dict | None:
+    """The one Live and invest planning figure.
 
-    ``typical`` is the middle of the repair range, which is what Live and invest
-    uses unless the building is described as being in good condition. A missing
-    budget is not treated as affordable. A shortlist does not change this label.
+    The midpoint of the existing repair range, including when the notice says
+    the building is in good condition. That is an estimate, not a survey.
+    A home with no established floor keeps the price-plus-fees subtotal and
+    does not grow a repair range. Other tabs keep ``money_out`` at the low end
+    unless they pass ``typical``.
     """
+    out = money_out(item, bid=bid, typical=True, basis=basis)
+    if not out:
+        return None
+    if repair_unresolved(item):
+        est = dict(out["estimate"])
+        est["all_in"] = None
+        est["renovation"] = None
+        amount = round(est["total"])
+        return {"amount": amount, "incomplete": True,
+                "detail": ("price, taxes and fees — a known subtotal; repairs are not "
+                           "priced because the floor area is not established"),
+                "estimate": est}
+    out["incomplete"] = False
+    return out
+
+
+def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
+    """Affordability on the Live and invest planning figure.
+
+    ``typical`` is ignored: this view always uses ``selected_planning``, the
+    midpoint, including a home advertised as being in good condition. A missing
+    budget is not affordable. An unresolved floor is not a complete within-budget
+    result. A shortlist does not change this label.
+    """
+    del typical
     acq = selected_acquisition(item)
-    out = money_out(item, bid=acq["amount"] or None, typical=typical, basis=acq["label"])
+    out = selected_planning(item, bid=acq["amount"] or None, basis=acq["label"])
     est = (out or {}).get("estimate") or {}
     work = est.get("renovation")
-    point = "middle" if typical and work else ("low" if work else None)
+    point = "middle" if work else None
+    subtotal = est.get("total")
     if not cash or cash <= 0:
         status = "budget_not_set"
         note = "Cash you can lose is not set."
     elif not out:
         status = "unknown"
         note = "No planning cost: there is no price to work from."
+    elif out.get("incomplete"):
+        if subtotal and subtotal > cash:
+            status = "over"
+            note = (f"Known subtotal €{out['amount']:,.0f} (price, taxes and fees) is already "
+                    f"over the €{cash:,.0f} you can lose. Repairs are not priced because the "
+                    "floor area is not established.")
+        else:
+            status = "incomplete"
+            note = (f"Known subtotal €{out['amount']:,.0f} (price, taxes and fees). Repairs are "
+                    "not priced because the floor area is not established. This is not a "
+                    "complete planning cost.")
     elif out["amount"] > cash:
         status = "over"
         note = (f"Planning cost €{out['amount']:,.0f} is over the €{cash:,.0f} you can lose"
@@ -877,7 +928,8 @@ def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
         note = f"Planning cost €{out['amount']:,.0f} fits the €{cash:,.0f} you can lose ({out['detail']})."
     return {"acquisition": {k: acq[k] for k in ("amount", "kind", "estimate", "label", "current_amount", "current_kind")},
             "all_in": est.get("all_in"), "renovation": work, "renovation_point": point,
-            "planning_amount": (out or {}).get("amount"), "status": status, "note": note}
+            "known_subtotal": subtotal, "planning_amount": (out or {}).get("amount"),
+            "status": status, "note": note}
 
 
 def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: bool = False,
@@ -889,7 +941,8 @@ def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: boo
     """
     if not cash or cash <= 0:
         return None
-    out = money_out(item, bid=bid, typical=typical, basis=basis)
+    out = (selected_planning(item, bid=bid, basis=basis) if typical
+           else money_out(item, bid=bid, typical=False, basis=basis))
     if not out or out["amount"] <= cash:
         return None
     return f"cash €{out['amount']:,.0f} all-in is over the €{cash:,.0f} you can lose ({out['detail']})"

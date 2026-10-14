@@ -384,7 +384,7 @@ def test_investment_counts_the_taxes_fees_and_work_not_the_bare_price():
                    description="Piso para reforma integral, en mal estado")
     s_sound, r_sound = score_detail(sound, mode="invest")
     s_ruin, r_ruin = score_detail(ruin, mode="invest")
-    assert any("all-in (price, taxes and fees, and the work it needs)" in r for r in r_sound)
+    assert any("all-in (price, taxes and fees, and the middle of the repair range)" in r for r in r_sound)
     assert any("below local prices all-in" in r for r in r_sound)
     assert s_sound > s_ruin
 

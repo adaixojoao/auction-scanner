@@ -32,8 +32,9 @@ def test_predicted_acquisition_is_the_planning_price():
     assert plan["acquisition"]["kind"] == "predicted"
     assert plan["acquisition"]["amount"] == 80000
     assert plan["status"] == "over"
-    assert plan["note"] != "Within the planning budget"
-    assert "middle" in (plan["renovation_point"] or "") or plan["renovation_point"] == "low"
+    assert plan["renovation_point"] == "middle"
+    assert plan["planning_amount"] == costs.selected_planning(
+        item, bid=plan["acquisition"]["amount"], basis=plan["acquisition"]["label"])["amount"]
 
 
 def test_shortlist_does_not_clear_the_over_budget_label():
@@ -81,3 +82,64 @@ def test_listings_page_names_the_research_group(db, add, monkeypatch):
     page = dashboard.app.test_client().get("/").get_data(as_text=True)
     assert "research-candidates" in page
     assert "Safe to buy" not in page
+    assert "Not safe to buy" not in page
+    assert "Not verified as ready to buy" in page
+
+
+def test_good_condition_planning_uses_the_same_midpoint(db, add, monkeypatch):
+    """A budget between the low end and the midpoint is over for Live and invest."""
+    monkeypatch.setattr(scoring, "local_price", lambda item: (2000.0, "a city series"))
+    house = {"title": "Moradia em bom estado", "description": "moradia em bom estado",
+             "tipo": "moradia", "country": "PT", "source": "eleiloes", "area_m2": 80, "price": 20000}
+    low = costs.money_out(house)["amount"]
+    planned = costs.selected_planning(house)
+    assert planned["amount"] - low == 6000
+    assert planned["incomplete"] is False
+    _, why = score_detail(house, mode="invest", now=NOW)
+    assert any(f"€{planned['amount']:,.0f}" in line for line in why)
+    cash = low + 1
+    assert low < cash < planned["amount"]
+    import config
+    from db import load_listings
+    config.save_config({"cash_on_hand": cash, "filters": {"min_score": 0}})
+    add("eleiloes", "midpoint", title="Moradia em bom estado", price=20000, area_m2=80,
+        description="moradia em bom estado")
+    hidden = [it for it in load_listings(db, filters={"min_score": 0}, mode="both", include_hidden=True)
+              if it["id"] == "eleiloes:midpoint"]
+    assert hidden and f"{planned['amount']:,.0f}" in hidden[0]["hidden_reason"]
+    assert "eleiloes:midpoint" not in {it["id"] for it in load_listings(db, filters={"min_score": 0}, mode="both")}
+    home_ids = {it["id"] for it in load_listings(db, filters={"min_score": 0}, mode="home")}
+    assert "eleiloes:midpoint" in home_ids
+    view = costs.planning_view(house, cash)
+    assert view["planning_amount"] == planned["amount"]
+    assert view["status"] == "over"
+    assert view["renovation_point"] == "middle"
+    assert view["all_in"]["low"] < view["planning_amount"] < view["all_in"]["high"]
+
+
+def test_unresolved_floor_is_not_labelled_within_budget():
+    missing = {"title": "Moradia", "description": "em bom estado", "tipo": "moradia",
+               "country": "PT", "source": "eleiloes", "price": 20000}
+    plan = costs.planning_view(missing, 500000)
+    assert plan["status"] == "incomplete"
+    assert plan["all_in"] is None and plan["renovation"] is None
+    assert plan["planning_amount"] == plan["known_subtotal"]
+    assert "fits" not in plan["note"]
+    assert missing.get("area_m2") is None
+
+    capped = {"title": "Moradia", "description": "em bom estado", "tipo": "moradia",
+              "country": "PT", "source": "eleiloes", "price": 20000, "area_m2": 5000}
+    capped_plan = costs.planning_view(capped, 500000)
+    assert costs.floor_resolution(capped)["source"] == "capped"
+    assert capped_plan["status"] == "incomplete"
+    assert capped_plan["all_in"] is None
+    assert capped["area_m2"] == 5000
+    assert capped_plan["planning_amount"] == round(costs.estimate(capped)["total"])
+
+    assert costs.planning_view(missing, 0)["status"] == "budget_not_set"
+    assert costs.planning_view({**missing, "price": 0}, 500000)["status"] == "unknown"
+    over = costs.planning_view({**missing, "price": 400000}, 10000)
+    assert over["status"] == "over"
+    assert "Known subtotal" in over["note"]
+    starred = costs.planning_view({**missing, "status": "shortlisted"}, 500000)
+    assert starred["status"] == "incomplete"

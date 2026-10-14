@@ -1506,15 +1506,14 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                     continue
 
         # Price plus taxes, fees and repairs, against cash you can lose.
-        # Live and invest uses the middle of the repair range unless the
-        # notice or the photos say the building is in good condition, and
-        # that all-in figure is the ceiling: over it, the home is hidden.
-        # The other tabs keep the low end. A shortlisted listing stays.
-        # Cash of 0 is not set and hides nothing.
+        # Live and invest always plans on the middle of the repair range,
+        # including a home advertised as being in good condition. An unresolved
+        # floor stays a known subtotal and is hidden only when that subtotal
+        # is already over the cash. The other tabs keep the low end.
+        # A shortlisted listing stays. Cash of 0 is not set and hides nothing.
         if reason is None and cash and item["status"] != "shortlisted":
             import costs
-            from scoring import condition as _condition
-            typical = mode == "both" and _condition(item) != "good"
+            typical = mode == "both"
             if mode == "both":
                 chosen = costs.selected_acquisition(item)
                 over = costs.over_cash(item, cash, bid=chosen["amount"] or None,

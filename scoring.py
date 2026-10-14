@@ -2952,12 +2952,14 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     # and registry, and the work the condition implies (costs.py). A gap
     # measured on the bare price is not a profit.
     import costs
-    est = costs.estimate(item, bid=pay) if pay else None
-    all_in = pay
-    if est:
-        all_in = (est["all_in"]["low"] + est["all_in"]["high"]) / 2 if est["all_in"] else est["total"]
-        reasons.append(f"€{all_in:,.0f} all-in (price, taxes and fees"
-                       + (", and the work it needs)" if est["all_in"] else ")"))
+    planned = costs.selected_planning(
+        item, bid=pay, basis=chosen["label"] if chosen["kind"] == "predicted" else None) if pay else None
+    est = planned["estimate"] if planned else None
+    all_in = planned["amount"] if planned else pay
+    if planned and planned.get("incomplete"):
+        reasons.append(f"€{all_in:,.0f} known subtotal (price, taxes and fees; repairs not priced)")
+    elif planned:
+        reasons.append(f"€{all_in:,.0f} all-in (price, taxes and fees, and the middle of the repair range)")
 
     found = local_price(item) if area else None
     unbelievable = False

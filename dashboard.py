@@ -437,8 +437,7 @@ def _research_candidates(items: list, cash: float) -> dict:
             if len(bucket) < 3:
                 bucket.append(it)
     def card(it, group):
-        typical = condition(it) != "good"
-        plan = costs.planning_view(it, cash, typical=typical)
+        plan = costs.planning_view(it, cash)
         level = (geo.location_confidence(it) or {}).get("level")
         gaps = []
         if group == "unvalued":
@@ -451,6 +450,8 @@ def _research_candidates(items: list, cash: float) -> dict:
             gaps.append("No sale deadline is stored")
         if not costs.floor_resolution(it)["established"]:
             gaps.append("Floor area not established")
+        gaps.append("Sale availability is not verified")
+        gaps.append("Hazard coverage is not a complete survey")
         gaps.append("Title, possession and legal access are not verified")
         return {
             "id": it.get("id"), "title": it.get("title") or "", "source": it.get("source") or "",

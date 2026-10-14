@@ -95,7 +95,7 @@ const $ = id => document.getElementById(id);
 
 // Each goal ranked on its own (scoring.MODES).
 const MODE_NOTE = {
-  both: "Homes you could live in that can also be priced as an investment. The pin is the house, the sea is within 10 km, the climate is good or excellent, and the floor is a real floor. The number is the worse of the living and investment scores. A home with no local sale price stays in the research group and is not ranked as an investment. These are research candidates, not purchases that have been checked.",
+  both: "Homes that can be lived in and priced as an investment. Sea distance uses the stored pin and is only as exact as that pin; 10 km is the gate. A climate grade is not a full hazard survey. The number is the worse of the living and investment scores, planned on the middle of the repair range. A home with no local sale price stays in the research group. These candidates are not verified as ready to buy.",
   home: "A home to live in — not a plot: the sea within 1.5 km, not a poor climate, your five wishes, mild winters if the Atlantic current fails.",
   invest: "Homes to make money on: far below the local price all-in (taxes, fees and the work), a net rental yield, by the beach, forced or bank sales.",
   land: "Plots as an investment: cheap per hectare against what land goes for there, big enough, reachable, water on it — with the forestry upside on top.",
@@ -174,7 +174,7 @@ function candidateCard(it) {
     : `<span>${AS.esc(it.title || "Listing")}</span> <span class="small muted">lookup ${AS.esc(it.lookup || it.id)}</span>`;
   const starred = it.status === "shortlisted";
   const id = AS.esc(it.id);
-  return `<article class="research-card">
+  return `<article class="research-card" data-id="${id}">
     <h3>${link}</h3>
     <p class="small">Living ${it.live_score == null ? "—" : AS.esc(String(it.live_score))}
       · Investment ${it.invest_score == null ? "—" : AS.esc(String(it.invest_score))}</p>
@@ -197,14 +197,21 @@ function renderResearch(research) {
   const unvalued = (research.unvalued || []).map(candidateCard).join("");
   box.hidden = false;
   box.innerHTML = `<h2>${AS.esc(research.heading)}</h2>
-    <p class="small muted">Not safe to buy. ${AS.esc(research.duplicates || "")}</p>
+    <p class="small muted">Not verified as ready to buy. ${AS.esc(research.duplicates || "")}</p>
     ${valued ? `<div class="research-grid">${valued}</div>` : `<p class="small muted">No priced research candidate in this view.</p>`}
     ${unvalued ? `<h3 class="small">Unvalued — investment value not established</h3><div class="research-grid">${unvalued}</div>` : ""}`;
 }
 
-function openCandidate(id) {
-  const row = document.querySelector(`#rows button[data-id="${CSS.escape(id)}"]`);
-  if (row) toggleDetails(row);
+async function openCandidate(id) {
+  const card = [...document.querySelectorAll("#research-candidates article")].find(el => el.dataset.id === id);
+  if (!card) return;
+  const existing = card.querySelector(".candidate-details");
+  if (existing) { existing.remove(); return; }
+  const d = await AS.api("/api/listing?id=" + encodeURIComponent(id) + "&mode=" + mode);
+  const panel = document.createElement("div");
+  panel.className = "candidate-details";
+  panel.innerHTML = detailsHtml(d);
+  card.appendChild(panel);
 }
 
 function renderRows(items, hiddenView) {
