@@ -37,8 +37,8 @@ and has **Update now**. During a scan, the update waits for the scan to finish.
 Untick *Update automatically when the app starts* to update only by hand.
 From a terminal: `python updater.py` (check) or `python updater.py apply`.
 
-It never overwrites your data (`auctions.db`, `config.json`, `reports/` and
-logs are not in git) and never overwrites files you changed in the app
+It never overwrites your data (`auctions.db`, `config.json`, `reports/`,
+`kept_photos/` and logs are not in git) and never overwrites files you changed in the app
 folder: then it tells you why it did not update. It skips the update when
 offline, when git is missing, or when the folder was not installed with
 `git clone`, and the app starts as it is.
@@ -59,7 +59,7 @@ another window.
 
 | Page | What it is for |
 |---|---|
-| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
+| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale; for France, the parcel named in the notice (its plot area and a map link) and, when the listing scores 85 or more and that parcel has a single building, the year and the use from the national building database. A listing at **85 or more** in any goal keeps its photos on this PC after the sale site takes them down, and the panel shows that gallery and the full description. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
@@ -514,6 +514,7 @@ costs.py        taxes, fees, work     prices.py      local €/m² (data/pt_home
 cartas.py       Citius batch letters  report.py      report files
 analysis.py     Claude calls          ics_export.py  calendar files
 geo.py          map positions, towns  listing_info.py  the ⓘ panel
+cadastre.py     parcel from the notice photos.py       photo check, kept photos
 scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 
@@ -536,9 +537,10 @@ Every listing's ⓘ panel says how exact its **location** is: exact (the sale's
 coordinates, the cadastre, or a position you verified), street, village or
 parish, municipality, or unknown. It also says what the checks are good for at
 that level. **Verify location** takes coordinates (or a Google Maps link), an
-address (looked up on OpenStreetMap) or, in Spain, a cadastral reference. Your
-position comes first, the scanner's own is kept beside it, and each change is
-logged. On Offers, an offer for a listing placed only at its town warns you;
+address (looked up on OpenStreetMap) or, in Spain, a cadastral reference.
+A French parcel is read from the notice on the next scan; this box does not
+look one up. Your position comes first, the scanner's own is kept beside it,
+and each change is logged. On Offers, an offer for a listing placed only at its town warns you;
 with Settings → Location check set to "ask my reason", it is sent or logged
 only with a reason, which is kept with the offer.
 
