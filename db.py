@@ -1051,6 +1051,18 @@ def filter_reason(item: dict, filters: dict | None, mode: str = "home") -> str |
     return None
 
 
+def minimum_bar(item: dict, mode: str) -> float:
+    """The score a minimum is applied to.
+
+    A priced lead uses the combined score. An unvalued Live and invest lead
+    has no investment rank, so the minimum applies to the living score. The
+    combined score stays 0 and no investment score is invented.
+    """
+    if mode == "both" and item.get("research_only"):
+        return float(item.get("live_score") or 0)
+    return float(item.get("score") or 0)
+
+
 def hidden_category(reason: str | None) -> str | None:
     """Group a hidden_reason into dismissed / expired / duplicate / stale / filtered / low score."""
     if not reason:
@@ -1081,7 +1093,8 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 # (dashboard._public), and they were the largest of these fields.
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
             "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
-            "reasons", "excellent", "category", "kind", "live_score", "invest_score")
+            "reasons", "excellent", "category", "kind", "live_score", "invest_score",
+            "research_only")
 _SCORED: dict[str, dict[str, tuple]] = {}      # mode → {listing id → (row key, results, inputs)}
 _UNSCORED = {"last_seen", "is_new"}
 # What a hidden listing keeps when load_listings(slim_hidden=True): what a list
@@ -1472,7 +1485,6 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                     scored[item["id"]] = (kept[0], results, kept[2])
         if results is not None:
             item.update(results)
-            sc = item["score"]
         else:
             if supply:
                 district = (item.get("district") or "").strip()
@@ -1480,9 +1492,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                     n = supply.get(((item.get("country") or "PT").upper(), normalize(district)), 0)
                     if n > 1:
                         item["open_homes_here"] = n - 1
-            sc = _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
-                            climate_on, mode)
-            data = {k: item[k] for k in _DERIVED}
+            _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
+                       climate_on, mode)
+            data = {k: item[k] for k in _DERIVED if k != "research_only"}
+            if "research_only" in item:
+                data["research_only"] = item["research_only"]
             if item.get("area_note"):
                 data["area_m2"] = item["area_m2"]
                 data["area_note"] = item["area_note"]
@@ -1497,10 +1511,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 item.pop("_climate_write", None)
 
         if reason is None and min_score and item["status"] != "shortlisted":
-            # The number on the list is the one that has to clear the minimum.
-            # Live and invest no longer substitutes the living score for that.
-            bar = sc
-            if bar < min_score and not (mode == "both" and item.get("research_only")):
+            # Priced leads clear the minimum on the combined score. An unvalued
+            # Live and invest lead has no investment rank, so its living score
+            # is the number that has to clear it. The combined score stays 0.
+            bar = minimum_bar(item, mode)
+            if bar < min_score:
                 reason = f"score {bar:.0f} < filters.min_score {min_score}"
                 if not include_hidden:
                     continue

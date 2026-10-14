@@ -143,3 +143,144 @@ def test_unresolved_floor_is_not_labelled_within_budget():
     assert "Known subtotal" in over["note"]
     starred = costs.planning_view({**missing, "status": "shortlisted"}, 500000)
     assert starred["status"] == "incomplete"
+
+
+def test_unvalued_minimum_uses_the_living_score(db, add, monkeypatch):
+    import config
+    import dashboard
+    from db import load_listings
+
+    config.save_config({"filters": {"min_score": 40}, "cash_on_hand": 10_000_000})
+    add("eleiloes", "low", title="Moradia T3", price=22000, area_m2=90,
+        description="moradia em bom estado")
+    add("eleiloes", "fit", title="Moradia T3", price=22000, area_m2=90,
+        description="moradia em bom estado")
+    add("eleiloes", "priced", title="Moradia T3", price=22000, area_m2=90,
+        description="moradia em bom estado")
+
+    def fake(item, now=None, targets=None, mode="home"):
+        if mode != "both":
+            return 80.0, ["home"]
+        if item["id"].endswith("low"):
+            item["live_score"] = 10.0
+            item["invest_score"] = None
+            item["research_only"] = True
+            return 0.0, ["Investment value not established"]
+        if item["id"].endswith("fit"):
+            item["live_score"] = 70.0
+            item["invest_score"] = None
+            item["research_only"] = True
+            return 0.0, ["Investment value not established"]
+        item["live_score"] = 80.0
+        item["invest_score"] = 20.0
+        item["research_only"] = False
+        return 60.0, ["priced below the minimum"]
+
+    monkeypatch.setattr(scoring, "score_detail", fake)
+    filters = config.load_config()["filters"]
+    shown = load_listings(db, filters=filters, mode="both", now=NOW)
+    assert [it["id"] for it in shown] == ["eleiloes:fit"]
+    fit = shown[0]
+    assert fit["score"] == 0.0 and fit["live_score"] == 70.0
+    assert fit["invest_score"] is None and fit["research_only"] is True
+    again = load_listings(db, filters=filters, mode="both", now=NOW)
+    assert [it["id"] for it in again] == ["eleiloes:fit"]
+    assert again[0]["score"] == 0.0 and again[0]["invest_score"] is None
+
+    hidden = {it["id"]: it for it in load_listings(
+        db, filters=filters, mode="both", include_hidden=True, now=NOW)}
+    assert hidden["eleiloes:low"]["score"] == 0.0
+    assert hidden["eleiloes:low"]["live_score"] == 10.0
+    assert hidden["eleiloes:low"]["hidden_reason"].startswith("score 10 < filters.min_score 40")
+    assert hidden["eleiloes:priced"]["live_score"] == 80.0
+    assert hidden["eleiloes:priced"]["score"] < 40
+    assert hidden["eleiloes:priced"]["hidden_reason"].startswith(
+        f"score {hidden['eleiloes:priced']['score']:.0f} < filters.min_score 40")
+
+    dashboard._LISTS.clear()
+    dashboard.app.config["TESTING"] = True
+    client = dashboard.app.test_client()
+    saved = client.get("/api/listings?mode=both&min_score=0").get_json()
+    assert [it["id"] for it in saved["items"]] == ["eleiloes:fit"]
+    assert [it["id"] for it in saved["research"]["unvalued"]] == ["eleiloes:fit"]
+    assert saved["research"]["valued"] == []
+    assert saved["research"]["unvalued"][0]["live_score"] == 70.0
+    assert saved["research"]["unvalued"][0]["invest_score"] is None
+
+    config.save_config({"filters": {"min_score": 0}, "cash_on_hand": 10_000_000})
+    filters = config.load_config()["filters"]
+    assert {it["id"] for it in load_listings(db, filters=filters, mode="both", now=NOW)} == {
+        "eleiloes:low", "eleiloes:fit", "eleiloes:priced"}
+    dashboard._LISTS.clear()
+    page = client.get("/api/listings?mode=both&min_score=40").get_json()
+    assert [it["id"] for it in page["items"]] == ["eleiloes:fit"]
+    assert [it["id"] for it in page["research"]["unvalued"]] == ["eleiloes:fit"]
+    assert page["research"]["valued"] == []
+
+
+def test_portal_auction_figure_is_a_reference_not_the_acquisition_price(db, add, monkeypatch):
+    import config
+    import dashboard
+    from listing_info import facts
+
+    item = {
+        "source": "fotocasa", "country": "ES", "tipo": "vivienda",
+        "title": "Vivienda en Donostia - San Sebastián",
+        "description": "Piso en subasta judicial",
+        "price": 135000, "min_price": 135000, "area_m2": 65,
+    }
+    acq = costs.selected_acquisition(dict(item))
+    assert acq["kind"] == "unusable"
+    assert acq["amount"] is None
+    assert acq["reference_amount"] == 135000
+    assert "subasta" in acq["label"]
+    plan = costs.planning_view(dict(item), 40000)
+    assert plan["status"] == "unknown"
+    assert "€135,000" in plan["note"]
+    assert "not used as the acquisition price" in plan["note"]
+    assert plan["acquisition"]["reference_amount"] == 135000
+    assert costs.over_cash(dict(item), 40000) is None
+    cash = costs.cash_view(dict(item), 40000)
+    assert cash["over"] is False
+    assert "Within" not in cash["text"]
+    assert "€135,000" not in cash["text"] or "not" in cash["text"].lower()
+
+    usable = {**item, "description": "vivienda luminosa", "min_price": None}
+    usable_plan = costs.planning_view(usable, 40000)
+    assert usable_plan["acquisition"]["kind"] == "asking"
+    assert usable_plan["acquisition"]["amount"] == 135000
+    assert usable_plan["status"] == "over"
+    assert costs.over_cash(usable, 40000)
+
+    labels = {fact["label"]: fact["value"] for fact in facts(dict(item))}
+    assert labels["Base value"] == "€135,000"
+    assert "subasta" in labels["Purchase price"]
+
+    config.save_config({"filters": {"min_score": 0, "countries": ["ES"]}, "cash_on_hand": 40000})
+    add("fotocasa", "191023678", country="ES", title=item["title"], price=135000,
+        min_price=135000, area_m2=65, description=item["description"],
+        url="https://www.fotocasa.es/es/comprar/vivienda/donostia/191023678/d")
+
+    def fake(row, now=None, targets=None, mode="home"):
+        if mode == "both":
+            row["live_score"] = 60.0
+            row["invest_score"] = 60.0
+            return 80.0, ["ranked"]
+        return 80.0, ["home"]
+
+    monkeypatch.setattr(scoring, "score_detail", fake)
+    dashboard._LISTS.clear()
+    dashboard.app.config["TESTING"] = True
+    body = dashboard.app.test_client().get("/api/listings?mode=both&min_score=0").get_json()
+    assert body["items"], body.get("stats")
+    row = body["items"][0]
+    assert row["price"] == 135000
+    assert "subasta" in row["price_unusable"]
+    card = body["research"]["valued"][0]
+    assert card["planning"]["status"] == "unknown"
+    assert card["planning"]["acquisition"]["kind"] == "unusable"
+    assert card["planning"]["acquisition"]["reference_amount"] == 135000
+    detail = dashboard.app.test_client().get("/api/listing?id=fotocasa:191023678&mode=both").get_json()
+    detail_facts = {fact["label"]: fact["value"] for fact in detail["facts"]}
+    assert detail_facts["Base value"] == "€135,000"
+    assert "subasta" in detail_facts["Purchase price"]
