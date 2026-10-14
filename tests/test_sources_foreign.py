@@ -64,6 +64,8 @@ def test_pvp_search_api_sales_to_come_within_budget(db, fake_http):
     assert house["date_end"] == "2026-10-08T18:00:00"
     assert house["url"] == "https://pvp.giustizia.it/pvp/it/detail_annuncio.page?idAnnuncio=1"
     assert "Disponibilità: occupato" in rows["pvp:4"]["description"]        # the occupancy reject sees it
+    assert json.loads(house["raw_json"])["occupation"] == "vacant"
+    assert json.loads(rows["pvp:4"]["raw_json"])["occupation"] == "occupied"
 
 
 def _servi_card(lid, price, text="Casa en venta en C. Mayor, 1, Requena, Valencia 110m 2 3 hab. 1 baño"):

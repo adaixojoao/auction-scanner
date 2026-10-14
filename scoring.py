@@ -16,7 +16,8 @@ import math
 import re
 from datetime import datetime
 
-from common import (days_left, effective_end, find_area, find_floor_area, find_terms, has_term, normalize,
+from common import (auction_occupation, days_left, effective_end, find_area, find_floor_area, find_terms,
+                    has_term, normalize, possession,
                     price_to_pay as _pay, term_regex, utcnow)
 import prices
 from prices import place_key as _place_key
@@ -732,7 +733,8 @@ def local_price(item: dict) -> tuple[float, str] | None:
     from INE (prices.py), else the city table. In Portugal only the concelho
     names the place (`district` is the district, not the town)."""
     country = item.get("country") or "PT"
-    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    import geo
+    place = item.get("concelho") or geo.municipality(item)
     return prices.local_price(country, place, _MARKET_INDEX, district=item.get("district"),
                               parish=item.get("freguesia") if country == "PT" else None)
 
@@ -764,14 +766,16 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
     if mode == "both":
         return (
             "A home that is worth living in and worth the money. It has to be a house or a flat "
-            "whose pin is the house, not the town, with the sea within 1.5 km of that pin (a lake "
-            "or a river is not the sea), a climate grade of good or excellent, and a real floor "
-            "between 40 and 250 m². The asking price is not the cap: the all-in cost against "
+            "whose pin is the house, not the town, with the sea within 10 km of that pin (closer "
+            "scores higher; a lake or a river is not the sea), a climate grade of good or excellent, and a real floor "
+            "between 40 and 250 m² (one dwelling in Catastro counts; several dwellings are not "
+            "added together). A sale the court marks as the debtor's main home is occupied, and "
+            "the bid rules for a main home are stricter. The asking price is not the cap: the all-in cost against "
             "the cash is, using the middle of the repair range when the condition is not stated. "
             "Rank a priced home by the worse of the living score and the investment score. When "
             "no local sale price exists, the rank is the living score and the investment is not "
             "priced. A beach flat with no resale case still ranks low. A cheap home that is not "
-            "by the sea fails."
+            "by the sea fails. A home that cannot be visited is out."
         ) + _OUTLOOK_NOTE
     if mode == "invest":
         return _INVEST_PRIORITIES + _OUTLOOK_NOTE
@@ -785,7 +789,11 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
                                          years=FOREST_ROI_YEARS)
     return (
         "A home (a house or a flat) to live in, at a very low price — not a plot, not a shop or a "
-        "garage. A MUST: by the beach, the sea within 1.5 km. A lake or a river you could swim in "
+        "garage. A MUST: by the beach, the sea within 10 km, with more points the closer it is. "
+        "One dwelling in Catastro counts as the floor when the notice states none; several "
+        "dwellings are not added together. A sale the court marks as the debtor's main home is "
+        "occupied, and the bid rules for a main home are stricter. A home that cannot be visited is out. "
+        "A lake or a river you could swim in "
         "is not a substitute, and a poor climate (extreme heat, a flood at the house, repeated "
         "fires, or severe water stress) is not a place to live. Prefer western continental Europe "
         "(mainland Portugal, Spain, France, Benelux, Germany, Austria, Switzerland, Italy); "
@@ -820,10 +828,19 @@ _INVEST_PRIORITIES = (
     "empty months) worth having; near the sea for a holiday let; a forced sale (court, tax or "
     "social security) or a bank selling what it repossessed, because those must sell. A sitting "
     "tenant is income only when the ad states the rent: the town average is not the lease, and "
-    "it makes the home harder to resell. Say which it is here. Okupas, or a bank sale "
+    "it makes the home harder to resell. Say which it is here. One dwelling in Catastro counts "
+    "as the floor when the notice states none; several dwellings are not added together. A sale "
+    "the court marks as the debtor's main home is occupied, and the bid rules for a main home "
+    "are stricter. A home that cannot be visited is out. Okupas, or a bank sale "
     "'sin posesión', are not a tenant: they are out. Homes still listed in that district on the "
     "sites scanned are supply a later buyer can choose among; say how many if you are told, and "
     "do not invent how far that cuts the price. "
+    "A building the ad counts as several flats (three T3 apartments) is let as that many "
+    "homes: when it names the type and not the floor, each flat is counted at a modest "
+    "planning size and the figure says so. That size is not the building's floor, so it "
+    "is not a discount against local sale prices, and the repairs are not in the yield. "
+    "Italian cadastral vani, when the notice states no floor, are counted at 15 m² each: "
+    "a cautious estimate, not a measured floor, so the same limits apply. "
     "Not wanted: a gap so wide it cannot be real (more than about 70% under the local price, a "
     "share of the property, a ruin sold as a home, an area that is really the plot) — say what to "
     "check, and do not treat that gap as a bargain or work out a rent on that price; a flat too "
@@ -1100,14 +1117,36 @@ KIND_LABELS = {"home": "home", "urban_plot": "urban plot", "rural_plot": "rural 
                "other": "not a home or plot"}
 
 
+def _debtor_main_home(item: dict) -> bool:
+    """The Spanish court marked the sale as the debtor's main home."""
+    return normalize(str(_raw(item).get("vivienda_habitual") or "")) in ("si", "s", "yes")
+
+
 def _occupation(item: dict) -> str | None:
-    raw = item.get("raw_json") or ""
-    if '"occupation"' not in raw:
-        return None
-    try:
-        return json.loads(raw).get("occupation")
-    except (TypeError, ValueError, AttributeError):
-        return None
+    """Vacant or occupied, from the sale's own field, else from the posesoria,
+    the Italian availability codes, or a Spanish "vivienda habitual: sí" when
+    nothing more precise was stated."""
+    raw = _raw(item)
+    if raw.get("occupation") in ("occupied", "vacant"):
+        stated = raw["occupation"]
+    else:
+        stated = possession(raw.get("situacion_posesoria")) or auction_occupation(raw.get("disponibilita"))
+    if stated:
+        return stated
+    if _debtor_main_home(item):
+        return "occupied"
+    return None
+
+
+def _catastro_floor(item: dict, area: float, reasons: list[str]) -> float:
+    """The notice's floor wins. Catastro fills in only when that floor is missing."""
+    if area:
+        return area
+    import costs
+    found, note = costs.catastro_home(item)
+    if note:
+        reasons.append(note)
+    return found or area
 
 
 def _raw(item: dict) -> dict:
@@ -1163,7 +1202,9 @@ def condition(item: dict) -> str:
     (photos.py) when neither says anything.
 
     A fallen roof or fibre-cement sheets in the photos raise the estimate even
-    when the ad says the house is sound. A barn photo that does not say so
+    when the ad says the house is sound. An obvious ruin in an open aerial or
+    street photo does too. A roof that is still on does not make the house
+    sound: the inside was not in that picture. A barn photo that does not say so
     still says nothing about the house. A portal that files the home as "a
     reformar" outranks an agent's "lista para entrar a vivir"."""
     text = f"{item.get('title') or ''} {item.get('description') or ''}"
@@ -1188,6 +1229,10 @@ def condition(item: dict) -> str:
         return "heavy"
     if state in ("good", "unknown") and has_term(notes, _PHOTO_ROOF_SOME, negations=False):
         return "some"
+    # An obvious ruin from the street or from above outranks a silent ad and a
+    # flattering photo. A roof that is still on does not: that stays unknown.
+    if state != "heavy" and outside_view(item) == "heavy":
+        return "heavy"
     return state
 
 
@@ -1203,12 +1248,31 @@ def photo_condition(item: dict) -> dict | None:
     return None
 
 
+def outside_view(item: dict) -> str | None:
+    """"heavy" or "standing" from an open aerial or street photo, else None.
+
+    A standing outside is not a sound house: the inside was not in the picture.
+    A low-confidence answer, or a picture that does not show the house, says nothing."""
+    if '"outside_check"' not in (item.get("raw_json") or ""):
+        return None
+    seen = _raw(item).get("outside_check") or {}
+    if seen.get("shows_house") is False or seen.get("confidence") not in ("high", "medium"):
+        return None
+    if seen.get("condition") in ("heavy", "standing"):
+        return seen["condition"]
+    return None
+
+
 _BUILT = re.compile(r"(?:ano\s+de\s+constru[çc][ãa]o|constru[íi]d[oa]\s+em|built\s+in)\D{0,5}((?:18|19|20)\d\d)", re.I)
 
 
 def built_year(item: dict) -> int | None:
     """The year the building was built: the portal's field, else the text."""
     year = _raw(item).get("ano_construcao")
+    if not year:
+        cat = _raw(item).get("catastro")
+        if isinstance(cat, dict):
+            year = cat.get("year")
     if not year:
         m = _BUILT.search(f"{item.get('title') or ''} {item.get('description') or ''}")
         year = m.group(1) if m else None
@@ -1445,10 +1509,11 @@ TOWN_DISTANCE_POINTS = [(0.3, 15), (1, 13), (3, 8), (6, 3), (10, -2), (20, -14),
 # town-level pin it counts BEACH_APPROX_SHARE of that.
 BEACH_POINTS = [(0.5, 25), (1, 22), (2, 18), (5, 12), (10, 6), (20, 2), (30, 0)]
 BEACH_APPROX_SHARE = 0.6
-# The owner's must (2026-10-04): somewhere to swim within 1.5 km — the sea, a lake
-# or reservoir, or a river big enough to show from space. A stream does not count.
-SWIM_MAX_KM = 1.5
-SWIM_POINTS = [(0.3, 25), (0.8, 20), (1.5, 14)]
+# The owner's must (2026-10-13): the sea within 10 km of the building, and more
+# points the closer it is. A lake, a reservoir or a wide river still counts as
+# somewhere to swim, at a lower share. A stream does not count.
+SWIM_MAX_KM = 10
+SWIM_POINTS = [(0.5, 25), (2, 18), (5, 11), (10, 3)]
 NO_SWIM = -30
 PHOTOS_MISS_THE_HOUSE = -5   # only a barn, land or the view: the house is unseen
 # The owner: sea > lakes > rivers. The satellite map cannot tell a lake from a
@@ -1576,8 +1641,8 @@ def _investment_unpriced(item: dict) -> bool:
 def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     """A home worth living in and worth the money, or nothing.
 
-    The pin has to be the house, the sea within 1.5 km of that pin, the climate
-    good or excellent, and the floor area a real floor. It is then the worse of
+    The pin has to be the house, the sea within 10 km of that pin (closer scores
+    higher), the climate good or excellent, and the floor area a real floor. It is then the worse of
     the living score and the investment score, so a beach flat with no resale
     case and a cheap inland yield both stay off this list.
     """
@@ -1606,7 +1671,7 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
     if grade not in ("good", "excellent"):
         blocked.append(f"climate {grade} — living here needs a good or excellent grade")
     area, source = building_m2(item)
-    if source not in ("stored", "notice") or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
+    if source not in ("stored", "notice", "catastro") or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
         blocked.append("floor area unknown, or the figure is the plot rather than the building")
     if blocked:
         return 0.0, blocked
@@ -1671,7 +1736,19 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
         return "timeshare (some weeks a year) — skip"
     if has_term(full, INSTALMENT_SALE):
         return "viager or vente à terme: the price is only the down payment, monthly payments follow — skip"
+    if _visit_refused(item, full):
+        return "cannot be visited — skip"
     return None
+
+
+def _visit_refused(item: dict, full: str) -> bool:
+    """The court, or the ad, says the house cannot be viewed.
+
+    "No consta" means the court did not say. A visit from the street still counts."""
+    stated = normalize(str(_raw(item).get("visitable") or ""))
+    if stated and not stated.startswith("no consta") and (stated == "no" or stated.startswith("no ")):
+        return True
+    return has_term(full, NOT_VISITABLE, negations=False)
 
 
 # Hand-checked in 2026-10: of the portal and bank homes that ranked high with no
@@ -1727,9 +1804,6 @@ def _doubts(item: dict, kind: str, pay: float, area: float, full: str, reasons: 
     if has_term(full, NO_VIEWING, negations=False):
         caps.append(UNCHECKED_CAP)
         reasons.append("auction resold by a middleman: no viewing, cash only")
-    if has_term(full, NOT_VISITABLE, negations=False):
-        caps.append(UNCHECKED_CAP)
-        reasons.append("cannot be visited — usually means someone lives there; ask before bidding")
     if has_term(full, NOT_REGISTERED, negations=False):
         caps.append(UNCHECKED_CAP)
         reasons.append("not in the land registry — normally no mortgage; have a lawyer check the title")
@@ -1814,6 +1888,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if kind == "home" and not item.get("area_m2"):
         # A home is sized by its floor, not by "terrain 1034 m²" in the text.
         area = find_floor_area(title) or find_floor_area(desc) or 0
+        area = _catastro_floor(item, area, reasons)
 
     if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
         s += _climate_points(item["climate"], kind, reasons, caps)
@@ -1861,6 +1936,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append("mainland Portugal")
 
     occupation = _occupation(item)   # read from the sale's detail page (ES, FR)
+    if _debtor_main_home(item):
+        reasons.append("the court marks this as the debtor's main home — normally still lived in, "
+                       "and a main home has stricter bid rules (check the notice)")
     if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
         s -= 25
         reasons.append("occupied/tenanted")
@@ -2234,6 +2312,8 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     said = has_term(full, HEAVY_WORK + SOME_WORK) or (has_term(full, GOOD_CONDITION) and _whole_house_good(full))
     seen = ("" if state == "unknown" or said
             else " (the portal's own field)" if portal_condition(item) else " (from the photos)")
+    if state == "heavy" and outside_view(item) == "heavy" and not has_term(full, HEAVY_WORK):
+        seen = " (from an open aerial or street photo)"
     if state == "heavy":
         s -= 25
         caps.append(40)   # a cheap ruin must not outrank a house you can live in
@@ -2244,8 +2324,13 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     elif state == "unknown":
         # Most judicial cards never say: treat like work until the text or photos do.
         # Otherwise Italy's silent listings crowd out homes that admit their state.
+        # A standing outside only rules out an obvious ruin. The inside is still unseen.
         s -= 10
-        reasons.append("condition not stated — assume it needs work")
+        if outside_view(item) == "standing":
+            reasons.append("the outside is standing (open aerial or street photo); the inside was not seen "
+                           "— assume it needs work")
+        else:
+            reasons.append("condition not stated — assume it needs work")
     elif state == "good":
         s += 15
         reasons.append(f"good condition{seen}")
@@ -2281,7 +2366,7 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
         reasons.append(f"nowhere to swim within {SWIM_MAX_KM:g} km"
                        + (f" (nearest: {swim[1]} {swim[0]:.1f} km)" if swim else ""))
 
-    # A home to live in is by the sea. A river, a lake, or a town 8 km inland is not.
+    # A home to live in is by the sea. A river, a lake, or a house past 10 km is not.
     # Unknown distance is left alone: that is a missing position, already capped.
     beach_km = (item.get("beach") or {}).get("km")
     if beach_km is not None and beach_km > SWIM_MAX_KM:
@@ -2814,6 +2899,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     s, reasons, caps = 50.0, [], []
     # The floor is what is valued and let: "terrain 1034 m²" in the text is not it.
     area = item.get("area_m2") or find_floor_area(title) or find_floor_area(desc) or 0
+    area = _catastro_floor(item, area, reasons)
     pay = _pay(item)
     likely = item.get("predicted_final")
     if likely and not item.get("price_unusable") and likely["price"] > pay * 1.02:
@@ -2871,6 +2957,9 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         est["rent"] = None
     rent = (est or {}).get("rent")
     state = condition(item)
+    if _debtor_main_home(item):
+        reasons.append("the court marks this as the debtor's main home — normally still lived in, "
+                       "and a main home has stricter bid rules (check the notice)")
     occupied = _occupied(item, full)
     if rent and state == "heavy":
         reasons.append("the rent is not counted — it needs a full rebuild before it can be let")
@@ -2890,7 +2979,17 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                        f"paid back in {rent['payback_years']} years"
                        + (" (a province average, halved — check rents in the village)"
                           if rent.get("province_average")
-                          else " (a town average — check rents there)" if rent["yield_pct"] > 15 else ""))
+                          else " (a town average — check rents there)" if rent["yield_pct"] > 15 else "")
+                       + (f" — {rent['planning']}; repairs are not in this yield"
+                          if rent.get("planning") else ""))
+    elif not area:
+        block = costs.flat_block(item)
+        if block and not block.get("area"):
+            reasons.append(block["label"])
+        else:
+            vani = costs.vani_floor(item)
+            if vani and vani.get("label"):
+                reasons.append(vani["label"])
     beach = item.get("beach")
     if beach and beach.get("km") is not None:
         s += curve(beach["km"], INVEST_BEACH_POINTS) * (BEACH_APPROX_SHARE if beach.get("approx") else 1) * w("beach")
@@ -2909,8 +3008,13 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if state == "heavy":
         caps.append(INVEST_RUIN_CAP)
     s += {"good": 5, "some": -5, "heavy": -15}.get(state, -3)
-    reasons.append({"good": "good condition", "some": "needs some work", "heavy": "needs heavy work"}.get(
-        state, "condition not stated"))
+    label = {"good": "good condition", "some": "needs some work", "heavy": "needs heavy work"}.get(
+        state, "condition not stated")
+    if state == "heavy" and outside_view(item) == "heavy" and not has_term(full, HEAVY_WORK):
+        label += " (from an open aerial or street photo)"
+    elif state == "unknown" and outside_view(item) == "standing":
+        label = "the outside is standing (open aerial or street photo); the inside was not seen"
+    reasons.append(label)
     dpe = energy_class(item) if item.get("country") == "FR" else None
     if dpe in INVEST_DPE_POINTS:
         s += INVEST_DPE_POINTS[dpe]

@@ -480,7 +480,7 @@ def test_each_goal_tells_the_ai_check_its_own_wish():
     assert "net rental yield" in invest and "live in" not in invest.split(",")[0]
     assert "at least 20,000 m²" in land and "€0.30/m²" in land and "not scored here" in land
     assert "forestry project" in forest and "10 ha" in forest and "not a plot to resell" in forest
-    assert "worth living in" in both and "worse of the living score" in both and "1.5 km" in both
+    assert "worth living in" in both and "worse of the living score" in both and "10 km" in both
     assert len(set(texts.values())) == len(MODES)
     assert all("EUROPOP2019" in texts[m] and "not a forecast" in texts[m]
                for m in ("home", "invest", "land", "both"))
@@ -630,7 +630,8 @@ def test_map_and_climate_lookups_take_the_best_of_every_tab_in_turn(monkeypatch)
              "forest": [{"id": "f1", "score": 85}, {"id": "f2", "score": 60}]}
     monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home": lists[mode])
     assert [it["id"] for it in pipeline.enrich_order(None, {})] == [
-        "live", "h1", "shared", "l1", "f1", "f2"]
+        "live", "h1", "f1", "shared", "l1", "f2"]
+    # 85 or more in any goal is taken first; f1 is 85, so it jumps the lower ones.
 
 
 def test_site_check_queue_puts_forestry_ahead_of_other_land(monkeypatch):

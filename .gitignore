@@ -21,6 +21,7 @@ config.json.tmp
 scan.lock
 starting.lock
 reports/
+kept_photos/
 app.log*
 app-output.log
 app-error.log

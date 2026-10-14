@@ -406,7 +406,53 @@ def parse_price(text) -> float | None:
 
 _AREA_RE = re.compile(
     r"(\d{1,3}(?:[ .\u00a0]\d{3})+(?:,\d+)?|\d+ ?, ?\d{1,2}(?=\s*m)|\d+(?:[.,]\d+)?)\s*"
-    r"(m²|m2|m\s?2|mq|sq\.?\s?m|ha|hectares?)(?![a-z])", re.I)
+    r"(m²|m2|m\s?2|mq|sq\.?\s?m|ha|hectares?|metros?\s+cuadrados|metros?\s+quadrados"
+    r"|metri\s+quadri|mètres?\s+carrés|metres?\s+carres)(?![a-z])", re.I)
+# "superficie total de 45,33 metros" — the unit is cut off, but the word says it is the area.
+_SURFACE_METROS = re.compile(
+    r"(?:superficie\w*|area).{0,50}?"
+    r"(\d{1,3}(?:[ .\u00a0]\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?)\s+metros?\b",
+    re.I)
+# Court notices spell the size: "cincuenta y cinco metros con sesenta y seis decímetros".
+# Longer words first so "doscientos" is not read as "dos".
+_SPOKEN = {
+    "cero": 0, "un": 1, "uno": 1, "uma": 1, "una": 1,
+    "dos": 2, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cuatro": 4, "cinco": 5,
+    "seis": 6, "siete": 7, "sete": 7, "ocho": 8, "oito": 8, "nueve": 9, "nove": 9,
+    "diez": 10, "dez": 10, "once": 11, "onze": 11, "doce": 12, "trece": 13, "treze": 13,
+    "catorce": 14, "catorze": 14, "quince": 15, "quinze": 15,
+    "dieciseis": 16, "dezasseis": 16, "diecisiete": 17, "dezassete": 17,
+    "dieciocho": 18, "dezoito": 18, "diecinueve": 19, "dezanove": 19,
+    "veinte": 20, "vinte": 20, "veintiun": 21, "veintidos": 22, "veintitres": 23,
+    "veinticuatro": 24, "veinticinco": 25, "veintiseis": 26, "veintisiete": 27,
+    "veintiocho": 28, "veintinueve": 29,
+    "treinta": 30, "trinta": 30, "cuarenta": 40, "quarenta": 40,
+    "cincuenta": 50, "cinquenta": 50, "sesenta": 60, "sessenta": 60, "setenta": 70,
+    "ochenta": 80, "oitenta": 80, "noventa": 90,
+    "cien": 100, "cem": 100, "cento": 100, "ciento": 100,
+    "doscientos": 200, "doscientas": 200, "duzentos": 200,
+    "trescientos": 300, "trescientas": 300, "trezentos": 300,
+    "cuatrocientos": 400, "cuatrocientas": 400, "quatrocentos": 400,
+    "quinientos": 500, "quinientas": 500, "quinhentos": 500,
+    "seiscientos": 600, "seiscientas": 600, "seiscentos": 600,
+    "setecientos": 700, "setecientas": 700, "setecentos": 700,
+    "ochocientos": 800, "ochocientas": 800, "oitocentos": 800,
+    "novecientos": 900, "novecientas": 900, "novecentos": 900,
+    "mil": 1000,
+}
+_SPOKEN_TOKEN = "|".join(sorted(_SPOKEN, key=len, reverse=True))
+_SPOKEN_SEQ = rf"(?:{_SPOKEN_TOKEN})(?:\s+(?:y|e)\s+(?:{_SPOKEN_TOKEN})|\s+(?:{_SPOKEN_TOKEN})){{0,8}}"
+_WRITTEN_SQUARE = re.compile(
+    rf"\b({_SPOKEN_SEQ})\s+metros?\s+(?:cuadrados|quadrados)"
+    rf"(?:\s+(?:con\s+|y\s+|e\s+)?({_SPOKEN_SEQ})\s+decimetros?)?",
+    re.I)
+_WRITTEN_SURFACE = re.compile(
+    rf"(?:superficie\w*|area).{{0,60}}?({_SPOKEN_SEQ})\s+metros?"
+    rf"(?:\s+(?:con\s+|y\s+|e\s+)?({_SPOKEN_SEQ})\s+decimetros?)?",
+    re.I)
+_WRITTEN_DM = re.compile(
+    rf"\b({_SPOKEN_SEQ})\s+metros?\s+(?:con\s+|y\s+|e\s+)?({_SPOKEN_SEQ})\s+decimetros?",
+    re.I)
 
 
 def _area_value(number: str, unit: str) -> float | None:
@@ -420,28 +466,141 @@ def _area_value(number: str, unit: str) -> float | None:
     return value if value > 0 else None
 
 
-def find_areas(text) -> list[float]:
-    """Every size in a text, in m², in the order written."""
-    values = []
-    for m in _AREA_RE.finditer(str(text or "")):
+def _spoken_int(phrase: str | None) -> int | None:
+    """"ciento ochenta y tres" → 183. None when the phrase is not a number."""
+    if not phrase:
+        return None
+    total = current = 0
+    got = False
+    for tok in phrase.split():
+        if tok in ("y", "e"):
+            if not got:
+                return None
+            continue
+        val = _SPOKEN.get(tok)
+        if val is None:
+            return None
+        got = True
+        if tok == "mil":
+            current = (current or 1) * 1000
+            total += current
+            current = 0
+        else:
+            current += val
+    return total + current if got else None
+
+
+def _norm_origins(text: str) -> tuple[str, list[int]]:
+    """Normalized text, and the original index of each of its characters."""
+    chars: list[str] = []
+    origins: list[int] = []
+    for i, ch in enumerate(text):
+        for c in normalize(ch):
+            chars.append(c)
+            origins.append(i)
+    return "".join(chars), origins
+
+
+def _surface_digit_areas(text: str) -> list[tuple[int, float]]:
+    """"superficie total de 45,33 metros" → (index, 45.33). Searched without accents."""
+    if "metro" not in text.lower():
+        return []
+    norm, origins = _norm_origins(text)
+    found = []
+    for m in _SURFACE_METROS.finditer(norm):
+        value = _area_value(m.group(1), "m2")
+        if value:
+            found.append((origins[m.start(1)], value))
+    return found
+
+
+def _written_areas(text: str) -> list[tuple[int, float]]:
+    """Spelled sizes, as (index in `text`, m²). A frontage ("frente de dos metros") is not one."""
+    if "metro" not in text.lower():
+        return []
+    norm, origins = _norm_origins(text)
+    found: list[tuple[int, float]] = []
+    for rx in (_WRITTEN_SQUARE, _WRITTEN_DM, _WRITTEN_SURFACE):
+        for m in rx.finditer(norm):
+            whole = _spoken_int(m.group(1))
+            if whole is None or not 0 < whole <= 500_000:
+                continue
+            extra = _spoken_int(m.group(2))
+            value = whole + (extra or 0) / 100
+            start = origins[m.start(1)]
+            if any(abs(prev - start) < 3 for prev, _ in found):
+                continue
+            found.append((start, value))
+    return found
+
+
+def _iter_areas(text) -> list[tuple[int, float]]:
+    """Every size as (index, m²), in the order written."""
+    text = str(text or "")
+    found: list[tuple[int, float]] = []
+    for m in _AREA_RE.finditer(text):
         value = _area_value(m.group(1), m.group(2))
         if value:
-            values.append(value)
-    if not values:
-        # Italian court texts put the unit first: "di MQ. 90", "mq 127,22".
-        m = _AREA_UNIT_FIRST_RE.search(str(text or ""))
+            found.append((m.start(), value))
+    for start, value in _surface_digit_areas(text):
+        if not any(abs(prev - start) < 5 for prev, _ in found):
+            found.append((start, value))
+    for start, value in _written_areas(text):
+        if not any(abs(prev - start) < 5 for prev, _ in found):
+            found.append((start, value))
+    if not found:
+        # Italian court texts put the unit first: "di MQ. 90", "metri quadri 9".
+        m = _AREA_UNIT_FIRST_RE.search(text)
         if m:
             value = float(m.group(1).replace(".", "").replace(",", "."))
             if value > 0:
-                values.append(value)
-    return values
+                found.append((m.start(1), value))
+    found.sort()
+    return found
+
+
+def find_areas(text) -> list[float]:
+    """Every size in a text, in m², in the order written."""
+    return [value for _, value in _iter_areas(text)]
 
 
 def find_area(text) -> float | None:
     """The first size in a text, in m²: "d'environ 35,50 m²" → 35.5,
-    "com 1.250 m2" → 1250, "8 ha" → 80000. None if there is none."""
+    "com 1.250 m2" → 1250, "8 ha" → 80000, "cincuenta metros cuadrados" → 50.
+    None if there is none."""
     found = find_areas(text)
     return found[0] if found else None
+
+
+def possession(text) -> str | None:
+    """A sale's own occupancy line → "occupied" / "vacant" / None.
+
+    "No consta" stays unknown, even when the same note later says occupied.
+    "Sin ocupantes" is vacant; "ocupantes sin derecho" is still someone living there."""
+    t = normalize(text)
+    if not t or "no consta" in t:
+        return None
+    if "libre" in t or "desocupad" in t or "sin ocupantes" in t:
+        return "vacant"
+    if "ocupad" in t or "ocupante" in t or "okupa" in t or "arrendad" in t or "inquilin" in t:
+        return "occupied"
+    return None
+
+
+def auction_occupation(flags) -> str | None:
+    """PVP availability codes → "occupied" / "vacant" / None.
+
+    LIBER is vacant. OCCUP, OCCST (no title) and INCOR (being vacated) are
+    occupied. A mix is occupied. NON_SPECIFICATA says nothing."""
+    codes = {str(x).upper() for x in flags or [] if x}
+    codes.discard("NON_SPECIFICATA")
+    if not codes:
+        return None
+    if codes <= {"LIBER"}:
+        return "vacant"
+    if codes & {"OCCUP", "OCCST", "INCOR"}:
+        return "occupied"
+    return None
 
 
 # A size the text gives the land, not the house: "un terrain de 400 m²", "parcela de 767 m2".
@@ -463,14 +622,78 @@ def _area_introduced_by(text: str, area: float, pattern: re.Pattern) -> bool:
         return False
     hits = marked = 0
     window = 48
-    for m in _AREA_RE.finditer(text):
-        value = _area_value(m.group(1), m.group(2))
-        if value is None or abs(value - area) > 0.05:
+    for start, value in _iter_areas(text):
+        if abs(value - area) > 0.05:
             continue
         hits += 1
-        if pattern.search(text[max(0, m.start() - window):m.start()]):
+        if pattern.search(text[max(0, start - window):start]):
             marked += 1
     return hits > 0 and marked == hits
+
+
+# A counted block: "trois appartements T3", "2 logements de type T2 et un T4".
+# One flat ("un appartement T3", "Moradia T3") is not a block. "dos" is left
+# out: in Portuguese it is "of the", not the number two.
+_FLAT_NUM = (
+    r"1[0-2]|[1-9]|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|"
+    r"um|uma|dois|duas|tres|cuatro|cinco|due|tre|quattro"
+)
+_FLAT_NOUN = r"appartements?|apartamentos?|logements?|fogos?|viviendas?|alloggi|alloggio|apartments?|flats?"
+_FLAT_WORD = {
+    "un": 1, "une": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5,
+    "six": 6, "sept": 7, "huit": 8, "neuf": 9, "dix": 10, "onze": 11, "douze": 12,
+    "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+    "due": 2, "tre": 3, "quattro": 4,
+}
+_TYPED_FLATS = re.compile(
+    rf"\b({_FLAT_NUM})\s+(?:({_FLAT_NOUN})\s+)?(?:de\s+type\s+|type\s+)?([tf])\s*([1-6])\b")
+_UNTYPED_FLATS = re.compile(rf"\b({_FLAT_NUM})\s+({_FLAT_NOUN})\b")
+# "maison individuelle … de type F2": one dwelling, when no count already covers it.
+_TYPE_ONLY = re.compile(r"\b(?:de\s+)?type\s+([tf])\s*([1-6])\b")
+
+
+def _flat_number(word: str) -> int:
+    return _FLAT_WORD[word] if word in _FLAT_WORD else int(word)
+
+
+def counted_flats(text) -> tuple[dict[str, int], int]:
+    """({"T3": 3}, 0) when the text says three T3 apartments, and how many
+    more it counts with no type.
+
+    F3 is the same dwelling as T3. A bare "T3", or one apartment, is still
+    returned; a caller that guesses a floor requires two or more. The same
+    phrase is not read twice."""
+    low = normalize(text)
+    typed: dict[str, int] = {}
+    spans: list[tuple[int, int]] = []
+    for m in _TYPED_FLATS.finditer(low):
+        noun_here = m.group(2)
+        if not noun_here:
+            # "et un T3": only when this sentence already named a flat, and the
+            # count is a word. A digit here is a lot number ("appartement n°3 T3").
+            if m.group(1).isdigit():
+                continue
+            earlier = low[low.rfind(".", 0, m.start()) + 1:m.start()]
+            if not re.search(rf"\b(?:{_FLAT_NOUN})\b", earlier):
+                continue
+        n = _flat_number(m.group(1))
+        if n < 1:
+            continue
+        key = "T" + m.group(4)
+        typed[key] = typed.get(key, 0) + n
+        spans.append((m.start(), m.end()))
+    for m in _TYPE_ONLY.finditer(low):
+        if any(a <= m.start() and m.end() <= b for a, b in spans):
+            continue
+        key = "T" + m.group(2)
+        typed[key] = typed.get(key, 0) + 1
+        spans.append((m.start(), m.end()))
+    untyped = 0
+    for m in _UNTYPED_FLATS.finditer(low):
+        if any(a <= m.start() and m.end() <= b for a, b in spans):
+            continue
+        untyped += _flat_number(m.group(1))
+    return typed, untyped
 
 
 def find_floor_area(text) -> float | None:
@@ -479,13 +702,11 @@ def find_floor_area(text) -> float | None:
     with only "terrain 1034 m²", or only "área de implantação", has none,
     which is better than a rent on the land or on the ground it covers."""
     text = str(text or "")
-    for m in _AREA_RE.finditer(text):
-        before = text[max(0, m.start() - 48):m.start()]
+    for start, value in _iter_areas(text):
+        before = text[max(0, start - 48):start]
         if _LAND_BEFORE_AREA.search(before) or _FOOTPRINT_BEFORE_AREA.search(before):
             continue
-        value = _area_value(m.group(1), m.group(2))
-        if value:
-            return value
+        return value
     return None
 
 
@@ -504,7 +725,8 @@ def footprint_figure(text, area: float) -> bool:
     return _area_introduced_by(str(text or ""), area, _FOOTPRINT_BEFORE_AREA)
 
 
-_AREA_UNIT_FIRST_RE = re.compile(r"\bmq\.?\s*(\d{1,6}(?:,\d{1,2})?)\b", re.I)
+_AREA_UNIT_FIRST_RE = re.compile(
+    r"\b(?:mq\.?|metri\s+quadri)\s*(\d{1,6}(?:[.,]\d{1,2})?)\b", re.I)
 
 # "Parcelas de 0,8 a 2,8 ha": the plots for sale, not the development they sit in.
 _PLOT_SPAN = re.compile(

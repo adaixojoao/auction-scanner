@@ -37,8 +37,8 @@ and has **Update now**. During a scan, the update waits for the scan to finish.
 Untick *Update automatically when the app starts* to update only by hand.
 From a terminal: `python updater.py` (check) or `python updater.py apply`.
 
-It never overwrites your data (`auctions.db`, `config.json`, `reports/` and
-logs are not in git) and never overwrites files you changed in the app
+It never overwrites your data (`auctions.db`, `config.json`, `reports/`,
+`kept_photos/` and logs are not in git) and never overwrites files you changed in the app
 folder: then it tells you why it did not update. It skips the update when
 offline, when git is missing, or when the folder was not installed with
 `git clone`, and the app starts as it is.
@@ -59,7 +59,7 @@ another window.
 
 | Page | What it is for |
 |---|---|
-| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
+| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale; for France, the parcel named in the notice (its plot area and a map link) and, when the listing scores 85 or more and that parcel has a single building, the year and the use from the national building database. A listing at **85 or more** in any goal keeps its photos on this PC after the sale site takes them down, and the panel shows that gallery and the full description. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
@@ -133,8 +133,12 @@ The guidance in the app is a summary, not legal advice.
 **Details from the sale page.** For BOE auctions the scanner also reads the
 authority, deposit and goods tabs (court name and e-mail, file number,
 *situación posesoria*, visits); for licitor it opens each annonce (tribunal,
-hearing date and time, *mise à prix*, the seller's lawyer, visits, occupancy).
-Occupancy from these pages feeds the score. These parsers were written from
+hearing date and time, *mise à prix*, the seller's lawyer, visits, occupancy,
+each part of the property, and the street). A map pin on the page is used for
+the beach, the climate and the distances. The page says its accuracy is not
+guaranteed, and that warning stays on the pin. A
+sponsored "prices nearby" figure is not used. Occupancy from these pages feeds
+the score. These parsers were written from
 the sites' public layout and could not be tested against the live sites; the
 Sources page shows if they stop finding anything.
 
@@ -179,7 +183,14 @@ pay on top of the price:
   price. Both the gross figure and a **net** one are given: about 20% goes on
   the property tax, insurance, repairs and management, and about 8% on the
   months it stands empty (`costs.py`). The *Investment home* score uses the net
-  figure. Income tax is not in it.
+  figure. Income tax is not in it. A building the ad counts as several flats
+  ("trois appartements T3") but gives no floor area is let as that many homes,
+  each at a modest planning size that the figure names. That size is not used
+  as the building's floor, so it is not a discount against local sale prices,
+  and the repairs are not in the yield. Italian cadastral *vani* are rooms, not
+  square metres. When the notice states no floor, one consistenza is counted at
+  15 m² a vano — below the 20 m² agents often use — and the figure says so.
+  Several different vani are not added together.
 
 All of it is an estimate. The Portuguese IMT is charged on the higher of the
 price and the taxable value (VPT), which the listings do not publish, and the
@@ -194,7 +205,7 @@ goal: a plot is not a bad home, it is somewhere else on the board.
 
 | Tab | What it ranks | Budget (Settings) |
 |---|---|---|
-| **My home** | A home to live in — not a plot. Somewhere to swim within 1.5 km, your five wishes, mild winters if the Atlantic current fails. | *a home to live in* |
+| **My home** | A home to live in — not a plot. The sea within 10 km, with more points the closer it is; your five wishes; mild winters if the Atlantic current fails. | *a home to live in* |
 | **Investment home** | A home to make money on: far below the local price **all-in** (price + taxes + fees + the work), a net rental yield, by the beach, forced and bank sales. | *a home to let or resell* |
 | **Investment land** | A plot as an investment: cheap per hectare against what land goes for in that district, big enough, reachable, water on it — with the forestry upside counted on top. | *land* |
 | **Forestry** | A forestry project: cheap per hectare, and a sale that can close sooner. 10 ha is the project, from 5 ha a first plot. Portugal first, because you can visit it. No deadline of this year. | *land* |
@@ -265,7 +276,20 @@ than €20,001 instead of jumping at a step.
   few a scan, each once) and the reason says *(from the photos)*. By default an
   open model on this PC through [Ollama](https://ollama.com) (free and private:
   install it, then `ollama pull qwen2.5vl:3b`); or Claude with an Anthropic API
-  key. Settings → Photo check.
+  key. Settings → Photo check. A home with no photos of its own, but a pin on the
+  building (the sale's coordinates, the cadastre, or a pin you verified), is
+  looked at with open pictures and no key: a [Panoramax](https://panoramax.fr)
+  street photo when one was taken within 40 m, and the national aerial survey
+  in Portugal (DGT), Spain (PNOA) and France (IGN). Germany and Italy have no
+  single open aerial survey wired in, so only the street photo is asked for
+  there. Only an obvious ruin — no roof, a collapsed roof, or missing walls —
+  changes the score, and the reason says it came from an open aerial or street
+  photo. A roof that is still on is noted and does not count as good condition:
+  the inside was not in the picture. No picture, or a town pin, leaves the
+  condition unstated. A listing shown at **85 or more** in any goal keeps its
+  photos on this PC (the sale site takes them down afterwards) and its detail
+  panel shows the whole gallery and the full description. Those listings are
+  also the first to be placed and checked for climate.
 - **Water from the map.** For a property with an exact position (the sale's
   coordinates or its street), OpenStreetMap is asked whether a river, stream,
   lake or reservoir is within 300 m; it counts like the words *junto ao rio*.
@@ -347,7 +371,26 @@ shortlist them.
 Words match whole words, accents ignored, and negations are understood:
 *desocupado* is vacant, not occupied; *não necessita de obras* does not count
 as needing work; *Casal do Mato* is not a *casa*; *Rio Maior* is a town, not a
-river. The **AI check** is told the goal of the tab the listing came from, not
+river. A size spelled out in the notice is read too ("cincuenta y cinco metros
+con sesenta y seis decímetros cuadrados", "190 metros cuadrados", "128 metri
+quadri"). When the notice states no floor, one dwelling in Catastro is used,
+and labelled as such; several dwellings are not added together. An Italian lot
+marked *libero* or *occupato*, and a Spanish posesoria that names an occupant,
+counts as vacant or occupied. A Spanish sale marked as the debtor's main home
+counts as occupied, and the stricter bid rules for a main home are named. A sale
+that cannot be visited is left off the lists. A Spanish cadastral reference,
+including the one stored on the detail page, is used to place the building.
+A French notice that names one parcel (section and number, or the 14-character
+id) is placed on that parcel, and the cadastre's plot area is shown. Several
+parcels, or two communes, are not given one pin. A listing at 85 or more is
+also asked of France's national building database: the year and the use are
+shown only when that parcel has a single building, and they do not change the
+score. A German list that gives a postcode and a town ("78647 Trossingen") is placed
+there; a street and a house number in that line are looked up as the building.
+Two different towns in one lot are not given one pin. The town alone is an
+approximate position: climate and distances say "about", and it is not treated
+as the building's beach. Germany has no municipal rent series in the scanner,
+so a rent is not invented from the town. The **AI check** is told the goal of the tab the listing came from, not
 a mixture of all of them.
 
 ## Sources and their health
@@ -471,6 +514,7 @@ costs.py        taxes, fees, work     prices.py      local €/m² (data/pt_home
 cartas.py       Citius batch letters  report.py      report files
 analysis.py     Claude calls          ics_export.py  calendar files
 geo.py          map positions, towns  listing_info.py  the ⓘ panel
+cadastre.py     parcel from the notice photos.py       photo check, kept photos
 scheduler.py    timetable             telegram_alert.py, notifications.py
 ```
 
@@ -493,9 +537,10 @@ Every listing's ⓘ panel says how exact its **location** is: exact (the sale's
 coordinates, the cadastre, or a position you verified), street, village or
 parish, municipality, or unknown. It also says what the checks are good for at
 that level. **Verify location** takes coordinates (or a Google Maps link), an
-address (looked up on OpenStreetMap) or, in Spain, a cadastral reference. Your
-position comes first, the scanner's own is kept beside it, and each change is
-logged. On Offers, an offer for a listing placed only at its town warns you;
+address (looked up on OpenStreetMap) or, in Spain, a cadastral reference.
+A French parcel is read from the notice on the next scan; this box does not
+look one up. Your position comes first, the scanner's own is kept beside it,
+and each change is logged. On Offers, an offer for a listing placed only at its town warns you;
 with Settings → Location check set to "ask my reason", it is sent or logged
 only with a reason, which is kept with the offer.
 
