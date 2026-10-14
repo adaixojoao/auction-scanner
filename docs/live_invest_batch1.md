@@ -60,11 +60,11 @@ Extra fields such as `starred`, `score`, `source`, and `override` are ignored. T
 
 Timestamps are strings. A trailing `Z` is accepted. Naive or malformed timestamps raise. `reviewed_at` cannot precede `observed_at`. `observed_at` and `reviewed_at` cannot be after `now`.
 
-Evidence is stale when `now` is at or after the earlier of `valid_until` and `observed_at + max_age_seconds`. A later review date does not refresh the observation. Stale evidence is unknown. A historic pass or adverse code is kept on `historic_reason_codes` and mentioned in the research text.
+Evidence is stale when `now` is at or after the earlier of `valid_until` and `observed_at + max_age_seconds`. A later review date does not refresh the observation. Stale evidence is unknown. A historic pass or adverse code is kept on `historic_reason_codes` and mentioned in the research text. Adding a permitted freshness window, or converting an offset to UTC, raises `EligibilityError` when the result cannot be represented. It is not clamped and it is not treated as the absence of a limit.
 
 A finding whose property or sale id differs from the envelope is unknown (`evidence.mismatch`), not a pass.
 
-Current reviewed pass and fail for the same key conflict. A current asserted or inferred finding that says the opposite of a current reviewed pass or fail also conflicts. The state is unknown with `evidence.conflict`, whatever the list order. Conflict is resolved only by explicit reviewed supersession.
+Current reviewed pass and fail for the same key conflict. A current asserted or inferred finding conflicts with a reviewed pass when its details are adverse or contradictory under the same predicates, even if its finding word is `undetermined` or `meets`. An empty undetermined record does not. The state is unknown with `evidence.conflict`, the warning is `conflicting`, and the result does not become a verified failure. Stale, out-of-scope, and wrong-policy records do not count. Conflict is resolved only by explicit reviewed supersession.
 
 `supersedes` must name another finding in the same requirement, property, and sale. The replacement itself must be reviewed, must be `meets` or `fails`, and must be an adequate consistent pass or fail. That applies even when the target is only asserted or inferred. Cycles (including a self-cycle and an equal-time pair), two replacements of one record, missing ids, cross-scope references, an older observation, and an older review date raise `EligibilityError`. An undetermined or otherwise inadequate replacement raises rather than erasing the target.
 
@@ -158,9 +158,26 @@ Batch 1A, after the corrections in this file:
 | `python -m pytest -q` | 0 | `875 passed in 397.29s (0:06:37)` |
 | pyflakes on top-level modules, `sources`, `tests`, and `scripts` | 0 | no findings |
 
+Batch 1B, after the two corrections above:
+
+| Command | Exit | Summary |
+| --- | --- | --- |
+| `python -m pytest -q tests/test_eligibility.py` | 0 | `98 passed in 5.12s` |
+| `python -m pytest -q` | 0 | `886 passed in 247.09s (0:04:07)` |
+| pyflakes on top-level modules, `sources`, `tests`, and `scripts` | 0 | no findings |
+
 ## 5. Trust boundary
 
 A recommended result means every mandatory key had adequate current reviewed support in the supplied objects, under the supplied policy, at the supplied time. It does not mean the property is safe, the reviewer is real, the document was read, or the financial assessment was recalculated. Batch 0's scoring and loader behaviour is untouched.
+
+## 5a. Batch 1B defects found on `c3dcbb1`
+
+These were reproduced on `c3dcbb1a6ce88327afc92a097c0ad64cec912574` before the correction. They are evaluator-contract defects. They do not change Batch 0's findings about the running application.
+
+| Case | On `c3dcbb1` | Corrected semantics |
+| --- | --- | --- |
+| Inferred or asserted `undetermined` legal access with `access: none`, beside a complete reviewed pass | `recommended`; legal access passed; the warning was `insufficient` | `research_needed`; legal access `unknown` with `evidence.conflict`; the warning is `conflicting`. Not a verified failure |
+| `residential_identity` observed `9999-12-30T11:00:00+00:00`, reviewed 30 minutes later, `now` `9999-12-30T12:00:00+00:00`, freshness `34560000` seconds | `OverflowError: date value out of range` | `EligibilityError` naming the freshness addition. The same applies to a UTC conversion that cannot be represented |
 
 ## 6. Next batch, still paused
 

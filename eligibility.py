@@ -183,7 +183,8 @@ def _requirement(key: str, findings: list[dict], evidence: dict, rules: dict, no
     inconsistent = [item for item in usable if _role(key, item, rules) == "inconsistent"]
     reviewed_pass = [item for item in usable if _role(key, item, rules) == "pass"]
     reviewed_fail = [item for item in usable if _role(key, item, rules) == "fail"]
-    conflict = _conflicts(reviewed_pass, reviewed_fail, usable)
+    concerns = [item for item in usable if _unreviewed_concern(key, item, rules)]
+    conflict = _conflicts(reviewed_pass, reviewed_fail, usable) or bool(reviewed_pass and concerns)
     historic = _unique(_historic_code(key, item, rules) for item in stale)
 
     if conflict:
@@ -201,6 +202,9 @@ def _requirement(key: str, findings: list[dict], evidence: dict, rules: dict, no
         codes = _unique([*codes, "evidence.inconsistent"])
 
     conflict_ids = _conflict_ids(reviewed_pass, reviewed_fail, usable) if conflict else set()
+    if reviewed_pass and concerns:
+        conflict_ids.update(item["id"] for item in reviewed_pass)
+        conflict_ids.update(item["id"] for item in concerns)
     shown = [*in_scope, *out_of_scope]
     research = _research_text(key, codes, historic) if state == "unknown" else None
     return {
@@ -234,6 +238,21 @@ def _trace(item, key, rules, now, evidence, resolved, mismatched, passes, fails,
     else:
         disposition = "insufficient"
     return {"id": item["id"], "provenance": item["provenance"], "disposition": disposition}
+
+
+def _unreviewed_concern(key: str, item: dict, rules: dict) -> bool:
+    """Adverse or contradictory content, apart from whether anyone reviewed it.
+
+    The finding word and an empty undetermined record are not enough. Details
+    use the same predicates as a reviewed failure. This does not make the
+    record a verified failure.
+    """
+    if item["provenance"] == "reviewed":
+        return False
+    details = item.get("details") or {}
+    if not isinstance(details, dict):
+        return False
+    return bool(_detail_conflict(key, details, rules) or _adverse_code(key, details, rules))
 
 
 def _conflicts(passes: list[dict], fails: list[dict], usable: list[dict]) -> bool:
@@ -492,7 +511,7 @@ def _is_stale(item: dict, rule: dict, now: datetime) -> bool:
     if item.get("valid_until") is not None:
         moments.append(item["valid_until"])
     if "max_age_seconds" in rule:
-        moments.append(item["observed_at"] + timedelta(seconds=rule["max_age_seconds"]))
+        moments.append(_add_seconds(item["observed_at"], rule["max_age_seconds"], "observed_at"))
     if not moments:
         return False
     return now >= min(moments)
@@ -743,7 +762,21 @@ def _adequate_replacement(item: dict, rules: dict) -> bool:
 def _require_aware(now: datetime, field: str) -> datetime:
     if not isinstance(now, datetime) or now.tzinfo is None or now.tzinfo.utcoffset(now) is None:
         raise EligibilityError(f"{field} must be timezone-aware")
-    return now.astimezone(timezone.utc)
+    return _to_utc(now, field)
+
+
+def _add_seconds(moment: datetime, seconds, field: str) -> datetime:
+    try:
+        return moment + timedelta(seconds=seconds)
+    except OverflowError as exc:
+        raise EligibilityError(f"{field} plus its freshness limit is outside the supported date range") from exc
+
+
+def _to_utc(moment: datetime, field: str) -> datetime:
+    try:
+        return moment.astimezone(timezone.utc)
+    except OverflowError as exc:
+        raise EligibilityError(f"{field} is outside the supported date range") from exc
 
 
 def _parse_time(value, field: str) -> datetime:
@@ -758,7 +791,7 @@ def _parse_time(value, field: str) -> datetime:
         raise EligibilityError(f"{field} must be an aware timestamp") from exc
     if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
         raise EligibilityError(f"{field} is naive")
-    return parsed.astimezone(timezone.utc)
+    return _to_utc(parsed, field)
 
 
 def _require_text(value, field: str) -> str:

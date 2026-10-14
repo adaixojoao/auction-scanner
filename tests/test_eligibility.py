@@ -725,3 +725,152 @@ def test_malformed_shapes_raise_eligibility_error(mutate):
         evidence["findings"][REQUIREMENT_KEYS.index("residential_identity")]["details"]["bundle"] = "true"
     with pytest.raises(EligibilityError):
         evaluate(evidence, policy, NOW)
+
+
+def _with_warning(provenance, **kw):
+    findings = complete()
+    findings.append(finding("legal_access", id="access-warning", provenance=provenance, **kw))
+    return findings
+
+
+@pytest.mark.parametrize("provenance", ["inferred", "asserted"])
+def test_unreviewed_undetermined_adverse_details_block_a_pass(provenance):
+    # On c3dcbb1 this stayed recommended and legal_access passed.
+    result = evaluate(envelope(_with_warning(
+        provenance, finding="undetermined", details={"access": "none"})), make_policy(), NOW)
+    assert result["readiness"] == "research_needed"
+    item = row(result, "legal_access")
+    assert item["state"] == "unknown"
+    assert "evidence.conflict" in item["reason_codes"]
+    assert "safety.legal_access" not in item["reason_codes"]
+    names = {entry["id"]: entry["disposition"] for entry in item["evidence"]}
+    assert names["access-warning"] == "conflicting"
+    assert names["f-legal_access"] == "conflicting"
+
+
+@pytest.mark.parametrize("provenance", ["inferred", "asserted"])
+def test_unreviewed_meets_with_adverse_details_blocks_a_pass(provenance):
+    result = evaluate(envelope(_with_warning(
+        provenance, finding="meets", details={"access": "none"})), make_policy(), NOW)
+    assert result["readiness"] == "research_needed"
+    assert row(result, "legal_access")["state"] == "unknown"
+    assert "safety.legal_access" not in row(result, "legal_access")["reason_codes"]
+
+
+def test_unreviewed_financial_and_hazard_contradictions_block_a_pass():
+    money = complete()
+    money.append(finding(
+        "financial_evidence", id="fin-warning", provenance="inferred", finding="undetermined",
+        details={**FINANCIAL, "basis": "conservative-scenario", "basis_ok": False}))
+    financial = evaluate(envelope(money), make_policy(), NOW)
+    assert row(financial, "financial_evidence")["state"] == "unknown"
+    assert "evidence.conflict" in row(financial, "financial_evidence")["reason_codes"]
+    assert "financial.evidence" not in row(financial, "financial_evidence")["reason_codes"]
+
+    hazards = copy.deepcopy(HAZARDS)
+    hazards["fire"] = {**hazards["fire"], "acceptable": False}
+    danger = complete()
+    danger.append(finding(
+        "hazard_acceptability", id="hazard-warning", provenance="asserted", finding="meets",
+        details={"acceptable": True, "hazards": hazards, **POLICY_BIND}))
+    hazard = evaluate(envelope(danger), make_policy(), NOW)
+    assert row(hazard, "hazard_acceptability")["state"] == "unknown"
+    assert "safety.hazard_acceptability" not in row(hazard, "hazard_acceptability")["reason_codes"]
+    assert financial["readiness"] == "research_needed"
+    assert hazard["readiness"] == "research_needed"
+
+
+def test_an_empty_undetermined_record_does_not_invent_a_conflict():
+    result = evaluate(envelope(_with_warning(
+        "inferred", finding="undetermined", details={})), make_policy(), NOW)
+    assert result["readiness"] == "recommended"
+    assert row(result, "legal_access")["state"] == "pass"
+    names = {entry["id"]: entry["disposition"] for entry in row(result, "legal_access")["evidence"]}
+    assert names["access-warning"] == "insufficient"
+    assert names["f-legal_access"] == "supporting"
+
+
+def test_stale_scoped_and_mismatched_warnings_do_not_block_a_pass():
+    stale = _with_warning(
+        "inferred", finding="undetermined", details={"access": "none"},
+        observed_at="2026-09-01T12:00:00+00:00", valid_until="2026-10-01T12:00:00+00:00")
+    stale_result = evaluate(envelope(stale), make_policy(), NOW)
+    assert row(stale_result, "legal_access")["state"] == "pass"
+    stale_names = {entry["id"]: entry["disposition"] for entry in row(stale_result, "legal_access")["evidence"]}
+    assert stale_names["access-warning"] == "stale"
+
+    other = _with_warning("asserted", finding="undetermined", details={"access": "none"}, subject_id="flat-2")
+    other_result = evaluate(envelope(other), make_policy(), NOW)
+    assert row(other_result, "legal_access")["state"] == "pass"
+    other_names = {entry["id"]: entry["disposition"] for entry in row(other_result, "legal_access")["evidence"]}
+    assert other_names["access-warning"] == "mismatch"
+
+    money = complete()
+    money.append(finding(
+        "financial_evidence", id="fin-other", provenance="inferred", finding="undetermined",
+        details={**FINANCIAL, "financial_policy_version": "other", "basis": "conservative-scenario",
+                 "basis_ok": False}))
+    mismatched = evaluate(envelope(money), make_policy(), NOW)
+    assert row(mismatched, "financial_evidence")["state"] == "pass"
+    money_names = {entry["id"]: entry["disposition"] for entry in row(mismatched, "financial_evidence")["evidence"]}
+    assert money_names["fin-other"] == "policy_mismatch"
+    assert stale_result["readiness"] == other_result["readiness"] == mismatched["readiness"] == "recommended"
+
+
+def test_unreviewed_concerns_are_order_independent_and_are_not_failures_alone():
+    warning = finding("legal_access", id="access-warning", provenance="inferred", finding="undetermined",
+                      details={"access": "none"})
+    base = complete()
+    forward = evaluate(envelope([*base, warning]), make_policy(), NOW)
+    backward = evaluate(envelope([warning, *reversed(base)]), make_policy(), NOW)
+    assert forward == backward
+    assert {entry["id"] for entry in row(forward, "legal_access")["evidence"]
+            if entry["disposition"] == "conflicting"} == {"access-warning", "f-legal_access"}
+
+    alone = [item for item in complete() if item["requirement_key"] != "legal_access"]
+    alone.append(finding("legal_access", id="access-warning", provenance="asserted", finding="undetermined",
+                         details={"access": "none"}))
+    only = evaluate(envelope(alone), make_policy(), NOW)
+    assert only["readiness"] == "research_needed"
+    assert row(only, "legal_access")["state"] == "unknown"
+    assert "safety.legal_access" not in row(only, "legal_access")["reason_codes"]
+
+
+def test_a_date_near_the_maximum_raises_eligibility_error_not_overflow():
+    # On c3dcbb1 this raised OverflowError: date value out of range.
+    now = datetime(9999, 12, 30, 12, 0, tzinfo=timezone.utc)
+    findings = complete()
+    findings[0] = finding(
+        findings[0]["requirement_key"],
+        observed_at="9999-12-30T11:00:00+00:00",
+        reviewed_at="9999-12-30T11:30:00+00:00")
+    with pytest.raises(EligibilityError, match="freshness"):
+        evaluate(envelope(findings), make_policy(), now)
+
+
+def test_utc_conversion_overflow_raises_eligibility_error():
+    late = datetime(9999, 12, 31, 20, 0, tzinfo=timezone(timedelta(hours=-8)))
+    early = datetime(1, 1, 1, 0, 30, tzinfo=timezone(timedelta(hours=5)))
+    with pytest.raises(EligibilityError, match="now"):
+        evaluate(envelope([]), make_policy(), late)
+    with pytest.raises(EligibilityError, match="now"):
+        evaluate(envelope([]), make_policy(), early)
+    findings = complete()
+    findings[0] = finding(findings[0]["requirement_key"], observed_at="9999-12-31T23:00:00-05:00",
+                          reviewed_at="9999-12-31T23:30:00-05:00")
+    with pytest.raises(EligibilityError, match="observed_at"):
+        evaluate(envelope(findings), make_policy(), NOW)
+
+
+def test_ordinary_expiry_arithmetic_still_distinguishes_the_boundary():
+    assert evaluate(envelope(complete()), make_policy(), NOW)["readiness"] == "recommended"
+    at_limit = (NOW - timedelta(seconds=3600)).isoformat()
+    boundary = complete()
+    boundary[REQUIREMENT_KEYS.index("floor_area")] = finding(
+        "floor_area", observed_at=at_limit, reviewed_at=at_limit, valid_until=NOW.isoformat())
+    assert row(evaluate(envelope(boundary), make_policy(), NOW), "floor_area")["state"] == "unknown"
+    inside = complete()
+    inside[REQUIREMENT_KEYS.index("floor_area")] = finding(
+        "floor_area", observed_at=at_limit, reviewed_at=at_limit,
+        valid_until=(NOW + timedelta(seconds=1)).isoformat())
+    assert row(evaluate(envelope(inside), make_policy(), NOW), "floor_area")["state"] == "pass"
