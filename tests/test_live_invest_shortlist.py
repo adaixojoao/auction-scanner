@@ -145,42 +145,77 @@ def test_unresolved_floor_is_not_labelled_within_budget():
     assert starred["status"] == "incomplete"
 
 
-def test_unvalued_living_score_does_not_bypass_the_saved_minimum(db, add, monkeypatch):
+def test_unvalued_minimum_uses_the_living_score(db, add, monkeypatch):
     import config
     import dashboard
     from db import load_listings
 
-    config.save_config({"filters": {"min_score": 40}, "cash_on_hand": 40000})
+    config.save_config({"filters": {"min_score": 40}, "cash_on_hand": 10_000_000})
     add("eleiloes", "low", title="Moradia T3", price=22000, area_m2=90,
+        description="moradia em bom estado")
+    add("eleiloes", "fit", title="Moradia T3", price=22000, area_m2=90,
+        description="moradia em bom estado")
+    add("eleiloes", "priced", title="Moradia T3", price=22000, area_m2=90,
         description="moradia em bom estado")
 
     def fake(item, now=None, targets=None, mode="home"):
-        if mode == "both":
+        if mode != "both":
+            return 80.0, ["home"]
+        if item["id"].endswith("low"):
             item["live_score"] = 10.0
             item["invest_score"] = None
             item["research_only"] = True
-            return 0.0, ["Investment value not established — not ranked"]
-        return 55.0, ["home"]
+            return 0.0, ["Investment value not established"]
+        if item["id"].endswith("fit"):
+            item["live_score"] = 70.0
+            item["invest_score"] = None
+            item["research_only"] = True
+            return 0.0, ["Investment value not established"]
+        item["live_score"] = 80.0
+        item["invest_score"] = 20.0
+        item["research_only"] = False
+        return 60.0, ["priced below the minimum"]
 
     monkeypatch.setattr(scoring, "score_detail", fake)
-    assert load_listings(db, filters={"min_score": 40}, mode="both", now=NOW) == []
-    hidden = [it for it in load_listings(db, filters={"min_score": 40}, mode="both",
-                                         include_hidden=True, now=NOW) if it["id"] == "eleiloes:low"]
-    assert hidden[0]["live_score"] == 10.0 and hidden[0]["score"] == 0.0
-    assert hidden[0]["hidden_reason"].startswith("score 0 < filters.min_score 40")
+    filters = config.load_config()["filters"]
+    shown = load_listings(db, filters=filters, mode="both", now=NOW)
+    assert [it["id"] for it in shown] == ["eleiloes:fit"]
+    fit = shown[0]
+    assert fit["score"] == 0.0 and fit["live_score"] == 70.0
+    assert fit["invest_score"] is None and fit["research_only"] is True
+    again = load_listings(db, filters=filters, mode="both", now=NOW)
+    assert [it["id"] for it in again] == ["eleiloes:fit"]
+    assert again[0]["score"] == 0.0 and again[0]["invest_score"] is None
+
+    hidden = {it["id"]: it for it in load_listings(
+        db, filters=filters, mode="both", include_hidden=True, now=NOW)}
+    assert hidden["eleiloes:low"]["score"] == 0.0
+    assert hidden["eleiloes:low"]["live_score"] == 10.0
+    assert hidden["eleiloes:low"]["hidden_reason"].startswith("score 10 < filters.min_score 40")
+    assert hidden["eleiloes:priced"]["live_score"] == 80.0
+    assert hidden["eleiloes:priced"]["score"] < 40
+    assert hidden["eleiloes:priced"]["hidden_reason"].startswith(
+        f"score {hidden['eleiloes:priced']['score']:.0f} < filters.min_score 40")
 
     dashboard._LISTS.clear()
     dashboard.app.config["TESTING"] = True
-    blocked = dashboard.app.test_client().get("/api/listings?mode=both&min_score=0").get_json()
-    assert blocked["items"] == []
-    assert blocked["research"]["unvalued"] == []
-    assert blocked["research"]["valued"] == []
+    client = dashboard.app.test_client()
+    saved = client.get("/api/listings?mode=both&min_score=0").get_json()
+    assert [it["id"] for it in saved["items"]] == ["eleiloes:fit"]
+    assert [it["id"] for it in saved["research"]["unvalued"]] == ["eleiloes:fit"]
+    assert saved["research"]["valued"] == []
+    assert saved["research"]["unvalued"][0]["live_score"] == 70.0
+    assert saved["research"]["unvalued"][0]["invest_score"] is None
 
-    config.save_config({"filters": {"min_score": 0}, "cash_on_hand": 40000})
+    config.save_config({"filters": {"min_score": 0}, "cash_on_hand": 10_000_000})
+    filters = config.load_config()["filters"]
+    assert {it["id"] for it in load_listings(db, filters=filters, mode="both", now=NOW)} == {
+        "eleiloes:low", "eleiloes:fit", "eleiloes:priced"}
     dashboard._LISTS.clear()
-    shown = dashboard.app.test_client().get("/api/listings?mode=both&min_score=0").get_json()
-    assert [it["id"] for it in shown["research"]["unvalued"]] == ["eleiloes:low"]
-    assert shown["research"]["unvalued"][0]["live_score"] == 10.0
+    page = client.get("/api/listings?mode=both&min_score=40").get_json()
+    assert [it["id"] for it in page["items"]] == ["eleiloes:fit"]
+    assert [it["id"] for it in page["research"]["unvalued"]] == ["eleiloes:fit"]
+    assert page["research"]["valued"] == []
 
 
 def test_portal_auction_figure_is_a_reference_not_the_acquisition_price(db, add, monkeypatch):

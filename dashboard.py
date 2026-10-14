@@ -31,7 +31,7 @@ import geo
 from common import COUNTRY_NAMES, FLAGS, make_session, mode_max_price, price_to_pay, safe_url
 from locks import lock_holder
 from db import (DISMISS_REASONS, attention_reason, connect, hidden_category, keep_scores_for, load_best,
-                 load_listings, set_listing_status, source_health, unchecked_over_cap)
+                 load_listings, minimum_bar, set_listing_status, source_health, unchecked_over_cap)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -505,7 +505,7 @@ def api_listings():
                   if _matches(it, country, source, tipo, max_price, search)
                   # long-ended sales are not counted among the open view's hidden ones
                   and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
-                  and it["score"] >= min_score
+                  and minimum_bar(it, mode) >= min_score
                   and (not properties_only or it["category"] == "imoveis")
                   and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
         if climate_grade or climate_exact:
