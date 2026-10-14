@@ -37,13 +37,13 @@ def _eur(v: float) -> str:
 def _value(item: dict, kind: str | None, targets: dict, unknowns: list[str]) -> dict | None:
     """{"amount", "basis", "confidence", "note"}: what the property is estimated
     to be worth (a home), or what you are willing to pay for land (a plot)."""
-    area = item.get("area_m2") or 0
     if kind == "home":
+        area, floor_source = costs.building_m2(item)
         if not area:
             unknowns.append("the floor area")
             return None
-        if area > costs.MAX_HOME_M2:
-            unknowns.append("the floor area (the area given is the plot's)")
+        if floor_source not in ("stored", "notice", "catastro"):
+            unknowns.append("the floor area (the stored figure is not an established floor)")
             return None
         mv = market_value_estimate(item)
         if not mv:
@@ -53,10 +53,13 @@ def _value(item: dict, kind: str | None, targets: dict, unknowns: list[str]) -> 
         factor, why = local_value_factor(item)
         confidence = "low" if source == "city estimate" or condition(item) == "unknown" else "medium"
         counted = f", counted at {factor:.0%} ({', '.join(why)})" if why else ""
+        where = {"notice": "the floor in the notice", "catastro": "the Catastro dwelling",
+                 "stored": "the stored floor area"}[floor_source]
         return {"amount": mv * factor, "basis": "market", "confidence": confidence,
-                "note": f"€{eur_m2:,.0f}/m² × {area:,.0f} m², the local median ({source}){counted}. "
+                "note": f"€{eur_m2:,.0f}/m² × {area:,.0f} m² ({where}), the local median ({source}){counted}. "
                         "A median for the area, not a valuation of this property."}
     if kind == "rural_plot":
+        area = item.get("area_m2") or 0
         if not area:
             unknowns.append("the land area")
             return None

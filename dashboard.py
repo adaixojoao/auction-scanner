@@ -417,6 +417,60 @@ def _matches(it: dict, country, source, tipo, max_price, search) -> bool:
     return True
 
 
+def _research_candidates(items: list, cash: float) -> dict:
+    """Up to three priced leads, and unvalued ones kept in a separate group.
+
+    Built from the listings this view already scored. Not a second ranker.
+    """
+    import costs
+    import geo
+    from scoring import condition
+    valued, unvalued = [], []
+    visible = sorted((it for it in items if not it.get("hidden_reason")),
+                     key=lambda it: it.get("score") or 0, reverse=True)
+    for it in visible:
+        unpriced = bool(it.get("research_only"))
+        if not unpriced and it.get("invest_score") is None:
+            continue
+        bucket = unvalued if unpriced else valued
+        if unpriced or (it.get("score") or 0) > 0:
+            if len(bucket) < 3:
+                bucket.append(it)
+    def card(it, group):
+        plan = costs.planning_view(it, cash)
+        level = (geo.location_confidence(it) or {}).get("level")
+        gaps = []
+        if group == "unvalued":
+            gaps.append("Investment value not established")
+        if level not in ("exact", "sale"):
+            gaps.append("Location is not established as the building")
+        if condition(it) == "unknown":
+            gaps.append("Condition is not stated")
+        if not it.get("date_end"):
+            gaps.append("No sale deadline is stored")
+        if not costs.floor_resolution(it)["established"]:
+            gaps.append("Floor area not established")
+        gaps.append("Sale availability is not verified")
+        gaps.append("Hazard coverage is not a complete survey")
+        gaps.append("Title, possession and legal access are not verified")
+        return {
+            "id": it.get("id"), "title": it.get("title") or "", "source": it.get("source") or "",
+            "url": safe_url(it.get("url")), "status": it.get("status") or "",
+            "lookup": it.get("external_id") or it.get("id"),
+            "live_score": it.get("live_score"), "invest_score": it.get("invest_score"),
+            "planning": plan,
+            "valuation": ("Investment value not established" if group == "unvalued"
+                          else "Local median used as a planning figure, not a valuation of this property"),
+            "gaps": gaps,
+        }
+    return {
+        "heading": "Research candidates — diligence incomplete",
+        "valued": [card(it, "valued") for it in valued],
+        "unvalued": [card(it, "unvalued") for it in unvalued],
+        "duplicates": "Duplicate matching is unchanged: two cards can still be the same property.",
+    }
+
+
 @app.route("/api/listings")
 def api_listings():
     args = request.args
@@ -451,7 +505,8 @@ def api_listings():
                   if _matches(it, country, source, tipo, max_price, search)
                   # long-ended sales are not counted among the open view's hidden ones
                   and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
-                  and it["score"] >= min_score and (not properties_only or it["category"] == "imoveis")
+                  and (it["score"] >= min_score or (mode == "both" and it.get("research_only")))
+                  and (not properties_only or it["category"] == "imoveis")
                   and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
         if climate_grade or climate_exact:
             loaded = [it for it in loaded if _climate_matches(it, climate_grade, climate_exact)]
@@ -505,6 +560,8 @@ def api_listings():
         },
         "last_scrape": last_scrape,
         "cash": _cash_public(),
+        "research": (_research_candidates(visible, float(_cash_public().get("amount") or 0))
+                     if mode == "both" else None),
     })
 
 

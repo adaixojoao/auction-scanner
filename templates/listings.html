@@ -67,6 +67,8 @@
   <button class="btn btn-primary" onclick="page=1; load()">Apply</button>
 </div>
 
+<section id="research-candidates" hidden></section>
+
 <table class="list">
   <thead><tr>
     <th class="sortable" data-sort="score">Score</th>
@@ -93,7 +95,7 @@ const $ = id => document.getElementById(id);
 
 // Each goal ranked on its own (scoring.MODES).
 const MODE_NOTE = {
-  both: "Homes you could live in that can also be priced as an investment. The pin is the house, the sea is within 1.5 km, the climate is good or excellent, and the floor is real. The ceiling is the all-in cost against your cash, not the asking price. The number is the worse of the two scores, or the living score when no local sale price exists.",
+  both: "Homes that can be lived in and priced as an investment. Sea distance uses the stored pin and is only as exact as that pin; 10 km is the gate. A climate grade is not a full hazard survey. The number is the worse of the living and investment scores, planned on the middle of the repair range. A home with no local sale price stays in the research group. These candidates are not verified as ready to buy.",
   home: "A home to live in — not a plot: the sea within 1.5 km, not a poor climate, your five wishes, mild winters if the Atlantic current fails.",
   invest: "Homes to make money on: far below the local price all-in (taxes, fees and the work), a net rental yield, by the beach, forced or bank sales.",
   land: "Plots as an investment: cheap per hectare against what land goes for there, big enough, reachable, water on it — with the forestry upside on top.",
@@ -141,6 +143,7 @@ async function load() {
   }
   lastFound = data.found ?? data.total; lastCap = data.cap ?? 100;
   renderStats(data.stats);
+  renderResearch(data.research);
   renderRows(data.items, status === "hidden");
   renderPages(data.total);
 }
@@ -155,6 +158,60 @@ function renderStats(s) {
     <div class="stat"><div class="label">No good read</div><div class="value ${s.sources_quiet ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_quiet || 0}</a></div></div>
     ${hidden ? `<div class="stat"><div class="label">Hidden</div><div class="small muted" style="margin-top:6px">${AS.esc(hidden)}</div></div>` : ""}
     ${s.unchecked ? `<div class="stat"><div class="label">Not checked</div><div class="value">${s.unchecked.toLocaleString("en-GB")}</div><div class="small muted">over €${Math.round(s.check_max_price).toLocaleString("en-GB")}</div></div>` : ""}`;
+}
+
+function candidateCard(it) {
+  const plan = it.planning || {};
+  const acq = plan.acquisition || {};
+  const work = plan.renovation;
+  const range = plan.all_in
+    ? `${AS.money(plan.all_in.low)}–${AS.money(plan.all_in.high)}`
+    : "all-in range not established";
+  const point = plan.renovation_point === "middle" ? "middle of the repair range"
+    : plan.renovation_point === "low" ? "low end of the repair range" : "repairs not priced";
+  const link = it.url
+    ? AS.link(it.url, it.title || "Listing")
+    : `<span>${AS.esc(it.title || "Listing")}</span> <span class="small muted">lookup ${AS.esc(it.lookup || it.id)}</span>`;
+  const starred = it.status === "shortlisted";
+  const id = AS.esc(it.id);
+  return `<article class="research-card" data-id="${id}">
+    <h3>${link}</h3>
+    <p class="small">Living ${it.live_score == null ? "—" : AS.esc(String(it.live_score))}
+      · Investment ${it.invest_score == null ? "—" : AS.esc(String(it.invest_score))}</p>
+    <p class="small">${AS.esc(acq.label || "Price not selected")}: ${AS.money(acq.amount)}</p>
+    <p class="small">Planning all-in ${range}. Affordability uses the ${AS.esc(point)}${work ? ` (${work.low ? AS.money(work.low) : "€0"}–${AS.money(work.high)})` : ""}.</p>
+    <p class="small">${AS.esc(plan.note || "")}</p>
+    <p class="small">${AS.esc(it.valuation || "")}</p>
+    <ul class="small">${(it.gaps || []).map(g => `<li>${AS.esc(g)}</li>`).join("")}</ul>
+    <p>
+      <button class="btn btn-sm" data-id="${id}" onclick="openCandidate(this.dataset.id)">Details</button>
+      <button class="btn btn-sm" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "On Offers" : "Shortlist"}</button>
+    </p>
+  </article>`;
+}
+
+function renderResearch(research) {
+  const box = $("research-candidates");
+  if (mode !== "both" || !research) { box.hidden = true; box.innerHTML = ""; return; }
+  const valued = (research.valued || []).map(candidateCard).join("");
+  const unvalued = (research.unvalued || []).map(candidateCard).join("");
+  box.hidden = false;
+  box.innerHTML = `<h2>${AS.esc(research.heading)}</h2>
+    <p class="small muted">Not verified as ready to buy. ${AS.esc(research.duplicates || "")}</p>
+    ${valued ? `<div class="research-grid">${valued}</div>` : `<p class="small muted">No priced research candidate in this view.</p>`}
+    ${unvalued ? `<h3 class="small">Unvalued — investment value not established</h3><div class="research-grid">${unvalued}</div>` : ""}`;
+}
+
+async function openCandidate(id) {
+  const card = [...document.querySelectorAll("#research-candidates article")].find(el => el.dataset.id === id);
+  if (!card) return;
+  const existing = card.querySelector(".candidate-details");
+  if (existing) { existing.remove(); return; }
+  const d = await AS.api("/api/listing?id=" + encodeURIComponent(id) + "&mode=" + mode);
+  const panel = document.createElement("div");
+  panel.className = "candidate-details";
+  panel.innerHTML = detailsHtml(d);
+  card.appendChild(panel);
 }
 
 function renderRows(items, hiddenView) {

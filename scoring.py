@@ -716,13 +716,15 @@ _MARKET_INDEX = {
 
 
 def market_value_estimate(item: dict) -> float | None:
-    """area × €/m² for the listing's municipality, if we have a figure for it.
+    """floor m² × €/m² for the listing's municipality, if both figures exist.
 
-    Matches the place name exactly (accent-insensitive). The old substring match
-    priced Porto de Mós as Porto and anything containing "a" as something.
+    Uses the resolved floor, not a stored land area. Matches the place name
+    exactly (accent-insensitive). The old substring match priced Porto de Mós
+    as Porto and anything containing "a" as something.
     """
-    area = item.get("area_m2") or 0
-    if not area or area < 5:
+    from costs import building_m2
+    area, source = building_m2(item)
+    if source not in ("stored", "notice", "catastro") or area < 5:
         return None
     found = local_price(item)
     return area * found[0] if found else None
@@ -1629,8 +1631,8 @@ def score_detail(item: dict, now: datetime | None = None,
 def _investment_unpriced(item: dict) -> bool:
     """No sale price for this place, or only a province average that includes its cities.
 
-    Either way a low investment score would mean "we cannot price it", and that
-    must not push a home you could live in off the list."""
+    Either way the combined rank stays at zero. The living score is kept beside
+    it, and the lead stays in the unvalued research group."""
     found = local_price(item)
     if not found:
         return True
@@ -1675,13 +1677,17 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         blocked.append("floor area unknown, or the figure is the plot rather than the building")
     if blocked:
         return 0.0, blocked
-    home_raw, home_why = _score_detail(item, now, targets)
-    inv_raw, inv_why = _score_invest(item, now, targets)
+    # Each component under that goal's own weights. score_detail restores the
+    # caller's weight context when it returns.
+    home_raw, home_why = score_detail(item, now, targets, mode="home")
+    inv_raw, inv_why = score_detail(item, now, targets, mode="invest")
     item["live_score"] = display_score(home_raw)
+    item["research_only"] = False
     if _investment_unpriced(item):
         item["invest_score"] = None
-        return home_raw, [
-            "no local sale price — the investment is not priced, so this rank is the living score",
+        item["research_only"] = True
+        return 0.0, [
+            "Investment value not established — not ranked as a dual-purpose investment",
             *home_why[:6],
         ]
     item["invest_score"] = display_score(inv_raw)
@@ -1865,10 +1871,12 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     source  = item.get("source",  "")
     title_n = normalize(title)
     pay     = _pay(item)
-    likely = item.get("predicted_final")
-    if likely and not item.get("price_unusable") and likely["price"] > pay * 1.02:
-        pay = likely["price"]                     # what it will probably take, not the base
-        reasons.append(likely["text"])
+    from costs import selected_acquisition
+    chosen = selected_acquisition(item)
+    if chosen["kind"] == "predicted":
+        pay = chosen["amount"]
+        if chosen["text"]:
+            reasons.append(chosen["text"])
     kind    = property_kind(item)
 
     skip = _skip_reason(item, title, full)
@@ -1889,6 +1897,18 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         # A home is sized by its floor, not by "terrain 1034 m²" in the text.
         area = find_floor_area(title) or find_floor_area(desc) or 0
         area = _catastro_floor(item, area, reasons)
+    if kind == "home":
+        from costs import building_m2
+        floor, floor_source = building_m2(item)
+        if floor and floor_source in ("stored", "notice", "catastro"):
+            area = floor
+            if floor_source == "notice":
+                reasons.append(f"floor {floor:.0f} m² from the notice, not a land area stored on the listing")
+            elif floor_source == "catastro":
+                reasons.append(f"floor {floor:.0f} m² from Catastro")
+        elif floor_source not in ("stored", "notice", "catastro"):
+            area = 0
+            reasons.append("floor area not established — no size claim uses a land or footprint figure")
 
     if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
         s += _climate_points(item["climate"], kind, reasons, caps)
@@ -1898,7 +1918,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         caps.append(UNCHECKED_CAP)
         reasons.append("location unknown — climate not checked")
 
-    _doubts(item, kind, pay, area, full, reasons, caps)
+    _doubts(item, kind, pay, area or item.get("area_m2") or 0, full, reasons, caps)
 
     # Land: too small is not wanted at all.
     if kind in ("urban_plot", "rural_plot"):
@@ -2279,8 +2299,15 @@ def climate_score(c: dict | None, kind: str | None = None) -> dict:
                 "bid_multiplier": CLIMATE_BID_MULTIPLIER["unknown"], "confidence": "unknown"}
     kind = kind or "home"
     reasons: list[str] = []
-    points = _climate_points(c, kind, reasons, [])
-    flags = _climate_flags(c, kind)
+    # Hazard severity is not a preference. Clear the sliders for this call only.
+    weight_token = _WEIGHTS.set({})
+    mode_token = _MODE.set("home")
+    try:
+        points = _climate_points(c, kind, reasons, [])
+        flags = _climate_flags(c, kind)
+    finally:
+        _WEIGHTS.reset(weight_token)
+        _MODE.reset(mode_token)
     exact = not c.get("approx")
     score = max(0.0, min(100.0, CLIMATE_BASE + CLIMATE_SCALE * points))
     grade = next((g for floor, g in CLIMATE_GRADES if score >= floor), "poor")
@@ -2838,7 +2865,11 @@ INVEST_RUIN_CAP = 45            # a full rebuild stays under the line that shows
 def price_too_far_below(item: dict, all_in: float) -> bool:
     """The all-in cost is so far under this place's own home price that a rent
     on it would not be a return. A province average is not that comparison."""
-    area = item.get("area_m2") or 0
+    if property_kind(item) == "home":
+        from costs import building_m2
+        area, _source = building_m2(item)
+    else:
+        area = item.get("area_m2") or 0
     if not area or not all_in or all_in <= 0:
         return False
     found = local_price(item)
@@ -2897,14 +2928,18 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if kind != "home":
         return 0.0, ["not a home — see Investment land"]
     s, reasons, caps = 50.0, [], []
-    # The floor is what is valued and let: "terrain 1034 m²" in the text is not it.
-    area = item.get("area_m2") or find_floor_area(title) or find_floor_area(desc) or 0
-    area = _catastro_floor(item, area, reasons)
+    from costs import building_m2, selected_acquisition
+    area, floor_source = building_m2(item)
+    if not area:
+        reasons.append("floor area not established — the investment is not priced on a land figure")
+    elif floor_source == "notice":
+        reasons.append(f"floor {area:.0f} m² from the notice, not a land area stored on the listing")
     pay = _pay(item)
-    likely = item.get("predicted_final")
-    if likely and not item.get("price_unusable") and likely["price"] > pay * 1.02:
-        pay = likely["price"]
-        reasons.append(likely["text"])
+    chosen = selected_acquisition(item)
+    if chosen["kind"] == "predicted":
+        pay = chosen["amount"]
+        if chosen["text"]:
+            reasons.append(chosen["text"])
     if item.get("price_unusable"):
         caps.append(NO_PRICE_CAP)
         reasons.append(item["price_unusable"])
@@ -2917,15 +2952,14 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     # and registry, and the work the condition implies (costs.py). A gap
     # measured on the bare price is not a profit.
     import costs
-    # Only INVEST_VALUE_MAX_M2 of building is valued, so only that much is
-    # taxed, renovated and let: a bigger "area" is the plot, not floor space.
-    building = {**item, "kind": kind, "area_m2": min(area, INVEST_VALUE_MAX_M2) if area else area}
-    est = costs.estimate(building, bid=pay) if pay else None
-    all_in = pay
-    if est:
-        all_in = (est["all_in"]["low"] + est["all_in"]["high"]) / 2 if est["all_in"] else est["total"]
-        reasons.append(f"€{all_in:,.0f} all-in (price, taxes and fees"
-                       + (", and the work it needs)" if est["all_in"] else ")"))
+    planned = costs.selected_planning(
+        item, bid=pay, basis=chosen["label"] if chosen["kind"] == "predicted" else None) if pay else None
+    est = planned["estimate"] if planned else None
+    all_in = planned["amount"] if planned else pay
+    if planned and planned.get("incomplete"):
+        reasons.append(f"€{all_in:,.0f} known subtotal (price, taxes and fees; repairs not priced)")
+    elif planned:
+        reasons.append(f"€{all_in:,.0f} all-in (price, taxes and fees, and the middle of the repair range)")
 
     found = local_price(item) if area else None
     unbelievable = False

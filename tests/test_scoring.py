@@ -968,8 +968,9 @@ def test_amoc_collapse_cold_costs_points_where_winters_would_freeze():
     sc_harsh, reasons = score_detail({**base, "climate": harsh})
     assert sc_harsh < sc_mild
     assert any("Atlantic current collapses" in r for r in reasons)
-    off, _ = score_detail({**base, "climate": harsh}, targets={"weights": {"amoc": 0}})
-    assert off == sc_mild
+    off, off_reasons = score_detail({**base, "climate": harsh}, targets={"weights": {"amoc": 0}})
+    assert any("poor climate" in r for r in off_reasons)
+    assert off < sc_mild
 
 
 def test_amoc_collapse_drying_costs_points():
