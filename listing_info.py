@@ -122,6 +122,8 @@ def gallery(item: dict) -> list[str]:
 
 
 def facts(item: dict) -> list[dict]:
+    from common import price_to_pay
+    price_to_pay(item)
     raw = raw_of(item)
     out = []
     for label, get in _FACTS:
@@ -134,6 +136,8 @@ def facts(item: dict) -> list[dict]:
     kept = raw.get("kept_photos") if isinstance(raw.get("kept_photos"), list) else []
     if kept:
         out.append({"label": "Photos kept", "value": f"{len(kept)} saved on this PC"})
+    if item.get("price_unusable"):
+        out.append({"label": "Purchase price", "value": str(item["price_unusable"])[:500]})
     for label, key in (("Photo check", "photo_check"), ("Outside", "outside_check")):
         notes = str((raw.get(key) or {}).get("notes") or "").strip()
         if notes:

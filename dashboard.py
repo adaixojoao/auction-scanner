@@ -505,7 +505,7 @@ def api_listings():
                   if _matches(it, country, source, tipo, max_price, search)
                   # long-ended sales are not counted among the open view's hidden ones
                   and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
-                  and (it["score"] >= min_score or (mode == "both" and it.get("research_only")))
+                  and it["score"] >= min_score
                   and (not properties_only or it["category"] == "imoveis")
                   and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
         if climate_grade or climate_exact:

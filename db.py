@@ -1500,7 +1500,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             # The number on the list is the one that has to clear the minimum.
             # Live and invest no longer substitutes the living score for that.
             bar = sc
-            if bar < min_score and not (mode == "both" and item.get("research_only")):
+            if bar < min_score:
                 reason = f"score {bar:.0f} < filters.min_score {min_score}"
                 if not include_hidden:
                     continue

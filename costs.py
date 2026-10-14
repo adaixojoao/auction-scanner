@@ -384,9 +384,17 @@ def selected_acquisition(item: dict) -> dict:
 
     A predicted close is an estimate. It is selected only when ranking would
     use it: higher than the price you would pay now, and not a rejected figure.
+    A portal figure the advert marks as an auction deposit or opening bid is
+    not selected. It stays a listed reference.
     """
     from common import price_to_pay
     pay = float(price_to_pay(item) or 0)
+    if item.get("price_unusable"):
+        listed = float(item.get("price") or item.get("min_price") or 0) or None
+        return {"amount": None, "kind": "unusable", "estimate": False,
+                "label": item["price_unusable"], "text": "",
+                "current_amount": None, "current_kind": "unusable",
+                "reference_amount": listed}
     if item.get("current_bid") and item["current_bid"] >= (item.get("min_price") or 0):
         current_kind = "current_bid"
     elif item.get("min_price"):
@@ -398,12 +406,14 @@ def selected_acquisition(item: dict) -> dict:
     if predicted and not item.get("price_unusable") and pay and predicted > pay * 1.02:
         return {"amount": predicted, "kind": "predicted", "estimate": True,
                 "label": "predicted closing price (an estimate, not a bid placed)",
-                "text": likely.get("text") or "", "current_amount": pay, "current_kind": current_kind}
+                "text": likely.get("text") or "", "current_amount": pay, "current_kind": current_kind,
+                "reference_amount": None}
     return {"amount": pay, "kind": current_kind, "estimate": False, "label": {
         "current_bid": "the current bid",
         "minimum": "the minimum accepted",
         "asking": "the asking or base price",
-    }[current_kind], "text": "", "current_amount": pay, "current_kind": current_kind}
+    }[current_kind], "text": "", "current_amount": pay, "current_kind": current_kind,
+            "reference_amount": None}
 
 
 def building_m2(item: dict) -> tuple[float, str]:
@@ -907,7 +917,13 @@ def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
         note = "Cash you can lose is not set."
     elif not out:
         status = "unknown"
-        note = "No planning cost: there is no price to work from."
+        if acq.get("kind") == "unusable":
+            ref = acq.get("reference_amount")
+            shown = f" The listed figure is €{ref:,.0f}." if ref else ""
+            note = (f"{acq['label']}.{shown} It is not used as the acquisition price, "
+                    "so it is not compared with the cash.")
+        else:
+            note = "No planning cost: there is no price to work from."
     elif out.get("incomplete"):
         if subtotal and subtotal > cash:
             status = "over"
@@ -926,7 +942,9 @@ def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
     else:
         status = "within"
         note = f"Planning cost €{out['amount']:,.0f} fits the €{cash:,.0f} you can lose ({out['detail']})."
-    return {"acquisition": {k: acq[k] for k in ("amount", "kind", "estimate", "label", "current_amount", "current_kind")},
+    return {"acquisition": {k: acq.get(k) for k in (
+                "amount", "kind", "estimate", "label", "current_amount", "current_kind",
+                "reference_amount")},
             "all_in": est.get("all_in"), "renovation": work, "renovation_point": point,
             "known_subtotal": subtotal, "planning_amount": (out or {}).get("amount"),
             "status": status, "note": note}
@@ -983,7 +1001,11 @@ def cash_view(item: dict, cash: float, *, bid: float | None = None, cheque: bool
         return {"set": False, "limit": None, "spent": spent, "over": False, "deposit": deposit,
                 "text": "Cash you can lose is not set. Set it under Settings → Budget before an offer."}
     if out is None:
-        text = f"Within the €{limit:,.0f} you can lose. This listing has no price to add taxes to."
+        if item.get("price_unusable"):
+            text = (f"{item['price_unusable']}. It is not used as the acquisition price, "
+                    "so it is not compared with the cash.")
+        else:
+            text = f"Within the €{limit:,.0f} you can lose. This listing has no price to add taxes to."
         over = False
     elif spent > limit:
         text = over_cash(item, limit, bid=bid) or ""
