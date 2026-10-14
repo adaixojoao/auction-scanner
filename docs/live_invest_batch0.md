@@ -2,15 +2,15 @@
 
 Inspection and characterisation only. No production module, schema, tax rate, UI, or `AGENTS.md` change. No live scan, mail, or bid.
 
-The earlier static audit targeted `34192bccc057100ffe625a7d7d13f83c5f7b497f`. That text is not in this checkout. Every finding below was checked against the current tree. Historical comments in the code are labelled as such.
+The earlier static audit named `34192bccc057100ffe625a7d7d13f83c5f7b497f`. That commit is now the `lean-start` merge on `master`, and its tree is the inspection commit `821ebcef`. The audit text itself is not in the checkout. Every finding below was checked against that tree. Historical comments in the code are labelled as such.
 
 ## 1. Environment
 
 | Item | Value |
 | --- | --- |
-| Branch | `batch0-live-invest-baseline` |
-| Base commit | `821ebcef6ba740e8f672945067b1337796b83f4e` on `lean-start` (2026-10-14, "Describe the French parcel, the saved photos, and where those files live.") |
-| `master` | `2dac1284bdf5aa6cb130715e57e11236123e6e9f` ("Merge pull request #103"). This branch is ahead of `master`; it was not created from `master`. |
+| Inspection commit | `821ebcef6ba740e8f672945067b1337796b83f4e` on `lean-start` (2026-10-14, "Describe the French parcel, the saved photos, and where those files live.") |
+| `origin/master` when this file was landed | `34192bccc057100ffe625a7d7d13f83c5f7b497f` ("Merge pull request #105 from adaixojoao/lean-start"). That merge's tree matches `821ebcef` (`git diff 821ebcef origin/master` is empty). The findings below are the behaviour of that tree. |
+| Where Batch 1 starts | Branch from `master` after this documentation pull request is merged. Do not branch Batch 1 from `lean-start` or from `batch0-live-invest-baseline`. |
 | Working tree before this batch | Clean. Nothing was reset, stashed, or discarded. |
 | OS | Windows 10.0.26200 |
 | Python used for the suite | 3.13.14 (`C:\Users\adaix\AppData\Local\Programs\Python\Python313\python.exe`), pytest 9.1.1, pyflakes already installed |
@@ -31,7 +31,8 @@ Schema: `db.SCHEMA_VERSION` is 20. New changes add `_migrate_vN` and must use `_
 | `python -m pytest -q` with miniforge 3.13.13 | 1 | `No module named pytest` |
 | `Python313\python.exe -m pytest -q tests/test_live_invest_batch0.py` | 0 | 17 passed |
 | `Python313\python.exe -m pyflakes` on the top-level modules, `sources`, `tests`, and `scripts` (PowerShell does not expand the CI glob) | 0 | no findings |
-| Full `Python313\python.exe -m pytest -q` | 0 | `788 passed in 335.42s (0:05:35)` |
+| Full `Python313\python.exe -m pytest -q` on `821ebcef` | 0 | `788 passed in 335.42s (0:05:35)` |
+| Same command on this master-based branch | 0 | `788 passed in 309.77s (0:05:09)`. `pyflakes` exit 0. No assertion differed from the inspection commit. |
 
 Not run: the GitHub matrix (no Ubuntu, no Python 3.11 in this session), climate-library reads, and any live source. A missing platform here is not a green CI run.
 
