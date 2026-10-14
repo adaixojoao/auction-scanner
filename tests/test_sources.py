@@ -287,6 +287,10 @@ def test_licitor_list_title_splits_department_and_town():
     title, town = parse_licitor_list_title("59Dunkerque (Petite-Synthe)Une maison individuelle")
     assert town == "Dunkerque (Petite-Synthe)"
     assert parse_licitor_list_title("Une maison sans code") == ("Une maison sans code", None)
+    from sources.fr import licitor_department
+    assert licitor_department("22PlémetUne maison") == "22"
+    assert licitor_department("971 Pointe-à-Pitre Une maison") == "971"
+    assert licitor_department("Une maison sans code") is None
 
 
 def test_spain_clears_a_stored_bidding_step(db):
@@ -373,6 +377,10 @@ def test_spain_detail_tabs_give_the_court_and_occupancy():
     assert extra["deposito"] == 4500 and extra["expediente"].startswith("1234")
     assert extra["occupation"] == "occupied" and extra["visitable"] == "No"
     assert _spain_occupation("No consta") is None and _spain_occupation("Libre de ocupantes") == "vacant"
+    assert _spain_occupation("Ocupantes sin derecho de permanencia") == "occupied"
+    assert _spain_occupation("Ocupante desconocido") == "occupied"
+    assert _spain_occupation("Sin ocupantes") == "vacant"
+    assert _spain_occupation("No consta (Según el decreto, ocupado)") is None
 
 
 def test_spain_enrichment_fills_letters_and_scoring(db, add, fake_http):
@@ -385,7 +393,8 @@ def test_spain_enrichment_fills_letters_and_scoring(db, add, fake_http):
     item = load_listings(db, include_hidden=True)[0]
     raw = json.loads(item["raw_json"])
     assert raw["autoridad_email"] == "instancia3.sevilla@justicia.es" and raw["detail_checked"]
-    assert "occupied/tenanted" in item["reasons"]
+    assert raw.get("occupation") == "occupied" and raw.get("visitable") == "No"
+    assert item["reasons"] and item["reasons"][0].startswith("cannot be visited")
     assert enrich_spain_details(db, session) == 0 and len(session.calls) == 3   # checked once
 
 
@@ -458,6 +467,24 @@ def test_licitor_annonce_parser():
     assert d["avocat_tel"] == "04 66 12 34 56" and d["visite"].startswith("sur place le mardi 6 octobre")
     occupied = parse_licitor_annonce("<p>Un appartement occupé par le locataire. Mise à prix: 120.000 €</p>")
     assert occupied["occupation"] == "occupied" and occupied["mise_a_prix"] == 120000
+    # The list line is truncated. The annonce has each part, the street and a
+    # map pin. A sponsored price widget is not a field.
+    page = """<article class="LegalAd"><div class="AdContent">
+      <div class="SousLot"><h2>Un immeuble</h2>
+        <p>sur deux étages, comprenant : trois appartements T3 partiellement en travaux Cour commune</p></div>
+      <div class="SousLot"><h2>MAISON INDIVIDUELLE</h2><p>sur deux étages, de type F2</p></div>
+      <p class="City">Cherbourg-en-Cotentin</p>
+      <p class="Street">5, passage Lejuez (accès par le 3, impasse Lejuez)</p>
+      <p class="Map"><a href="https://maps.google.fr/maps?q=49.6431999,-1.6362118&amp;z=13">plan</a></p>
+      <div class="PartnerOfferValue">2 466 €/m²</div>
+    </div></article>"""
+    full = parse_licitor_annonce(page)
+    assert "trois appartements T3" in full["description"] and "de type F2" in full["description"]
+    assert full["street"].startswith("5, passage Lejuez") and full["city"] == "Cherbourg-en-Cotentin"
+    assert full["pin"] == (49.6431999, -1.6362118)
+    assert "2466" not in json.dumps(full)
+    from common import counted_flats
+    assert counted_flats(full["description"])[0] == {"T3": 3, "T2": 1}
 
 
 def test_france_enrichment_sets_the_hearing_date(db, add, fake_http):
@@ -471,6 +498,34 @@ def test_france_enrichment_sets_the_hearing_date(db, add, fake_http):
     item = load_listings(db, include_hidden=True, now=datetime(2026, 9, 1, tzinfo=timezone.utc))[0]
     assert item["date_end"] == "2026-10-15T14:30:00" and item["price"] == 40000
     assert item["district"] == "Nîmes" and "vacant (devoluto)" in item["reasons"]
+
+
+def test_a_licitor_pin_is_kept_and_is_not_the_building(db, add, fake_http):
+    from sources.fr import enrich_france_details
+    html = """<p class="Court">Tribunal Judiciaire de Cherbourg-en-Cotentin (Manche)</p>
+    <p>audience du mercredi 14 octobre 2026 à 15h30</p>
+    <p>Mise à prix : 30 000 €</p>
+    <article class="LegalAd"><div class="AdContent">
+      <div class="SousLot"><h2>Un immeuble</h2><p>trois appartements T3</p></div>
+      <p class="City">Cherbourg-en-Cotentin</p>
+      <p class="Street">5, passage Lejuez</p>
+      <p class="Map"><a href="https://maps.google.fr/maps?q=49.6431999,-1.6362118">plan</a></p>
+    </div></article>"""
+    add("france", "109989", "FR", title="Un immeuble", concelho="Cherbourg-en-Cotentin",
+        url="https://www.licitor.com/annonce/109989.html",
+        raw_json=json.dumps({"geo": {"lat": 49.64, "lon": -1.62, "precision": "municipality",
+                                    "query": "Cherbourg-en-Cotentin"}, "climate": {"v": 1}}))
+    session = fake_http(lambda m, url, kw: FakeResponse(html))
+    assert enrich_france_details(db, session) == 1
+    description, raw_json = db.execute(
+        "SELECT description, raw_json FROM listings WHERE id='france:109989'").fetchone()
+    raw = json.loads(raw_json)
+    assert "passage Lejuez" in description and raw["morada"].startswith("5, passage")
+    assert raw["geo"]["precision"] == "advertised" and raw["geo"]["lat"] == 49.6431999
+    assert raw.get("lat") is None and raw.get("lon") is None
+    assert raw.get("climate") is None and raw.get("water_check") is None
+    import geo
+    assert raw["geo"]["precision"] in geo.EXACT_ENOUGH
 
 
 def _citius_block(html_id, proc, price, desc):

@@ -229,7 +229,9 @@ table.list tr.dim td { opacity: .45; }
 /* Listing details panel (Listings → ⓘ) */
 tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 .details { display: flex; gap: 16px; align-items: flex-start; }
-.details .d-img { width: 220px; max-height: 165px; object-fit: cover; border-radius: 6px; flex: none; }
+.details .d-gallery { display: flex; flex-wrap: wrap; gap: 6px; flex: none; max-width: 340px; }
+.details .d-img { width: 220px; max-height: 165px; object-fit: cover; border-radius: 6px; }
+.details .d-gallery .d-img { width: 160px; max-height: 120px; }
 .details .d-main { flex: 1; min-width: 0; }
 .details .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; margin: 8px 0; }
 .details .fact { display: flex; gap: 8px; font-size: 13px; }
@@ -241,7 +243,7 @@ tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 .details .guide ol { margin: 6px 0 0 18px; font-size: 13px; }
 .details .cost-total { font-weight: 600; margin-top: 4px; }
 .details .guide code { background: var(--card); padding: 1px 5px; border-radius: 4px; }
-@media (max-width: 800px) { .details { flex-direction: column; } .details .d-img { width: 100%; } }
+@media (max-width: 800px) { .details { flex-direction: column; } .details .d-gallery { max-width: none; } .details .d-img { width: 100%; } }
 .details .d-lots { font-size: 13px; margin: 8px 0; }
 .details .d-lots ul { margin: 4px 0 0 18px; }
 .details .copy-list { margin: 6px 0 0 18px; font-size: 13px; }

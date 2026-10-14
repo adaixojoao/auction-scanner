@@ -204,3 +204,165 @@ def test_exact_beach_homes_are_photographed_first(monkeypatch):
 
     monkeypatch.setattr("db.load_listings", fake_load)
     assert [it["id"] for it in photos.queue(None, {})][0] == "a"
+
+
+def test_a_score_of_85_keeps_the_photos_and_a_lower_one_does_not(db):
+    import io
+    import pytest
+    import listing_info
+    Image = pytest.importorskip("PIL.Image")
+    from common import make_listing
+    upsert_listing(db, make_listing("eleiloes", "hi", **HOUSE))
+    db.commit()
+    item = next(it for it in load_listings(db, include_hidden=True, apply_min_score=False)
+                if it["id"] == "eleiloes:hi")
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "blue").save(buf, "PNG")
+
+    class Sess:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, timeout=30):
+            self.calls += 1
+            return type("R", (), {"status_code": 200, "content": buf.getvalue(),
+                                  "headers": {"content-type": "image/png"}})()
+
+    low = {**item, "rank": 84}
+    assert photos.keep_one(db, Sess(), low) is False
+    assert photos.kept_path(db, item["id"], 0) is None
+    session = Sess()
+    high = {**item, "rank": 85}
+    assert photos.keep_one(db, session, high) is True
+    assert session.calls == 1
+    path = photos.kept_path(db, item["id"], 0)
+    assert path and open(path, "rb").read()[:2] == b"\xff\xd8"
+    assert photos.kept_path(db, item["id"], 1) is None
+    raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id=?", (item["id"],)).fetchone()[0])
+    assert raw["kept_photos"] == ["0.jpg"]
+    # Already saved: not fetched again. A later scrape does not drop the copies.
+    assert photos.keep_one(db, Sess(), {**high, "raw_json": json.dumps(raw)}) is False
+    upsert_listing(db, make_listing("eleiloes", "hi", **HOUSE, raw_json={"valorBase": 1}))
+    db.commit()
+    raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id=?", (item["id"],)).fetchone()[0])
+    assert raw["kept_photos"] == ["0.jpg"] and raw["valorBase"] == 1
+    pics = listing_info.gallery({**high, "raw_json": json.dumps(raw)})
+    assert pics == ["/api/kept-photo?id=eleiloes%3Ahi&n=0"]
+    assert any(f["label"] == "Photos kept" for f in listing_info.facts({**high, "raw_json": json.dumps(raw)}))
+
+
+def test_the_open_pictures_can_show_a_ruin_but_not_a_sound_house(db, monkeypatch):
+    """An obvious ruin at the building's pin counts. A standing outside does not:
+    the inside was not in the picture. A town pin is not looked at. No key."""
+    upsert_listing(db, make_listing("eleiloes", "out", **{**HOUSE, "image_url": None},
+                                    raw_json={"lat": 41.06, "lon": -7.93}))
+    db.commit()
+    item = next(it for it in load_listings(db, include_hidden=True, apply_min_score=False)
+                if it["id"] == "eleiloes:out")
+    assert photos.needs_outside_check(item)
+    assert not photos.needs_outside_check(
+        {**item, "raw_json": json.dumps({"geo": {"lat": 41.0, "lon": -7.0, "precision": "municipality"}})})
+    assert not photos.needs_outside_check(
+        {**item, "raw_json": json.dumps({"geo": {"lat": 41.0, "lon": -7.0, "precision": "street"}})})
+
+    class Look:
+        name = "test"
+
+        def look_images(self, images, prompt):
+            return {"condition": "heavy", "confidence": "high", "notes": "collapsed roof",
+                    "shows_house": True}
+
+    monkeypatch.setattr(photos, "fetch_outside", lambda *a, **k: ([b"jpeg"], ["PNOA"]))
+    assert photos.check_pending(db, {}, [item], looker=Look()) == 1
+    raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='eleiloes:out'").fetchone()[0])
+    assert raw["outside_check"]["condition"] == "heavy" and raw["outside_check"]["sources"] == ["PNOA"]
+    judged = {**item, "raw_json": json.dumps(raw)}
+    assert condition(judged) == "heavy"
+    assert any("open aerial or street photo" in r for r in score_detail(judged)[1])
+    raw["outside_check"] = {**raw["outside_check"], "condition": "standing", "notes": "outside standing"}
+    standing = {**item, "raw_json": json.dumps(raw)}
+    assert condition(standing) == "unknown"
+    reasons = score_detail(standing)[1]
+    assert any("outside is standing" in r and "inside was not seen" in r for r in reasons)
+    assert not any(r.startswith("good condition") for r in reasons)
+    raw["outside_check"] = {"condition": "heavy", "confidence": "low", "shows_house": True}
+    assert condition({**item, "raw_json": json.dumps(raw)}) == "unknown"
+
+
+def test_a_picture_server_that_fails_is_not_stored_as_no_ruin(db, monkeypatch):
+    upsert_listing(db, make_listing("eleiloes", "out2", **{**HOUSE, "image_url": None},
+                                    raw_json={"lat": 41.06, "lon": -7.93}))
+    db.commit()
+    item = next(it for it in load_listings(db, include_hidden=True, apply_min_score=False)
+                if it["id"] == "eleiloes:out2")
+
+    def refused(*_a, **_k):
+        raise photos.OutsideUnavailable()
+
+    monkeypatch.setattr(photos, "fetch_outside", refused)
+
+    class Look:
+        name = "test"
+
+    assert photos.check_pending(db, {}, [item], looker=Look()) == 0
+    raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='eleiloes:out2'").fetchone()[0])
+    assert "outside_check" not in raw
+
+
+def test_open_aerial_and_street_photos_need_no_key():
+    import io
+    import pytest
+    Image = pytest.importorskip("PIL.Image")
+    # The projection origin of the Portuguese grid is (0, 0). France and Spain
+    # use a web-mercator square. Germany has no open aerial survey wired in.
+    x, y = photos._pt_tm06(39.66825833333333, -8.133108333333334)
+    assert abs(x) < 1 and abs(y) < 1
+    pt, name = photos.aerial_url("PT", 39.66825833333333, -8.133108333333334)
+    assert name == "DGT" and "ortos2025" in pt and "EPSG%3A3763" in pt
+    fr, fr_name = photos.aerial_url("FR", 49.64, -1.64)
+    assert fr_name == "IGN" and "data.geopf.fr" in fr and "ORTHOIMAGERY.ORTHOPHOTOS" in fr
+    es, es_name = photos.aerial_url("ES", 37.39, -5.99)
+    assert es_name == "PNOA" and "ign.es/wmts/pnoa-ma" in es and "TILEMATRIX=19" in es
+    assert photos.aerial_url("DE", 48.1, 11.5) is None
+    search = photos.street_search_url(41.06, -7.93)
+    assert search.startswith("https://api.panoramax.xyz/api/search?") and "bbox=" in search
+    near = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-7.9301, 41.0601]},
+            "assets": {"sd": {"href": "https://panoramax.example/sd.jpg"}}}
+    far = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-7.95, 41.08]},
+           "assets": {"sd": {"href": "https://panoramax.example/far.jpg"}}}
+    assert photos.nearest_street_href({"features": [far, near]}, 41.06, -7.93) == "https://panoramax.example/sd.jpg"
+    assert photos.nearest_street_href({"features": [far]}, 41.06, -7.93) is None
+
+    class Resp:
+        def __init__(self, code, body, kind, payload=None):
+            self.status_code, self.content = code, body
+            self.headers = {"content-type": kind}
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buf, "PNG")
+    png = buf.getvalue()
+
+    class Sess:
+        def get(self, url, timeout=30):
+            if "panoramax" in url and "search" in url:
+                return Resp(200, b"{}", "application/json", {"features": [near]})
+            return Resp(200, png, "image/png")
+
+    images, sources = photos.fetch_outside(Sess(), {"lat": 41.06, "lon": -7.93}, "ES")
+    assert sources == ["Panoramax", "PNOA"] and len(images) == 2 and images[0][:2] == b"\xff\xd8"
+
+    class Down:
+        def get(self, url, timeout=30):
+            return Resp(503, b"", "text/plain")
+
+    try:
+        photos.fetch_outside(Down(), {"lat": 41.06, "lon": -7.93}, "ES")
+    except photos.OutsideUnavailable:
+        pass
+    else:
+        raise AssertionError("a failed picture server should be tried again, not stored")
+

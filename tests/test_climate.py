@@ -129,7 +129,7 @@ def test_exact_seaside_homes_are_read_before_a_missing_grade_rejects_them(layers
     """Live and invest must not be the first time a seaside house is judged.
 
     A home the score filter left out of the queue is still read when its pin is
-    the building and the sea is within 1.5 km. A town pin is not, and neither
+    the building and the sea is within 10 km. A town pin is not, and neither
     is a plot. One already read does not use up the budget. A missing grade
     stays unknown: it does not pass, and it is not called poor."""
     import json

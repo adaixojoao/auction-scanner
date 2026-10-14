@@ -175,13 +175,23 @@ def enrich_order(db, cfg: dict) -> list[dict]:
     from scoring import MODES
     ranked = [sorted(load_listings(db, filters=cfg.get("filters"), mode=m),
                      key=lambda it: -it.get("rank", it["score"])) for m in MODES]
-    order, seen = [], set()
+    order, seen, best = [], set(), {}
     for row in zip(*[r + [None] * (max(map(len, ranked)) - len(r)) for r in ranked]):
         for it in row:
-            if it and it["id"] not in seen:
+            if not it:
+                continue
+            best[it["id"]] = max(best.get(it["id"], 0), it.get("rank") or it.get("score") or 0)
+            if it["id"] not in seen:
                 seen.add(it["id"])
                 order.append(it)
-    return order
+    # 85 or more in any goal is looked up first: its photos, climate and place
+    # are what the detail panel is asked to show in full.
+    from photos import KEEP_SCORE
+    high = [it for it in order if best.get(it["id"], 0) >= KEEP_SCORE]
+    rest = [it for it in order if best.get(it["id"], 0) < KEEP_SCORE]
+    for it in high + rest:
+        it["best_rank"] = best.get(it["id"], 0)
+    return high + rest
 
 
 def _plots_for_site_check(db, cfg: dict) -> list[dict]:
@@ -317,6 +327,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                 if not stopped:
                     _set_state(db, current="refreshing the lists")
                     rescore(db, cfg)
+                    try:
+                        import photos
+                        photos.keep_high(db, cfg)
+                    except Exception:  # noqa: BLE001 — saving photos must never fail the scan
+                        LOG.exception("Keeping photos failed")
                 try:
                     import dashboard
                     dashboard.refresh_cached_lists(finished_at)

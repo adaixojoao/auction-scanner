@@ -510,7 +510,8 @@ def _is_cut_copy(new: str | None, old: str | None) -> bool:
 
 # What the app found out itself (geo.py, photos.py, links.py): a source's fresh
 # raw data does not know it, so it is carried over.
-LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "eleiloes_id", "water_check", "cadastre_checked",
+LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "outside_check", "kept_photos", "eleiloes_id",
+                    "water_check", "cadastre_checked", "fr_cadastre", "fr_commune_miss", "department",
                     "climate", "verified_geo")
 
 
@@ -1326,7 +1327,7 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
 
 
 def _both_worth_reading(item: dict) -> bool:
-    """An exact pin, the sea within 1.5 km of it, and a house: worth a climate
+    """An exact pin, the sea within 10 km of it, and a house: worth a climate
     read, unless the light checks already rule it out (heavy_checks_spared)."""
     import geo
     from scoring import SWIM_MAX_KM, property_kind

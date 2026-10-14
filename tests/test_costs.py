@@ -114,6 +114,27 @@ def test_renovation_only_for_a_home_whose_size_is_known():
     assert "plot" in work["note"]
 
 
+def test_one_catastro_dwelling_is_the_floor_and_several_are_not():
+    import json
+    one = home(area_m2=0, country="ES", title="Vivienda", raw_json=json.dumps({
+        "catastro": {"use": "Residencial", "built_m2": 62,
+                     "units": [{"use": "VIVIENDA", "m2": 44}, {"use": "ELEMENTOS COMUNES", "m2": 18}]}}))
+    assert costs.building_m2(one) == (44.0, "catastro")
+    assert "Catastro" in costs.renovation(one)["note"]
+    # The notice's own floor wins over the registry.
+    stated = {**one, "description": "superficie de 50 m²"}
+    assert costs.building_m2(stated) == (50.0, "notice")
+    many = home(area_m2=0, raw_json=json.dumps({
+        "catastro": {"use": "Residencial", "built_m2": 80,
+                     "units": [{"use": "VIVIENDA", "m2": 40}, {"use": "VIVIENDA", "m2": 40}]}}))
+    assert costs.catastro_home(many)[0] == 0
+    assert "2 dwellings" in costs.catastro_home(many)[1]
+    assert costs.building_m2(many) == (0.0, "")
+    bare = home(area_m2=0, raw_json=json.dumps({
+        "catastro": {"use": "Residencial", "built_m2": 90}}))
+    assert costs.building_m2(bare) == (90.0, "catastro")
+
+
 def test_a_stored_area_the_notice_calls_land_is_not_a_floor():
     # The only size is the plot. Renovation, rent and cash then have no floor
     # to price — the same figure, not a guessed one.
@@ -254,6 +275,66 @@ def test_rents_keep_their_cents():
     rows, _, _ = update_prices.parse_ine(answer, digits=2)
     assert rows[0]["eur_m2"] == 5.23
     assert update_prices.parse_ine(answer)[0][0]["eur_m2"] == 5
+
+
+def test_three_t3_apartments_are_let_as_three_flats(tmp_path, monkeypatch):
+    """No floor area: the rent is three planning T3s, and that size is not a
+    measured floor, so it is not a discount against local sale prices."""
+    import prices
+    from common import counted_flats
+    from scoring import score_detail
+    path = tmp_path / "fr_rents.csv"
+    path.write_text("municipality,eur_m2,period,source\n"
+                    "Cherbourg-en-Cotentin,10.00,2025,Carte des loyers\n", encoding="utf-8")
+    monkeypatch.setitem(prices.RENT_FILES, "FR", str(path))
+    title = ("Un immeuble sur deux étages, comprenant : trois appartements T3 "
+             "partiellement en travaux")
+    assert counted_flats(title) == ({"T3": 3}, 0)
+    assert counted_flats("deux appartements T2 et un T3") == ({"T2": 2, "T3": 1}, 0)
+    assert counted_flats("un appartement T3") == ({"T3": 1}, 0)
+    assert counted_flats("Casa de tres plantas") == ({}, 0)
+    assert counted_flats("um dos apartamentos T3") == ({}, 0)
+    block = {"title": title, "tipo": "immobilier", "country": "FR", "source": "france",
+             "concelho": "Cherbourg-en-Cotentin", "district": "Manche", "price": 30000}
+    rent = costs.estimate(block)["rent"]
+    assert rent["monthly"] == 3 * 55 * 10
+    assert rent["planning"].startswith("3 T3 apartments, each counted at 55 m²")
+    assert "Repairs are not in this yield" in rent["note"]
+    # The title repeated as the description is still three flats, not six.
+    assert costs.estimate({**block, "description": title})["rent"]["monthly"] == rent["monthly"]
+    # A floor the ad states wins over the planning size.
+    measured = costs.estimate({**block, "area_m2": 80})["rent"]
+    assert measured["monthly"] == 800 and "planning" not in measured
+    # One flat, or flats with no type, do not grow a floor that was not stated.
+    assert costs.estimate({**block, "title": "Un appartement T3"})["rent"] is None
+    assert costs.estimate({**block, "title": "Trois appartements"})["rent"] is None
+    _, why = score_detail(block, mode="invest")
+    assert any("3 T3 apartments" in r and "repairs are not in this yield" in r for r in why)
+    assert not any("below local prices" in r for r in why)
+
+
+def test_vani_are_a_cautious_floor_and_several_are_not(tmp_path, monkeypatch):
+    """3.5 vani become 52.5 m² for the rent only. A stated floor wins, and two
+    consistenze are not added into one home."""
+    import prices
+    path = tmp_path / "it_rents.csv"
+    path.write_text("municipality,eur_m2,period,source\nRoma,10.00,2025,OMI\n", encoding="utf-8")
+    monkeypatch.setitem(prices.RENT_FILES, "IT", str(path))
+    one = {"title": "Appartamento", "description": "Categoria A/2, consistenza 3,5 vani",
+           "tipo": "appartamento", "country": "IT", "source": "pvp", "concelho": "Roma",
+           "price": 40000}
+    assert costs.vani_floor(one)["area"] == 3.5 * 15
+    rent = costs.estimate(one)["rent"]
+    assert rent["monthly"] == round(52.5 * 10)
+    assert rent["planning"].startswith("3.5 vani, counted at 15 m²")
+    assert "Repairs are not in this yield" in rent["note"]
+    assert costs.building_m2(one)[0] == 0
+    assert costs.estimate(one)["renovation"] is None
+    measured = costs.estimate({**one, "description": "consistenza 3,5 vani, superficie 80 mq"})["rent"]
+    assert measured["monthly"] == 800 and "planning" not in measured
+    several = {**one, "description": "consistenza 6,5 vani. consistenza di 2 vani"}
+    assert costs.vani_floor(several)["area"] is None
+    assert costs.estimate(several)["rent"] is None
 
 
 def test_a_french_house_rents_at_the_communes_carte_des_loyers(tmp_path, monkeypatch):

@@ -8,8 +8,11 @@ User-Agent that names the application, so only listings someone would see are
 looked up (GEOCODE_PER_SCAN a scan), once each, and the result is kept.
 
 Each position says how exact it is ("street", "village", "parish",
-"municipality", "sale"): at village level Street View shows a street near the
-property, not the building.
+"municipality", "sale", "advertised"): at village level Street View shows a
+street near the property, not the building. "advertised" is a map pin the
+sale page itself gives (Licitor). It is used for the beach, the climate and
+the distances, the same as a street pin; the page's own note that the
+accuracy is not guaranteed is kept on the pin.
 """
 from __future__ import annotations
 
@@ -35,8 +38,12 @@ COUNTRY_CODES = {"PT": "pt", "ES": "es", "FR": "fr", "IT": "it", "NL": "nl", "DE
                  "BG": "bg", "SK": "sk", "LV": "lv"}
 _STREET = re.compile(
     r"\b((?:Rua|Rúa|Travessa|Avenida|Av\.|Largo|Estrada|Caminho|Praceta|Beco|Canada|Calçada|Alameda|"
-    r"Praça|Quinta|Bairro|Urbaniza[çc][ãa]o|Calle|Carrer|Rue|Chemin|Impasse|Boulevard|"
-    r"Via|Viale|Piazza|Corso|Stra(?:ße|sse)|Weg)\s+[^,.;:()]{2,60})", re.I)
+    r"Praça|Quinta|Bairro|Urbaniza[çc][ãa]o|Calle|Carrer|Rue|Avenue|Passage|All[ée]e|Place|"
+    r"Route|Quai|Square|Chemin|Impasse|Boulevard|"
+    r"Via|Viale|Piazza|Corso|Stra(?:ße|sse)|Weg)\s+[^,.;:()]{2,60}"
+    # German lists put the type at the end of the name: "Wangener Straße 141".
+    r"|(?:[A-ZÄÖÜa-zäöü][\wÄÖÜäöüß.'\-]*(?:straße|strasse|platz|allee|ring|gasse|damm|ufer|chaussee)"
+    r"\s+\d[\w/\-]*))", re.I)
 _LUGAR = re.compile(r"\b(?:lugar|sitio|sítio)\s+(?:de|do|da|dos|das)\s+([^,.;:()]{2,40})", re.I)
 _PLACE_OF = {"road": "street", "house_number": "street", "building": "street", "residential": "street",
              "hamlet": "village", "village": "village", "isolated_dwelling": "village", "locality": "village",
@@ -102,6 +109,31 @@ _FREGUESIA = re.compile(r"\bfreguesia\s+(?:de|do|da|dos|das)\s+([A-ZÀ-Ú][^,.;:
 # Citius land: "localização : Rojanda, Freixedas, Pinhel" — the places, smallest first.
 _LOCALIZACAO = re.compile(r"\blocaliza[çc][ãa]o\s*:\s*([^.;:()]{2,120})", re.I)
 _NOT_A_PLACE = re.compile(r"^\s*(?:lugar|rua|travessa|largo|avenida|estrada|caminho|sitio|sítio)\b", re.I)
+# A German list names the town after the postcode ("78647 Trossingen"), and the
+# district field is the Land ("in Bayern"), which is not a town.
+_DE_PLZ = re.compile(
+    r"\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]+){0,2})")
+_DE_STATE = re.compile(
+    r"^(?:in\s+)?(?:baden|bayern|berlin|brandenburg|bremen|hamburg|hessen|"
+    r"mecklenburg|niedersachsen|nordrhein|rheinland|saarland|sachsen|schleswig|"
+    r"thueringen|thüringen)\b", re.I)
+
+
+def _german_town(item: dict) -> tuple[str | None, str | None]:
+    """(town, postcode) from a German '78647 Trossingen', or (None, None).
+
+    Two different towns in one lot are not one place, so neither is returned.
+    A postcode of 00000 is not used; the town name still is."""
+    found: list[tuple[str | None, str]] = []
+    for m in _DE_PLZ.finditer(_address_text(item)):
+        name = re.sub(r"\s+", " ", m.group(2)).strip(" ,")
+        key = normalize(name)
+        if any(normalize(n) == key for _, n in found):
+            continue
+        found.append((None if m.group(1) == "00000" else m.group(1), name))
+    if len(found) != 1:
+        return None, None
+    return found[0][1], found[0][0]
 
 
 def _real_municipality(name: str | None, country: str) -> str | None:
@@ -151,8 +183,12 @@ def municipality(item: dict) -> str | None:
                     break
             if town:
                 break
+    if not town and country == "DE":
+        town, _plz = _german_town(item)
     if not town and country != "PT":
-        town = item.get("district")
+        district = (item.get("district") or "").strip()
+        if district and not (country == "DE" and _DE_STATE.match(district)):
+            town = district
     return re.sub(r"\s+", " ", town).strip(" ,") if town else None
 
 
@@ -164,6 +200,13 @@ def queries(item: dict) -> list[str]:
     town = municipality(item)
     if not town:
         return []
+    # The postcode keeps "Frankfurt" from landing on the other Frankfurt.
+    # Written as "78647 Trossingen", with no comma, so a town-only hit stays
+    # the town's pin and is not treated as a street.
+    if (item.get("country") or "PT") == "DE":
+        name, plz = _german_town(item)
+        if plz and name and normalize(name) == normalize(town):
+            town = f"{plz} {town}"
     parish = item.get("freguesia")
     if parish:
         parish = uf_parish(parish)
@@ -248,8 +291,9 @@ def _should_geocode(item: dict, raw: dict) -> bool:
         return False
     pos = position(item)
     upgrade = street_query(item)
-    # A sale, street, cadastre or verified pin is the building. A town or
-    # village pin is not, and a street in the notice is worth one more lookup.
+    # A sale, street, cadastre, verified or advertised pin is the building.
+    # A town or village pin is not, and a street in the notice is worth one
+    # more lookup.
     if pos and pos.get("precision") in EXACT_ENOUGH:
         return False
     if pos and upgrade and raw.get("geo_street_tried") != upgrade:
@@ -695,7 +739,10 @@ def km_text(km: float) -> str:
 OVERPASS = "https://overpass-api.de/api/interpreter"
 WATER_RADIUS_M = 300
 WATER_PER_SCAN = 40
-EXACT_ENOUGH = {"sale", "street", "cadastre", "verified"}
+# "advertised" is the sale page's own map pin (Licitor). The page may say the
+# accuracy is not guaranteed; it is still the location to use for the beach,
+# the climate and the distances.
+EXACT_ENOUGH = {"sale", "street", "cadastre", "verified", "advertised"}
 # A hamlet or village pin is not the plot, but water within a kilometre of it
 # is still worth knowing (and says "approx.").
 NEAR_ENOUGH = {"village"}

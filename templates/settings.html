@@ -202,13 +202,13 @@
 
 <div class="card" id="maps">
   <h3>Street View</h3>
-  <p class="small muted" style="margin-bottom:10px">Each listing's panel links to Google Street View at the property. To see Street View inside the panel, paste a Google Maps <b>Embed API</b> key (free: Google Cloud console → APIs → "Maps Embed API" → Credentials). It stays on this PC.</p>
+  <p class="small muted" style="margin-bottom:10px">Each listing's panel links to Google Street View at the property. To see Street View inside the panel, paste a Google Maps <b>Embed API</b> key (free: Google Cloud console → APIs → "Maps Embed API" → Credentials). It stays on this PC. The ruin check does not use this key: it uses open aerial photos and Panoramax street photos.</p>
   <div class="form-grid"><div class="field"><label>Google Maps Embed API key</label><input id="maps_google_key" type="password" autocomplete="off"></div></div>
 </div>
 
 <div class="card" id="ai">
   <h3>Photo check</h3>
-  <p class="small muted" style="margin-bottom:10px">After each scan, a vision model looks at the photos of the best homes (a few each scan, each once) and says whether the building looks sound, needs work or is a ruin. It is used when the listing's text says nothing about the condition. <b>Open model (Ollama)</b>: free and private, runs on this PC — install Ollama from ollama.com and run <code>ollama pull qwen2.5vl:3b</code>; without a graphics card a photo takes about a minute. <b>Claude</b>: faster, needs an Anthropic API key (it stays on this PC; the AI check on Offers uses it too).</p>
+  <p class="small muted" style="margin-bottom:10px">After each scan, a vision model looks at the photos of the best homes (a few each scan, each once) and says whether the building looks sound, needs work or is a ruin. It is used when the listing's text says nothing about the condition. A home with no photos of its own is looked at from open pictures instead: a Panoramax street photo, and in Portugal, Spain and France the national aerial survey. No key. Only an obvious ruin changes the score. <b>Open model (Ollama)</b>: free and private, runs on this PC — install Ollama from ollama.com and run <code>ollama pull qwen2.5vl:3b</code>; without a graphics card a photo takes about a minute. <b>Claude</b>: faster, needs an Anthropic API key (it stays on this PC; the AI check on Offers uses it too).</p>
   <div class="form-grid">
     <div class="field"><label>Model</label><select id="ai_provider"><option value="ollama">Open model on this PC (Ollama)</option><option value="anthropic">Claude (API key)</option></select></div>
     <div class="field"><label>Ollama model</label><input id="ai_ollama_model" type="text" placeholder="qwen2.5vl:3b"></div>

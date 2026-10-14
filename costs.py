@@ -25,9 +25,11 @@ Everything here is an estimate, and it says so:
 """
 from __future__ import annotations
 
+import json
 import re
 
-from common import find_floor_area, footprint_figure, land_figure, normalize, parse_price, price_to_pay
+from common import (counted_flats, find_floor_area, footprint_figure, land_figure, normalize,
+                    parse_price, price_to_pay)
 from scoring import INVEST_VALUE_MAX_M2, categorize, condition, property_kind
 
 IMT_YEAR = 2025
@@ -316,29 +318,72 @@ def imt(value: float, kind: str | None, *, own_home: bool = False) -> tuple[floa
     return 0.0, ""
 
 
+def _item_raw(item: dict) -> dict:
+    raw = item.get("raw_json")
+    if isinstance(raw, dict):
+        return raw
+    try:
+        raw = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def catastro_home(item: dict) -> tuple[float, str]:
+    """(dwelling m², note) from a stored Catastro reading.
+
+    One VIVIENDA is the floor. Common parts, a store and a parking space are
+    not. Two or more dwellings are not added together: the notice does not say
+    whether the sale is one of them or the whole building. No reading, no note.
+    """
+    cat = _item_raw(item).get("catastro")
+    if not isinstance(cat, dict):
+        return 0.0, ""
+    homes = []
+    for unit in cat.get("units") or []:
+        if not isinstance(unit, dict) or not unit.get("m2"):
+            continue
+        if normalize(unit.get("use")) == "vivienda":
+            homes.append(float(unit["m2"]))
+    if len(homes) == 1 and homes[0] > 0:
+        return homes[0], (
+            f"floor {homes[0]:.0f} m² from Catastro (the dwelling; common parts are not counted)")
+    if len(homes) > 1:
+        listed = ", ".join(f"{m:.0f}" for m in homes)
+        return 0.0, (
+            f"Catastro lists {len(homes)} dwellings ({listed} m²) — the notice does not say "
+            "whether this sale is one of them or all of them")
+    built = float(cat.get("built_m2") or 0)
+    if built > 0 and "residencial" in normalize(cat.get("use")) and not cat.get("units"):
+        return built, f"floor {built:.0f} m² from Catastro (built area; the notice states none)"
+    return 0.0, ""
+
+
 def building_m2(item: dict) -> tuple[float, str]:
     """(m² of building to renovate and let, where the figure came from).
 
     The stored area, otherwise the first size in the title or the description
-    that is not the land or the footprint. A stored area the notice calls land
-    or implantação is not the floor: the floor is then the notice's own floor
-    figure, or unknown when that is the only size. Nothing is invented. At most
-    INVEST_VALUE_MAX_M2: a bigger number is the plot, and pricing all of it
-    would treat the land as floor space. The source is "stored", "notice" or
-    "capped" ("" when there is no floor).
+    that is not the land or the footprint, otherwise one dwelling in Catastro.
+    A stored area the notice calls land or implantação is not the floor: the
+    floor is then the notice's own floor figure, or unknown when that is the
+    only size. Nothing is invented. At most INVEST_VALUE_MAX_M2: a bigger
+    number is the plot, and pricing all of it would treat the land as floor
+    space. The source is "stored", "notice", "catastro" or "capped"
+    ("" when there is no floor).
     """
     stored = float(item.get("area_m2") or 0)
     title, desc = item.get("title"), item.get("description")
     notice = find_floor_area(title) or find_floor_area(desc) or 0
     text = f"{title or ''}\n{desc or ''}"
     if stored and (land_figure(text, stored) or footprint_figure(text, stored)):
-        if not notice:
-            return 0.0, ""
-        raw, source = float(notice), "notice"
+        raw, source = (float(notice), "notice") if notice else (0.0, "")
     elif stored:
         raw, source = stored, "stored"
     else:
         raw, source = float(notice), "notice" if notice else ""
+    if not raw:
+        raw, _note = catastro_home(item)
+        source = "catastro" if raw else ""
     if not raw:
         return 0.0, ""
     if raw > INVEST_VALUE_MAX_M2:
@@ -358,6 +403,8 @@ def renovation(item: dict) -> dict | None:
     where = f"{area:,.0f} m²".replace(",", " ")
     if source == "notice":
         where += " (the size in the notice)"
+    elif source == "catastro":
+        where += " (Catastro's dwelling, not a size written in the notice)"
     elif source == "capped":
         where += " of building — a larger area is the plot, not floor space"
     return {"low": round(area * low), "high": round(area * high), "eur_m2": (low, high),
@@ -403,6 +450,19 @@ def _other_lines(item: dict, value: float, country: str) -> list[dict]:
 
 
 RENT_MAX_M2 = 200            # a bigger house does not rent for proportionally more
+# A block the ad counts ("trois appartements T3") but does not measure. Each
+# figure is a modest floor for that type, not a survey and not this building.
+# The rent says so. The resale comparison and the repair bill stay on a floor
+# the ad or the feed actually states.
+FLAT_PLAN_M2 = {"T1": 25, "T2": 40, "T3": 55, "T4": 75, "T5": 90, "T6": 110}
+FLAT_BLOCK_MAX = 8           # past this, guessing a floor would invent a building
+# Italian cadastral "vani" are rooms, not square metres, and the cadastre
+# publishes no conversion. Agents often count about 20 m². 15 understates the
+# floor, so a rent worked out from it does not pretend the home is larger than
+# it is. It is never stored as the floor and never used for the resale discount
+# or the repair bill.
+VANI_M2 = 15.0
+VANI_MAX = 12.0              # past this it is a block or a misread, not one home
 # A lease the ad states, above this share of the cost a year, is not believed:
 # the number is usually the price, a year, or a deposit.
 STATED_YIELD_MAX = 30
@@ -524,33 +584,137 @@ def _finish_rent(item: dict, cost: float, monthly: float, *, source: str, provin
             "note": note}
 
 
+def _block_text(item: dict) -> str:
+    """The title or the description, whichever names the flats. Not both:
+    a title that repeats the description would count six T3s."""
+    title = item.get("title") or ""
+    desc = item.get("description") or ""
+    nt, nd = normalize(title), normalize(desc)
+    if not nd or nd in nt:
+        return title
+    if not nt or nt in nd:
+        return desc
+
+    def named(text: str) -> int:
+        typed, bare = counted_flats(text)
+        return sum(typed.values()) + bare
+
+    if named(title) and not named(desc):
+        return title
+    return desc or title
+
+
+def flat_block(item: dict) -> dict | None:
+    """A building the ad counts as several flats, or None for a single home.
+
+    {"area", "label", "count"}. `area` is a planning floor when every flat has
+    a type and there are at most FLAT_BLOCK_MAX of them, else None and the
+    label says why no rent was worked out. A measured floor is not this."""
+    typed, bare = counted_flats(_block_text(item))
+    count = sum(typed.values()) + bare
+    if count < 2:
+        return None
+    if bare or count > FLAT_BLOCK_MAX or any(t not in FLAT_PLAN_M2 for t in typed):
+        why = (f"{count} apartments — too many to guess a floor from the types"
+               if count > FLAT_BLOCK_MAX else
+               f"{count} apartments, sizes not stated — rent not worked out")
+        return {"area": None, "label": why, "count": count}
+    area = float(sum(n * FLAT_PLAN_M2[t] for t, n in typed.items()))
+    if len(typed) == 1:
+        t, n = next(iter(typed.items()))
+        label = (f"{n} {t} apartments, each counted at {FLAT_PLAN_M2[t]:.0f} m²"
+                 " — the ad states no floor area")
+    else:
+        parts = ", ".join(f"{n} {t}" for t, n in sorted(typed.items()))
+        label = f"{parts}, each counted at a planning size — the ad states no floor area"
+    if area > INVEST_VALUE_MAX_M2:
+        label += f"; only {INVEST_VALUE_MAX_M2:.0f} m² is counted"
+        area = float(INVEST_VALUE_MAX_M2)
+    return {"area": area, "label": label, "count": count}
+
+
+_VANI_RE = re.compile(
+    r"consist(?:enza|\.)(?:\s+di)?\s+(\d{1,2}(?:[.,]\d+)?)\s+vani\b"
+    r"|(?:cat(?:egoria|\.)?\s*)?A\s*/?\s*\d\w?(?:[^.\n]{0,60}?)vani\s+(\d{1,2}(?:[.,]\d+)?)"
+    r"|(?:cat(?:egoria|\.)?\s*)?A\s*/?\s*\d\w?(?:[^.\n]{0,60}?)(\d{1,2}(?:[.,]\d+)?)\s+vani\b",
+    re.I)
+
+
+def vani_floor(item: dict) -> dict | None:
+    """A cautious floor from Italian cadastral vani, or None.
+
+    {"area", "label"}. One consistenza is counted at VANI_M2. Several different
+    figures are not added. A floor the notice or Catastro states is not this:
+    the caller only asks when that floor is missing."""
+    nums: list[float] = []
+    for m in _VANI_RE.finditer(_block_text(item)):
+        raw = next(g for g in m.groups() if g)
+        n = float(raw.replace(",", "."))
+        if 1 <= n <= VANI_MAX and n not in nums:
+            nums.append(n)
+    if not nums:
+        return None
+    if len(nums) > 1:
+        return {"area": None,
+                "label": (f"the court gives {len(nums)} sizes in vani — not added together, "
+                          "and not a floor area")}
+    n = nums[0]
+    shown = f"{n:g}"
+    return {"area": n * VANI_M2,
+            "label": (f"{shown} vani, counted at {VANI_M2:.0f} m² each — the court states "
+                      "no floor area, so this is a cautious estimate, not a measured floor")}
+
+
 def rent(item: dict, cost: float) -> dict | None:
     """What a home would rent for, from the rent per m² in its municipality
     (Portugal: INE's median of new leases; France: the carte des loyers;
     Spain: SERPAVI; Italy: OMI quotations by comune), and
     the yield on `cost` (what it takes to own it, with the work), net of the
-    default running costs and empty months. None without an area or a figure."""
+    default running costs and empty months. None without an area or a figure.
+
+    Several flats named by type but with no floor area ("trois appartements
+    T3") are let as that many homes, at FLAT_PLAN_M2 each. Italian cadastral
+    vani, when the notice states no floor, are counted at VANI_M2 each. Neither
+    size is used for the resale comparison or the repair bill."""
     if (item.get("kind") or property_kind(item)) != "home":
         return None
     country = (item.get("country") or "PT").upper()
     area, _source = building_m2(item)
+    block = None
+    vani = None
+    if not area:
+        block = flat_block(item)
+        if block and block.get("area"):
+            area = block["area"]
+        elif not block:
+            vani = vani_floor(item)
+            if vani and vani.get("area"):
+                area = vani["area"]
     if not area or cost <= 0:
         return None
+    import geo
     import prices
-    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    place = item.get("concelho") or geo.municipality(item)
     found = prices.rent_per_m2(country, place, item.get("district") if place != item.get("district") else None)
     if not found:
         return None
     eur_m2, source = found
-    used = min(area, RENT_MAX_M2)
+    # One house stops growing at RENT_MAX_M2. A counted block is several leases,
+    # already capped at the building size, so three T3s are not cut back to one.
+    used = area if block else min(area, RENT_MAX_M2)
     # A missing village falls back on the province, which is the towns. Count
     # half of that and say so: a remote village does not let at the province rate.
     province = "province" in source
     if province:
         eur_m2 = eur_m2 / 2
     monthly = round(used * eur_m2)
-    return _finish_rent(item, cost, monthly, source=source, province=province,
-                        eur_m2=eur_m2, area_used=used)
+    out = _finish_rent(item, cost, monthly, source=source, province=province,
+                       eur_m2=eur_m2, area_used=used)
+    planned = block if block and block.get("area") else (vani if vani and vani.get("area") else None)
+    if out and planned and planned.get("label"):
+        out["planning"] = planned["label"]
+        out["note"] += f"; {planned['label']}. Repairs are not in this yield"
+    return out
 
 
 def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) -> dict | None:
@@ -609,7 +773,8 @@ def money_out(item: dict, *, bid: float | None = None, typical: bool = False) ->
     """What one purchase takes from cash you can lose.
 
     {"amount", "detail", "estimate"}. The amount is the low end of the all-in
-    figure when the floor area is known — stored, or written in the notice —
+    figure when the floor area is known — stored, written in the notice, or one
+    Catastro dwelling —
     otherwise the price plus taxes and fees. `typical` uses the middle of the
     repair range, for a home whose condition was not stated. A stored area
     larger than the building cap counts only that much floor. Repairs are left

@@ -9,7 +9,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 from common import (LOG, find_area, find_price, has_term, land_max_price, make_listing, make_session, normalize,
-                    parse_date_dmy, parse_price, prefer_stated_area, safe_url, stable_id, to_number)
+                    parse_date_dmy, parse_price, possession, prefer_stated_area, safe_url, stable_id, to_number)
 from db import upsert_listing
 from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
@@ -269,14 +269,7 @@ _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 def _spain_occupation(text: str | None) -> str | None:
     """BOE "Situación posesoria" → "occupied" / "vacant" / None (unknown)."""
-    t = (text or "").lower()
-    if not t or "no consta" in t:
-        return None
-    if "libre" in t or "desocupad" in t or "sin ocupantes" in t:
-        return "vacant"
-    if "ocupad" in t or "okupa" in t or "arrendad" in t or "inquilin" in t:
-        return "occupied"
-    return None
+    return possession(text)
 
 
 def _spain_parse_general(html: str) -> dict:

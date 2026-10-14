@@ -41,6 +41,31 @@ def parse_licitor_list_title(text: str) -> tuple[str, str | None]:
     return _unglue_french(m.group(3).strip() or title)[:120], town
 
 
+def licitor_department(text: str) -> str | None:
+    """The department code glued to the front of a licitor list title ("22Plémet")."""
+    m = re.match(r"^\s*(\d{2,3}|2[ab])(?=\s*\D)", text or "", re.I)
+    return m.group(1).upper() if m else None
+
+
+def remember_department(db, listing_id: str, department: str | None) -> None:
+    """Keep the department beside whatever the row already stores. A later page
+    must not have to guess which of several communes of the same name it is."""
+    if not department:
+        return
+    row = db.execute("SELECT raw_json FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if not row:
+        return
+    try:
+        raw = json.loads(row[0] or "{}")
+    except ValueError:
+        raw = {}
+    if not isinstance(raw, dict) or raw.get("department"):
+        return
+    raw["department"] = department
+    db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
+               (json.dumps(raw, ensure_ascii=False), listing_id))
+
+
 def _unglue_french(title: str) -> str:
     """Insert spaces the list page left out ('habitationde', 'occupationMise')."""
     title = re.sub(r"(habitation)(de)\b", r"\1 \2", title, flags=re.I)
@@ -94,6 +119,8 @@ def scrape_france(db, max_price: float = 50000, **_):
                 "france", eid, "FR", title=title, tipo="immobilier", price=price,
                 concelho=town, url=href, base_url=LICITOR_BASE,
             ))
+            if town:
+                remember_department(db, f"france:{eid}", licitor_department(raw_title))
             count += 1
 
         if count:
@@ -177,10 +204,65 @@ def parse_licitor_annonce(html: str) -> dict:
     occ = _licitor_occupation(norm)
     if occ:
         out["occupation"] = occ
+
+    # The list link is one truncated line. The annonce names each part, the
+    # street and a map pin. The pin is used for the beach, the climate and the
+    # distances; the note keeps the page's warning that its accuracy is not
+    # guaranteed. A sponsored "prices nearby" widget is not read — it is not a
+    # sale price for this property.
+    ad = soup.select_one(".AdContent") or soup.select_one("article.LegalAd")
+    if ad is not None:
+        lots = []
+        for lot in ad.select(".SousLot"):
+            head = lot.find(["h2", "h3"])
+            body = " ".join(p.get_text(" ", strip=True) for p in lot.find_all("p"))
+            title = head.get_text(" ", strip=True) if head else ""
+            piece = re.sub(r"\s+", " ", f"{title} {body}").strip()
+            if piece:
+                lots.append(piece)
+        street_el = ad.select_one("p.Street")
+        city_el = ad.select_one("p.City")
+        street = re.sub(r"\s+", " ", street_el.get_text(" ", strip=True)) if street_el else ""
+        city = re.sub(r"\s+", " ", city_el.get_text(" ", strip=True)) if city_el else ""
+        if street:
+            out["street"] = street
+        if city:
+            out["city"] = city
+        where = ", ".join(p for p in (street, city) if p)
+        if lots or where:
+            out["description"] = ". ".join([*lots, where] if where else lots)
+        link = ad.select_one("p.Map a[href*='q=']")
+        found = re.search(r"q=(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)", link.get("href") or "") if link else None
+        if found:
+            lat, lon = float(found.group(1)), float(found.group(2))
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                out["pin"] = (lat, lon)
     return out
 
 
-def enrich_france_details(db, session, limit: int = 60):
+def _remember_advertised_pin(raw: dict, info: dict) -> None:
+    """Keep Licitor's map pin when nothing more exact is stored.
+
+    Bare lat/lon would be read as the sale's own coordinates. This pin is used
+    for the beach, the climate and the distances. The note keeps the page's
+    warning that its accuracy is not guaranteed."""
+    pin = info.get("pin")
+    if not pin:
+        return
+    geo = raw.get("geo") if isinstance(raw.get("geo"), dict) else {}
+    if raw.get("verified_geo") or geo.get("precision") in ("sale", "street", "cadastre", "verified"):
+        return
+    street, city = info.get("street") or "", info.get("city") or ""
+    raw["geo"] = {"lat": pin[0], "lon": pin[1], "precision": "advertised",
+                  "query": ", ".join(p for p in (street, city) if p) or "licitor",
+                  "note": "Licitor's map pin; the page says its accuracy is not guaranteed"}
+    # A missing key is filled back in from the old row (db._keep_learned).
+    # Null says the old reading was for another pin and must not come back.
+    raw["climate"] = None
+    raw["water_check"] = None
+
+
+def enrich_france_details(db, session, limit: int = 160):
     """Open the annonce page of licitor listings not checked yet, newest
     first: hearing date (so past sales expire), tribunal, mise à prix, the
     lawyer's name and e-mail for letters, occupancy for the score.
@@ -190,7 +272,7 @@ def enrich_france_details(db, session, limit: int = 60):
     clause, extra = still_worth_a_page_sql()
     rows = db.execute(f"""
         SELECT * FROM listings WHERE source='france' AND url IS NOT NULL
-          AND (raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
+          AND (raw_json IS NULL OR raw_json NOT LIKE '%"body_checked"%')
           {clause}
         ORDER BY first_seen DESC LIMIT ?
     """, (*extra, limit)).fetchall()
@@ -207,14 +289,19 @@ def enrich_france_details(db, session, limit: int = 60):
             raw = json.loads(item.get("raw_json") or "{}") or {}
         except ValueError:
             raw = {}
-        raw.update(info)
-        raw["detail_checked"] = datetime.now().strftime("%Y-%m-%d")
+        raw.update({k: v for k, v in info.items() if k not in ("description", "street", "city", "pin")})
+        raw["detail_checked"] = raw["body_checked"] = datetime.now().strftime("%Y-%m-%d")
+        if info.get("street"):
+            raw["morada"] = info["street"]
+        _remember_advertised_pin(raw, info)
         fields = {k: item.get(k) for k in (
             "title", "description", "tipo", "area_m2", "price", "current_bid", "min_price",
             "district", "concelho", "freguesia", "url", "image_url", "date_end")}
+        fields["description"] = info.get("description") or fields["description"]
         fields["price"] = fields["price"] or info.get("mise_a_prix")
         fields["date_end"] = info.get("audience") or fields["date_end"]
         fields["district"] = fields["district"] or info.get("tribunal_ville")
+        fields["concelho"] = fields["concelho"] or info.get("city")
         # Older scrapes glued "22PlémetUne…"; split when the stored title still is.
         title, town = parse_licitor_list_title(fields.get("title") or "")
         if town:

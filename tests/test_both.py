@@ -28,16 +28,30 @@ def test_a_house_by_the_sea_in_a_good_climate_is_the_worse_of_the_two_scores(mon
     assert why[0].startswith("the worse of the two")
 
 
+def test_one_catastro_dwelling_counts_as_the_floor(monkeypatch):
+    monkeypatch.setattr("scoring.local_price", lambda item: (1200.0, "a city series"))
+    raw = json.loads(SALE)
+    raw["catastro"] = {"use": "Residencial", "built_m2": 77,
+                       "units": [{"use": "VIVIENDA", "m2": 77}]}
+    house = beach_home(area_m2=0, description="moradia", raw_json=json.dumps(raw))
+    score, why = score_detail(house, mode="both")
+    assert score > 0 and not any(r.startswith("floor area") for r in why)
+    assert any("from Catastro" in r for r in score_detail(house, mode="home")[1])
+
+
 def test_the_gates_keep_off_what_is_not_a_home_to_live_in():
     town = beach_home(raw_json=json.dumps(
         {"geo": {"lat": 41.1, "lon": -8.6, "precision": "municipality"}}))
     assert score_detail(town, mode="both")[0] == 0
     assert "town, not the house" in score_detail(town, mode="both")[1][0]
 
-    far = beach_home(beach={"km": 8.2, "approx": False, "text": "8.2 km from the beach"})
+    far = beach_home(beach={"km": 12, "approx": False, "text": "12 km from the beach"})
     assert score_detail(far, mode="both")[0] == 0
     assert score_detail(far, mode="both")[1][0].startswith("not by the beach")
     assert score_detail(far, mode="invest")[0] > 0
+    nearer = beach_home(beach={"km": 8.2, "approx": False, "text": "8.2 km from the beach"})
+    assert score_detail(nearer, mode="both")[0] > 0
+    assert not any(r.startswith("not by the beach") for r in score_detail(nearer, mode="both")[1])
 
     guessed = beach_home(beach={"km": 0.4, "approx": True, "text": "about 0.4 km from the beach"})
     assert score_detail(guessed, mode="both")[0] == 0

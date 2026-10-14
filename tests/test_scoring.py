@@ -285,6 +285,44 @@ def test_occupancy_from_the_detail_page_wins():
     assert "occupied/tenanted" in french
     _, libre = score(item(title="Maison libre de toute occupation"))
     assert "occupied/tenanted" not in libre and "vacant (devoluto)" in libre
+    habitual = item(title="Vivienda", country="ES", raw_json=json.dumps({"vivienda_habitual": "Sí"}))
+    _, why = score(habitual)
+    assert "debtor's main home" in " ".join(why) and "occupied/tenanted" in why
+    # A posesoria that says vacant is more precise than the main-home mark.
+    empty = item(title="Vivienda", country="ES", raw_json=json.dumps(
+        {"vivienda_habitual": "Sí", "occupation": "vacant"}))
+    _, why = score(empty)
+    assert "occupied/tenanted" not in why and "debtor's main home" in " ".join(why)
+
+
+def test_a_catastro_dwelling_fills_a_missing_floor():
+    import json
+    raw = json.dumps({"catastro": {"use": "Residencial", "built_m2": 77, "year": 1978,
+                                   "units": [{"use": "VIVIENDA", "m2": 77}]},
+                      "ano_construcao": None})
+    sc, why = score(item(title="Vivienda en Oviedo", country="ES", area_m2=0, price=20000,
+                         raw_json=raw))
+    text = " ".join(why)
+    assert "77 m² from Catastro" in text and "size unknown" not in text and sc > 0
+    from scoring import built_year
+    assert built_year(item(raw_json=raw)) == 1978
+    two = item(title="Vivienda", country="ES", area_m2=0, raw_json=json.dumps({
+        "catastro": {"units": [{"use": "VIVIENDA", "m2": 40}, {"use": "VIVIENDA", "m2": 40}]}}))
+    _, why = score(two)
+    assert "2 dwellings" in " ".join(why) and "size unknown" in " ".join(why)
+
+
+def test_a_stored_availability_counts_as_occupied_or_vacant():
+    from scoring import _occupation
+    assert _occupation({"raw_json": '{"disponibilita": ["LIBER"]}'}) == "vacant"
+    assert _occupation({"raw_json": '{"disponibilita": ["OCCUP"]}'}) == "occupied"
+    assert _occupation({"raw_json": '{"disponibilita": ["OCCST"]}'}) == "occupied"
+    assert _occupation({"raw_json": '{"disponibilita": ["LIBER", "OCCUP"]}'}) == "occupied"
+    assert _occupation({"raw_json": '{"disponibilita": ["NON_SPECIFICATA"]}'}) is None
+    assert _occupation({"raw_json": '{"situacion_posesoria": "Ocupantes sin derecho de permanencia"}'}) == "occupied"
+    assert _occupation({"raw_json": '{"situacion_posesoria": "No consta"}'}) is None
+    # The page's own mark wins over a stray word in the description.
+    assert _occupation({"raw_json": '{"occupation": "vacant", "disponibilita": ["OCCUP"]}'}) == "vacant"
 
 
 def test_score_bounds():
@@ -634,6 +672,19 @@ def test_size_written_in_the_text():
     assert find_area("Prédio com 1.250 m2 de terreno") == 1250
     assert find_area("Herdade com 8 ha") == 80000
     assert find_area("T2 em Lisboa, 3º andar") is None
+    assert find_area("tiene una superficie total de 190 metros cuadrados") == 190
+    assert find_area("superficie total de 45,33 metros") == 45.33
+    assert find_area("superficie construida de cincuenta y cinco metros con sesenta y seis decímetros cuadrados") == 55.66
+    assert find_area("superficie construida de ciento ochenta y tres metros y ochenta y ocho decímetros") == 183.88
+    assert find_area("CUATRO METROS CUADRADOS CON SETENTA Y UN DECÍMETROS CUADRADOS") == 4.71
+    assert find_area("superficie útil de sesenta y siete metros sesenta y cinco decímetros") == 67.65
+    assert find_area("Ocupa una superficie de dieciséis metros cuadrados.") == 16
+    assert find_area("superficie lorda commerciale di 128 metri quadri") == 128
+    assert find_area("della superficie catastale di metri quadri 9 circa") == 9
+    assert find_area("trinta e cinco metros quadrados") == 35
+    assert find_area("teniendo un frente de dos metros") is None
+    from common import find_floor_area
+    assert find_floor_area("finca de 1000 metros cuadrados, casa de 90 m²") == 90
     # the Le Mans house from the real list: 35 m² is a small home, however cheap
     sc, reasons = score(item(source="france", country="FR", price=6000,
                              title="72Le MansUne maison à usage d'habitationd'environ 35,50 m², comprenant : entrée"))
@@ -959,6 +1010,7 @@ def test_the_five_wishes_at_a_glance():
 def test_listing_traps_seen_in_the_top_15():
     """Each was ranked near the top before (2026-10-06)."""
     from scoring import NOT_VISITABLE, _skip_reason, has_term, property_kind
+    import json
     share = "Compartes el inmueble con otros 5 socios, y disfrutas 60 días al año."
     assert _skip_reason({}, "Vivienda en Antigua", share).startswith("a share")
     camp = "Bungalow de TEMPORADA. NO ES POSIBLE COMO VIVIENDA HABITUAL, NO SE PUEDE ALQUILAR"
@@ -971,3 +1023,13 @@ def test_listing_traps_seen_in_the_top_15():
                           "description": "En lo alto, presentamos esta maravillosa finca de más de 40.000m2 "
                                          "con dos cabañas"}) == "rural_plot"
     assert has_term("Piso de 3 dormitorios. No Visitable.", NOT_VISITABLE, negations=False)
+    hidden = item(title="Vivienda", price=20000, area_m2=80, raw_json=json.dumps({"visitable": "No"}))
+    assert score(hidden)[0] == 0 and score(hidden)[1][0].startswith("cannot be visited")
+    unknown = item(title="Vivienda", price=20000, area_m2=80, description="Casa em bom estado",
+                   raw_json=json.dumps({"visitable": "No consta"}))
+    assert not score(unknown)[1][0].startswith("cannot be visited")
+    street = item(title="Vivienda", price=20000, area_m2=80,
+                  raw_json=json.dumps({"visitable": "Sí (Desde el exterior)"}))
+    assert not score(street)[1][0].startswith("cannot be visited")
+    prose = item(title="Piso", description="Piso de 3 dormitorios. No visitable.", price=20000, area_m2=70)
+    assert score(prose)[0] == 0 and score(prose)[1][0].startswith("cannot be visited")

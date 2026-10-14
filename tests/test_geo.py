@@ -160,6 +160,24 @@ def test_street_view_links_and_the_embed_only_when_the_position_is_exact():
     assert sv["embed"] is None and sv["precision"].startswith("approximate")
 
 
+def test_a_german_postcode_names_the_town_and_a_street_number_the_building():
+    item = {"country": "DE", "district": "in Baden-Wuerttemberg", "concelho": None,
+            "title": "Einfamilienhaus : Bismarckstraße 26/1, 78647 Trossingen — K 0026/2024",
+            "description": "", "raw_json": "{}"}
+    assert geo.municipality(item) == "Trossingen"
+    assert geo.queries(item)[0] == "Bismarckstraße 26/1, 78647 Trossingen"
+    # The Land is not a town, and two towns are not one pin.
+    assert geo.municipality({"country": "DE", "district": "in Bayern", "title": "Haus",
+                             "raw_json": "{}"}) is None
+    two = {**item, "title": "Fläche : Oberer Esch, 88437 Laupertshausen und 88400 Biberach"}
+    assert geo.municipality(two) is None and geo.queries(two) == []
+    import prices
+    from scoring import local_price
+    found = local_price(item)
+    direct = prices.local_price("DE", "Trossingen", {})
+    assert found and direct and found[0] == direct[0]
+
+
 def test_public_facts_in_the_portuguese_records():
     rec = listing_info.official_records({
         "country": "PT", "source": "citius", "concelho": "Oliveira de Azeméis",

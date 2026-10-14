@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
+import urllib.parse
 
 from common import LOG, utcnow_iso
 
@@ -39,6 +41,13 @@ PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
 PHOTO_FAILURES_IN_A_ROW = 2         # then the looker is down (Ollama out of memory, …)
 MAX_PHOTOS = {"ollama": 2, "anthropic": 6}   # a 6 GB laptop swaps with more images in one Ollama call
 MAX_PHOTO_BYTES = 3_000_000
+# A listing shown at 85 or more in any goal keeps its photos on this PC. Auction
+# sites take the pictures down when the sale ends; the detail panel then still
+# has them. Twelve is a full gallery, not the two the vision model looks at.
+KEEP_SCORE = 85
+KEEP_PER_SCAN = 20
+KEEP_GALLERY = 12
+KEEP_SIDE = 1600
 DESCRIPTION_CHARS = 1200   # enough for the condition; more slows a small local model
 # Gallery keys scrapers have used (and a few common alternate spellings).
 _GALLERY_KEYS = ("fotos", "photos", "images", "imagens", "immagini", "gallery",
@@ -94,7 +103,7 @@ def _url(value) -> str | None:
     return None
 
 
-def photo_urls(item: dict) -> list[str]:
+def photo_urls(item: dict, limit: int | None = None) -> list[str]:
     """The listing's photos: the cover, then any gallery the source gave."""
     try:
         raw = json.loads(item.get("raw_json") or "{}")
@@ -113,7 +122,7 @@ def photo_urls(item: dict) -> list[str]:
         cleaned = _url(u)
         if cleaned and cleaned not in out:
             out.append(cleaned)
-    return out[:max(MAX_PHOTOS.values())]
+    return out[: max(MAX_PHOTOS.values()) if limit is None else limit]
 
 
 def needs_photo_check(item: dict) -> bool:
@@ -161,6 +170,19 @@ class ClaudeLooker:
         resp = self.client.messages.create(
             model=self.model, max_tokens=400, messages=[{"role": "user", "content": content}],
             output_config={"format": {"type": "json_schema", "schema": PHOTO_SCHEMA}},
+        )
+        return json.loads(next((b.text for b in resp.content if b.type == "text"), ""))
+
+    def look_images(self, images: list[bytes], prompt: str) -> dict:
+        """Pictures we already fetched (the street and the satellite). The request
+        does not carry a URL, so the Google key is not sent with them."""
+        content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                 "data": base64.b64encode(data).decode("ascii")}}
+                   for data in images]
+        content.append({"type": "text", "text": prompt})
+        resp = self.client.messages.create(
+            model=self.model, max_tokens=400, messages=[{"role": "user", "content": content}],
+            output_config={"format": {"type": "json_schema", "schema": OUTSIDE_SCHEMA}},
         )
         return json.loads(next((b.text for b in resp.content if b.type == "text"), ""))
 
@@ -220,6 +242,18 @@ class OllamaLooker:
         resp.raise_for_status()
         return json.loads(resp.json()["message"]["content"])
 
+    def look_images(self, images: list[bytes], prompt: str) -> dict:
+        encoded = [base64.b64encode(data).decode("ascii") for data in images if data]
+        if not encoded:
+            raise ValueError("no photo could be fetched")
+        resp = self.session.post(f"{self.url}/api/chat", json={
+            "model": self.model, "stream": False, "format": OUTSIDE_SCHEMA, "options": {"temperature": 0},
+            "keep_alive": "5m",
+            "messages": [{"role": "user", "content": prompt, "images": encoded}],
+        }, timeout=900)
+        resp.raise_for_status()
+        return json.loads(resp.json()["message"]["content"])
+
 
 def check_photos(looker, item: dict) -> dict | None:
     """Ask the model about one listing's photos. None when it has none."""
@@ -234,6 +268,270 @@ def check_photos(looker, item: dict) -> dict | None:
             "notes": str(found.get("notes") or "")[:200], "photos": len(urls),
             "shows_house": found.get("shows_house") is not False,
             "by": getattr(looker, "model", looker.name), "at": utcnow_iso()}
+
+
+# The sale's own pin, the cadastre, or a pin you verified. A street or a town
+# pin is a different building, so a ruin there would be the wrong house.
+OUTSIDE_EXACT = {"sale", "cadastre", "verified", "advertised"}
+# How far a street photo may be from the pin. Farther than this is a different
+# building. The aerial photo is a square of this half-width, so the pin sits
+# in the middle.
+OUTSIDE_M = 40
+# Open pictures, no key. Street photos: Panoramax (the shared catalogue; dense
+# in France, sparse elsewhere). Aerial photos, about 20–25 cm, where a national
+# survey publishes one: France IGN, Spain PNOA, Portugal DGT. Germany and Italy
+# have no single open national aerial service, so only a street photo is asked for.
+PANORAMAX_SEARCH = "https://api.panoramax.xyz/api/search"
+_AERIAL = {
+    "FR": ("https://data.geopf.fr/wms-r/wms", "ORTHOIMAGERY.ORTHOPHOTOS", "EPSG:3857", "IGN"),
+    "PT": ("https://cartografia.dgterritorio.gov.pt/wms/ortos2025", "Ortos2025-RGB", "EPSG:3763", "DGT"),
+}
+OUTSIDE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "condition": {"type": "string", "enum": ["heavy", "standing", "unknown"]},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "notes": {"type": "string"},
+        "shows_house": {"type": "boolean"},
+    },
+    "required": ["condition", "confidence", "notes", "shows_house"],
+    "additionalProperties": False,
+}
+OUTSIDE_PROMPT = """These pictures are the outside of one building at a sale's map pin: {title}.
+One, if present, is an official aerial photo of the block around the pin.
+One, if present, is the nearest open street photo (it may show the street rather than the door).
+They are not the seller's photos. The inside is not shown.
+- "heavy": an obvious ruin — no roof, a collapsed or fallen roof, or walls missing so it is a shell.
+  Say "collapsed roof" or "missing walls" in notes.
+- "standing": the roof is on, or the walls are up. Say "outside standing" in notes.
+  This is not a judgment of the inside, the damp or the kitchen.
+- "unknown": you cannot see this building, or you cannot tell which roof is the sale
+  (trees, several roofs, the wrong house, only land, too blurred).
+"shows_house": true only if a picture shows the dwelling itself, not a barn, a shed or the view.
+Do not guess. If you are unsure, answer "unknown"."""
+
+
+class OutsideUnavailable(Exception):
+    """The picture server did not answer. Try next scan, and do not store a guess."""
+
+
+def needs_outside_check(item: dict) -> bool:
+    """A home with no photos, no stated condition, and a pin that is the building."""
+    if '"outside_check"' in (item.get("raw_json") or ""):
+        return False
+    if photo_urls(item):
+        return False
+    kind = item.get("kind")
+    if kind is None:
+        from scoring import property_kind
+        kind = property_kind(item)
+    if kind != "home":
+        return False
+    from scoring import (GOOD_CONDITION, HEAVY_WORK, SOME_WORK, has_term, portal_condition,
+                         _whole_house_good)
+    if portal_condition(item):
+        return False
+    text = f"{item.get('title') or ''} {item.get('description') or ''}"
+    if has_term(text, HEAVY_WORK + SOME_WORK) or (has_term(text, GOOD_CONDITION) and _whole_house_good(text)):
+        return False
+    import geo
+    pos = geo.position(item)
+    return bool(pos and pos.get("precision") in OUTSIDE_EXACT)
+
+
+def _web_mercator(lat: float, lon: float) -> tuple[float, float]:
+    x = math.radians(lon) * 6378137.0
+    y = math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * 6378137.0
+    return x, y
+
+
+def _pt_tm06(lat: float, lon: float) -> tuple[float, float]:
+    """ETRS89 / Portugal TM06 (EPSG:3763), metres. The DGT aerial service asks
+    for this grid. The projection's own origin maps to (0, 0)."""
+    a = 6378137.0
+    f = 1 / 298.257222101
+    lat0 = math.radians(39.66825833333333)
+    lon0 = math.radians(-8.133108333333334)
+    e2 = f * (2 - f)
+    ep2 = e2 / (1 - e2)
+
+    def arc(phi: float) -> float:
+        e4, e6 = e2 * e2, e2 * e2 * e2
+        return a * ((1 - e2 / 4 - 3 * e4 / 64 - 5 * e6 / 256) * phi
+                    - (3 * e2 / 8 + 3 * e4 / 32 + 45 * e6 / 1024) * math.sin(2 * phi)
+                    + (15 * e4 / 256 + 45 * e6 / 1024) * math.sin(4 * phi)
+                    - (35 * e6 / 3072) * math.sin(6 * phi))
+
+    phi, lam = math.radians(lat), math.radians(lon)
+    n = a / math.sqrt(1 - e2 * math.sin(phi) ** 2)
+    t = math.tan(phi) ** 2
+    c = ep2 * math.cos(phi) ** 2
+    aa = (lam - lon0) * math.cos(phi)
+    x = n * (aa + (1 - t + c) * aa ** 3 / 6
+             + (5 - 18 * t + t * t + 72 * c - 58 * ep2) * aa ** 5 / 120)
+    y = (arc(phi) - arc(lat0) + n * math.tan(phi) * (
+        aa ** 2 / 2 + (5 - t + 9 * c + 4 * c * c) * aa ** 4 / 24
+        + (61 - 58 * t + t * t + 600 * c - 330 * ep2) * aa ** 6 / 720))
+    return x, y
+
+
+def _tile_xy(lat: float, lon: float, zoom: int) -> tuple[int, int]:
+    n = 2 ** zoom
+    x = int((lon + 180.0) / 360.0 * n)
+    lat_r = math.radians(max(-85.0, min(85.0, lat)))
+    y = int((1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n)
+    return x, y
+
+
+def aerial_url(country: str, lat: float, lon: float) -> tuple[str, str] | None:
+    """(picture URL, who published it) for an open aerial photo of the block
+    around the pin, or None where no such survey is wired in.
+
+    Spain's map service answers a prepared tile quickly; a made-to-order picture
+    of one field was too slow to use. France and Portugal draw a square centred
+    on the pin."""
+    if (country or "").upper() == "ES":
+        x, y = _tile_xy(lat, lon, 19)
+        url = ("https://www.ign.es/wmts/pnoa-ma?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0"
+               "&LAYER=OI.OrthoimageCoverage&STYLE=default&TILEMATRIXSET=GoogleMapsCompatible"
+               f"&FORMAT=image/jpeg&TILEMATRIX=19&TILECOL={x}&TILEROW={y}")
+        return url, "PNOA"
+    found = _AERIAL.get((country or "").upper())
+    if not found:
+        return None
+    base, layer, crs, name = found
+    if crs == "EPSG:3763":
+        x, y = _pt_tm06(lat, lon)
+    else:
+        x, y = _web_mercator(lat, lon)
+    half = float(OUTSIDE_M)
+    query = urllib.parse.urlencode({
+        "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": layer,
+        "STYLES": "", "CRS": crs, "BBOX": f"{x - half:.1f},{y - half:.1f},{x + half:.1f},{y + half:.1f}",
+        "WIDTH": 512, "HEIGHT": 512, "FORMAT": "image/jpeg",
+    })
+    return f"{base}?{query}", name
+
+
+def street_search_url(lat: float, lon: float) -> str:
+    """Panoramax pictures within OUTSIDE_M of the pin. No account."""
+    dlat = OUTSIDE_M / 111320
+    dlon = dlat / max(0.2, math.cos(math.radians(lat)))
+    bbox = f"{lon - dlon:.6f},{lat - dlat:.6f},{lon + dlon:.6f},{lat + dlat:.6f}"
+    return PANORAMAX_SEARCH + "?" + urllib.parse.urlencode({"limit": 10, "bbox": bbox})
+
+
+def _asset_href(feature: dict) -> str | None:
+    assets = feature.get("assets") or {}
+    for key in ("sd", "thumb", "hd"):
+        href = (assets.get(key) or {}).get("href")
+        if isinstance(href, str) and href.startswith("https://"):
+            return href
+    return None
+
+
+def nearest_street_href(collection: dict, lat: float, lon: float) -> str | None:
+    """The closest Panoramax photo within OUTSIDE_M, or None."""
+    import geo
+    best, best_km = None, None
+    for feature in collection.get("features") or []:
+        coords = (feature.get("geometry") or {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        try:
+            km = geo.distance_km(lat, lon, float(coords[1]), float(coords[0]))
+        except (TypeError, ValueError):
+            continue
+        if km * 1000 > OUTSIDE_M:
+            continue
+        href = _asset_href(feature)
+        if href and (best_km is None or km < best_km):
+            best, best_km = href, km
+    return best
+
+
+def _as_jpeg(data: bytes, side: int = OLLAMA_PHOTO_SIDE) -> bytes | None:
+    """The picture as a JPEG no wider than `side`, or None when it is not an image."""
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+        img = Image.open(BytesIO(data)).convert("RGB")
+        if max(img.size) > side:
+            img.thumbnail((side, side))
+        out = BytesIO()
+        img.save(out, "JPEG", quality=85)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001 — not an image, or Pillow is missing
+        return None
+
+
+def _read(session, url: str):
+    """The response, or raises OutsideUnavailable when the server failed.
+    None when this URL has nothing to show (a missing photo, an error page)."""
+    resp = session.get(url, timeout=30)
+    if resp.status_code >= 500 or resp.status_code in (401, 403):
+        raise OutsideUnavailable()
+    if resp.status_code != 200:
+        return None
+    return resp
+
+
+def _jpeg_from(resp) -> bytes | None:
+    if resp is None:
+        return None
+    kind = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if not kind.startswith("image/") or not resp.content or len(resp.content) > MAX_PHOTO_BYTES:
+        return None
+    return _as_jpeg(resp.content)
+
+
+def fetch_outside(session, pos: dict, country: str) -> tuple[list[bytes], list[str]]:
+    """(pictures, sources) from Panoramax and, where one exists, the national
+    aerial survey. A server failure raises. No picture nearby is an empty list."""
+    images, sources = [], []
+    lat, lon = float(pos["lat"]), float(pos["lon"])
+    found = _read(session, street_search_url(lat, lon))
+    href = None
+    if found is not None:
+        try:
+            href = nearest_street_href(found.json(), lat, lon)
+        except ValueError:
+            href = None
+    if href:
+        jpeg = _jpeg_from(_read(session, href))
+        if jpeg:
+            images.append(jpeg)
+            sources.append("Panoramax")
+    aerial = aerial_url(country, lat, lon)
+    if aerial:
+        jpeg = _jpeg_from(_read(session, aerial[0]))
+        if jpeg:
+            images.append(jpeg)
+            sources.append(aerial[1])
+    return images, sources
+
+
+def check_outside(looker, item: dict, session) -> dict | None:
+    """What the open street photo and the aerial photo show: an obvious ruin,
+    a standing outside, or nothing usable. None when this listing should not
+    be looked at."""
+    import geo
+    if not needs_outside_check(item):
+        return None
+    pos = geo.position(item)
+    images, sources = fetch_outside(session, pos, item.get("country") or "")
+    if not images:
+        return {"condition": "unknown", "confidence": "low", "notes": "no open picture at this pin",
+                "shows_house": False, "photos": 0, "sources": sources, "by": "outside", "at": utcnow_iso()}
+    found = looker.look_images(images, OUTSIDE_PROMPT.format(title=(item.get("title") or "")[:150]))
+    if found.get("condition") not in OUTSIDE_SCHEMA["properties"]["condition"]["enum"]:
+        raise ValueError(f"unexpected answer {found!r:.80}")
+    return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
+            "notes": str(found.get("notes") or "")[:200], "photos": len(images),
+            "sources": sources, "shows_house": found.get("shows_house") is not False,
+            "by": getattr(looker, "model", None) or getattr(looker, "name", "outside"),
+            "at": utcnow_iso()}
 
 
 def make_looker(cfg: dict):
@@ -260,7 +558,7 @@ def make_looker(cfg: dict):
 
 
 def _exact_sea(item: dict) -> bool:
-    """The pin is the building and the sea is within 1.5 km. Photos of these come first."""
+    """The pin is the building and the sea is within 10 km. Photos of these come first."""
     from scoring import SWIM_MAX_KM
     beach = item.get("beach") or {}
     km = beach.get("km")
@@ -300,11 +598,147 @@ def queue(db, cfg: dict) -> list[dict]:
             continue
         if _exact_sea(it) and not heavy_checks_spared(it, cash, light_from):
             keep(it)
-    return sorted(best.values(), key=lambda it: (not _exact_sea(it), -it.get("rank", it["score"])))
+    return sorted(best.values(), key=lambda it: (not _exact_sea(it), (it.get("rank") or 0) < KEEP_SCORE,
+                                                 -it.get("rank", it["score"])))
+
+
+def photos_root(db) -> str | None:
+    """Folder of saved photos, next to the database. None for a memory database."""
+    path = next((r[2] for r in db.execute("PRAGMA database_list") if r[1] == "main"), "")
+    if not path:
+        return None
+    return os.path.join(os.path.dirname(os.path.abspath(path)), "kept_photos")
+
+
+def _photo_folder(listing_id: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(listing_id))
+    return (cleaned or "listing")[:80]
+
+
+def kept_path(db, listing_id: str, n: int) -> str | None:
+    """The saved file for that photo, or None. The name has to be one this
+    listing stored; a made-up number is not a file elsewhere on the disk."""
+    root = photos_root(db)
+    if not root or n < 0:
+        return None
+    row = db.execute("SELECT raw_json FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if not row:
+        return None
+    try:
+        raw = json.loads(row[0] or "{}")
+    except (TypeError, ValueError):
+        return None
+    names = raw.get("kept_photos") if isinstance(raw, dict) else None
+    if not isinstance(names, list) or n >= len(names):
+        return None
+    name = names[n]
+    if not isinstance(name, str) or name != f"{n}.jpg":
+        return None
+    path = os.path.abspath(os.path.join(root, _photo_folder(listing_id), name))
+    root_abs = os.path.abspath(root)
+    try:
+        inside = os.path.commonpath([root_abs, path]) == root_abs
+    except ValueError:
+        return None
+    if not inside or not os.path.isfile(path):
+        return None
+    return path
+
+
+def _worth_keeping(item: dict) -> bool:
+    score = item.get("rank")
+    if score is None:
+        score = item.get("score") or 0
+    return score >= KEEP_SCORE
+
+
+def keep_one(db, session, item: dict) -> bool:
+    """Save this listing's photos on disk. False when it is under KEEP_SCORE,
+    already saved, or nothing could be fetched."""
+    if not _worth_keeping(item):
+        return False
+    root = photos_root(db)
+    if not root or not item.get("id"):
+        return False
+    folder = os.path.join(root, _photo_folder(item["id"]))
+    os.makedirs(folder, exist_ok=True)
+    try:
+        raw = json.loads(item.get("raw_json") or "{}")
+    except (TypeError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    urls = photo_urls(item, limit=KEEP_GALLERY)
+    saved = [name for name in (raw.get("kept_photos") or [])
+             if isinstance(name, str) and os.path.isfile(os.path.join(folder, name))]
+    if saved and len(saved) >= min(len(urls), KEEP_GALLERY) and urls:
+        return False
+    changed = False
+    names = []
+    for i, url in enumerate(urls):
+        name = f"{i}.jpg"
+        path = os.path.join(folder, name)
+        if os.path.isfile(path):
+            names.append(name)
+            continue
+        try:
+            resp = session.get(url, timeout=30)
+        except Exception:  # noqa: BLE001 — one dead picture is not the gallery
+            break
+        if resp.status_code != 200:
+            break
+        jpeg = _as_jpeg(resp.content, KEEP_SIDE)
+        if not jpeg:
+            break
+        with open(path, "wb") as handle:
+            handle.write(jpeg)
+        names.append(name)
+        changed = True
+    if not names or not changed:
+        return False
+    raw["kept_photos"] = names
+    db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
+               (json.dumps(raw, ensure_ascii=False), item["id"]))
+    db.commit()
+    return True
+
+
+def keep_high(db, cfg: dict | None = None) -> int:
+    """Save the photos of every listing at KEEP_SCORE or more in any goal.
+    A few each scan; one already saved is left as it is."""
+    from db import load_listings
+    from scoring import MODES
+    filters = (cfg or {}).get("filters")
+    chosen: dict[str, dict] = {}
+    for mode in MODES:
+        for it in load_listings(db, filters=filters, include_hidden=True, mode=mode):
+            if _worth_keeping(it) and it["id"] not in chosen:
+                chosen[it["id"]] = it
+    if not chosen:
+        return 0
+    from common import make_session
+    session = make_session(timeout=30)
+    done = 0
+    for item in sorted(chosen.values(), key=lambda it: -(it.get("rank") or 0)):
+        if done >= KEEP_PER_SCAN:
+            break
+        try:
+            if keep_one(db, session, item):
+                done += 1
+        except Exception as e:  # noqa: BLE001 — a photo must never fail the scan
+            LOG.info(f"Keeping photos of {item.get('id')} failed ({type(e).__name__})")
+    if done:
+        LOG.info(f"Photos kept for {done} listings at {KEEP_SCORE} or more")
+    return done
 
 
 def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, looker=None) -> int:
-    """Look at the photos of the best homes not looked at yet, once each."""
+    """Look at the photos of the best homes not looked at yet, once each.
+
+    A home with no photos but a pin on the building is looked at from an open
+    street photo and, in Portugal, Spain and France, from the national aerial
+    survey. No key. That look can call an obvious ruin; a standing outside is
+    only noted."""
     ai = cfg.get("ai") or {}
     if ai.get("photo_check") is False:
         return 0
@@ -317,14 +751,25 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
         return 0
     if limit is None:
         limit = photos_budget(items, looker.name, ai.get("photos_per_scan") or None)
+    session = None
     done = failed = 0
     for item in items:
         if done >= limit:
             break
-        if not needs_photo_check(item):
+        has_photos = needs_photo_check(item)
+        outside = needs_outside_check(item)
+        if not has_photos and not outside:
             continue
         try:
-            found = check_photos(looker, item)
+            if has_photos:
+                found = check_photos(looker, item)
+                field = "photo_check"
+            else:
+                if session is None:
+                    from common import make_session
+                    session = make_session(timeout=30)
+                found = check_outside(looker, item, session)
+                field = "outside_check"
         except Exception as e:  # noqa: BLE001: a photo check must never fail the scan
             LOG.info(f"Photo check of {item['id']} failed ({type(e).__name__}); trying next scan")
             failed += 1
@@ -339,7 +784,7 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
             raw = json.loads(item.get("raw_json") or "{}")
         except ValueError:
             raw = {}
-        raw["photo_check"] = found
+        raw[field] = found
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
         db.commit()
         done += 1

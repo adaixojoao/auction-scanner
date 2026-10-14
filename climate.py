@@ -37,7 +37,7 @@ SCENARIOS = ("ssp245", "ssp585")
 PERIODS = ("2061-2080", "2081-2100")
 MAIN = ("ssp245", "2081-2100")               # the figure the score uses
 FIRE_KM = 2.0
-WATER_KM = 1.5   # the owner swims within 1.5 km (scoring.SWIM_MAX_KM)
+WATER_KM = 1.5   # how far the water layer is searched; the sea gate is scoring.SWIM_MAX_KM
 
 
 def data_dir(cfg: dict | None = None) -> str:
@@ -587,12 +587,12 @@ def remember(item: dict, result: dict) -> None:
 
 
 def _exact_seaside_home(item: dict, towns: dict) -> bool:
-    """A home whose pin is the building, with the sea within WATER_KM of that pin.
+    """A home whose pin is the building, with the sea within scoring.SWIM_MAX_KM.
 
     A town pin does not count, and neither does a river or a lake: the distance
     is the sea beach, and only when it is this building's."""
     import geo
-    from scoring import property_kind
+    from scoring import SWIM_MAX_KM, property_kind
     pos = geo.position(item)
     if not pos or pos.get("precision") not in geo.EXACT_ENOUGH:
         return False
@@ -602,7 +602,7 @@ def _exact_seaside_home(item: dict, towns: dict) -> bool:
     if not isinstance(beach, dict):
         beach = geo.nearest_beach(item, towns=towns) or {}
     km = beach.get("km")
-    return km is not None and not beach.get("approx") and km <= WATER_KM
+    return km is not None and not beach.get("approx") and km <= SWIM_MAX_KM
 
 
 def _still_for_sale(item: dict, today: str) -> bool:

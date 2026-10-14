@@ -513,6 +513,7 @@ def api_listing_detail():
     """Everything known about one listing, for the detail panel on Listings."""
     import costs
     import listing_info
+    from photos import KEEP_SCORE
     from scoring import wishes
     listing_id = request.args.get("id", "")
     db = get_db()
@@ -535,8 +536,10 @@ def api_listing_detail():
         db.close()
     return jsonify({
         "id": it["id"], "title": it.get("title"), "source": it.get("source"),
-        "url": safe_url(it.get("url")), "image": safe_url(it.get("image_url")),
-        "description": (it.get("description") or "")[:4000],
+        "url": safe_url(it.get("url")),
+        "image": (listing_info.gallery(it) or [None])[0],
+        "images": listing_info.gallery(it),
+        "description": (it.get("description") or "")[:20000 if (it.get("rank") or 0) >= KEEP_SCORE else 4000],
         "score": it["score"], "rank": it.get("rank", it["score"]), "reasons": it.get("reasons") or [], "wishes": wishes(it),
         "excellent": it.get("excellent"),
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
@@ -568,6 +571,26 @@ def api_listing_note():
     finally:
         db.close()
     return jsonify({"ok": True})
+
+
+@app.route("/api/kept-photo")
+def api_kept_photo():
+    """A photo saved for a listing that scored 85 or more. Only a file this
+    listing's own record names, inside the kept-photos folder."""
+    import photos
+    listing_id = request.args.get("id", "")
+    try:
+        n = int(request.args.get("n", "0"))
+    except ValueError:
+        abort(404)
+    db = get_db()
+    try:
+        path = photos.kept_path(db, listing_id, n)
+    finally:
+        db.close()
+    if not path:
+        abort(404)
+    return send_file(path, mimetype="image/jpeg")
 
 
 @app.route("/api/listing/location", methods=["POST"])

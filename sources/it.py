@@ -6,7 +6,7 @@ import time
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_area, find_price, make_listing, make_session, parse_price
+from common import LOG, auction_occupation, find_area, find_price, make_listing, make_session, parse_price
 from db import upsert_listing
 from sources import register
 from sources._cards import CardSite, scrape_cards
@@ -71,6 +71,9 @@ def pvp_listing(lot: dict) -> dict | None:
                                    "offertaMinima", "disponibilita") if lot.get(k)}
     if coords.get("latitudine") and coords.get("longitudine"):
         raw.update(lat=coords["latitudine"], lon=coords["longitudine"])
+    occ = auction_occupation(lot.get("disponibilita"))
+    if occ:
+        raw["occupation"] = occ
     date = lot.get("dataOraVendita") or lot.get("dataVendita")
     return make_listing(
         "pvp_giustizia", str(lid), "IT", id_prefix="pvp",

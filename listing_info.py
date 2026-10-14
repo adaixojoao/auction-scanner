@@ -102,6 +102,25 @@ _FACTS = [
 ]
 
 
+def gallery(item: dict) -> list[str]:
+    """Pictures for the detail panel. A listing at 85 or more shows every photo
+    it still has, and the copies saved on this PC once the scan has kept them."""
+    from urllib.parse import quote
+
+    from photos import KEEP_GALLERY, KEEP_SCORE, photo_urls
+    raw = raw_of(item)
+    names = raw.get("kept_photos") if isinstance(raw.get("kept_photos"), list) else []
+    names = [n for n in names if isinstance(n, str)]
+    if names:
+        ident = quote(str(item.get("id") or ""), safe="")
+        return [f"/api/kept-photo?id={ident}&n={i}" for i in range(len(names))]
+    if (item.get("rank") or 0) >= KEEP_SCORE:
+        return photo_urls(item, limit=KEEP_GALLERY)
+    from common import safe_url
+    one = safe_url(item.get("image_url"))
+    return [one] if one else []
+
+
 def facts(item: dict) -> list[dict]:
     raw = raw_of(item)
     out = []
@@ -112,6 +131,13 @@ def facts(item: dict) -> list[dict]:
             value = None
         if value not in (None, "", [], {}):
             out.append({"label": label, "value": str(value)[:500]})
+    kept = raw.get("kept_photos") if isinstance(raw.get("kept_photos"), list) else []
+    if kept:
+        out.append({"label": "Photos kept", "value": f"{len(kept)} saved on this PC"})
+    for label, key in (("Photo check", "photo_check"), ("Outside", "outside_check")):
+        notes = str((raw.get(key) or {}).get("notes") or "").strip()
+        if notes:
+            out.append({"label": label, "value": notes[:500]})
     return out
 
 
@@ -315,6 +341,77 @@ def _land_register_from_text(text: str) -> list[dict]:
     return found
 
 
+def _m2(value) -> str:
+    return f"{value:,.0f}".replace(",", " ") + " m²"
+
+
+def _parcel_label(section, numero) -> str:
+    shown = str(int(numero)) if str(numero or "").isdigit() else str(numero or "")
+    return f"{section} {shown}".strip()
+
+
+_FR_NOTES = {
+    "several parcels — not placed as one pin": "Several parcels are named, so they were not given one pin.",
+    "several communes — not placed as one pin": "More than one commune is named, so the parcel was not placed.",
+    "the commune could not be named for certain": "The commune could not be named for certain, so the parcel was not placed.",
+    "the cadastre did not return that one parcel": "The cadastre did not return that one parcel.",
+}
+
+
+def _french_records(item: dict, raw: dict) -> dict | None:
+    """The French cadastre's parcel, and the building file when it names one building."""
+    import cadastre
+    text = f"{item.get('title') or ''} {item.get('description') or ''}"
+    record = raw.get("fr_cadastre") if isinstance(raw.get("fr_cadastre"), dict) else {}
+    refs = cadastre.french_parcels(text)
+    if not record and not refs:
+        return None
+    facts = []
+    if record.get("plot_m2"):
+        facts.append({"label": "Plot", "value": _m2(record["plot_m2"])})
+    if record.get("commune"):
+        facts.append({"label": "Commune", "value": record["commune"]})
+    for parcel in (record.get("parcels") or [])[:4]:
+        area = f" — {_m2(parcel['plot_m2'])}" if parcel.get("plot_m2") else ""
+        facts.append({"label": "Parcel", "value": _parcel_label(parcel.get("section"), parcel.get("numero")) + area})
+    bdnb = record.get("bdnb") if isinstance(record.get("bdnb"), dict) else None
+    if bdnb and bdnb.get("buildings") == 1:
+        if bdnb.get("year"):
+            facts.append({"label": "Year built", "value": str(bdnb["year"])})
+        if bdnb.get("use"):
+            facts.append({"label": "Use", "value": bdnb["use"]})
+    check = None
+    if bdnb and bdnb.get("buildings") == 1 and (bdnb.get("year") or bdnb.get("use")):
+        check = ("Year and use are from France's national building database, for the one building "
+                 "on this parcel. They are not the cadastre, and they are not used in the score.")
+    elif bdnb and bdnb.get("buildings", 0) > 1:
+        n = bdnb["buildings"]
+        check = (f"The national building database lists {n} buildings on this parcel, "
+                 "so no single year or use was taken.")
+    elif bdnb and bdnb.get("buildings") == 0:
+        check = "The national building database has no building on this parcel."
+    elif record.get("note"):
+        check = _FR_NOTES.get(record["note"], record["note"])
+    copy = []
+    if record.get("section") and record.get("numero"):
+        copy.append({"label": "Parcel", "value": _parcel_label(record["section"], record["numero"])})
+    if record.get("idu"):
+        copy.append({"label": "Cadastral id", "value": record["idu"]})
+    elif refs and not record.get("section"):
+        copy.append({"label": "Parcel", "value": ", ".join(
+            _parcel_label(ref["section"], ref["numero"]) for ref in refs[:4])})
+    links = []
+    if record.get("lat") and record.get("lon"):
+        links.append({"label": "Open the cadastre map",
+                      "url": f"https://www.geoportail.gouv.fr/plan/{record['lat']}/{record['lon']}"})
+    steps = []
+    if not record:
+        steps.append({"text": "The French cadastre has not been read for this sale yet "
+                              "(it is read during scans)."})
+    return {"country": "FR", "registry": "Cadastre (France)", "facts": facts, "check": check,
+            "copy": copy, "links": links, "steps": steps}
+
+
 def official_records(item: dict) -> dict | None:
     """Where the government's own record of this property is, with the numbers
     to find it, and what that record says when it can be read for free."""
@@ -351,6 +448,8 @@ def official_records(item: dict) -> dict | None:
                 "links": [{"label": "Open in Catastro", "url": catastro_url(item)}] if catastro_url(item) else [],
                 "steps": [] if cat else [{"text": "Catastro has not been read for this sale yet (it is read "
                                                   "during scans; open the link to see it now)."}]}
+    if country == "FR":
+        return _french_records(item, raw)
     if country != "PT":
         return None
 
