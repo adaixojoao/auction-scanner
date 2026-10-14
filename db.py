@@ -1497,11 +1497,10 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 item.pop("_climate_write", None)
 
         if reason is None and min_score and item["status"] != "shortlisted":
-            # Live and invest shows the worse of the two goals. Hide it when
-            # it is not a place to live, and keep it when the investment side
-            # is the weaker number.
-            bar = item.get("live_score") if mode == "both" and item.get("live_score") is not None else sc
-            if bar < min_score:
+            # The number on the list is the one that has to clear the minimum.
+            # Live and invest no longer substitutes the living score for that.
+            bar = sc
+            if bar < min_score and not (mode == "both" and item.get("research_only")):
                 reason = f"score {bar:.0f} < filters.min_score {min_score}"
                 if not include_hidden:
                     continue
@@ -1516,7 +1515,12 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             import costs
             from scoring import condition as _condition
             typical = mode == "both" and _condition(item) != "good"
-            over = costs.over_cash(item, cash, typical=typical)
+            if mode == "both":
+                chosen = costs.selected_acquisition(item)
+                over = costs.over_cash(item, cash, bid=chosen["amount"] or None,
+                                       typical=typical, basis=chosen["label"])
+            else:
+                over = costs.over_cash(item, cash, typical=typical)
             if over:
                 reason = over
                 if not include_hidden:

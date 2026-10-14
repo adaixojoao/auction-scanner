@@ -359,6 +359,53 @@ def catastro_home(item: dict) -> tuple[float, str]:
     return 0.0, ""
 
 
+def floor_resolution(item: dict) -> dict:
+    """The one floor figure the decision path may use, and where it came from.
+
+    The stored ``area_m2`` is left as scraped. A land or footprint figure is
+    not rewritten into a floor, and a large ambiguous area is not turned into
+    a 250 m² house here: ``building_m2`` already returns that cap only when
+    the stored number was accepted as floor and then limited.
+    """
+    metres, source = building_m2(item)
+    labels = {
+        "stored": "stored floor area",
+        "notice": "floor area written in the notice",
+        "catastro": "Catastro dwelling",
+        "capped": "building-size cap (a larger stored figure is not all floor)",
+        "": "floor area not established",
+    }
+    return {"m2": metres, "source": source, "label": labels.get(source, source),
+            "established": source in ("stored", "notice", "catastro") and metres > 0}
+
+
+def selected_acquisition(item: dict) -> dict:
+    """The price Live and invest plans with. Current bid, minimum and a typed bid stay distinct.
+
+    A predicted close is an estimate. It is selected only when ranking would
+    use it: higher than the price you would pay now, and not a rejected figure.
+    """
+    from common import price_to_pay
+    pay = float(price_to_pay(item) or 0)
+    if item.get("current_bid") and item["current_bid"] >= (item.get("min_price") or 0):
+        current_kind = "current_bid"
+    elif item.get("min_price"):
+        current_kind = "minimum"
+    else:
+        current_kind = "asking"
+    likely = item.get("predicted_final") or {}
+    predicted = float(likely.get("price") or 0) if isinstance(likely, dict) else 0.0
+    if predicted and not item.get("price_unusable") and pay and predicted > pay * 1.02:
+        return {"amount": predicted, "kind": "predicted", "estimate": True,
+                "label": "predicted closing price (an estimate, not a bid placed)",
+                "text": likely.get("text") or "", "current_amount": pay, "current_kind": current_kind}
+    return {"amount": pay, "kind": current_kind, "estimate": False, "label": {
+        "current_bid": "the current bid",
+        "minimum": "the minimum accepted",
+        "asking": "the asking or base price",
+    }[current_kind], "text": "", "current_amount": pay, "current_kind": current_kind}
+
+
 def building_m2(item: dict) -> tuple[float, str]:
     """(m² of building to renovate and let, where the figure came from).
 
@@ -717,7 +764,8 @@ def rent(item: dict, cost: float) -> dict | None:
     return out
 
 
-def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) -> dict | None:
+def estimate(item: dict, *, bid: float | None = None, own_home: bool = False,
+             basis: str | None = None) -> dict | None:
     """What buying this listing really costs.
 
     {"base", "basis", "lines": [{"label", "amount", "note"}], "fees", "total",
@@ -729,7 +777,9 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     if value <= 0 or (item.get("category") or categorize(item)) != "imoveis":
         return None
     country = (item.get("country") or "PT").upper()
-    if bid:
+    if basis:
+        pass
+    elif bid:
         basis = "your bid"
     elif item.get("current_bid") and item["current_bid"] >= (item.get("min_price") or 0):
         basis = "the current bid"
@@ -769,7 +819,8 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False) ->
     return out
 
 
-def money_out(item: dict, *, bid: float | None = None, typical: bool = False) -> dict | None:
+def money_out(item: dict, *, bid: float | None = None, typical: bool = False,
+              basis: str | None = None) -> dict | None:
     """What one purchase takes from cash you can lose.
 
     {"amount", "detail", "estimate"}. The amount is the low end of the all-in
@@ -780,7 +831,7 @@ def money_out(item: dict, *, bid: float | None = None, typical: bool = False) ->
     larger than the building cap counts only that much floor. Repairs are left
     out when there is no floor area, and the detail says so.
     """
-    est = estimate(item, bid=bid)
+    est = estimate(item, bid=bid, basis=basis)
     if not est:
         return None
     if est["all_in"]:
@@ -799,7 +850,38 @@ def money_out(item: dict, *, bid: float | None = None, typical: bool = False) ->
     return {"amount": round(amount), "detail": detail, "estimate": est}
 
 
-def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: bool = False) -> str | None:
+def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
+    """Affordability on the same acquisition assumption the both-mode rank uses.
+
+    ``typical`` is the middle of the repair range, which is what Live and invest
+    uses unless the building is described as being in good condition. A missing
+    budget is not treated as affordable. A shortlist does not change this label.
+    """
+    acq = selected_acquisition(item)
+    out = money_out(item, bid=acq["amount"] or None, typical=typical, basis=acq["label"])
+    est = (out or {}).get("estimate") or {}
+    work = est.get("renovation")
+    point = "middle" if typical and work else ("low" if work else None)
+    if not cash or cash <= 0:
+        status = "budget_not_set"
+        note = "Cash you can lose is not set."
+    elif not out:
+        status = "unknown"
+        note = "No planning cost: there is no price to work from."
+    elif out["amount"] > cash:
+        status = "over"
+        note = (f"Planning cost €{out['amount']:,.0f} is over the €{cash:,.0f} you can lose"
+                f" ({out['detail']}).")
+    else:
+        status = "within"
+        note = f"Planning cost €{out['amount']:,.0f} fits the €{cash:,.0f} you can lose ({out['detail']})."
+    return {"acquisition": {k: acq[k] for k in ("amount", "kind", "estimate", "label", "current_amount", "current_kind")},
+            "all_in": est.get("all_in"), "renovation": work, "renovation_point": point,
+            "planning_amount": (out or {}).get("amount"), "status": status, "note": note}
+
+
+def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: bool = False,
+              basis: str | None = None) -> str | None:
     """Why this purchase is over the cash you can lose, or None.
 
     A cash figure of 0 is not set, and hides nothing: the Offers page refuses
@@ -807,7 +889,7 @@ def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: boo
     """
     if not cash or cash <= 0:
         return None
-    out = money_out(item, bid=bid, typical=typical)
+    out = money_out(item, bid=bid, typical=typical, basis=basis)
     if not out or out["amount"] <= cash:
         return None
     return f"cash €{out['amount']:,.0f} all-in is over the €{cash:,.0f} you can lose ({out['detail']})"

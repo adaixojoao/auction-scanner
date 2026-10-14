@@ -50,8 +50,10 @@ def test_the_gates_keep_off_what_is_not_a_home_to_live_in():
     assert score_detail(far, mode="both")[1][0].startswith("not by the beach")
     assert score_detail(far, mode="invest")[0] > 0
     nearer = beach_home(beach={"km": 8.2, "approx": False, "text": "8.2 km from the beach"})
-    assert score_detail(nearer, mode="both")[0] > 0
-    assert not any(r.startswith("not by the beach") for r in score_detail(nearer, mode="both")[1])
+    nearer_score, nearer_why = score_detail(nearer, mode="both")
+    assert nearer_score == 0
+    assert nearer_why[0].startswith("Investment value not established")
+    assert not any(r.startswith("not by the beach") for r in nearer_why)
 
     guessed = beach_home(beach={"km": 0.4, "approx": True, "text": "about 0.4 km from the beach"})
     assert score_detail(guessed, mode="both")[0] == 0
@@ -122,16 +124,16 @@ def test_a_province_average_is_not_a_price_for_this_house(monkeypatch):
     monkeypatch.setattr("scoring.local_price", lambda item: (900.0, "MIVAU, province average"))
     house = beach_home()
     both, why = score_detail(house, mode="both")
-    home = score_detail(house, mode="home")[0]
-    assert both == home
-    assert why[0].startswith("no local sale price")
+    home = score_detail(dict(house), mode="home")[0]
+    assert home > 0 and both == 0
+    assert house["research_only"] is True
+    assert why[0].startswith("Investment value not established")
     monkeypatch.setattr("scoring.local_price", lambda item: None)
     house = beach_home()
     both, why = score_detail(house, mode="both")
-    home = score_detail(house, mode="home")[0]
-    assert both == home > 0
-    assert why[0].startswith("no local sale price")
-    assert score_detail(house, mode="both")[0] > score_detail(house, mode="invest")[0]
+    home = score_detail(dict(house), mode="home")[0]
+    assert home > 0 and both == 0
+    assert why[0].startswith("Investment value not established")
 
 
 def test_live_and_invest_drops_what_the_cash_cannot_cover(db, add, monkeypatch):
@@ -145,7 +147,7 @@ def test_live_and_invest_drops_what_the_cash_cannot_cover(db, add, monkeypatch):
         if mode == "both":
             item["live_score"] = 86.0
             item["invest_score"] = 26.0
-            return 60.0, ["the worse of the two (86 to live in, 26 as an investment)"]
+            return 80.0, ["the worse of the two (86 to live in, 26 as an investment)"]
         return 80.0, ["home"]
 
     monkeypatch.setattr("scoring.score_detail", fake)

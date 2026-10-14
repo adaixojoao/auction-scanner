@@ -1,9 +1,8 @@
-"""Characterisation of the Live and invest path at this commit.
+"""Live and invest checks.
 
-These tests record what the code does today. A passing assertion is not an
-endorsement. Desired behaviour for later batches is in
-docs/live_invest_batch0.md, under the same LI-xx ids. No production module
-is changed here.
+LI-01, LI-03, LI-04 and LI-07 began as characterisation of unsafe behaviour.
+Those four now assert the corrected contract. The other tests still record
+behaviour this assignment did not change.
 """
 import json
 import math
@@ -41,10 +40,12 @@ def test_li01_missing_valuation_ranks_on_living_fit(monkeypatch):
     monkeypatch.setattr(scoring, "local_price", lambda item: None)
     house = beach_home()
     both, why = score_detail(house, mode="both", now=NOW)
-    home = score_detail(house, mode="home", now=NOW)[0]
-    assert both == home > 0
+    home = score_detail(dict(house), mode="home", now=NOW)[0]
+    assert home > 0
+    assert both == 0
     assert house["invest_score"] is None
-    assert why[0].startswith("no local sale price")
+    assert house["research_only"] is True
+    assert why[0].startswith("Investment value not established")
 
 
 # LI-02. Saved min_score in both mode uses live_score. The listings API
@@ -69,19 +70,24 @@ def test_li02_saved_minimum_uses_living_fit_and_the_api_uses_the_combined_score(
 
     monkeypatch.setattr(scoring, "score_detail", fake)
     shown = load_listings(db, filters={"min_score": 45}, mode="both", now=NOW)
-    assert [it["id"] for it in shown] == ["eleiloes:gap"]
-    assert shown[0]["score"] == 0.0 and shown[0]["live_score"] == 80.0
+    assert shown == []
+    kept_rows = load_listings(db, filters={"min_score": 0}, mode="both", now=NOW)
+    assert [it["id"] for it in kept_rows] == ["eleiloes:gap"]
+    assert kept_rows[0]["score"] == 0.0 and kept_rows[0]["live_score"] == 80.0
 
     dashboard._LISTS.clear()
     dashboard.app.config["TESTING"] = True
     client = dashboard.app.test_client()
-    kept = client.get("/api/listings?mode=both&min_score=0").get_json()
-    dropped = client.get("/api/listings?mode=both&min_score=45").get_json()
-    assert [it["id"] for it in kept["items"]] == ["eleiloes:gap"]
+    dropped = client.get("/api/listings?mode=both&min_score=0").get_json()
     assert dropped["items"] == []
+    config.save_config({"filters": {"min_score": 0}, "cash_on_hand": 10_000_000})
+    dashboard._LISTS.clear()
+    kept = client.get("/api/listings?mode=both&min_score=0").get_json()
+    assert [it["id"] for it in kept["items"]] == ["eleiloes:gap"]
+    assert kept["items"][0]["score"] == 0.0
 
 
-# LI-03. Nested per-goal weights are not applied while mode is "both".
+# LI-03. Both mode uses each goal's own nested weights, then restores the context.
 
 
 def test_li03_both_mode_ignores_nested_goal_weights(monkeypatch):
@@ -95,11 +101,11 @@ def test_li03_both_mode_ignores_nested_goal_weights(monkeypatch):
     invest_default = score_detail(house, mode="invest", now=NOW)[0]
     assert home_beach_off < home_default
     assert invest_price_off != invest_default
-    assert both == min(home_default, invest_default)
-    assert both != min(home_beach_off, invest_price_off)
+    assert both == min(home_beach_off, invest_price_off)
+    assert scoring.w("beach") == 1.0
 
 
-# LI-04. climate_score multiplies hazard points by the active preference weights.
+# LI-04. Hazard grade stays put when a preference weight changes.
 
 
 def test_li04_hazard_grade_moves_with_preference_weights():
@@ -122,7 +128,7 @@ def test_li04_hazard_grade_moves_with_preference_weights():
         at_zero = captured["result"]["grade"]
     finally:
         scoring.climate_score = real
-    assert (at_one, at_zero) == ("good", "caution")
+    assert at_one == at_zero == "good"
 
 
 # LI-05. A reassuring grade does not require flood or fire coverage.
@@ -170,15 +176,15 @@ def test_li07_land_150_and_notice_80_are_not_one_area(monkeypatch):
                        price=40000)
     assert costs.building_m2(house) == (80.0, "notice")
     assert score_detail(house, mode="both", now=NOW)[0] > 0
-    assert scoring.market_value_estimate(house) == 150_000
+    assert scoring.market_value_estimate(house) == 80_000
     work = costs.renovation(house)
     assert work["low"] == round(80 * work["eur_m2"][0])
     cap = bidcap.calculate_bid_cap(house, {"filters": {}, "bid_cap": {}}, {
         "climate": climate_score(house["climate"], "home"),
         "location": {"level": "exact"},
     })
-    assert "150" in cap["basis"]["note"]
-    assert "80" not in cap["basis"]["note"]
+    assert "80" in cap["basis"]["note"]
+    assert "150" not in cap["basis"]["note"]
 
 
 # LI-08. predicted_final changes the rank. The cash filter does not receive it as the bid.

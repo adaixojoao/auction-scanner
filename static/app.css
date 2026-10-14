@@ -15,6 +15,12 @@ code { background: var(--card-2); padding: 1px 5px; border-radius: 4px; font-siz
 .muted { color: var(--muted); }
 .faint { color: var(--faint); }
 .small { font-size: 12px; }
+.research-candidates, #research-candidates { margin: 16px 0 8px; }
+#research-candidates h2 { font-size: 16px; margin-bottom: 4px; }
+.research-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 10px 0 16px; }
+.research-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.research-card h3 { font-size: 14px; margin-bottom: 6px; }
+.research-card ul { margin: 6px 0 8px 16px; }
 
 /* ── Top bar ─────────────────────────────────────────────── */
 .topbar {
