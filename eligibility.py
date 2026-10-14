@@ -5,7 +5,19 @@ listing, read settings, or collect evidence. A result is decision support:
 review metadata is a record of a claimed review, not proof of who reviewed it
 or of the underlying document.
 
-No mandatory requirement in this profile can be skipped.
+No mandatory requirement in this profile can be skipped. Schema version 1
+keeps the sea-beach maximum at 10 km.
+
+A record whose own details contradict its finding is unknown
+(evidence.inconsistent). It is not rewritten into a verified failure.
+A wrong type or an unsupported shape raises EligibilityError.
+
+Facts about the asset (identity, ownership, possession, title, access, use,
+inspection, work, floor area, the building's location, whether this sale is
+available, and whether a submission can be made) are not bound to a policy
+version. Sea distance, hazard coverage, hazard acceptability, and the
+financial assessments are. A review made under another policy cannot pass,
+fail, or supersede.
 """
 from __future__ import annotations
 
@@ -15,6 +27,11 @@ from datetime import datetime, timedelta, timezone
 EVALUATOR_VERSION = "1"
 SCHEMA_VERSION = "1"
 MODE = "live_and_invest"
+SEA_MAX_KM = 10
+# Large enough for a freshness window, small enough that adding it to a
+# present-day timestamp cannot overflow datetime.
+_MAX_ABS_NUMBER = 10 ** 11
+_MAX_KM = 20000
 
 REQUIREMENT_KEYS = (
     "residential_identity",
@@ -38,8 +55,44 @@ REQUIREMENT_KEYS = (
 )
 
 _FINANCIAL = {"financial_evidence", "financial_margin", "cash_fit"}
+_POLICY_BOUND = {"sea_distance", "hazard_coverage", "hazard_acceptability"}
 _FINDINGS = {"meets", "fails", "undetermined"}
 _PROVENANCE = {"reviewed", "asserted", "inferred"}
+_UNAVAILABLE = {"sold", "withdrawn", "unavailable"}
+
+_ENUMS = {
+    "residential_identity": {"asset_kind": {"residential", "land", "movable", "bundle"}},
+    "complete_ownership": {"right": {"complete", "fraction", "bare"}},
+    "vacant_possession": {"possession": {"vacant", "occupied", "refused"}},
+    "title_and_charges": {"exposure": {"none", "reviewed", "adverse"}},
+    "legal_access": {"access": {"legal", "none"}},
+    "residential_use": {"use": {"residential_supported", "prohibited"}},
+    "inspection": {"inspection": {"adequate", "inadequate"}},
+    "work_scope": {"uncertainty": {"bounded", "unbounded"}},
+    "floor_area": {"basis": {"floor", "land", "footprint"}},
+    "building_location": {"precision": {"building", "street", "town", "municipality", "advertised"}},
+    "sea_distance": {"water": {"sea", "river", "lake"}},
+    "specific_sale_available": {"availability": {"sold", "withdrawn", "unavailable"}},
+}
+_BOOLS = {
+    "residential_identity": ("bundle",),
+    "title_and_charges": ("charges_reviewed",),
+    "work_scope": ("heavy_rebuild",),
+    "floor_area": ("compatible", "usable_floor_absent"),
+    "building_location": ("wrong_asset",),
+    "hazard_acceptability": ("acceptable",),
+    "specific_sale_available": ("specific_sale", "generic_url"),
+    "financial_evidence": ("basis_ok",),
+    "financial_margin": ("meets_margin",),
+    "cash_fit": ("fits_cash",),
+    "procedural_readiness": ("deadline_known", "can_submit"),
+}
+_TEXTS = {
+    "inspection": ("scope",),
+    "sea_distance": ("basis",),
+    "financial_evidence": ("basis",),
+    "procedural_readiness": ("method",),
+}
 
 _LIMITATIONS = (
     "This is decision support, not a legal, engineering, or valuation certificate.",
@@ -47,16 +100,19 @@ _LIMITATIONS = (
     "Asserted and inferred findings are research leads, not verification.",
     "A star, shortlist, score, or source does not change eligibility.",
     "Rejected is an evaluation result. It does not dismiss, hide, or delete a listing.",
+    "Sea distance, hazards, and financial assessments count only under the supplied policy version.",
+    "Missing or coarse evidence is research, not a finding that the property fails.",
 )
 
 _RESEARCH = {
     "evidence.missing": "No finding was supplied for {key}.",
     "evidence.stale": "Reviewed evidence for {key} is stale.",
     "evidence.conflict": "Current findings for {key} conflict.",
+    "evidence.inconsistent": "A finding for {key} contradicts its own details.",
     "evidence.mismatch": "Evidence for {key} refers to a different property or sale.",
     "evidence.insufficient": "Reviewed evidence for {key} does not establish the requirement.",
     "evidence.unreviewed": "Only asserted or inferred findings were supplied for {key}.",
-    "evidence.policy_mismatch": "The financial finding for {key} was made under a different policy.",
+    "evidence.policy_mismatch": "A finding for {key} was assessed under a different policy.",
 }
 
 
@@ -78,7 +134,7 @@ def evaluate(evidence: dict, policy: dict, now: datetime) -> dict:
     moment = _require_aware(now, "now")
     rules = _policy(policy)
     findings = _evidence(evidence, moment)
-    _supersession(findings)
+    _supersession(findings, rules)
     rows = [_requirement(key, findings, evidence, rules, moment) for key in REQUIREMENT_KEYS]
     failed = [row["key"] for row in rows if row["state"] == "fail"]
     unknown = [row["key"] for row in rows if row["state"] == "unknown"]
@@ -111,18 +167,20 @@ def _requirement(key: str, findings: list[dict], evidence: dict, rules: dict, no
     mine = [item for item in findings if item["requirement_key"] == key]
     in_scope = [item for item in mine if _in_scope(item, evidence)]
     out_of_scope = [item for item in mine if not _in_scope(item, evidence)]
-    active = [item for item in in_scope if item["id"] not in _superseded_ids(findings)]
+    resolved = _resolved_ids(findings, rules, now, evidence)
+    active = [item for item in in_scope if item["id"] not in resolved]
     current = [item for item in active if not _is_stale(item, rules["freshness"][key], now)]
     stale = [item for item in active if _is_stale(item, rules["freshness"][key], now)]
 
     usable = []
     mismatched = []
     for item in current:
-        if key in _FINANCIAL and not _same_financial_policy(item, rules):
+        if _policy_mismatch(key, item, rules):
             mismatched.append(item)
         else:
             usable.append(item)
 
+    inconsistent = [item for item in usable if _role(key, item, rules) == "inconsistent"]
     reviewed_pass = [item for item in usable if _role(key, item, rules) == "pass"]
     reviewed_fail = [item for item in usable if _role(key, item, rules) == "fail"]
     conflict = _conflicts(reviewed_pass, reviewed_fail, usable)
@@ -131,35 +189,81 @@ def _requirement(key: str, findings: list[dict], evidence: dict, rules: dict, no
     if conflict:
         state, codes = "unknown", ["evidence.conflict"]
     elif reviewed_fail:
-        state, codes = "fail", _unique(_adverse_code(key, item.get("details") or {}, rules) for item in reviewed_fail)
+        state = "fail"
+        codes = _unique(_adverse_code(key, item.get("details") or {}, rules) for item in reviewed_fail)
+    elif inconsistent:
+        state, codes = "unknown", ["evidence.inconsistent"]
     elif reviewed_pass:
         state, codes = "pass", []
     else:
         state, codes = "unknown", _unknown_codes(in_scope, out_of_scope, stale, mismatched, usable)
+    if inconsistent and "evidence.inconsistent" not in codes:
+        codes = _unique([*codes, "evidence.inconsistent"])
 
-    shown = in_scope if in_scope else out_of_scope
-    research = None
-    if state == "unknown":
-        research = _research_text(key, codes, historic)
+    conflict_ids = _conflict_ids(reviewed_pass, reviewed_fail, usable) if conflict else set()
+    shown = [*in_scope, *out_of_scope]
+    research = _research_text(key, codes, historic) if state == "unknown" else None
     return {
         "key": key,
         "state": state,
         "reason_codes": codes,
         "historic_reason_codes": historic,
-        "evidence": [{"id": item["id"], "provenance": item["provenance"]}
+        "evidence": [_trace(item, key, rules, now, evidence, resolved, mismatched,
+                            reviewed_pass, reviewed_fail, inconsistent, conflict_ids, state)
                      for item in sorted(shown, key=lambda item: item["id"])],
         "research_need": research,
     }
 
 
+def _trace(item, key, rules, now, evidence, resolved, mismatched, passes, fails,
+           inconsistent, conflict_ids, state) -> dict:
+    if not _in_scope(item, evidence):
+        disposition = "mismatch"
+    elif item["id"] in resolved:
+        disposition = "superseded"
+    elif _is_stale(item, rules["freshness"][key], now):
+        disposition = "stale"
+    elif item in mismatched or _policy_mismatch(key, item, rules):
+        disposition = "policy_mismatch"
+    elif item["id"] in conflict_ids or item in inconsistent:
+        disposition = "conflicting"
+    elif state == "pass" and item in passes:
+        disposition = "supporting"
+    elif state == "fail" and item in fails:
+        disposition = "supporting"
+    else:
+        disposition = "insufficient"
+    return {"id": item["id"], "provenance": item["provenance"], "disposition": disposition}
+
+
 def _conflicts(passes: list[dict], fails: list[dict], usable: list[dict]) -> bool:
+    consistent = [item for item in usable if item not in passes and item not in fails]
+    opposing_fail = [item for item in consistent if item["finding"] == "fails" and item["provenance"] != "reviewed"]
+    opposing_meet = [item for item in consistent if item["finding"] == "meets" and item["provenance"] != "reviewed"]
     if passes and fails:
         return True
-    if passes and any(item["finding"] == "fails" and item["provenance"] != "reviewed" for item in usable):
+    if passes and opposing_fail:
         return True
-    if fails and any(item["finding"] == "meets" and item["provenance"] != "reviewed" for item in usable):
+    if fails and opposing_meet:
         return True
     return False
+
+
+def _conflict_ids(passes, fails, usable) -> set[str]:
+    consistent = [item for item in usable if item not in passes and item not in fails]
+    ids = set()
+    if passes and fails:
+        ids.update(item["id"] for item in passes)
+        ids.update(item["id"] for item in fails)
+    if passes and any(item["finding"] == "fails" and item["provenance"] != "reviewed" for item in consistent):
+        ids.update(item["id"] for item in passes)
+        ids.update(item["id"] for item in consistent
+                   if item["finding"] == "fails" and item["provenance"] != "reviewed")
+    if fails and any(item["finding"] == "meets" and item["provenance"] != "reviewed" for item in consistent):
+        ids.update(item["id"] for item in fails)
+        ids.update(item["id"] for item in consistent
+                   if item["finding"] == "meets" and item["provenance"] != "reviewed")
+    return ids
 
 
 def _unknown_codes(in_scope, out_of_scope, stale, mismatched, usable) -> list[str]:
@@ -194,6 +298,8 @@ def _research_text(key: str, codes: list[str], historic: list[str]) -> str:
 def _historic_code(key: str, item: dict, rules: dict) -> str:
     if item["provenance"] != "reviewed":
         return ""
+    if _inconsistent(key, item, rules):
+        return "evidence.inconsistent"
     if item["finding"] == "fails":
         return _adverse_code(key, item.get("details") or {}, rules) or ""
     if item["finding"] == "meets" and _supports_pass(key, item.get("details") or {}, rules):
@@ -204,12 +310,42 @@ def _historic_code(key: str, item: dict, rules: dict) -> str:
 def _role(key: str, item: dict, rules: dict) -> str:
     if item["provenance"] != "reviewed":
         return "unreviewed"
+    if _inconsistent(key, item, rules):
+        return "inconsistent"
     details = item.get("details") or {}
     if item["finding"] == "meets" and _supports_pass(key, details, rules):
         return "pass"
     if item["finding"] == "fails" and _adverse_code(key, details, rules):
         return "fail"
     return "insufficient"
+
+
+def _inconsistent(key: str, item: dict, rules: dict) -> bool:
+    details = item.get("details") or {}
+    if not isinstance(details, dict):
+        return False
+    positive = _supports_pass(key, details, rules)
+    adverse = bool(_adverse_code(key, details, rules))
+    if _detail_conflict(key, details, rules) or (positive and adverse):
+        return True
+    finding = item["finding"]
+    if finding == "meets" and adverse:
+        return True
+    if finding == "fails" and positive:
+        return True
+    if finding == "undetermined" and (positive or adverse):
+        return True
+    return False
+
+
+def _detail_conflict(key: str, details: dict, rules: dict) -> bool:
+    if key == "financial_evidence" and details.get("basis_ok") is False and _text(details.get("basis")):
+        return True
+    if key == "hazard_acceptability" and details.get("acceptable") is True and _hazard_negative(details, rules, "acceptable"):
+        return True
+    if key == "specific_sale_available" and details.get("specific_sale") is True and details.get("generic_url") is True:
+        return True
+    return False
 
 
 def _supports_pass(key: str, details: dict, rules: dict) -> bool:
@@ -232,9 +368,10 @@ def _supports_pass(key: str, details: dict, rules: dict) -> bool:
     if key == "work_scope":
         return details.get("heavy_rebuild") is False and details.get("uncertainty") == "bounded"
     if key == "floor_area":
-        return details.get("basis") == "floor" and details.get("compatible") is True
+        return (details.get("basis") == "floor" and details.get("compatible") is True
+                and details.get("usable_floor_absent") is not True)
     if key == "building_location":
-        return details.get("precision") == "building"
+        return details.get("precision") == "building" and details.get("wrong_asset") is not True
     if key == "sea_distance":
         km = details.get("km")
         return (details.get("water") == "sea" and _number(km) and 0 <= km <= rules["sea_max_km"]
@@ -244,9 +381,10 @@ def _supports_pass(key: str, details: dict, rules: dict) -> bool:
     if key == "hazard_acceptability":
         return details.get("acceptable") is True and _hazards(details, rules, "acceptable")
     if key == "specific_sale_available":
-        return details.get("specific_sale") is True and details.get("generic_url") is not True
+        return (details.get("specific_sale") is True and details.get("generic_url") is not True
+                and details.get("availability") not in _UNAVAILABLE)
     if key == "financial_evidence":
-        return _text(details.get("basis"))
+        return _text(details.get("basis")) and details.get("basis_ok") is not False
     if key == "financial_margin":
         return details.get("meets_margin") is True
     if key == "cash_fit":
@@ -258,7 +396,7 @@ def _supports_pass(key: str, details: dict, rules: dict) -> bool:
 
 
 def _adverse_code(key: str, details: dict, rules: dict) -> str:
-    if not isinstance(details, dict):
+    if not isinstance(details, dict) or _detail_conflict(key, details, rules):
         return ""
     if key == "residential_identity" and (details.get("asset_kind") in {"land", "movable", "bundle"}
                                           or details.get("bundle") is True):
@@ -279,19 +417,16 @@ def _adverse_code(key: str, details: dict, rules: dict) -> str:
         return "preference.heavy_rebuild"
     if key == "work_scope" and details.get("uncertainty") == "unbounded":
         return "safety.work_scope"
-    if key == "floor_area" and details.get("basis") in {"land", "footprint"}:
+    if key == "floor_area" and details.get("usable_floor_absent") is True:
         return "safety.floor_area"
-    if key == "building_location" and details.get("precision") in {"street", "town", "municipality", "advertised"}:
+    if key == "building_location" and details.get("wrong_asset") is True:
         return "safety.building_location"
     if key == "sea_distance" and (details.get("water") in {"river", "lake"} or _over_sea(details, rules)):
         return "preference.sea_distance"
-    if key == "hazard_coverage" and _hazard_negative(details, rules, "covered"):
-        return "safety.hazard_coverage"
     if key == "hazard_acceptability" and (details.get("acceptable") is False
                                            or _hazard_negative(details, rules, "acceptable")):
         return "safety.hazard_acceptability"
-    if key == "specific_sale_available" and (details.get("specific_sale") is False
-                                              or details.get("generic_url") is True):
+    if key == "specific_sale_available" and details.get("availability") in _UNAVAILABLE:
         return "execution.specific_sale_available"
     if key == "financial_evidence" and details.get("basis_ok") is False:
         return "financial.evidence"
@@ -299,8 +434,7 @@ def _adverse_code(key: str, details: dict, rules: dict) -> str:
         return "financial.margin"
     if key == "cash_fit" and details.get("fits_cash") is False:
         return "financial.cash_fit"
-    if key == "procedural_readiness" and (details.get("can_submit") is False
-                                           or details.get("deadline_known") is False):
+    if key == "procedural_readiness" and details.get("deadline_known") is True and details.get("can_submit") is False:
         return "execution.procedural_readiness"
     return ""
 
@@ -333,10 +467,24 @@ def _hazard_negative(details: dict, rules: dict, flag: str) -> bool:
                for name in rules["required_hazards"])
 
 
+def _policy_mismatch(key: str, item: dict, rules: dict) -> bool:
+    if key in _FINANCIAL:
+        return not _same_financial_policy(item, rules)
+    if key in _POLICY_BOUND:
+        return not _same_eligibility_policy(item, rules)
+    return False
+
+
 def _same_financial_policy(item: dict, rules: dict) -> bool:
     details = item.get("details") or {}
     return (details.get("financial_policy_id") == rules["financial_policy_id"]
             and details.get("financial_policy_version") == rules["financial_policy_version"])
+
+
+def _same_eligibility_policy(item: dict, rules: dict) -> bool:
+    details = item.get("details") or {}
+    return (details.get("policy_id") == rules["policy_id"]
+            and details.get("policy_version") == rules["policy_version"])
 
 
 def _is_stale(item: dict, rule: dict, now: datetime) -> bool:
@@ -354,27 +502,39 @@ def _in_scope(item: dict, evidence: dict) -> bool:
     return item["subject_id"] == evidence["subject_id"] and item["sale_id"] == evidence["sale_id"]
 
 
-def _superseded_ids(findings: list[dict]) -> set[str]:
-    return {item["supersedes"] for item in findings if item.get("supersedes")}
+def _resolved_ids(findings: list[dict], rules: dict, now: datetime, evidence: dict) -> set[str]:
+    resolved = set()
+    for item in findings:
+        target_id = item.get("supersedes")
+        if not target_id or not _in_scope(item, evidence):
+            continue
+        if _is_stale(item, rules["freshness"][item["requirement_key"]], now):
+            continue
+        if _policy_mismatch(item["requirement_key"], item, rules):
+            continue
+        resolved.add(target_id)
+    return resolved
 
 
 def _policy(policy: dict) -> dict:
     if not isinstance(policy, dict):
         raise EligibilityError("policy must be an object")
-    _reject_nonfinite(policy, "policy")
+    _reject_nonjson(policy, "policy")
     if policy.get("schema_version") != SCHEMA_VERSION:
         raise EligibilityError("unsupported policy schema")
     if policy.get("mode") != MODE:
         raise EligibilityError("policy mode must be live_and_invest")
     _bypass(policy)
     sea = policy.get("sea_max_km")
-    if not _number(sea) or sea <= 0:
-        raise EligibilityError("sea_max_km must be a finite number greater than 0")
+    if isinstance(sea, bool) or not isinstance(sea, (int, float)) or sea != SEA_MAX_KM:
+        raise EligibilityError("schema version 1 requires sea_max_km of 10")
     hazards = policy.get("required_hazards")
-    if not isinstance(hazards, list) or not hazards or len(hazards) != len(set(hazards)):
+    if not isinstance(hazards, list) or not hazards:
         raise EligibilityError("required_hazards must list each critical hazard once")
     if not all(isinstance(name, str) and name.strip() for name in hazards):
         raise EligibilityError("required_hazards must be non-empty strings")
+    if len(hazards) != len(set(hazards)):
+        raise EligibilityError("required_hazards must list each critical hazard once")
     freshness = policy.get("freshness")
     if not isinstance(freshness, dict) or set(freshness) != set(REQUIREMENT_KEYS):
         raise EligibilityError("freshness must name every mandatory requirement and no others")
@@ -384,7 +544,7 @@ def _policy(policy: dict) -> dict:
     return {
         "policy_id": _require_text(policy.get("policy_id"), "policy_id"),
         "policy_version": _require_text(policy.get("policy_version"), "policy_version"),
-        "sea_max_km": sea,
+        "sea_max_km": SEA_MAX_KM,
         "required_hazards": tuple(hazards),
         "freshness": parsed,
         "financial_policy_id": _require_text(policy.get("financial_policy_id"), "financial_policy_id"),
@@ -401,9 +561,11 @@ def _freshness_rule(key: str, rule: dict) -> dict:
     if immutable == has_age:
         raise EligibilityError(f"freshness for {key} needs a duration or an immutable rule")
     if immutable:
+        if "immutable" in rule and not isinstance(rule.get("immutable"), bool):
+            raise EligibilityError(f"freshness for {key} needs a duration or an immutable rule")
         return {"immutable": True}
     age = rule.get("max_age_seconds")
-    if not _number(age) or age <= 0:
+    if not _number(age) or age <= 0 or age > _MAX_ABS_NUMBER:
         raise EligibilityError(f"freshness for {key} needs a positive finite duration")
     return {"max_age_seconds": age}
 
@@ -418,7 +580,7 @@ def _bypass(policy: dict) -> None:
 def _evidence(evidence: dict, now: datetime) -> list[dict]:
     if not isinstance(evidence, dict):
         raise EligibilityError("evidence must be an object")
-    _reject_nonfinite(evidence, "evidence")
+    _reject_nonjson(evidence, "evidence")
     if evidence.get("schema_version") != SCHEMA_VERSION:
         raise EligibilityError("unsupported evidence schema")
     _require_text(evidence.get("subject_id"), "subject_id")
@@ -441,13 +603,13 @@ def _finding(item: dict, now: datetime) -> dict:
                                                         or item["details"].get("exempt") is True)):
         raise EligibilityError("a mandatory requirement cannot be marked not applicable")
     key = item.get("requirement_key")
-    if key not in REQUIREMENT_KEYS:
+    if not isinstance(key, str) or key not in REQUIREMENT_KEYS:
         raise EligibilityError("unknown requirement")
     kind = item.get("finding")
-    if kind not in _FINDINGS:
+    if not isinstance(kind, str) or kind not in _FINDINGS:
         raise EligibilityError("unknown finding value")
     provenance = item.get("provenance")
-    if provenance not in _PROVENANCE:
+    if not isinstance(provenance, str) or provenance not in _PROVENANCE:
         raise EligibilityError("unknown provenance")
     observed = _parse_time(item.get("observed_at"), "observed_at")
     if observed > now:
@@ -472,8 +634,8 @@ def _finding(item: dict, now: datetime) -> dict:
     details = item.get("details")
     if details is not None and not isinstance(details, dict):
         raise EligibilityError("details must be an object")
-    if isinstance(details, dict) and isinstance(details.get("km"), bool):
-        raise EligibilityError("boolean is not a number")
+    if isinstance(details, dict):
+        _check_details(key, details)
     return {
         "id": _require_text(item.get("id"), "id"),
         "requirement_key": key,
@@ -491,12 +653,58 @@ def _finding(item: dict, now: datetime) -> dict:
     }
 
 
-def _supersession(findings: list[dict]) -> None:
+def _check_details(key: str, details: dict) -> None:
+    for field, allowed in _ENUMS.get(key, {}).items():
+        if field not in details:
+            continue
+        value = details[field]
+        if not isinstance(value, str) or value not in allowed:
+            raise EligibilityError(f"{field} has an unsupported value")
+    for field in _BOOLS.get(key, ()):
+        if field in details and not isinstance(details[field], bool):
+            raise EligibilityError(f"{field} must be a boolean")
+    for field in _TEXTS.get(key, ()):
+        if field in details and not isinstance(details[field], str):
+            raise EligibilityError(f"{field} must be a string")
+    for field in ("policy_id", "policy_version", "financial_policy_id", "financial_policy_version"):
+        if field in details and not _text(details[field]):
+            raise EligibilityError(f"{field} must be a non-empty string")
+    if "km" in details:
+        km = details["km"]
+        if not _number(km) or km < 0 or km > _MAX_KM:
+            raise EligibilityError("km must be a finite distance")
+    if "not_applicable" in details and not isinstance(details["not_applicable"], bool):
+        raise EligibilityError("not_applicable must be a boolean")
+    if "exempt" in details and not isinstance(details["exempt"], bool):
+        raise EligibilityError("exempt must be a boolean")
+    hazards = details.get("hazards")
+    if hazards is None:
+        return
+    if not isinstance(hazards, dict):
+        raise EligibilityError("hazards must be an object")
+    for name, entry in hazards.items():
+        if not isinstance(name, str) or not name.strip():
+            raise EligibilityError("hazard name must be a string")
+        if not isinstance(entry, dict):
+            raise EligibilityError("hazard entry must be an object")
+        for field in ("applicable", "covered", "acceptable"):
+            if field in entry and not isinstance(entry[field], bool):
+                raise EligibilityError(f"hazard {field} must be a boolean")
+        for field in ("reference", "scale"):
+            if field in entry and not isinstance(entry[field], str):
+                raise EligibilityError(f"hazard {field} must be a string")
+
+
+def _supersession(findings: list[dict], rules: dict) -> None:
     by_id = {item["id"]: item for item in findings}
+    claimed = set()
     for item in findings:
         target_id = item.get("supersedes")
         if not target_id:
             continue
+        if target_id in claimed:
+            raise EligibilityError("a finding has more than one replacement")
+        claimed.add(target_id)
         target = by_id.get(target_id)
         if target is None:
             raise EligibilityError("supersedes an unknown finding")
@@ -504,10 +712,17 @@ def _supersession(findings: list[dict]) -> None:
                 or target["subject_id"] != item["subject_id"]
                 or target["sale_id"] != item["sale_id"]):
             raise EligibilityError("supersession crosses requirement, property, or sale")
-        if target["provenance"] == "reviewed" and item["provenance"] != "reviewed":
-            raise EligibilityError("an unreviewed finding cannot supersede a review")
+        if item["provenance"] != "reviewed":
+            raise EligibilityError("only a reviewed finding can supersede")
+        if item["finding"] == "undetermined":
+            raise EligibilityError("undetermined evidence cannot supersede")
         if item["observed_at"] < target["observed_at"]:
             raise EligibilityError("an older observation cannot supersede a newer one")
+        if target.get("reviewed_at") is not None and item.get("reviewed_at") is not None:
+            if item["reviewed_at"] < target["reviewed_at"]:
+                raise EligibilityError("an older review cannot supersede a newer review")
+        if not _adequate_replacement(item, rules):
+            raise EligibilityError("supersession does not resolve the finding")
         seen = {item["id"]}
         cursor = target
         while cursor.get("supersedes"):
@@ -518,6 +733,11 @@ def _supersession(findings: list[dict]) -> None:
             cursor = by_id.get(nxt)
             if cursor is None:
                 break
+
+
+def _adequate_replacement(item: dict, rules: dict) -> bool:
+    role = _role(item["requirement_key"], item, rules)
+    return role in {"pass", "fail"}
 
 
 def _require_aware(now: datetime, field: str) -> datetime:
@@ -552,18 +772,40 @@ def _text(value) -> bool:
 
 
 def _number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if isinstance(value, int) and abs(value) > _MAX_ABS_NUMBER:
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
-def _reject_nonfinite(value, path: str) -> None:
-    if isinstance(value, float) and not math.isfinite(value):
-        raise EligibilityError(f"{path} is not a finite number")
+def _reject_nonjson(value, path: str) -> None:
+    if value is None or isinstance(value, str):
+        return
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        if abs(value) > _MAX_ABS_NUMBER:
+            raise EligibilityError(f"{path} is outside the supported range")
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise EligibilityError(f"{path} is not a finite number")
+        return
     if isinstance(value, dict):
         for key, item in value.items():
-            _reject_nonfinite(item, f"{path}.{key}")
-    elif isinstance(value, list):
+            if not isinstance(key, str):
+                raise EligibilityError(f"{path} has a non-string key")
+            _reject_nonjson(item, f"{path}.{key}")
+        return
+    if isinstance(value, list):
         for index, item in enumerate(value):
-            _reject_nonfinite(item, f"{path}[{index}]")
+            _reject_nonjson(item, f"{path}[{index}]")
+        return
+    raise EligibilityError(f"{path} is not JSON-compatible")
 
 
 def _unique(codes) -> list[str]:
