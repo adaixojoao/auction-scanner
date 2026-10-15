@@ -158,8 +158,11 @@ def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | Non
     room_rec = value["amount"] - reno_high - reserve - climate_adj - margin
     budget_binds = False
     if value and budget:
-        budget_binds = budget - reno_high < room_rec
-        room_max, room_rec = min(room_max, budget - reno_low), min(room_rec, budget - reno_high)
+        budget_ceiling_max = budget - reno_low - reserve - climate_adj
+        budget_ceiling_rec = budget - reno_high - reserve - climate_adj
+        budget_binds = budget_ceiling_rec < room_rec
+        room_max = min(room_max, budget_ceiling_max)
+        room_rec = min(room_rec, budget_ceiling_rec)
     absolute = _largest_bid(listing, room_max, 1.0)
     recommended = _largest_bid(listing, room_rec, costs.FEES_HIGH_FACTOR)
     if recommended >= absolute:            # no margin and no range in the work: stay below the maximum

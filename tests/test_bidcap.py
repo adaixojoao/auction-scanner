@@ -159,6 +159,23 @@ def test_the_maximum_bid_setting(client):
     assert config.load_config()["bid_cap"]["require_exact"] is True
 
 
+def test_budget_binding_ceiling_deducts_reserve():
+    # When the budget binds, all-in_low must never exceed the budget.
+    # Bug: old code used budget - reno only, omitting reserve and climate_adj,
+    # so all_in_low = bid + fees + reno_low + reserve could exceed budget.
+    home = _home()
+    settings = _settings(max_all_in=90_000, contingency_pct=10, adviser_reserve_eur=1500,
+                         margin_pct=15)
+    cap = bidcap.calculate_bid_cap(home, settings, _exact_evidence("good"))
+    assert cap["recommended_bid"] is not None
+    # The total all-in (recommended bid + fees + reno_low + reserve) must fit the budget.
+    all_in = (cap["recommended_bid"]
+              + (cap["taxes_and_fees_low"] or 0)
+              + (cap["renovation_low"] or 0)
+              + (cap["risk_reserve"] or 0))
+    assert all_in <= 90_000, f"all_in {all_in} exceeds budget 90_000"
+
+
 def test_a_version_10_database_gets_the_bid_cap_columns(tmp_path):
     path = str(tmp_path / "v10.db")
     conn = connect(path)
