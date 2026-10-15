@@ -228,16 +228,18 @@ def _plots_for_site_check(db, cfg: dict) -> list[dict]:
     return forest + rest
 
 
-def rescore(db, cfg: dict) -> None:
-    """Score again what the scan changed (new towns, auction results, land prices),
-    for every goal, so the next page view finds the scores ready."""
+def rescore(db, cfg: dict) -> bool:
+    """Refresh every goal; False means normal publication must be suppressed."""
     try:
         from db import load_listings
         from scoring import MODES
         for mode in MODES:
-            load_listings(db, filters=cfg.get("filters"), include_hidden=True, mode=mode, refresh=True)
-    except Exception:  # noqa: BLE001 — only a speed-up
-        LOG.exception("Rescoring after the scan failed")
+            load_listings(db, filters=cfg.get("filters"), include_hidden=True,
+                          mode=mode, refresh=True)
+    except Exception:
+        LOG.exception("Rescoring after the scan failed; normal publication suppressed")
+        return False
+    return True
 
 
 def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
@@ -273,6 +275,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
             results = []
             stopped = False
             report_path = None
+            publication_rescored = False
             try:
                 for i, source in enumerate(chosen):
                     if _stop_requested(db):
@@ -290,22 +293,6 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     except Exception:  # noqa: BLE001 — a join must never fail the scan
                         LOG.exception("Joining Citius to e-leilões failed")
                     mark_duplicates(db)
-                    if report:
-                        _set_state(db, current="report")
-                        report_path = build_report(db, cfg)
-                    if alerts:
-                        _set_state(db, current="alerts")
-                        send_alerts(db, cfg)
-                        try:
-                            from telegram_alert import alert_source_failures
-                            alert_source_failures(db, cfg, [r["source"] for r in results])
-                        except Exception:  # noqa: BLE001 — an alarm must never fail the scan
-                            LOG.exception("Source alarm failed")
-                        try:
-                            from outbox import queue_requests
-                            queue_requests(db, cfg)          # offered on Telegram; sent only on your tap
-                        except Exception:  # noqa: BLE001
-                            LOG.exception("Preparing information requests failed")
                     try:
                         import outcomes
                         outcomes.record_results(db)      # ended sales and their last bid
@@ -345,11 +332,31 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         confirm.check_top(db, cfg, make_session())
                     except Exception:  # noqa: BLE001 — a dead link must never fail the scan
                         LOG.exception("Link check failed")
+                    if not rescore(db, cfg):
+                        raise RuntimeError("Post-enrichment rescoring failed; reports and alerts not published")
+                    publication_rescored = True
+                    if report:
+                        _set_state(db, current="report")
+                        report_path = build_report(db, cfg)
+                    if alerts:
+                        _set_state(db, current="alerts")
+                        send_alerts(db, cfg)
+                        try:
+                            from telegram_alert import alert_source_failures
+                            alert_source_failures(db, cfg, [r["source"] for r in results])
+                        except Exception:  # noqa: BLE001 — an alarm must never fail the scan
+                            LOG.exception("Source alarm failed")
+                        try:
+                            from outbox import queue_requests
+                            queue_requests(db, cfg)          # offered on Telegram; sent only on your tap
+                        except Exception:  # noqa: BLE001
+                            LOG.exception("Preparing information requests failed")
             finally:
                 finished_at = utcnow_iso()
                 if not stopped:
                     _set_state(db, current="refreshing the lists")
-                    rescore(db, cfg)
+                    if not publication_rescored:
+                        rescore(db, cfg)
                     try:
                         import photos
                         photos.keep_high(db, cfg)
