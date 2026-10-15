@@ -422,3 +422,83 @@ def test_evidence_revision_busts_score_cache(db):
     load_listings(db, apply_min_score=False)
     new_key = dbmod._SCORED["home"]["eleiloes:1"][0]
     assert new_key != first_key, "evidence revision must change the score cache key"
+
+
+# ─── Task 7: anomaly clearance bound to evidence revisions ────────────────────
+
+def test_clearance_without_rev_sum_is_stale_after_migration(db, add, monkeypatch):
+    """A pre-v27 clearance (evidence_rev_sum=NULL) is treated as stale by load_best (Task 7)."""
+    import scoring
+    monkeypatch.setattr(scoring, "local_price", lambda item: (500_000.0, "test series"))
+    from db import clear_extreme_discount, load_best
+    # price=30000 on a 80m² property is ~92% below 500k/80m²=6250/m² — triggers extreme_discount
+    add(external_id="disc1", title="Moradia T3", price=30000, area_m2=80)
+    listing_id = "eleiloes:disc1"
+    clear_extreme_discount(db, listing_id, note="checked", evidence_rev_sum=None)
+    result = load_best(db)
+    ids = {it["id"] for it in result}
+    assert listing_id not in ids, "clearance with NULL rev_sum must not grant finalist access"
+
+
+def test_clearance_with_matching_rev_sum_passes(db, add, monkeypatch):
+    """A clearance whose evidence_rev_sum matches the current sum reaches load_best (Task 7)."""
+    import scoring
+    monkeypatch.setattr(scoring, "local_price", lambda item: (500_000.0, "test series"))
+    from db import clear_extreme_discount, load_best, record_evidence_revision
+    add(external_id="disc2", title="Moradia T3 em bom estado", price=30000, area_m2=80)
+    listing_id = "eleiloes:disc2"
+    record_evidence_revision(db, listing_id, "location", {"precision": "sale"})
+    db.commit()
+    rev_sum = db.execute(
+        "SELECT SUM(rev) FROM evidence_revisions WHERE listing_id=?", (listing_id,)
+    ).fetchone()[0] or 0
+    clear_extreme_discount(db, listing_id, note="verified ownership", evidence_rev_sum=rev_sum)
+    result = load_best(db)
+    ids = {it["id"] for it in result}
+    assert listing_id in ids, "clearance with matching rev_sum must allow finalist access"
+
+
+def test_clearance_revoked_when_evidence_changes(db, add, monkeypatch):
+    """After an evidence update, the clearance is revoked and the item is blocked again (Task 7)."""
+    import scoring
+    monkeypatch.setattr(scoring, "local_price", lambda item: (500_000.0, "test series"))
+    from db import clear_extreme_discount, load_best, record_evidence_revision
+    add(external_id="disc3", title="Moradia grande em bom estado", price=30000, area_m2=80)
+    listing_id = "eleiloes:disc3"
+    record_evidence_revision(db, listing_id, "location", {"precision": "sale"})
+    db.commit()
+    rev_sum = db.execute(
+        "SELECT SUM(rev) FROM evidence_revisions WHERE listing_id=?", (listing_id,)
+    ).fetchone()[0] or 0
+    clear_extreme_discount(db, listing_id, note="ok", evidence_rev_sum=rev_sum)
+    assert any(it["id"] == listing_id for it in load_best(db))
+    record_evidence_revision(db, listing_id, "hazard", {"flood_m": 0.5})
+    db.commit()
+    result_after = load_best(db)
+    ids_after = {it["id"] for it in result_after}
+    assert listing_id not in ids_after, "stale clearance must be revoked after evidence change"
+    row = db.execute(
+        "SELECT * FROM investigation_clearances WHERE listing_id=?", (listing_id,)
+    ).fetchone()
+    assert row is None, "revoked clearance row must be deleted from investigation_clearances"
+
+
+def test_anomaly_investigated_uses_clearance_not_note(db, add, monkeypatch):
+    """_shadow_evaluate sets anomaly_investigated from investigation_clearances, not investigation_note (Task 7)."""
+    import scoring
+    monkeypatch.setattr(scoring, "local_price", lambda item: (500_000.0, "test series"))
+    from db import clear_extreme_discount, load_listings, record_evidence_revision
+    add(external_id="disc4", title="Moradia T4 bom estado", price=30000, area_m2=80)
+    listing_id = "eleiloes:disc4"
+    items = load_listings(db, apply_min_score=False)
+    it = next(i for i in items if i["id"] == listing_id)
+    assert not it.get("investigation_cleared"), "not cleared yet"
+    record_evidence_revision(db, listing_id, "identity", {"confirmed": True})
+    db.commit()
+    rev_sum = db.execute(
+        "SELECT SUM(rev) FROM evidence_revisions WHERE listing_id=?", (listing_id,)
+    ).fetchone()[0] or 0
+    clear_extreme_discount(db, listing_id, note="owner verified", evidence_rev_sum=rev_sum)
+    items = load_listings(db, apply_min_score=False)
+    it2 = next(i for i in items if i["id"] == listing_id)
+    assert it2.get("investigation_cleared"), "cleared listing must have investigation_cleared=True"

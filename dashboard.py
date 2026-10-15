@@ -426,14 +426,29 @@ def _research_candidates(items: list, cash: float) -> dict:
     import geo
     from scoring import condition
     valued, unvalued = [], []
-    visible = sorted((it for it in items if not it.get("hidden_reason")),
+    # Task 8: research candidates bypass the soft score cutoff (min_score) for
+    # extreme-discount leads.  Hard exclusions (dismissed, duplicate, expired,
+    # gone) are still respected — only "low score" and similar soft reasons are
+    # overridden so a deep-discount item below the normal score threshold reaches
+    # the investigation queue.
+    SOFT_HIDDEN = {"low score"}
+    HARD_HIDDEN = {"dismissed", "duplicate", "expired", "gone", "stale", "over budget"}
+    def _research_eligible(it: dict) -> bool:
+        hr = it.get("hidden_reason") or ""
+        if not hr:
+            return True
+        # Allow extreme-discount items through soft filters only.
+        if it.get("extreme_discount") and not any(h in hr for h in HARD_HIDDEN):
+            return True
+        return False
+    visible = sorted((it for it in items if _research_eligible(it)),
                      key=lambda it: it.get("score") or 0, reverse=True)
     for it in visible:
         unpriced = bool(it.get("research_only"))
         if not unpriced and it.get("invest_score") is None:
             continue
         bucket = unvalued if unpriced else valued
-        if unpriced or (it.get("score") or 0) > 0:
+        if unpriced or (it.get("score") or 0) > 0 or it.get("extreme_discount"):
             if len(bucket) < 3:
                 bucket.append(it)
     def card(it, group):
@@ -560,7 +575,11 @@ def api_listings():
         },
         "last_scrape": last_scrape,
         "cash": _cash_public(),
-        "research": (_research_candidates(visible, float(_cash_public().get("amount") or 0))
+        # Task 8: research candidates must include extreme-discount items even when they
+        # fall below the normal score cutoff (min_score). Pass `loaded` (the full scored
+        # list, including items with a hidden_reason) so leads that failed the soft score
+        # filter still appear in the research tab for investigation.
+        "research": (_research_candidates(loaded, float(_cash_public().get("amount") or 0))
                      if mode == "both" else None),
     })
 

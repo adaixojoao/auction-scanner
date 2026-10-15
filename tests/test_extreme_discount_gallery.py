@@ -96,8 +96,11 @@ def test_cleared_extreme_discount_reaches_load_best(db, add, monkeypatch):
     # Before clearance: blocked from load_best
     best_before = {it["id"] for it in load_best(db, now=NOW, apply_min_score=False)}
     assert listing_id not in best_before, "should be blocked before clearance"
-    # After clearance: passes the gate
-    clear_extreme_discount(db, listing_id, note="price confirmed by court record")
+    # After clearance: passes the gate (evidence_rev_sum=0: no evidence rows yet)
+    ev_sum = db.execute(
+        "SELECT COALESCE(SUM(rev),0) FROM evidence_revisions WHERE listing_id=?", (listing_id,)
+    ).fetchone()[0]
+    clear_extreme_discount(db, listing_id, note="price confirmed by court record", evidence_rev_sum=ev_sum)
     best_after = {it["id"] for it in load_best(db, now=NOW, apply_min_score=False)}
     assert listing_id in best_after, "cleared item must reach finalist path"
     # Still visible in listing tab with extreme_discount flag (unchanged)

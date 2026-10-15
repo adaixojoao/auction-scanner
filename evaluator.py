@@ -589,6 +589,43 @@ def _req_financial_margin(evidence: dict, policy: dict) -> Requirement:
     )
 
 
+def _req_photo_suitability(evidence: dict, policy: dict) -> Requirement:
+    """At least one listing photo shows the dwelling itself (not just a plot or a view).
+
+    Task 10: missing shows_house (None/absent from the photo_check payload) must remain
+    UNKNOWN, not treated as True.  An explicit False means photos confirmed as not showing
+    the house — UNKNOWN until retaken.  Only an explicit True from a model run counts.
+    """
+    pc = evidence.get("photo_check") or {}
+    if not pc:
+        return Requirement(
+            key="photo_suitability", outcome=UNKNOWN,
+            code="DATA_PHOTO_MISSING",
+            message="No photo check has been run for this listing.",
+            next_evidence_needed="Run photo check to confirm at least one photo shows the dwelling.",
+        )
+    shows_house = pc.get("shows_house")
+    if shows_house is None:
+        return Requirement(
+            key="photo_suitability", outcome=UNKNOWN,
+            code="DATA_PHOTO_SHOWS_HOUSE_UNKNOWN",
+            message="Photo check ran but shows_house attribution is missing.",
+            next_evidence_needed="Re-run photo check; model must explicitly report shows_house.",
+        )
+    if shows_house is False:
+        return Requirement(
+            key="photo_suitability", outcome=UNKNOWN,
+            code="DATA_PHOTO_NO_DWELLING",
+            message="No photo shows the dwelling; condition cannot be assessed from photos.",
+            next_evidence_needed="Obtain photos of the dwelling itself before assessment.",
+        )
+    return Requirement(
+        key="photo_suitability", outcome=PASS,
+        code="DATA_PHOTO_OK",
+        message="At least one photo confirmed showing the dwelling.",
+    )
+
+
 def _req_cash_fit(evidence: dict, policy: dict) -> Requirement:
     """Total project cost (including required reserve) fits available cash."""
     cash = evidence.get("available_cash_eur")
@@ -641,6 +678,7 @@ _REQUIREMENTS = [
     _req_coastal,
     _req_floor_area,
     _req_hazard_coverage,
+    _req_photo_suitability,
     _req_sale_availability,
     _req_anomaly_investigation,
     _req_financial_evidence,

@@ -41,7 +41,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -617,12 +617,24 @@ def _migrate_v26(db: sqlite3.Connection):
                  row["listing_id"], row["conflict_details"]))
 
 
+def _migrate_v27(db: sqlite3.Connection):
+    """Bind investigation clearances to the evidence revision sum at the time of review (Task 7).
+
+    Adds evidence_rev_sum to investigation_clearances so a clearance is automatically
+    invalidated when material evidence (location, hazard, checklist, identity) changes.
+    An existing clearance without the column is preserved with rev_sum=NULL; it will be
+    treated as stale and removed the next time load_listings runs for that listing.
+    """
+    _add_column(db, "investigation_clearances", "evidence_rev_sum", "INTEGER")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
-               23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26}
+               23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
+               27: _migrate_v27}
 
 
 def init_db(db: sqlite3.Connection):
@@ -681,17 +693,23 @@ def get_evidence_revisions(db: sqlite3.Connection, listing_id: str) -> dict[str,
 # ─── Investigation clearances (F05) ──────────────────────────────────
 
 def clear_extreme_discount(db: sqlite3.Connection, listing_id: str,
-                           note: str | None = None) -> None:
+                           note: str | None = None,
+                           evidence_rev_sum: int | None = None) -> None:
     """Record that `listing_id` has been investigated and cleared for finalist promotion.
+
+    `evidence_rev_sum` is the sum of all evidence revision counters at the time of
+    review (from the evidence_revisions table).  When the sum later increases, the
+    clearance is treated as stale and revoked automatically by load_listings.
 
     After this call the item will pass the extreme-discount gate in load_best and
     can appear in reports, alerts and the Offers shortlist.  The item remains visible
     in the listing tab (load_listings) regardless.
     """
     db.execute(
-        "INSERT OR REPLACE INTO investigation_clearances (listing_id, cleared_at, note)"
-        " VALUES (?, ?, ?)",
-        (listing_id, utcnow_iso(), note),
+        "INSERT OR REPLACE INTO investigation_clearances"
+        " (listing_id, cleared_at, note, evidence_rev_sum)"
+        " VALUES (?, ?, ?, ?)",
+        (listing_id, utcnow_iso(), note, evidence_rev_sum),
     )
     db.commit()
 
@@ -702,16 +720,39 @@ def revoke_extreme_clearance(db: sqlite3.Connection, listing_id: str) -> None:
     db.commit()
 
 
-def _extreme_clearances(db: sqlite3.Connection, listing_ids: set[str]) -> set[str]:
-    """Return the subset of `listing_ids` that have been cleared for finalist promotion."""
+def _extreme_clearances(db: sqlite3.Connection, listing_ids: set[str],
+                        ev_rev_sums: dict[str, int] | None = None,
+                        revoke_stale: bool = False) -> set[str]:
+    """Return the subset of `listing_ids` cleared for finalist promotion.
+
+    If `ev_rev_sums` is supplied, a clearance whose stored `evidence_rev_sum` does not
+    match the current sum is treated as stale.  When `revoke_stale` is True (only in
+    load_best, never in read-only paths) the stale rows are deleted so the investigator
+    must re-review after evidence changes.  NULL stored sum (pre-v27 clearance) is stale.
+    """
     if not listing_ids:
         return set()
     placeholders = ",".join("?" * len(listing_ids))
     rows = db.execute(
-        f"SELECT listing_id FROM investigation_clearances WHERE listing_id IN ({placeholders})",
+        f"SELECT listing_id, evidence_rev_sum FROM investigation_clearances"
+        f" WHERE listing_id IN ({placeholders})",
         tuple(listing_ids),
     ).fetchall()
-    return {r["listing_id"] for r in rows}
+    cleared: set[str] = set()
+    stale: list[str] = []
+    for r in rows:
+        lid = r["listing_id"]
+        stored_rev = r["evidence_rev_sum"]
+        if ev_rev_sums is not None:
+            current_rev = ev_rev_sums.get(lid, 0)
+            if stored_rev is None or stored_rev != current_rev:
+                stale.append(lid)
+                continue
+        cleared.add(lid)
+    if revoke_stale:
+        for lid in stale:
+            revoke_extreme_clearance(db, lid)
+    return cleared
 
 
 # ─── Writes ──────────────────────────────────────────────────────────
@@ -1664,8 +1705,13 @@ def _shadow_evaluate(item: dict, now) -> None:
             "floor_source": item.get("area_source"),
             "climate": item.get("climate"),
             "sale_availability": item.get("sale_availability"),
+            "photo_check": item.get("photo_check"),
             "apparent_discount_pct": item.get("invest_discount_pct"),
-            "anomaly_investigated": bool(item.get("investigation_note")),
+            # investigation_cleared is set by load_listings from investigation_clearances
+            # (Task 7). Falling back to investigation_note (a legacy raw field that was
+            # never reliably written) is the old bug: it let a star or free-text note act
+            # as certification. Now only a DB clearance with matching evidence_rev_sum counts.
+            "anomaly_investigated": bool(item.get("investigation_cleared")),
             "valuation_source": item.get("valuation_source"),
             "conservative_margin_eur": item.get("conservative_margin_eur"),
             "available_cash_eur": item.get("available_cash_eur"),
@@ -1720,6 +1766,19 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     # A scan touches last_seen on every listing it sees; the score never reads it.
     scored_cols = [i for i, k in enumerate(rows[0].keys()) if k not in _UNSCORED] if rows else []
 
+    # Task 7: load investigation clearances upfront so _shadow_evaluate can use the
+    # correct anomaly_investigated value rather than the legacy investigation_note field.
+    _all_ids = {r["id"] for r in rows}
+    _ev_rev_sums_ll: dict[str, int] = {
+        row["listing_id"]: row["s"]
+        for row in db.execute(
+            "SELECT listing_id, SUM(rev) AS s FROM evidence_revisions GROUP BY listing_id"
+        ).fetchall()
+    }
+    _investigation_cleared: set[str] = _extreme_clearances(
+        db, _all_ids, ev_rev_sums=_ev_rev_sums_ll
+    )
+
     from confirm import gone_reason
     last_ok = last_ok_by_source(db)
     failed_at = latest_failure(db)
@@ -1772,6 +1831,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["status"] = statuses.get(item["id"])
         offer = offers.get(item["id"])
         item["offer_outcome"] = offer["outcome"] if offer else None
+        # Task 7: mark whether this item has a valid (non-stale) investigation clearance.
+        item["investigation_cleared"] = item["id"] in _investigation_cleared
         # Over common.check_max_price: kept so the scanner knows it, never scored,
         # checked or shown. One you shortlisted or made an offer on stays.
         if cap and item["status"] != "shortlisted" and offer is None and price_to_pay(dict(item)) > cap:
@@ -1956,6 +2017,19 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
     # enrichable) but must not reach reports, alerts or the Offers shortlist until
     # they have been reviewed and cleared via clear_extreme_discount() (F05).
     # Shortlist membership or offers do not waive this requirement.
-    cleared = _extreme_clearances(db, extreme_ids)
+    # Pass current evidence revision sums so stale clearances (evidence changed
+    # since the review) are automatically revoked before the gate is applied.
+    ev_rev_sums_best: dict[str, int] = {}
+    if extreme_ids:
+        ev_rev_sums_best = {
+            row["listing_id"]: row["s"]
+            for row in db.execute(
+                "SELECT listing_id, SUM(rev) AS s FROM evidence_revisions"
+                f" WHERE listing_id IN ({','.join('?' * len(extreme_ids))})"
+                " GROUP BY listing_id",
+                tuple(extreme_ids),
+            ).fetchall()
+        }
+    cleared = _extreme_clearances(db, extreme_ids, ev_rev_sums=ev_rev_sums_best, revoke_stale=True)
     blocked = extreme_ids - cleared
     return [it for it in best.values() if it["id"] not in blocked]

@@ -36,7 +36,7 @@ def test_the_photos_decide_when_the_text_says_nothing(db):
     upsert_listing(db, make_listing("eleiloes", "3", **{**HOUSE, "description": "Moradia em bom estado"}))
     db.commit()
     before = {it["id"]: it["rank"] for it in load_listings(db, apply_min_score=False)}
-    claude = FakeClaude({"condition": "heavy", "confidence": "high", "notes": "No roof, walls collapsing."})
+    claude = FakeClaude({"condition": "heavy", "confidence": "high", "notes": "No roof, walls collapsing.", "shows_house": True})
     items = load_listings(db, apply_min_score=False)
     assert photos.check_pending(db, {}, items, looker=photos.ClaudeLooker(claude)) == 2        # not the one without photos
     image = claude.requests[0]["messages"][0]["content"][0]
