@@ -150,6 +150,29 @@ def test_shortlisted_listing_joins_offers_even_below_the_candidate_score(client,
     assert offers["review"] == [] and [o["id"] for o in offers["rejected"]] == ["zvg:k1"]
 
 
+def test_sent_offer_for_home_mode_listing_appears_in_sent_tab(client, add):
+    """A 'home' mode offer must survive in Sent/Closed even though api_offers only
+    loads EARNING_MODES ('invest', 'land') listings into by_id (Task 6 regression).
+    Before the fix, by_id.get(listing_id) returned None for 'home' mode listings
+    and the log entry was silently skipped."""
+    # fotocasa is treated as a portal ad (mode 'home'), not in EARNING_MODES
+    add("fotocasa", "home1", "PT", title="Apartamento T2 para viver", price=80000,
+        area_m2=90, concelho="Porto")
+    # shortlist it so it appears in review
+    client.post("/api/listings/status", json={"id": "fotocasa:home1", "status": "shortlisted"})
+    # record a sent offer
+    sent_resp = client.post("/api/offers/sent", json={
+        "id": "fotocasa:home1", "bid": "30.000,00",
+        "checklist_override": "override for test"
+    }).get_json()
+    assert sent_resp and "log_id" in sent_resp, f"Expected log_id in response: {sent_resp}"
+    # The sent offer must appear in the Sent tab, not vanish
+    offers = client.get("/api/offers").get_json()
+    sent_ids = [o["id"] for o in offers.get("sent", [])]
+    assert "fotocasa:home1" in sent_ids, (
+        f"home-mode offer not in sent tab; sent={sent_ids}")
+
+
 def test_offers_rank_court_and_bank_sales_not_portal_ads_or_a_home_to_live_in(client, add):
     # price=80000, area=100, Lugo ES (€1404/m² → 33% gap, under 70% extreme-discount threshold)
     add("fotocasa", "ad", "ES", title="Casa en buen estado junto al mar", price=80000,
