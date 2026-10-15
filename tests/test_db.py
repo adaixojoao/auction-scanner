@@ -476,11 +476,11 @@ def test_clearance_revoked_when_evidence_changes(db, add, monkeypatch):
     db.commit()
     result_after = load_best(db)
     ids_after = {it["id"] for it in result_after}
-    assert listing_id not in ids_after, "stale clearance must be revoked after evidence change"
+    assert listing_id not in ids_after, "stale clearance must not count after evidence change"
     row = db.execute(
         "SELECT * FROM investigation_clearances WHERE listing_id=?", (listing_id,)
     ).fetchone()
-    assert row is None, "revoked clearance row must be deleted from investigation_clearances"
+    assert row is not None, "a stale clearance is excluded, never deleted by a reader"
 
 
 def test_anomaly_investigated_uses_clearance_not_note(db, add, monkeypatch):
