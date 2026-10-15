@@ -133,14 +133,74 @@ def test_publication_snapshot_returns_listings(tmp_path):
     assert any(it["id"] == "citius:1" for it in snap)
 
 
-def test_publication_snapshot_cached_within_ttl(tmp_path):
-    """Two calls within TTL return the same list object (identity, not just equal)."""
+def test_publication_snapshot_cached_within_ttl(tmp_path, monkeypatch):
+    """Within the TTL the loader runs once; each caller gets an equal but
+    independent copy, so mutating one result alters neither another result
+    nor the cached snapshot."""
+    import db as store
+
     db = _fresh_db(tmp_path)
     _invest_listing(db)
     invalidate_snapshot()
+    calls = []
+    real = store.load_listings
+    monkeypatch.setattr(store, "load_listings", lambda *a, **k: calls.append(1) or real(*a, **k))
     first = publication_snapshot(db, include_hidden=True, now=NOW)
     second = publication_snapshot(db, include_hidden=True, now=NOW)
-    assert first is second, "cached snapshot must be the same object within TTL"
+    assert calls == [1], "identical requests within the TTL must load once"
+    assert first == second and first is not second
+    item = next(it for it in first if it["id"] == "citius:1")
+    nested = next(k for k, v in item.items() if isinstance(v, (dict, list)) and v)
+    original = json.dumps(second, sort_keys=True, default=str)
+    item["score"] = -1
+    if isinstance(item[nested], dict):
+        item[nested]["__mutated__"] = True
+    else:
+        item[nested].append("__mutated__")
+    first.clear()
+    assert json.dumps(second, sort_keys=True, default=str) == original
+    third = publication_snapshot(db, include_hidden=True, now=NOW)
+    assert json.dumps(third, sort_keys=True, default=str) == original
+    assert calls == [1]
+    invalidate_snapshot()
+
+
+def test_publication_snapshot_ttl_expiry_reloads(tmp_path, monkeypatch):
+    import db as store
+
+    db = _fresh_db(tmp_path)
+    invalidate_snapshot()
+    calls = []
+    monkeypatch.setattr(store, "load_listings", lambda *a, **k: calls.append(1) or [])
+    publication_snapshot(db, now=NOW, ttl=0.05)
+    publication_snapshot(db, now=NOW, ttl=0.05)
+    time.sleep(0.1)
+    publication_snapshot(db, now=NOW, ttl=0.05)
+    assert calls == [1, 1]
+    invalidate_snapshot()
+
+
+def test_publication_snapshot_keys_on_database_time_and_policy(tmp_path, monkeypatch):
+    """Different databases (files), requested times and policies never share a snapshot."""
+    import db as store
+
+    one, two = _fresh_db(tmp_path, "one.db"), _fresh_db(tmp_path, "two.db")
+    invalidate_snapshot()
+    calls = []
+    monkeypatch.setattr(store, "load_listings", lambda conn, **k: calls.append((conn, k["now"])) or [])
+    policy = {"max_price": 1}
+    monkeypatch.setattr(store, "_load_config_safe", lambda: dict(policy))
+    later = NOW.replace(day=16)
+    publication_snapshot(one, now=NOW, ttl=60)
+    publication_snapshot(two, now=NOW, ttl=60)
+    publication_snapshot(one, now=later, ttl=60)
+    assert calls == [(one, NOW), (two, NOW), (one, later)]
+    policy["max_price"] = 2
+    publication_snapshot(one, now=NOW, ttl=60)
+    assert len(calls) == 4, "a changed policy must not reuse the old snapshot"
+    publication_snapshot(one, now=NOW, ttl=60)
+    assert len(calls) == 4
+    invalidate_snapshot()
 
 
 def test_publication_snapshot_refreshes_after_ttl(tmp_path):

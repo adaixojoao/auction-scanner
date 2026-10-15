@@ -2264,53 +2264,46 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
 
 _SNAP_LOCK = threading.Lock()
 # {cache_key: (monotonic_time, listings_list)}
-_SNAP_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_SNAP_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
 # How long (seconds) a snapshot is considered fresh.  Multiple consumers within
 # the same enrichment cycle see the same listing states; after the TTL the next
 # call re-runs load_listings so a new scrape is reflected promptly.
 SNAP_TTL: float = 10.0
 
 
-def publication_snapshot(db: sqlite3.Connection, *,
-                         filters: dict | None = None,
-                         mode: str = "home",
-                         include_hidden: bool = False,
-                         slim_hidden: bool = False,
-                         now: datetime | None = None,
+def publication_snapshot(db: sqlite3.Connection, *, filters: dict | None = None,
+                         mode: str = "home", include_hidden: bool = False,
+                         slim_hidden: bool = False, now: datetime | None = None,
                          ttl: float | None = None) -> list[dict]:
-    """Central post-enrichment snapshot (F15).
+    """Database-scoped snapshot; consumers cannot mutate the cached copy."""
+    import copy
 
-    Returns the same in-memory listing list to every caller within `ttl`
-    seconds (default SNAP_TTL).  All consumers that call this function during
-    the same enrichment cycle see an identical, immutable view of the data.
-
-    Keyed on (db path, mode, include_hidden, slim_hidden, filters hash) so
-    different consumers with different args each get their own consistent view,
-    but two consumers with the same args share one call.
-    """
     effective_ttl = ttl if ttl is not None else SNAP_TTL
     filters_key = json.dumps(filters, sort_keys=True, default=str) if filters else "null"
-    db_path = getattr(db, "database", "") or ""
-    cache_key = f"{db_path}|{mode}|{include_hidden}|{slim_hidden}|{filters_key}"
-    ts_now = time.monotonic()
+    paths = [row[2] for row in db.execute("PRAGMA database_list") if row[1] == "main"]
+    path = paths[0] if paths else ""
+    identity = ("file", os.path.realpath(path)) if path else ("memory", id(db))
+    time_key = now.isoformat() if now is not None else None
+    policy_key = json.dumps(_load_config_safe(), sort_keys=True, default=str)
+    cache_key = (identity, mode, include_hidden, slim_hidden, filters_key, time_key, policy_key)
     with _SNAP_LOCK:
+        stamp = time.monotonic()
         entry = _SNAP_CACHE.get(cache_key)
-        if entry is not None and ts_now - entry[0] < effective_ttl:
-            return entry[1]
-    listings = load_listings(db, filters=filters, mode=mode,
-                             include_hidden=include_hidden,
-                             slim_hidden=slim_hidden, now=now)
-    with _SNAP_LOCK:
-        _SNAP_CACHE[cache_key] = (ts_now, listings)
-    return listings
+        if entry is not None and stamp - entry[0] < effective_ttl:
+            return copy.deepcopy(entry[1])
+        listings = load_listings(db, filters=filters, mode=mode,
+                                 include_hidden=include_hidden, slim_hidden=slim_hidden, now=now)
+        stored_copy = copy.deepcopy(listings)
+        _SNAP_CACHE[cache_key] = (time.monotonic(), stored_copy)
+        return copy.deepcopy(stored_copy)
 
 
 def invalidate_snapshot(mode: str | None = None) -> None:
-    """Drop cached snapshots.  Pass mode to invalidate only that mode's entries."""
+    """Invalidate all snapshots or those for one goal."""
     with _SNAP_LOCK:
         if mode is None:
             _SNAP_CACHE.clear()
         else:
-            for k in list(_SNAP_CACHE.keys()):
-                if f"|{mode}|" in k:
-                    del _SNAP_CACHE[k]
+            for key in list(_SNAP_CACHE):
+                if isinstance(key, tuple) and len(key) > 1 and key[1] == mode:
+                    del _SNAP_CACHE[key]
