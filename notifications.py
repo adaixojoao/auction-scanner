@@ -110,7 +110,7 @@ def send_alerts(db, notify_cfg: dict, score_fn=None, max_price: float = 50000,
         "\n".join(f"[{it['score']:.0f}] {it['title']} — {it.get('url') or ''}" for it in alerts[:50]),
     )
     if ok:
-        mark_alerted(db, CHANNEL, [it["id"] for it in alerts])
+        mark_alerted(db, CHANNEL, [it["id"] for it in alerts[:50]])
 
 
 def _build_email_html(alerts: list, max_price: float, now: datetime, min_score: float = 60) -> str:
