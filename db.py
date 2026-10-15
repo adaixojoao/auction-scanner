@@ -1548,7 +1548,7 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
             "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
             "reasons", "excellent", "category", "kind", "live_score", "invest_score",
-            "research_only", "extreme_discount")
+            "research_only", "extreme_discount", "floor_guess")
 _SCORED: dict[str, dict[str, tuple]] = {}      # mode → {listing id → (row key, results, inputs)}
 _UNSCORED = {"last_seen", "is_new"}
 # What a hidden listing keeps when load_listings(slim_hidden=True): what a list
@@ -1575,8 +1575,18 @@ def _land_market(db) -> dict:
     return land_prices.observed_index(rows)
 
 
+def _floor_market(db) -> dict:
+    """The floors the scanner has seen for each type of home, by place: what a
+    floor the notice does not state is guessed from (guesses.py)."""
+    import guesses
+    rows = db.execute("SELECT country, district, title, description, tipo, area_m2 FROM listings "
+                      "WHERE area_m2 BETWEEN ? AND ?", guesses.FLOOR_RANGE)
+    return guesses.observed_floors(rows)
+
+
 def _shared_lookups(db, now):
-    """(first prices, rounds index, towns, auction results, land market): rebuilt
+    """(first prices, rounds index, towns, auction results, land market, floor
+    market): rebuilt
     when the day, the database or the row counts of the tables they come from change."""
     import geo
     import outcomes
@@ -1589,7 +1599,7 @@ def _shared_lookups(db, now):
     key = (path or id(db), now.date(), counts)
     if _SHARED["key"] != key:
         _SHARED.update(key=key, value=(_first_prices(db), rounds.index(db), geo.town_index(db),
-                                       outcomes.stats(db), _land_market(db)))
+                                       outcomes.stats(db), _land_market(db), _floor_market(db)))
     return _SHARED["value"]
 
 
@@ -1640,7 +1650,7 @@ _SCORE_DBS: dict = {}
 # A dashboard or scraper change must not throw away every kept score. Only
 # these decide the number a listing gets.
 _SCORE_CODE = ("scoring.py", "costs.py", "forestry.py", "land_prices.py", "common.py",
-               "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py")
+               "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py", "guesses.py", "outline.py")
 
 
 @functools.lru_cache(maxsize=1)
@@ -1751,7 +1761,7 @@ def _open_home_supply(rows) -> dict[tuple[str, str], int]:
 
 
 def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land_market,
-               climate_on, mode="home") -> float:
+               climate_on, mode="home", floor_market=None) -> float:
     """Everything load_listings works out for one listing (kept in the score cache)."""
     import climate
     import geo
@@ -1784,6 +1794,8 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
     item["unlocated"] = climate_on and not item["climate"] and not geo._place(item, towns)
     item["predicted_final"] = outcomes.predict(item, closes, property_kind(item)) if closes else None
     item["land_market"] = land_market        # what land goes for here (land_prices.py)
+    item["floor_market"] = floor_market or {}  # what floors homes have here (guesses.py)
+    item.pop("floor_guess", None)             # worked out again with them (costs.floor_guess)
 
     rank, reasons = score_detail(item, now=now, targets=filters, mode=mode)
     sc = display_score(rank)
@@ -1997,7 +2009,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     offers = latest_offers(db)
     # first prices; rounds (all listings: they span sites and dates); where each
     # municipality's town is; what ended sales closed at. Shared, rebuilt when their tables change.
-    first_price, cases, towns, closes, land_market = _shared_lookups(db, now)
+    first_price, cases, towns, closes, land_market, floor_market = _shared_lookups(db, now)
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     climate_on = climate.available()
     maps_before = climate.maps_loaded()
@@ -2015,7 +2027,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     # count and does not change its points for it, so a scan's refresh is enough.
     supply: dict[tuple[str, str], int] = _open_home_supply(rows) if mode == "invest" else {}
     supply_fp = ",".join(f"{a}|{b}:{n}" for (a, b), n in sorted(supply.items()))
-    inputs = json.dumps([len(towns), sum(len(v) for v in closes.values()), len(land_market), supply_fp])
+    inputs = json.dumps([len(towns), sum(len(v) for v in closes.values()), len(land_market), supply_fp,
+                         len(floor_market)])
     if _SCORED_FOR[0] != context:
         _SCORED.clear()
         _LOADED_MODES.clear()
@@ -2100,11 +2113,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                     if n > 1:
                         item["open_homes_here"] = n - 1
             _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
-                       climate_on, mode)
+                       climate_on, mode, floor_market)
             if mode in ("both", "invest"):
                 _shadow_evaluate(item, now, db=db,
                                  ev_rev_sum=ev_rev_sums.get(item["id"]))
-            _optional = {"research_only", "extreme_discount"}
+            _optional = {"research_only", "extreme_discount", "floor_guess"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
                 if _k in item:

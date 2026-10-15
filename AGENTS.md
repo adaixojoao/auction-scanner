@@ -62,7 +62,28 @@ round matcher and the estimate all call it.
 
 Every figure is shown as an estimate and says so, because the scanner does not
 know the VPT, the region's rate or the state of the building. Never present one
-as a fact, and never use one to decide a listing's score.
+as a fact.
+
+## Educated guesses: they rank, they never bid
+
+Court and tax notices (Citius, e-leilões, Finanças) seldom state the floor or
+give coordinates; scored on stated facts alone they never reach the top. So
+`guesses.py` may fill exactly two gaps, and a new one is added there, with a
+test, not improvised in a scorer:
+
+- a floor the notice does not state: the map's outline with its levels, else
+  the **lower quartile** of the floors the scanner has seen for that type of
+  home (T3, V2…) in the district (`MIN_FLOORS` of them), else the country;
+- the sea from a village, parish or town pin, at its **worst case** (the
+  distance plus `SPREAD_KM` for that precision), for Live and invest.
+
+A guess is conservative (a lower quartile or a worst case, never a middle),
+named in the reasons with what it came from, and charged `GUESS_FACTOR` of the
+rank each, so a sale known for certain beats one guessed at the same numbers.
+Repairs are priced on a guessed floor, so the discount is not flattered. A
+guess never sets a bid: the bid cap and the evaluator take only a stated floor
+(`costs.STATED_FLOORS`); the scorers also take a guess (`costs.SCORED_FLOORS`).
+Guesses come from what the scanner has seen or a map, never from a made-up table.
 
 `land_prices.py` is the same rule for what land costs. Outside France (whose
 forest price is published) no one publishes it, so the benchmark is the median
@@ -85,14 +106,15 @@ respect the precision: the distance from a "municipality" pin to its own town
 is zero by construction, so it is not a distance, and a town lookup that lands
 more than `MAX_TOWN_KM` away found the wrong town (there are two Lagoas). Say
 nothing rather than score on a number that is not real, and label a parish-level
-answer "about". OpenStreetMap allows one request a second and wants the
+answer "about"; the one exception is the worst-case beach of `guesses.py`. OpenStreetMap allows one request a second and wants the
 User-Agent that names this app; look each place up once and keep the answer,
 including "looked for, not found".
 
 `outline.py` (the house, its annexes and its plot, from the cadastre and
 OpenStreetMap) is looked up only at a pin that is the building (sale,
 cadastre, verified, advertised): at a street pin the outline is a neighbour's.
-Its figures are estimates shown beside the notice's; they never change a score.
+Its figures are estimates shown beside the notice's; they reach a score only
+as a floor guess (`guesses.floor_guess`), when the notice states none.
 
 ## One app, one of each
 

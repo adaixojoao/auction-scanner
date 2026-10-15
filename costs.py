@@ -373,10 +373,11 @@ def floor_resolution(item: dict) -> dict:
         "notice": "floor area written in the notice",
         "catastro": "Catastro dwelling",
         "capped": "building-size cap (a larger stored figure is not all floor)",
+        "guess": "educated guess (not established)",
         "": "floor area not established",
     }
     return {"m2": metres, "source": source, "label": labels.get(source, source),
-            "established": source in ("stored", "notice", "catastro") and metres > 0}
+            "established": source in STATED_FLOORS and metres > 0}
 
 
 def selected_acquisition(item: dict) -> dict:
@@ -416,17 +417,33 @@ def selected_acquisition(item: dict) -> dict:
             "reference_amount": None}
 
 
+# Where a floor figure may come from to set a bid, and to rank a listing.
+STATED_FLOORS = ("stored", "notice", "catastro")
+SCORED_FLOORS = STATED_FLOORS + ("guess",)
+
+
+def floor_guess(item: dict) -> dict | None:
+    """guesses.floor_guess, worked out once per listing and kept on it with its
+    score, so the detail panel shows the figure the score used."""
+    if "floor_guess" not in item:
+        import guesses
+        item["floor_guess"] = guesses.floor_guess(item)
+    return item["floor_guess"]
+
+
 def building_m2(item: dict) -> tuple[float, str]:
     """(m² of building to renovate and let, where the figure came from).
 
     The stored area, otherwise the first size in the title or the description
-    that is not the land or the footprint, otherwise one dwelling in Catastro.
-    A stored area the notice calls land or implantação is not the floor: the
-    floor is then the notice's own floor figure, or unknown when that is the
-    only size. Nothing is invented. At most INVEST_VALUE_MAX_M2: a bigger
-    number is the plot, and pricing all of it would treat the land as floor
-    space. The source is "stored", "notice", "catastro" or "capped"
-    ("" when there is no floor).
+    that is not the land or the footprint, otherwise one dwelling in Catastro,
+    otherwise an educated guess (guesses.floor_guess: the map's outline, or the
+    lower quartile of the floors seen for that type of home there). A stored
+    area the notice calls land or implantação is not the floor. At most
+    INVEST_VALUE_MAX_M2: a bigger number is the plot, and pricing all of it
+    would treat the land as floor space. The source is "stored", "notice",
+    "catastro", "guess" or "capped" ("" when there is no floor). A guess may
+    rank a listing (SCORED_FLOORS); only a stated floor may set a bid
+    (STATED_FLOORS).
     """
     stored = float(item.get("area_m2") or 0)
     title, desc = item.get("title"), item.get("description")
@@ -441,6 +458,9 @@ def building_m2(item: dict) -> tuple[float, str]:
     if not raw:
         raw, _note = catastro_home(item)
         source = "catastro" if raw else ""
+    if not raw:
+        guess = floor_guess(item)
+        raw, source = (guess["m2"], "guess") if guess else (0.0, "")
     if not raw:
         return 0.0, ""
     if raw > INVEST_VALUE_MAX_M2:
@@ -833,11 +853,14 @@ def repair_unresolved(item: dict) -> bool:
     """A home whose floor is missing, land, or only a building-size cap.
 
     Repairs priced on that cap would invent a floor. The stored area is not changed.
+    A guessed floor (guesses.py) is priced: the value it ranks on uses the same
+    floor, and a repair bill left out would make the discount look bigger.
     """
     import scoring
     if scoring.property_kind(item) != "home":
         return False
-    return not floor_resolution(item)["established"]
+    found = floor_resolution(item)
+    return not (found["established"] or (found["source"] == "guess" and found["m2"] > 0))
 
 
 def money_out(item: dict, *, bid: float | None = None, typical: bool = False,
