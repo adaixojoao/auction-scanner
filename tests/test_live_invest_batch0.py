@@ -410,26 +410,11 @@ def test_li13_errors_and_a_search_page_are_stored_as_not_gone(db, add):
     assert lc.get("availability") in ("blocked", "error", None)
 
 
-# LI-14. The report and the alerts run before enrichment and the link check.
+# LI-14. Reports and alerts are published only after enrichment, the link check
+# and a successful rescore, so they never endorse a pre-enrichment assessment.
 
 
-def test_li14_report_and_alerts_precede_enrichment(db, fake_http, monkeypatch, tmp_path):
-    import pipeline
-
-    fake_http(lambda m, u, kw: FakeResponse("", status=404))
-    order = []
-    orig_report, orig_alerts = pipeline.build_report, pipeline.send_alerts
-
-    def report(db_, cfg):
-        order.append("report")
-        return orig_report(db_, cfg)
-
-    def alerts(db_, cfg):
-        order.append("alerts")
-        return orig_alerts(db_, cfg)
-
-    monkeypatch.setattr(pipeline, "build_report", report)
-    monkeypatch.setattr(pipeline, "send_alerts", alerts)
+def _li14_quiet_enrichment(monkeypatch, order, check_top=None):
     import cadastre
     import climate
     import confirm
@@ -437,22 +422,174 @@ def test_li14_report_and_alerts_precede_enrichment(db, fake_http, monkeypatch, t
     import outcomes
     import photos
     import site_check
-    monkeypatch.setattr(outcomes, "record_results", lambda *a, **k: order.append("results") or 0)
-    monkeypatch.setattr(geo, "locate_towns", lambda *a, **k: order.append("geo"))
-    monkeypatch.setattr(geo, "geocode_pending", lambda *a, **k: None)
-    monkeypatch.setattr(geo, "check_water_pending", lambda *a, **k: None)
-    monkeypatch.setattr(cadastre, "locate_pending", lambda *a, **k: None)
-    monkeypatch.setattr(climate, "assess_pending", lambda *a, **k: order.append("climate") or 0)
-    monkeypatch.setattr(site_check, "check_pending", lambda *a, **k: None)
-    monkeypatch.setattr(photos, "check_pending", lambda *a, **k: None)
+
+    def mark(name, result=None):
+        return lambda *a, **k: order.append(name) or result
+
+    monkeypatch.setattr(outcomes, "record_results", mark("results", 0))
+    monkeypatch.setattr(geo, "locate_towns", mark("towns"))
+    monkeypatch.setattr(geo, "geocode_pending", mark("geocode"))
+    monkeypatch.setattr(geo, "check_water_pending", mark("water"))
+    monkeypatch.setattr(cadastre, "locate_pending", mark("cadastre"))
+    monkeypatch.setattr(climate, "assess_pending", mark("climate", 0))
+    monkeypatch.setattr(site_check, "check_pending", mark("site"))
+    monkeypatch.setattr(photos, "check_pending", mark("photos"))
     monkeypatch.setattr(photos, "keep_high", lambda *a, **k: None)
-    monkeypatch.setattr(confirm, "check_top", lambda *a, **k: order.append("confirm") or 0)
-    cfg = {"filters": {}, "report": {"out_dir": str(tmp_path / "r"), "desktop_copy": False}}
-    pipeline.run_scan(source_names=["bcp"], cfg=cfg, db=db, report=True, alerts=True)
-    assert order.index("report") < order.index("climate")
-    assert order.index("alerts") < order.index("climate")
-    assert order.index("alerts") < order.index("confirm")
-    assert order.index("results") < order.index("climate")
+    monkeypatch.setattr(confirm, "check_top", check_top or mark("availability", 0))
+
+
+def _li14_spy_publication(monkeypatch, order):
+    import outbox
+    import pipeline
+
+    orig_report, orig_alerts, orig_rescore = pipeline.build_report, pipeline.send_alerts, pipeline.rescore
+    orig_queue = outbox.queue_requests
+    monkeypatch.setattr(pipeline, "build_report",
+                        lambda db_, cfg: order.append("report") or orig_report(db_, cfg))
+    monkeypatch.setattr(pipeline, "send_alerts",
+                        lambda db_, cfg: order.append("alerts") or orig_alerts(db_, cfg))
+    monkeypatch.setattr(outbox, "queue_requests",
+                        lambda db_, cfg: order.append("requests") or orig_queue(db_, cfg))
+
+    def rescore(db_, cfg):
+        ok = orig_rescore(db_, cfg)
+        order.append("rescore" if ok else "rescore-failed")
+        return ok
+    monkeypatch.setattr(pipeline, "rescore", rescore)
+
+
+def _li14_cfg(tmp_path):
+    return {"filters": {}, "report": {"out_dir": str(tmp_path / "r"), "desktop_copy": False},
+            "telegram": {"enabled": True, "token": "t", "chat_id": "c", "min_score": 50}}
+
+
+def test_li14_publication_follows_enrichment_and_rescore(db, fake_http, monkeypatch, tmp_path):
+    import pipeline
+
+    fake_http(lambda m, u, kw: FakeResponse("", status=404))
+    monkeypatch.setattr("telegram_alert.send_telegram", lambda *a, **k: True)
+    order = []
+    _li14_quiet_enrichment(monkeypatch, order)
+    _li14_spy_publication(monkeypatch, order)
+    pipeline.run_scan(source_names=["bcp"], cfg=_li14_cfg(tmp_path), db=db, report=True, alerts=True)
+    for stage in ("towns", "geocode", "cadastre", "climate", "site", "photos", "availability", "results"):
+        assert order.index(stage) < order.index("rescore"), stage
+    assert order.index("rescore") < order.index("report") < order.index("alerts") < order.index("requests")
+    assert order.count("rescore") == 1          # the finally block does not score twice
+    assert db.execute("SELECT running FROM scan_state WHERE id=1").fetchone()[0] == 0
+
+
+def test_li14_failed_real_rescore_publishes_nothing(db, fake_http, monkeypatch, tmp_path):
+    import pytest
+
+    import db as store
+    import pipeline
+
+    fake_http(lambda m, u, kw: FakeResponse("", status=404))
+    sent = []
+    monkeypatch.setattr("telegram_alert.send_telegram", lambda *a, **k: sent.append(a) or True)
+    order = []
+    _li14_quiet_enrichment(monkeypatch, order)
+    _li14_spy_publication(monkeypatch, order)
+    orig_load = store.load_listings
+
+    def broken(*a, **k):
+        if k.get("refresh"):
+            raise RuntimeError("scoring broke")
+        return orig_load(*a, **k)
+    monkeypatch.setattr(store, "load_listings", broken)
+    with pytest.raises(RuntimeError, match="rescoring failed"):
+        pipeline.run_scan(source_names=["bcp"], cfg=_li14_cfg(tmp_path), db=db, report=True, alerts=True)
+    assert "report" not in order and "alerts" not in order and "requests" not in order
+    assert sent == []
+    assert not (tmp_path / "r").exists() or not any((tmp_path / "r").iterdir())
+    state = db.execute("SELECT running, stop FROM scan_state WHERE id=1").fetchone()
+    assert (state["running"], state["stop"]) == (0, 0)
+
+
+def test_li14_cancelled_scan_publishes_nothing_and_finishes(db, fake_http, monkeypatch, tmp_path):
+    import pipeline
+
+    fake_http(lambda m, u, kw: FakeResponse("", status=404))
+    order = []
+    _li14_quiet_enrichment(monkeypatch, order)
+    _li14_spy_publication(monkeypatch, order)
+    monkeypatch.setattr(pipeline, "_stop_requested", lambda db_: True)
+    result = pipeline.run_scan(source_names=["bcp"], cfg=_li14_cfg(tmp_path), db=db, report=True, alerts=True)
+    assert result["stopped"] is True
+    assert not {"report", "alerts", "requests", "rescore"} & set(order)
+    state = db.execute("SELECT running, stop, summary FROM scan_state WHERE id=1").fetchone()
+    assert (state["running"], state["stop"]) == (0, 0)
+    assert json.loads(state["summary"])["stopped"] is True
+
+
+def test_li14_report_exception_sends_no_alerts_and_finishes(db, fake_http, monkeypatch, tmp_path):
+    import pytest
+
+    import pipeline
+
+    fake_http(lambda m, u, kw: FakeResponse("", status=404))
+    sent = []
+    monkeypatch.setattr("telegram_alert.send_telegram", lambda *a, **k: sent.append(a) or True)
+    order = []
+    _li14_quiet_enrichment(monkeypatch, order)
+    _li14_spy_publication(monkeypatch, order)
+
+    def report(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(pipeline, "build_report", report)
+    with pytest.raises(OSError):
+        pipeline.run_scan(source_names=["bcp"], cfg=_li14_cfg(tmp_path), db=db, report=True, alerts=True)
+    assert "alerts" not in order and sent == []
+    assert order.count("rescore") == 1
+    assert db.execute("SELECT running FROM scan_state WHERE id=1").fetchone()[0] == 0
+
+
+def _li14_alerted(db):
+    return {r[0] for r in db.execute("SELECT listing_id FROM alert_log")}
+
+
+def test_li14_attractive_listing_is_alerted_when_enrichment_keeps_it(db, add, fake_http, monkeypatch, tmp_path):
+    """Control for the test below: the same listing is published when nothing changes."""
+    import pipeline
+
+    fake_http(lambda m, u, kw: FakeResponse("", status=404))
+    sent = []
+    monkeypatch.setattr("telegram_alert.send_telegram", lambda t, c, m, **k: sent.append(m) or True)
+    row = add(external_id="good", title="Moradia T3", price=20000)
+    _li14_quiet_enrichment(monkeypatch, [])
+    result = pipeline.run_scan(source_names=["bcp"], cfg=_li14_cfg(tmp_path), db=db, report=True, alerts=True)
+    assert row["id"] in _li14_alerted(db)
+    assert any("Moradia T3" in m for m in sent)
+    with open(result["report"], encoding="utf-8") as f:
+        assert "Moradia T3" in f.read()
+
+
+def test_li14_listing_withdrawn_by_enrichment_is_not_published(db, add, fake_http, monkeypatch, tmp_path):
+    """Attractive before enrichment; the link check then finds it withdrawn.
+    Neither the report nor the alerts may endorse the obsolete assessment."""
+    import confirm
+    import pipeline
+    from db import load_best
+
+    fake_http(lambda m, u, kw: FakeResponse("", status=404))
+    sent = []
+    monkeypatch.setattr("telegram_alert.send_telegram", lambda t, c, m, **k: sent.append(m) or True)
+    row = add(external_id="gone", title="Moradia Retirada", price=20000)
+    before = {it["id"]: it for it in load_best(db, filters={})}
+    assert before[row["id"]]["score"] >= 50          # attractive before enrichment
+
+    def withdraw(db_, cfg, session):
+        item = db_.execute("SELECT * FROM listings WHERE id=?", (row["id"],)).fetchone()
+        confirm._store(db_, dict(item), "withdrawn", "vendido")
+        return 1
+    _li14_quiet_enrichment(monkeypatch, [], check_top=withdraw)
+    result = pipeline.run_scan(source_names=["bcp"], cfg=_li14_cfg(tmp_path), db=db, report=True, alerts=True)
+    assert row["id"] not in _li14_alerted(db)
+    assert not any("Moradia Retirada" in m for m in sent)
+    with open(result["report"], encoding="utf-8") as f:
+        assert "Moradia Retirada" not in f.read()
+    assert row["id"] not in {it["id"] for it in load_best(db, filters={})}
 
 
 # LI-15. Any positive count moves last_ok, including a run that never visited a listing.
