@@ -222,22 +222,31 @@ def test_a_portal_relisting_is_a_duplicate_but_court_twin_lots_are_not(db, add):
     add("fotocasa", "2", "ES", title="Vivienda en Ferrol", price=19000, area_m2=87, concelho="Ferrol")
     add("citius", "x", title="Fracção A", price=19000, area_m2=87, concelho="Guarda")
     add("citius", "y", title="Fracção B", price=19000, area_m2=87, concelho="Guarda")
+    # Equal price and size on one portal is similarity, not identity: a hint only.
+    assert mark_duplicates(db) == 0
+    assert db.execute("SELECT possible_match FROM listings WHERE id='fotocasa:2'").fetchone()[0] == "fotocasa:1"
+    # With the same street address the re-post is the same house and is hidden.
+    db.execute("UPDATE listings SET raw_json=? WHERE id IN ('fotocasa:1','fotocasa:2')",
+               ('{"address": "Calle Real 5"}',))
+    db.commit()
     assert mark_duplicates(db) == 1
     flagged = db.execute("SELECT id FROM listings WHERE duplicate_of IS NOT NULL").fetchone()[0]
     assert flagged.startswith("fotocasa:")
 
 
-def test_flats_of_one_building_show_once_cheapest_first(db, add):
-    # Three floors of one Cortenova building, one court case: one choice.
+def test_flats_of_one_building_are_hinted_toward_the_cheapest(db, add):
+    # Three floors of one Cortenova building, one court case: one choice is a hint.
     t = "Piena Proprietà. In Comune Amministrativo di CORTENOVA (LC),"
     add("pvp_giustizia", "1", "IT", title=t, price=27717, area_m2=425, concelho="Cortenova")
     add("pvp_giustizia", "2", "IT", title=t, price=27675, area_m2=425, concelho="Cortenova")
     add("pvp_giustizia", "3", "IT", title=t, price=28835, area_m2=425, concelho="Cortenova")
     add("pvp_giustizia", "4", "IT", title=t, price=60000, area_m2=425, concelho="Cortenova")
-    assert mark_duplicates(db) == 2
+    # Same title, price and size, no unit identity: similarity only → hints.
+    assert mark_duplicates(db) == 0
     assert db.execute("SELECT COUNT(*) FROM listings").fetchone()[0] == 4
-    shown = {r[0] for r in db.execute("SELECT id FROM listings WHERE duplicate_of IS NULL")}
-    assert shown == {"pvp_giustizia:2", "pvp_giustizia:4"}
+    hints = {r[0]: r[1] for r in db.execute("SELECT id, possible_match FROM listings")}
+    assert hints["pvp_giustizia:1"] == hints["pvp_giustizia:3"] == "pvp_giustizia:2"
+    assert hints["pvp_giustizia:4"] is None
 
 
 def test_duplicates_deduped_when_one_side_has_no_area(db, add):
@@ -476,11 +485,11 @@ def test_clearance_revoked_when_evidence_changes(db, add, monkeypatch):
     db.commit()
     result_after = load_best(db)
     ids_after = {it["id"] for it in result_after}
-    assert listing_id not in ids_after, "stale clearance must be revoked after evidence change"
+    assert listing_id not in ids_after, "stale clearance must not count after evidence change"
     row = db.execute(
         "SELECT * FROM investigation_clearances WHERE listing_id=?", (listing_id,)
     ).fetchone()
-    assert row is None, "revoked clearance row must be deleted from investigation_clearances"
+    assert row is not None, "a stale clearance is excluded, never deleted by a reader"
 
 
 def test_anomaly_investigated_uses_clearance_not_note(db, add, monkeypatch):

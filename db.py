@@ -574,12 +574,12 @@ def _migrate_v26(db: sqlite3.Connection):
     import identity_map as _im
 
     rows = db.execute(
-        "SELECT source, processo, lot_key, listing_id, conflict_details"
+        "SELECT source, processo, lot_key, listing_id, created_at, conflict_details"
         " FROM lot_map WHERE source='citius'"
     ).fetchall()
 
     for row in rows:
-        canonical = _im.canonical_processo(row["processo"])
+        canonical = _im.processo_root(row["processo"])
         if canonical == row["processo"]:
             continue  # already normalised
 
@@ -604,17 +604,11 @@ def _migrate_v26(db: sqlite3.Connection):
                 "UPDATE lot_map SET conflict_details=? WHERE source='citius' AND processo=? AND lot_key=?",
                 (_json.dumps(conflict), canonical, row["lot_key"]))
         else:
-            # No collision: rename the row to the canonical processo key.
-            # SQLite PRIMARY KEY cannot be updated directly; delete-then-insert.
+            # No collision: rename the row to the canonical processo key,
+            # keeping when the mapping was first made (created_at).
             db.execute(
-                "DELETE FROM lot_map WHERE source='citius' AND processo=? AND lot_key=?",
-                (row["processo"], row["lot_key"]))
-            db.execute(
-                "INSERT OR IGNORE INTO lot_map"
-                " (source, processo, lot_key, listing_id, conflict_details)"
-                " VALUES (?,?,?,?,?)",
-                ("citius", canonical, row["lot_key"],
-                 row["listing_id"], row["conflict_details"]))
+                "UPDATE lot_map SET processo=? WHERE source='citius' AND processo=? AND lot_key=?",
+                (canonical, row["processo"], row["lot_key"]))
 
 
 def _migrate_v27(db: sqlite3.Connection):
@@ -721,14 +715,14 @@ def revoke_extreme_clearance(db: sqlite3.Connection, listing_id: str) -> None:
 
 
 def _extreme_clearances(db: sqlite3.Connection, listing_ids: set[str],
-                        ev_rev_sums: dict[str, int] | None = None,
-                        revoke_stale: bool = False) -> set[str]:
+                        ev_rev_sums: dict[str, int] | None = None) -> set[str]:
     """Return the subset of `listing_ids` cleared for finalist promotion.
 
     If `ev_rev_sums` is supplied, a clearance whose stored `evidence_rev_sum` does not
-    match the current sum is treated as stale.  When `revoke_stale` is True (only in
-    load_best, never in read-only paths) the stale rows are deleted so the investigator
-    must re-review after evidence changes.  NULL stored sum (pre-v27 clearance) is stale.
+    match the current sum is treated as stale and left out of the result.  This is a
+    read: stale rows are never deleted here (or by any loader) — they are the review
+    history, and only an explicit revoke_extreme_clearance() removes one.
+    NULL stored sum (pre-v27 clearance) is stale.
     """
     if not listing_ids:
         return set()
@@ -739,19 +733,14 @@ def _extreme_clearances(db: sqlite3.Connection, listing_ids: set[str],
         tuple(listing_ids),
     ).fetchall()
     cleared: set[str] = set()
-    stale: list[str] = []
     for r in rows:
         lid = r["listing_id"]
         stored_rev = r["evidence_rev_sum"]
         if ev_rev_sums is not None:
             current_rev = ev_rev_sums.get(lid, 0)
             if stored_rev is None or stored_rev != current_rev:
-                stale.append(lid)
                 continue
         cleared.add(lid)
-    if revoke_stale:
-        for lid in stale:
-            revoke_extreme_clearance(db, lid)
     return cleared
 
 
@@ -875,6 +864,73 @@ TWIN_UNIT_TOLERANCE = 0.10
 TWIN_UNIT_OPENING = 80    # characters of description that must match: portals title by town only
 
 
+_FRACTION_RE = re.compile(r"\bfra(?:c|cc)ao\s+(?:autonoma\s+)?(?:designada\s+(?:pela\s+letra\s+)?)?\"?([a-z]{1,3})\b")
+_ARTICLE_RE = re.compile(r"\bartigo\s+(?:matricial\s+)?(?:urbano\s+|rustico\s+)?(?:n\.?\s*o?\s*)?(\d{1,6})\b")
+
+
+def _unit_markers(r) -> dict:
+    """What says which legal unit a row is: its street address and its land
+    registry identifiers (description number, fraction, tax articles), from
+    the stored raw data and from the wording ("fração B", "artigo 1234").
+    Empty values are left out: a missing marker neither confirms nor contradicts."""
+    try:
+        raw = json.loads(r["raw_json"] or "{}")
+    except (ValueError, TypeError, IndexError, KeyError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    address = None
+    for key in ("morada", "address", "street", "direccion"):
+        val = raw.get(key)
+        if isinstance(val, str) and val.strip():
+            address = re.sub(r"\s+", " ", normalize(val)).strip()
+            break
+    registry: set = set()
+    for entry in raw.get("registo_predial") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("descricao"):
+            registry.add(("descricao", str(entry["descricao"]).strip().lower(),
+                          str(entry.get("fracao") or "").strip().lower()))
+        for art in entry.get("artigos") or []:
+            if isinstance(art, dict) and art.get("numero"):
+                registry.add(("artigo", str(art["numero"]).strip()))
+    if raw.get("fracao"):
+        registry.add(("fracao", str(raw["fracao"]).strip().lower()))
+    for key in ("artigo", "artigos"):
+        val = raw.get(key)
+        for v in (val if isinstance(val, list) else [val]):
+            if isinstance(v, dict):
+                v = v.get("numero")
+            if v not in (None, ""):
+                registry.add(("artigo", str(v).strip()))
+    text = normalize(f"{r['title'] or ''} {r['description'] or ''}")
+    for m in _FRACTION_RE.finditer(text):
+        registry.add(("fracao", m.group(1)))
+    for m in _ARTICLE_RE.finditer(text):
+        registry.add(("artigo", m.group(1)))
+    return {"address": address, "registry": frozenset(registry)}
+
+
+def _unit_relation(a, b) -> str:
+    """'same' when the two rows share a unit marker and none disagrees,
+    'different' when any marker present on both disagrees, else 'unknown'
+    (price, size and wording alone never make two rows one legal unit)."""
+    ma, mb = _unit_markers(a), _unit_markers(b)
+    agree = False
+    if ma["address"] and mb["address"]:
+        if ma["address"] != mb["address"]:
+            return "different"
+        agree = True
+    ra, rb = ma["registry"], mb["registry"]
+    if ra and rb:
+        for kind in {k[0] for k in ra} & {k[0] for k in rb}:
+            if {k for k in ra if k[0] == kind} != {k for k in rb if k[0] == kind}:
+                return "different"
+            agree = True
+    return "same" if agree else "unknown"
+
+
 def _twin_units(rows, dup_of: dict) -> list[list]:
     """Groups of rows from one source with the same title, place and opening words whose price
     and size differ by at most 10%: the floors of one building in a court sale,
@@ -971,12 +1027,19 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                 if other["id"] in dup_of:
                     continue
                 if other["source"] == keeper["source"]:
-                    # Portals re-post the same house under a new id: the same price
-                    # and size there is the same house.
+                    # Portals re-post the same house under a new id. The same
+                    # price and size alone is only similarity: it hides the
+                    # re-post only when its address or registry unit is the same;
+                    # otherwise both stay visible with a possible_match hint.
                     if (keeper["source"] in RELISTING_SOURCES and other["price"] == keeper["price"]
                             and (keeper["area_m2"] is None or other["area_m2"] is None
                                  or other["area_m2"] == keeper["area_m2"])):
-                        dup_of[other["id"]] = keeper["id"]
+                        relation = _unit_relation(keeper, other)
+                        if relation == "same":
+                            dup_of[other["id"]] = keeper["id"]
+                            possible.pop(other["id"], None)
+                        elif other["id"] not in possible:
+                            possible[other["id"]] = keeper["id"]
                     continue
                 ka, oa = keeper["area_m2"], other["area_m2"]
                 area_match = (ka is None or oa is None or abs(ka - oa) < 5)
@@ -1001,23 +1064,21 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                         possible[drop["id"]] = keep["id"]
 
     # Flats of one building or promotion (same source, same title, price and
-    # size within 10%): suppress only when descriptions do not diverge beyond
-    # the opening — diverging tails indicate distinct legal units (e.g.
-    # "fração A artigo 1" vs "fração B artigo 2") and yield a hint only.
+    # size within 10%) are similar, which is not the same legal unit: equal,
+    # missing or identical short descriptions prove nothing. Suppress only when
+    # the address or registry unit is the same; otherwise (different units
+    # such as "fração A" vs "fração B", or no marker) both stay, with a hint.
     for group in _twin_units(rows, dup_of):
         cheapest = min(group, key=lambda r: (r["price"], r["id"]))
         for r in group:
             if r["id"] == cheapest["id"]:
                 continue
-            tail_r = normalize(r["description"] or "")[TWIN_UNIT_OPENING:]
-            tail_c = normalize(cheapest["description"] or "")[TWIN_UNIT_OPENING:]
-            if tail_r and tail_c and tail_r != tail_c:
-                # Descriptions diverge past the opening: distinct legal units.
-                if r["id"] not in possible:
-                    possible[r["id"]] = cheapest["id"]
-            else:
+            relation = _unit_relation(cheapest, r)
+            if relation == "same":
                 dup_of[r["id"]] = cheapest["id"]
                 possible.pop(r["id"], None)
+            elif r["id"] not in possible:
+                possible[r["id"]] = cheapest["id"]
 
     # A Citius sale joined to its e-leilões auction (links.py) is one sale.
     from links import linked_pairs
@@ -1401,6 +1462,47 @@ def hidden_category(reason: str | None) -> str | None:
     return "filtered"
 
 
+# hidden_category() labels that research selection never overrides. Exact
+# membership on the category, never a substring test on the reason text: a
+# cash or keyword exclusion ("cash …", "keyword '…'") is as final as a dismissal.
+RESEARCH_HARD_HIDDEN = frozenset({"dismissed", "expired", "duplicate", "gone", "stale",
+                                  "over cash", "filtered"})
+# The only hidden categories an extreme-discount lead may bypass for research.
+RESEARCH_SOFT_HIDDEN = frozenset({"low score"})
+
+
+def research_eligible(item: dict) -> bool:
+    """Whether a scored item may be a research candidate (Live and invest)."""
+    reason = item.get("hidden_reason")
+    if not reason:
+        return True
+    category = hidden_category(reason)
+    if category in RESEARCH_HARD_HIDDEN:
+        return False
+    return bool(item.get("extreme_discount")) and category in RESEARCH_SOFT_HIDDEN
+
+
+def research_selection(items: list, per_group: int = 3) -> tuple[list, list]:
+    """Up to `per_group` priced leads and, separately, unvalued ones.
+
+    The one selection the Listings research panel and the scan's enrichment
+    order both use. Pass the full scored list (hidden rows included, before any
+    request score cutoff): selection happens first, a view's cutoff after.
+    """
+    valued, unvalued = [], []
+    ranked = sorted((it for it in items if research_eligible(it)),
+                    key=lambda it: it.get("score") or 0, reverse=True)
+    for it in ranked:
+        unpriced = bool(it.get("research_only"))
+        if not unpriced and it.get("invest_score") is None:
+            continue
+        bucket = unvalued if unpriced else valued
+        if unpriced or (it.get("score") or 0) > 0 or it.get("extreme_discount"):
+            if len(bucket) < per_group:
+                bucket.append(it)
+    return valued, unvalued
+
+
 def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
     first = {}
     for lid, price in db.execute(
@@ -1431,7 +1533,10 @@ _UNSCORED = {"last_seen", "is_new"}
 # shows hidden ones reads those rows in full (dashboard._full_rows).
 _SLIM = ("id", "source", "country", "tipo", "title", "description", "concelho", "district", "price",
          "current_bid", "area_m2", "date_end", "first_seen", "raw_json", "status", "hidden_reason",
-         "score", "rank", "category", "kind", "climate", "is_recent")
+         "score", "rank", "category", "kind", "climate", "is_recent",
+         # what research selection reads (research_selection): a hidden lead
+         # must still be selectable for investigation from the slim list.
+         "extreme_discount", "invest_score", "live_score", "research_only", "investigation_cleared")
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
 
@@ -1683,6 +1788,52 @@ def _both_worth_reading(item: dict) -> bool:
     return not heavy_checks_spared(item, _cash_on_hand(), _work_limits()[1])
 
 
+def _stored_photo_check(item: dict) -> dict | None:
+    """The photo check result: top-level if a caller set one, else the payload
+    photos.py stored in the listing's raw_json (the loader does not lift it)."""
+    pc = item.get("photo_check")
+    if isinstance(pc, dict) and pc:
+        return pc
+    raw = item.get("raw_json")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            raw = None
+    if isinstance(raw, dict):
+        stored = raw.get("photo_check")
+        if isinstance(stored, dict):
+            return stored
+    return None
+
+
+def _shadow_evidence(item: dict) -> dict:
+    """The evaluator evidence dict _shadow_evaluate builds for `item`."""
+    return {
+        "property_identity": item.get("identity") or {},
+        "ownership_type": item.get("ownership_type"),
+        "occupation": item.get("occupation"),
+        "delivery_terms": item.get("delivery_terms"),
+        "title_status": item.get("title_status"),
+        "legal_access": item.get("legal_access"),
+        "raw_json": item.get("raw_json"),
+        "location_precision": item.get("location_precision"),
+        "beach": item.get("beach"),
+        "floor_m2": item.get("area_m2"),
+        "floor_source": item.get("area_source"),
+        "climate": item.get("climate"),
+        "sale_availability": item.get("sale_availability"),
+        "photo_check": _stored_photo_check(item),
+        "apparent_discount_pct": item.get("invest_discount_pct"),
+        # Only a DB clearance with matching evidence_rev_sum counts (Task 7).
+        "anomaly_investigated": bool(item.get("investigation_cleared")),
+        "valuation_source": item.get("valuation_source"),
+        "conservative_margin_eur": item.get("conservative_margin_eur"),
+        "available_cash_eur": item.get("available_cash_eur"),
+        "total_project_cost_eur": item.get("total_project_cost_eur"),
+    }
+
+
 def _shadow_evaluate(item: dict, now) -> None:
     """Call evaluator.evaluate() in shadow mode and log the decision (F01).
 
@@ -1691,32 +1842,7 @@ def _shadow_evaluate(item: dict, now) -> None:
     """
     try:
         import evaluator
-        evidence = {
-            "property_identity": item.get("identity") or {},
-            "ownership_type": item.get("ownership_type"),
-            "occupation": item.get("occupation"),
-            "delivery_terms": item.get("delivery_terms"),
-            "title_status": item.get("title_status"),
-            "legal_access": item.get("legal_access"),
-            "raw_json": item.get("raw_json"),
-            "location_precision": item.get("location_precision"),
-            "beach": item.get("beach"),
-            "floor_m2": item.get("area_m2"),
-            "floor_source": item.get("area_source"),
-            "climate": item.get("climate"),
-            "sale_availability": item.get("sale_availability"),
-            "photo_check": item.get("photo_check"),
-            "apparent_discount_pct": item.get("invest_discount_pct"),
-            # investigation_cleared is set by load_listings from investigation_clearances
-            # (Task 7). Falling back to investigation_note (a legacy raw field that was
-            # never reliably written) is the old bug: it let a star or free-text note act
-            # as certification. Now only a DB clearance with matching evidence_rev_sum counts.
-            "anomaly_investigated": bool(item.get("investigation_cleared")),
-            "valuation_source": item.get("valuation_source"),
-            "conservative_margin_eur": item.get("conservative_margin_eur"),
-            "available_cash_eur": item.get("available_cash_eur"),
-            "total_project_cost_eur": item.get("total_project_cost_eur"),
-        }
+        evidence = _shadow_evidence(item)
         decision = evaluator.evaluate(evidence, now=now)
         LOG.debug(
             "shadow-eval %s → %s (%d reqs, %d blocking)",
@@ -2018,7 +2144,8 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
     # they have been reviewed and cleared via clear_extreme_discount() (F05).
     # Shortlist membership or offers do not waive this requirement.
     # Pass current evidence revision sums so stale clearances (evidence changed
-    # since the review) are automatically revoked before the gate is applied.
+    # since the review) do not count. They are excluded, never deleted: a read
+    # must not write, and the stale row is the review history.
     ev_rev_sums_best: dict[str, int] = {}
     if extreme_ids:
         ev_rev_sums_best = {
@@ -2030,6 +2157,6 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
                 tuple(extreme_ids),
             ).fetchall()
         }
-    cleared = _extreme_clearances(db, extreme_ids, ev_rev_sums=ev_rev_sums_best, revoke_stale=True)
+    cleared = _extreme_clearances(db, extreme_ids, ev_rev_sums=ev_rev_sums_best)
     blocked = extreme_ids - cleared
     return [it for it in best.values() if it["id"] not in blocked]

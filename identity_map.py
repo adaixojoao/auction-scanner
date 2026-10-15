@@ -87,8 +87,36 @@ def lot_key_citius(lot_data: dict) -> str:
     mat = _norm(lot_data.get("art_matricial"))
     if mat:
         return f"mat:{mat}"
-    desc = re.sub(r"\s+", " ", (lot_data.get("desc") or "").strip()).lower()[:160]
+    desc = _desc_text(lot_data.get("desc"))[:DESC_KEY_CHARS]
     return "desc:" + hashlib.sha1(desc.encode()).hexdigest()[:20]
+
+
+#: Characters of the description a desc: lot_key is built from. Two lots can
+#: share this much text (a court's boilerplate) and differ only in the tail.
+DESC_KEY_CHARS = 160
+#: Characters of the processo kept as the ID root (the scraper's base_eid).
+PROCESSO_ROOT_CHARS = 40
+
+
+def processo_root(p: str | None) -> str:
+    """The lot_map processo key exactly as the scraper builds it: canonical,
+    then cut to PROCESSO_ROOT_CHARS. Backfill and migrations use this too."""
+    return canonical_processo(p)[:PROCESSO_ROOT_CHARS]
+
+
+def _desc_text(desc: str | None) -> str:
+    return re.sub(r"\s+", " ", (desc or "").strip()).lower()
+
+
+_FRACTION_RE = re.compile(r"\bfra[cç]{1,2}[aã]o\s+(?:aut[oó]noma\s+)?(?:designada\s+(?:pela\s+letra\s+)?)?[\"'«]?([a-z]{1,3})\b")
+_ARTICLE_RE = re.compile(r"\bartigo\s+(?:matricial\s+)?(?:urbano\s+|r[uú]stico\s+)?(?:n\.?\s*[oº]?\s*)?(\d{1,6})\b")
+
+
+def unit_markers(text: str | None) -> dict:
+    """The fraction letters and tax-article numbers a lot's text names."""
+    t = _desc_text(text)
+    return {"fractions": sorted({m.group(1) for m in _FRACTION_RE.finditer(t)}),
+            "articles": sorted({m.group(1) for m in _ARTICLE_RE.finditer(t)})}
 
 
 def lot_key_leilosoc(batch_id: str | int) -> str:
@@ -198,6 +226,8 @@ def _resolve(
 
     if row:
         eid = row["listing_id"].removeprefix(f"{source}:")
+        # The same key on an existing mapping is only an upsert target once the
+        # full material unit identity agrees (not just the key's 160 characters).
         if row["conflict_details"]:
             cd = json.loads(row["conflict_details"])
             LOG.warning(
@@ -210,7 +240,7 @@ def _resolve(
                 conflict_details=cd,
             )
         # Existing mapping — verify material identifiers have not diverged.
-        divergence = _check_identifier_divergence(db, source, eid, lot_data)
+        divergence = _check_identifier_divergence(db, source, eid, lot_data, lot_key)
         if divergence:
             # Record divergence in the existing row and quarantine.
             LOG.warning(
@@ -225,7 +255,10 @@ def _resolve(
                 lot_key=lot_key,
                 conflict_details=divergence,
             )
-        return ResolutionResult(kind=ResolutionKind.RESOLVED, eid=eid, lot_key=lot_key)
+        # A lot known only by its description hash stays PROVISIONAL however
+        # often it is seen: repetition of the same weak data is not new support.
+        kind = ResolutionKind.PROVISIONAL if lot_key.startswith("desc:") else ResolutionKind.RESOLVED
+        return ResolutionResult(kind=kind, eid=eid, lot_key=lot_key)
 
     # New lot_key for this processo — check for same-key conflicts before inserting.
     conflict_details = _check_same_key_conflict(db, source, processo, lot_key, lot_data)
@@ -287,9 +320,15 @@ def _check_identifier_divergence(
         source: str,
         eid: str,
         lot_data: dict,
+        lot_key: str = "",
 ) -> dict | None:
     """Return a conflict dict when the current lot_data's strong identifiers diverge
     from those stored in the existing listing, otherwise None.
+
+    Also compares the material unit identity named in the text — fraction letters
+    and tax articles — and, for a lot keyed by its description's first
+    DESC_KEY_CHARS characters, the rest of that description: two lots of one
+    processo sharing a long boilerplate opening must not share an ID.
 
     Divergence is only flagged when both the stored record and the new observation
     carry a non-empty value for the same strong identifier (registo or art_matricial)
@@ -299,14 +338,21 @@ def _check_identifier_divergence(
     if not lot_data:
         return None
     listing_id = f"{source}:{eid}"
-    row = db.execute(
-        "SELECT raw_json FROM listings WHERE id=?", (listing_id,)).fetchone()
-    if not row or not row["raw_json"]:
+    try:
+        row = db.execute(
+            "SELECT raw_json, description FROM listings WHERE id=?", (listing_id,)).fetchone()
+    except sqlite3.OperationalError:          # a table without the description column
+        row = db.execute(
+            "SELECT raw_json, NULL AS description FROM listings WHERE id=?", (listing_id,)).fetchone()
+    if not row:
         return None
     try:
-        stored_raw = json.loads(row["raw_json"])
+        stored_raw = json.loads(row["raw_json"] or "{}")
     except (ValueError, TypeError):
-        return None
+        stored_raw = {}
+    if not isinstance(stored_raw, dict):
+        stored_raw = {}
+    stored_text = row["description"] or ""
 
     stored_registo = _norm(stored_raw.get("registo"))
     stored_mat = _norm(stored_raw.get("art_matricial"))
@@ -320,6 +366,25 @@ def _check_identifier_divergence(
     if stored_mat and new_mat and stored_mat != new_mat:
         divergence["art_matricial_divergence"] = {
             "stored": stored_mat, "new": new_mat}
+
+    new_desc = lot_data.get("desc") or ""
+    if stored_text and new_desc:
+        old_m, new_m = unit_markers(stored_text), unit_markers(new_desc)
+        for kind in ("fractions", "articles"):
+            if old_m[kind] and new_m[kind] and old_m[kind] != new_m[kind]:
+                divergence[f"{kind}_divergence"] = {"stored": old_m[kind], "new": new_m[kind]}
+        if lot_key.startswith("desc:"):
+            # The listing's description starts with the lot text it was made from.
+            # A list page's copy is often cut ("… com uma ..."): a cut copy of
+            # the stored text, or of its full detail text, is the same lot.
+            new_t = re.sub(r"[\s.…]+$", "", _desc_text(new_desc))[:3000]
+            stored = [_desc_text(stored_text), _desc_text(stored_raw.get("descricao_completa"))]
+            same = any(t and (t.startswith(new_t) or new_t.startswith(t)) for t in stored)
+            if len(new_t) > DESC_KEY_CHARS and not same:
+                divergence["description_tail_divergence"] = {
+                    "shared_prefix_chars": DESC_KEY_CHARS,
+                    "stored_tail": stored[0][DESC_KEY_CHARS:DESC_KEY_CHARS + 120],
+                    "new_tail": new_t[DESC_KEY_CHARS:DESC_KEY_CHARS + 120]}
     return divergence or None
 
 
@@ -343,7 +408,8 @@ def backfill_citius(db: sqlite3.Connection) -> int:
             raw = json.loads(row["raw_json"] or "{}")
         except (ValueError, TypeError):
             raw = {}
-        processo = canonical_processo(raw.get("processo") or "")
+        # The same key the scraper builds (canonical, cut to 40 characters).
+        processo = processo_root(raw.get("processo") or "")
         if not processo:
             # Fall back to the id itself as its own processo group
             processo = row["id"].removeprefix("citius:")
