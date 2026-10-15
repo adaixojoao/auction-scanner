@@ -41,7 +41,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -526,12 +526,26 @@ def _migrate_v23(db: sqlite3.Connection):
     db.execute("CREATE INDEX IF NOT EXISTS idx_ev_rev_listing ON evidence_revisions(listing_id)")
 
 
+def _migrate_v24(db: sqlite3.Connection):
+    """Scan-completeness columns in scrape_log (F13 / Milestone E).
+
+    scope:        "full" = scraper reached natural end; "partial" = hit budget or
+                  error mid-scrape; NULL for old rows (treated as "full" for back-compat).
+    pages_seen:   how many source pages the scraper fetched before stopping.
+
+    last_ok_by_source() now excludes partial-scope runs so a budget-capped scrape
+    does not advance the freshness clock for unseen listings.
+    """
+    _add_column(db, "scrape_log", "scope", "TEXT")
+    _add_column(db, "scrape_log", "pages_seen", "INTEGER")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
-               23: _migrate_v23}
+               23: _migrate_v23, 24: _migrate_v24}
 
 
 def init_db(db: sqlite3.Connection):
@@ -683,11 +697,18 @@ def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
 
 def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: str,
                   message: str | None = None, duration_s: float | None = None,
-                  timestamp: str | None = None):
+                  timestamp: str | None = None, scope: str | None = None,
+                  pages_seen: int | None = None):
+    """Log one source run.
+
+    scope: "full" when the scraper reached its natural end; "partial" when it
+    stopped early due to a page budget, timeout or mid-scrape error.  Callers
+    that don't know yet may omit it (NULL, treated as "full" by last_ok_by_source).
+    """
     db.execute(
-        "INSERT INTO scrape_log (source, timestamp, count, status, message, duration_s) "
-        "VALUES (?,?,?,?,?,?)",
-        (source, timestamp or utcnow_iso(), count, status, message, duration_s),
+        "INSERT INTO scrape_log (source, timestamp, count, status, message, duration_s, scope, pages_seen) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (source, timestamp or utcnow_iso(), count, status, message, duration_s, scope, pages_seen),
     )
     db.commit()
 
@@ -1022,9 +1043,18 @@ def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
 
 
 def last_ok_by_source(db: sqlite3.Connection) -> dict[str, datetime]:
+    """Most-recent full-scope successful run per source.
+
+    A partial-scope run (scope='partial') does not advance the freshness clock:
+    listings the scraper did not reach in that run are still as fresh as the
+    last full run (F13).  Old rows with scope NULL are treated as full runs for
+    backwards compatibility.
+    """
     out = {}
     for source, ts in db.execute(
-            "SELECT source, MAX(timestamp) FROM scrape_log WHERE count > 0 GROUP BY source"):
+            "SELECT source, MAX(timestamp) FROM scrape_log"
+            " WHERE count > 0 AND (scope IS NULL OR scope != 'partial')"
+            " GROUP BY source"):
         dt = parse_dt(ts)
         if dt:
             out[source] = dt

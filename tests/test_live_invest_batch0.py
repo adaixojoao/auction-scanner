@@ -399,7 +399,10 @@ def test_li13_errors_and_a_search_page_are_stored_as_not_gone(db, add):
 
     assert confirm.check_top(db, {"filters": {"min_score": 0}}, Session()) == 0
     raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='fotocasa:s'").fetchone()[0])
-    assert raw["link_check"]["gone"] is False and raw["link_check"]["why"] is None
+    # blocked/error states must NOT mark listing as gone; availability is typed
+    lc = raw["link_check"]
+    assert lc["gone"] is False
+    assert lc.get("availability") in ("blocked", "error", None)
 
 
 # LI-14. The report and the alerts run before enrichment and the link check.
