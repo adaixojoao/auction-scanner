@@ -1,7 +1,6 @@
 """Milestone H — F07 double-depreciation fix; F08 risk_reserve in all_in."""
 from __future__ import annotations
 
-import json
 
 import bidcap
 import costs
@@ -65,7 +64,6 @@ def test_bidcap_note_says_after_work_value():
 
 def test_condition_factor_no_longer_reduces_value_base():
     """condition factor must NOT appear in the value amount — only in renovation (F07)."""
-    import scoring
     import bidcap as bc
 
     # A "heavy" condition home used to have value *= 0.3 (or similar factor).

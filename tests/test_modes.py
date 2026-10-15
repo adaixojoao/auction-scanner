@@ -502,7 +502,6 @@ def test_investment_does_not_believe_an_impossible_discount(monkeypatch):
     assert costs.estimate(absurd)["rent"] is None
     assert not any("check why" in r for r in plausible_reasons)
     assert any("a year net of running costs" in r for r in plausible_reasons)
-    import scoring
     # F05 corrected contract: extreme discount is queued for investigation, not penalised.
     absurd_score = score_detail(absurd, mode="invest")[0]
     plausible_score = score_detail(plausible, mode="invest")[0]

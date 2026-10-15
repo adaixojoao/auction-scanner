@@ -7,7 +7,6 @@ import time
 import urllib.parse
 from html import unescape as _unescape
 import warnings
-from collections import defaultdict
 from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup

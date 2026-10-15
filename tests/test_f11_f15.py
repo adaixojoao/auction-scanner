@@ -1,14 +1,11 @@
 """F11/F16 — Decision persistence; F15 — publication snapshot."""
 import json
-import sqlite3
 import time
 from datetime import datetime, timezone
 
-import db as dbmod
 from db import (
     connect, load_decision, load_listings, publication_snapshot,
     invalidate_snapshot, record_evidence_revision, upsert_listing,
-    SNAP_TTL,
 )
 from common import make_listing
 
@@ -90,25 +87,21 @@ def test_load_decision_returns_none_when_stale(tmp_path):
 
 
 def test_decision_reruns_when_evidence_changes(tmp_path):
-    """After evidence_revision increment the next invest-mode load overwrites the row."""
+    """After an evidence revision the next invest-mode load re-evaluates and
+    stores the Decision under the new evidence_rev_sum, so it reads as fresh."""
     db = _fresh_db(tmp_path)
     lid = _invest_listing(db)
     load_listings(db, mode="invest", include_hidden=True, now=NOW)
-    first = db.execute(
-        "SELECT evaluated_at FROM evaluator_decisions WHERE listing_id = ?", (lid,)
-    ).fetchone()["evaluated_at"]
+    assert load_decision(db, lid)["evidence_rev_sum"] is None   # no evidence recorded yet
 
     # Record an evidence revision to bump the rev_sum
-    record_evidence_revision(db, lid, "location", {"lat": 41.0, "lon": -8.0})
-    # Re-run (with refresh=True to bypass score cache)
-    load_listings(db, mode="invest", include_hidden=True, now=NOW, refresh=True)
-    second = db.execute(
-        "SELECT evaluated_at FROM evaluator_decisions WHERE listing_id = ?", (lid,)
-    ).fetchone()["evaluated_at"]
-    # evaluated_at must have been updated (timestamps differ because the eval runs fresh)
-    # At minimum the row must exist; if clocks are the same the test still passes
-    # because _persist_decision is called unconditionally on every new score path.
-    assert second is not None
+    rev = record_evidence_revision(db, lid, "location", {"lat": 41.0, "lon": -8.0})
+    db.commit()
+    # No refresh=True: the changed rev_sum alone must bust the kept score.
+    load_listings(db, mode="invest", include_hidden=True, now=NOW)
+    stored = load_decision(db, lid)
+    assert stored["evidence_rev_sum"] == rev
+    assert load_decision(db, lid, ev_rev_sum=rev) is not None
 
 
 def test_evaluator_state_set_on_item(tmp_path):

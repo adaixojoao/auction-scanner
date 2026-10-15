@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import pytest
 
 from evaluator import (
-    FAIL, NOT_APPLICABLE, PASS, UNKNOWN,
+    FAIL, PASS, UNKNOWN,
     Decision, Requirement,
     evaluate,
 )

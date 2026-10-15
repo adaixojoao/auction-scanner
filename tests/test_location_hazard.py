@@ -1,7 +1,6 @@
 """Tests for Milestone F — location capabilities and hazard-coverage contract (F03, F04)."""
 from __future__ import annotations
 
-import pytest
 
 from geo import BUILDING_EXACT, EXACT_ENOUGH, location_capability
 from scoring import climate_score

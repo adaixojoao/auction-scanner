@@ -410,7 +410,7 @@ def test_a_hidden_listing_kept_slim_is_the_same_listing_read_in_full(db):
     assert again[0] == from_kept["eleiloes:2"]
 
 
-def test_evidence_revision_busts_score_cache(db):
+def test_evidence_revision_busts_score_cache(db, monkeypatch):
     """An evidence update (location, hazard, etc.) invalidates the score cache (F11)."""
     import db as dbmod
     from common import make_listing
@@ -418,19 +418,22 @@ def test_evidence_revision_busts_score_cache(db):
     upsert_listing(db, make_listing("eleiloes", "1", title="Moradia T3", price=20000, area_m2=120,
                                     description="Casa em bom estado"))
     db.commit()
-    first = load_listings(db, apply_min_score=False)[0]
+    load_listings(db, apply_min_score=False)
     first_key = dbmod._SCORED["home"]["eleiloes:1"][0]
+    # Loading again with nothing changed reuses the kept score.
+    load_listings(db, apply_min_score=False)
+    assert dbmod._SCORED["home"]["eleiloes:1"][0] == first_key
     # Simulate an evidence update (e.g. climate or location revision)
     record_evidence_revision(db, "eleiloes:1", "climate", {"grade": "good", "version": 1})
     db.commit()
-    # Load again — the rev sum changed, so the cache key must change and score must be re-computed
-    calls = []
+    # Load again without forgetting the kept scores: the rev sum alone must
+    # change the cache key, so the listing is scored again with the new evidence.
+    rescored = []
     real = dbmod._score_one
-    dbmod.forget_scores(db)
-    monkeypatch_target = real  # use directly below
+    monkeypatch.setattr(dbmod, "_score_one", lambda item, *a, **kw: (rescored.append(item["id"]), real(item, *a, **kw)))
     load_listings(db, apply_min_score=False)
-    new_key = dbmod._SCORED["home"]["eleiloes:1"][0]
-    assert new_key != first_key, "evidence revision must change the score cache key"
+    assert rescored == ["eleiloes:1"], "evidence revision must re-score the listing"
+    assert dbmod._SCORED["home"]["eleiloes:1"][0] != first_key, "evidence revision must change the score cache key"
 
 
 # ─── Task 7: anomaly clearance bound to evidence revisions ────────────────────
