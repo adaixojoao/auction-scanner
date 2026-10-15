@@ -1048,7 +1048,12 @@ def test_the_same_house_on_two_portals_shows_once(db):
     upsert_listing(db, make_listing("pisos", "2", "ES", title="Casa en Ourol", price=22000, area_m2=294,
                                     concelho=pisos_municipality("Ourol (Casco Urbano)"), district="Lugo"))
     db.commit()
-    assert mark_duplicates(db) == 1
+    # identical price+area across sources → speculative possible_match hint, both visible
+    assert mark_duplicates(db) == 0
+    rows = db.execute("SELECT id, possible_match FROM listings WHERE possible_match IS NOT NULL").fetchall()
+    assert len(rows) == 1
+    ids = {rows[0]["id"], rows[0]["possible_match"]}
+    assert ids == {"fotocasa:1", "pisos:2"}
 
 
 def test_pisos_reads_cards_and_the_detail_page():

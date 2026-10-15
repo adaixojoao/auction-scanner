@@ -41,7 +41,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -495,11 +495,21 @@ def _migrate_v21(db: sqlite3.Connection):
     _im.backfill_leilosoc(db)
 
 
+def _migrate_v22(db: sqlite3.Connection):
+    """Non-suppressive similarity hint for cross-source near-matches (F02 / Milestone C).
+
+    possible_match stores the id of one similar listing when the evidence is not
+    strong enough to confirm they are the same legal property.  Unlike duplicate_of
+    it does not hide the listing; it is surfaced as a research note.
+    """
+    _add_column(db, "listings", "possible_match", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
-               19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21}
+               19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22}
 
 
 def init_db(db: sqlite3.Connection):
@@ -682,9 +692,15 @@ def _same_house_elsewhere(a, b) -> bool:
 
 
 def mark_duplicates(db: sqlite3.Connection) -> int:
-    """Flag cross-source near-duplicates (same country + concelho, price within
-    €500, area within 5 m²). The most complete row stays visible; the others get
-    duplicate_of set. Nothing is deleted. Returns how many rows are flagged."""
+    """Identify duplicate and near-duplicate listings.
+
+    Sets duplicate_of when there is corroborated evidence that two rows describe
+    the same legal property (same-source relisting, geo/phrase match, same court
+    sale lot, or a verified link).  Sets possible_match for rows that are similar
+    by price and area alone but whose addresses may differ (F02 fix).
+
+    Nothing is deleted.  Returns the number of rows where duplicate_of is set.
+    """
     rows = db.execute("""
         SELECT * FROM listings
         WHERE price IS NOT NULL
@@ -699,6 +715,11 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
         return (sum(1 for v in r if v is not None), r["first_seen"] or "", r["id"])
 
     dup_of: dict[str, str] = {}
+    # Speculative similarity (price±€500, area±5m²) across sources: not sufficient
+    # to confirm same legal property.  Recorded as possible_match instead of
+    # duplicate_of so both listings remain visible in the research panel.
+    possible: dict[str, str] = {}
+
     for group in buckets.values():
         if len(group) < 2:
             continue
@@ -720,11 +741,14 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                 ka, oa = keeper["area_m2"], other["area_m2"]
                 area_match = (ka is None or oa is None or abs(ka - oa) < 5)
                 if abs(other["price"] - keeper["price"]) < 500 and area_match:
-                    dup_of[other["id"]] = keeper["id"]
+                    # Speculative: similar price/area but address may differ.
+                    # Record as a hint, not a suppression.
+                    if other["id"] not in possible:
+                        possible[other["id"]] = keeper["id"]
 
     # The same house on two portals at a different price: the same size to 2%,
     # price within 15%, and pins within 3 km (portals blur them) or the same
-    # wording. The cheaper ad stays visible.
+    # wording. Corroborated — suppress the dearer one.
     for group in buckets.values():
         for i, a in enumerate(group):
             for o in group[i + 1:]:
@@ -733,6 +757,7 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                 if _same_house_elsewhere(a, o):
                     keep, drop = sorted((a, o), key=lambda r: (r["price"], r["id"]))
                     dup_of[drop["id"]] = keep["id"]
+                    possible.pop(drop["id"], None)   # promoted to confirmed duplicate
 
     # Flats of one building or promotion (same source, same title, price and
     # size within 10%): one choice, so only the cheapest stays visible.
@@ -741,18 +766,24 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
         for r in group:
             if r["id"] != cheapest["id"]:
                 dup_of[r["id"]] = cheapest["id"]
+                possible.pop(r["id"], None)
 
     # A Citius sale joined to its e-leilões auction (links.py) is one sale.
     from links import linked_pairs
     for el, citius in linked_pairs(db).items():
         dup_of[el] = citius
+        possible.pop(el, None)
 
     db.execute("UPDATE listings SET duplicate_of = NULL WHERE duplicate_of IS NOT NULL")
+    db.execute("UPDATE listings SET possible_match = NULL WHERE possible_match IS NOT NULL")
     db.executemany("UPDATE listings SET duplicate_of = ? WHERE id = ?",
                    [(keeper, dup) for dup, keeper in dup_of.items()])
+    db.executemany("UPDATE listings SET possible_match = ? WHERE id = ?",
+                   [(match, lid) for lid, match in possible.items()])
     db.commit()
     if dup_of:
-        LOG.info(f"Deduplication: {len(dup_of)} listings flagged as cross-source duplicates")
+        LOG.info(f"Deduplication: {len(dup_of)} listings flagged as cross-source duplicates"
+                 f"; {len(possible)} as possible matches")
     return len(dup_of)
 
 

@@ -206,13 +206,15 @@ def test_duplicates_are_flagged_not_deleted(db, add):
         description="rich", district="Guarda")
     add("imobancos", "b", title="Moradia", price=20200, area_m2=102, concelho="guarda")
     add("bpi", "c", title="Moradia", price=90000, area_m2=100, concelho="Guarda")
-    assert mark_duplicates(db) == 1
+    # speculative price+area match → possible_match (not suppressive duplicate_of)
+    assert mark_duplicates(db) == 0
     assert db.execute("SELECT COUNT(*) FROM listings").fetchone()[0] == 3
-    dup = db.execute("SELECT id, duplicate_of FROM listings WHERE duplicate_of IS NOT NULL").fetchone()
-    assert tuple(dup) == ("imobancos:b", "eleiloes:a")
-    assert "imobancos:b" not in {it["id"] for it in load_listings(db)}
+    assert db.execute("SELECT duplicate_of FROM listings WHERE duplicate_of IS NOT NULL").fetchone() is None
+    pm = db.execute("SELECT possible_match FROM listings WHERE id='imobancos:b'").fetchone()["possible_match"]
+    assert pm == "eleiloes:a"
+    assert "imobancos:b" in {it["id"] for it in load_listings(db)}
     # re-running is stable
-    assert mark_duplicates(db) == 1
+    assert mark_duplicates(db) == 0
 
 
 def test_a_portal_relisting_is_a_duplicate_but_court_twin_lots_are_not(db, add):
@@ -240,13 +242,13 @@ def test_flats_of_one_building_show_once_cheapest_first(db, add):
 
 def test_duplicates_deduped_when_one_side_has_no_area(db, add):
     # Citius scrapes often have no area_m2; the same property on e-leilões has one.
-    # They should still be deduped on price + concelho.
+    # Price+área match (area treated as match when one side is None) → possible_match hint.
     add("eleiloes", "a", title="Moradia", price=20000, area_m2=100, concelho="Guarda")
     add("citius",   "b", title="Moradia", price=20000, area_m2=None, concelho="Guarda")
-    assert mark_duplicates(db) == 1
-    flagged = db.execute("SELECT id FROM listings WHERE duplicate_of IS NOT NULL").fetchone()[0]
-    # the more complete row (eleiloes, has area) should be kept
-    assert flagged == "citius:b"
+    assert mark_duplicates(db) == 0
+    assert db.execute("SELECT duplicate_of FROM listings WHERE duplicate_of IS NOT NULL").fetchone() is None
+    pm = db.execute("SELECT possible_match FROM listings WHERE id='citius:b'").fetchone()["possible_match"]
+    assert pm == "eleiloes:a"
 
 
 def test_a_listing_with_no_size_does_not_stop_the_cross_site_check(db, add):

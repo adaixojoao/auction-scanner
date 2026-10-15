@@ -223,11 +223,14 @@ def test_li08_predicted_close_ranks_but_cash_uses_the_current_price(db, add, mon
     assert any("likely to close around €80,000" in r for r in rows["eleiloes:live"]["reasons"])
 
 
-# LI-09. Same municipality, similar price and area: distinct addresses merge.
-# Same title and opening words: two legal units collapse to the cheaper one.
+# LI-09. Cross-source similarity (price±€500, area±5m²) is NOT sufficient to
+# confirm same legal property.  Different-address listings must stay visible as
+# possible_match hints, not be hidden.  Same-source twin units (same court sale,
+# same title/opening/size) are still suppressed — that evidence is corroborated.
+# Corrected contract: distinct addresses visible; twin units hidden.
 
 
-def test_li09_distinct_addresses_and_legal_units_are_hidden(db, add):
+def test_li09_distinct_addresses_visible_twin_units_hidden(db, add):
     from db import load_listings, mark_duplicates
 
     add("fotocasa", "1", "ES", title="Calle Mayor 1", description="Calle Mayor 1, piso primero",
@@ -241,10 +244,17 @@ def test_li09_distinct_addresses_and_legal_units_are_hidden(db, add):
     add("citius", "b", title="Fracção autónoma", description=opening + " fração B artigo 2",
         price=20000, area_m2=84, concelho="Guarda")
     mark_duplicates(db)
-    hidden = {it["id"]: it["hidden_reason"] for it in load_listings(db, include_hidden=True, apply_min_score=False)
-              if it.get("hidden_reason")}
-    # The dearer distinct address stays: the keeper is the more complete row, then the later id.
-    assert hidden["fotocasa:1"].startswith("duplicate of pisos:2")
+    all_items = {it["id"]: it for it in load_listings(db, include_hidden=True, apply_min_score=False)}
+    hidden = {k: v["hidden_reason"] for k, v in all_items.items() if v.get("hidden_reason")}
+
+    # Different addresses: both must be visible (not hidden), only a possible_match hint.
+    assert "fotocasa:1" not in hidden, "distinct-address listing must not be hidden"
+    assert "pisos:2" not in hidden
+    foto = all_items["fotocasa:1"]
+    assert foto.get("possible_match") == "pisos:2", "possible_match hint must be set"
+
+    # Twin units (same source, same title, same opening, size within 10%):
+    # still suppressed — corroborated evidence.
     assert hidden["citius:b"].startswith("duplicate of citius:a")
 
 
