@@ -131,7 +131,14 @@ def _req_residential_identity(evidence: dict, policy: dict) -> Requirement:
             next_evidence_needed="Confirm legal unit from registry or catastro.",
         )
     unit_type = ident.get("unit_type")
-    if unit_type and unit_type not in ("residential", "mixed", "unknown"):
+    if unit_type is None or unit_type == "unknown":
+        return Requirement(
+            key="residential_identity", outcome=UNKNOWN,
+            code="DATA_IDENTITY_TYPE_UNKNOWN",
+            message="Legal unit type is not established.",
+            next_evidence_needed="Confirm the legal unit type from registry or catastro.",
+        )
+    if unit_type not in ("residential", "mixed"):
         return Requirement(
             key="residential_identity", outcome=FAIL,
             code="LEGAL_NOT_RESIDENTIAL",
@@ -183,6 +190,10 @@ def _req_possession(evidence: dict, policy: dict) -> Requirement:
     """Vacant possession or confirmed delivery terms on completion."""
     occupation = evidence.get("occupation")    # "vacant" | "occupied" | "tenant" | None
     delivery = evidence.get("delivery_terms")  # "vacant_on_completion" | "with_tenant" | None
+    if delivery == "unknown":
+        delivery = None
+    if occupation == "unknown":
+        occupation = None
     if occupation is None and delivery is None:
         return Requirement(
             key="possession", outcome=UNKNOWN,
@@ -213,8 +224,14 @@ def _req_possession(evidence: dict, policy: dict) -> Requirement:
             code="PHYS_POSSESSION_OK",
             message="Occupied now but vacant possession confirmed on completion.",
         )
-    # Any other non-None occupation values that aren't explicitly affirmed → unknown.
-    if occupation is not None and occupation not in ("vacant",):
+    # Any other occupation values that aren't explicitly affirmed → unknown.
+    if occupation is None and delivery == "vacant_on_completion":
+        return Requirement(
+            key="possession", outcome=PASS,
+            code="PHYS_POSSESSION_OK",
+            message="Vacant possession on completion confirmed by the sale terms.",
+        )
+    if occupation not in ("vacant",):
         return Requirement(
             key="possession", outcome=UNKNOWN,
             code="DATA_POSSESSION_UNRECOGNISED",
@@ -297,6 +314,13 @@ def _req_legal_access(evidence: dict, policy: dict) -> Requirement:
             code="PHYS_LANDLOCKED",
             message="Property has no confirmed legal access.",
             dangerous=True,
+        )
+    if access != "confirmed":
+        return Requirement(
+            key="legal_access", outcome=UNKNOWN,
+            code="DATA_ACCESS_UNRECOGNISED",
+            message=f"Legal access value {access!r} is not a recognised affirmed state.",
+            next_evidence_needed="Confirm legal road access from registry or inspection.",
         )
     return Requirement(key="legal_access", outcome=PASS, code="PHYS_ACCESS_OK",
                        message="Legal access confirmed.")
@@ -412,7 +436,8 @@ def _req_hazard_coverage(evidence: dict, policy: dict) -> Requirement:
             next_evidence_needed="Run climate assessment for the building's position.",
         )
 
-    missing = [layer for layer in required if layer not in climate]
+    missing = [layer for layer in required
+               if climate.get(layer) is None or climate.get(layer) in ({}, [], "")]
     if missing:
         return Requirement(
             key="hazard_coverage", outcome=UNKNOWN,
@@ -531,6 +556,10 @@ def _req_anomaly_investigation(evidence: dict, policy: dict) -> Requirement:
     )
 
 
+#: Valuation evidence types that support a finalist.  Anything else fails closed.
+SUPPORTED_VALUATION_SOURCES = frozenset({"comparables", "appraisal", "city_index"})
+
+
 def _req_financial_evidence(evidence: dict, policy: dict) -> Requirement:
     """Supported valuation evidence exists (not just a municipal median)."""
     val_source = evidence.get("valuation_source")
@@ -549,6 +578,13 @@ def _req_financial_evidence(evidence: dict, policy: dict) -> Requirement:
             code="DATA_VALUATION_FALLBACK",
             message="Valuation relies only on a fallback city median, not property-specific comparables.",
             next_evidence_needed="Obtain transaction comparables matched by type, size and micro-location.",
+        )
+    if val_source not in SUPPORTED_VALUATION_SOURCES:
+        return Requirement(
+            key="financial_evidence", outcome=UNKNOWN,
+            code="DATA_VALUATION_UNRECOGNISED",
+            message=f"Valuation source {val_source!r} is not a supported evidence type.",
+            next_evidence_needed="Assemble comparable transactions or a supported valuation.",
         )
     return Requirement(
         key="financial_evidence", outcome=PASS,
@@ -597,7 +633,7 @@ def _req_photo_suitability(evidence: dict, policy: dict) -> Requirement:
     the house — UNKNOWN until retaken.  Only an explicit True from a model run counts.
     """
     pc = evidence.get("photo_check") or {}
-    if not pc:
+    if not isinstance(pc, dict) or not pc:
         return Requirement(
             key="photo_suitability", outcome=UNKNOWN,
             code="DATA_PHOTO_MISSING",
@@ -612,7 +648,8 @@ def _req_photo_suitability(evidence: dict, policy: dict) -> Requirement:
             message="Photo check ran but shows_house attribution is missing.",
             next_evidence_needed="Re-run photo check; model must explicitly report shows_house.",
         )
-    if shows_house is False:
+    if not (isinstance(shows_house, bool) and shows_house is True):
+        # Only a real boolean True counts; strings ("true"), ints, lists do not.
         return Requirement(
             key="photo_suitability", outcome=UNKNOWN,
             code="DATA_PHOTO_NO_DWELLING",
