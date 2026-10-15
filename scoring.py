@@ -2991,9 +2991,9 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                 adjusted += skipped
             reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
         if too_far:
-            # Shown, but not rewarded: a gap this wide is usually a share, a tenant or a wrong area.
+            # Queued for investigation — not penalised (F05). The gap is shown but no points either way.
             unbelievable = True
-            s += INVEST_TOO_CHEAP
+            item["extreme_discount"] = True
             reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
                            " — check why")
         elif not _discount_skipped(item, why):

@@ -18,7 +18,7 @@ import math
 
 import costs
 from common import price_to_pay
-from scoring import (TARGET_DEFAULTS, condition, local_price, local_value_factor, market_value_estimate,
+from scoring import (TARGET_DEFAULTS, condition, local_price, market_value_estimate,
                      property_kind)
 
 ROUND = 100          # bids are rounded down to this
@@ -50,13 +50,12 @@ def _value(item: dict, kind: str | None, targets: dict, unknowns: list[str]) -> 
             unknowns.append("a local price for this place")
             return None
         eur_m2, source = local_price(item)
-        factor, why = local_value_factor(item)
         confidence = "low" if source == "city estimate" or condition(item) == "unknown" else "medium"
-        counted = f", counted at {factor:.0%} ({', '.join(why)})" if why else ""
         where = {"notice": "the floor in the notice", "catastro": "the Catastro dwelling",
                  "stored": "the stored floor area"}[floor_source]
-        return {"amount": mv * factor, "basis": "market", "confidence": confidence,
-                "note": f"€{eur_m2:,.0f}/m² × {area:,.0f} m² ({where}), the local median ({source}){counted}. "
+        return {"amount": mv, "basis": "market", "confidence": confidence,
+                "note": f"€{eur_m2:,.0f}/m² × {area:,.0f} m² ({where}), the local median ({source}). "
+                        "After-work value — renovation is deducted separately. "
                         "A median for the area, not a valuation of this property."}
     if kind == "rural_plot":
         area = item.get("area_m2") or 0
@@ -166,8 +165,8 @@ def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | Non
     fees_high = fees_low * costs.FEES_HIGH_FACTOR
     out.update({"taxes_and_fees_low": round(fees_low), "taxes_and_fees_high": round(fees_high),
                 "risk_reserve": round(reserve), "climate_adjustment": round(climate_adj),
-                "all_in_low": round(recommended + fees_low + reno_low),
-                "all_in_high": round(recommended + fees_high + reno_high),
+                "all_in_low": round(recommended + fees_low + reno_low + reserve),
+                "all_in_high": round(recommended + fees_high + reno_high + reserve),
                 "recommended_bid": recommended, "absolute_max_bid": absolute})
 
     rows = [{"label": "Estimated value" if value and value["basis"] == "market"

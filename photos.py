@@ -20,6 +20,7 @@ queue drains in days rather than months.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import math
 import os
@@ -125,6 +126,12 @@ def photo_urls(item: dict, limit: int | None = None) -> list[str]:
     return out[: max(MAX_PHOTOS.values()) if limit is None else limit]
 
 
+def _gallery_hash(item: dict) -> str:
+    """SHA1 of the sorted gallery URL list — stable fingerprint for change detection (F10)."""
+    urls = sorted(photo_urls(item))
+    return hashlib.sha1(json.dumps(urls).encode()).hexdigest()
+
+
 def needs_photo_check(item: dict) -> bool:
     """True when this home has photos and either no stored answer or a useless answer.
 
@@ -132,6 +139,9 @@ def needs_photo_check(item: dict) -> bool:
     documents, maps or generic images — not the building.  That is not useful
     evidence of condition, so the listing is re-queued the next time real photos
     appear (F09).
+
+    A stored answer with shows_house=True is also re-queued when the gallery has
+    grown since the check (new photos are available — F10).
     """
     kind = item.get("kind")
     if kind is None:
@@ -147,7 +157,9 @@ def needs_photo_check(item: dict) -> bool:
             pass
         else:
             if pc.get("shows_house") is not False:
-                return False  # already have a useful check
+                stored = pc.get("gallery_hash")
+                if not stored or stored == _gallery_hash(item):
+                    return False  # already have a useful check, gallery unchanged
     return bool(photo_urls(item))
 
 
@@ -280,6 +292,7 @@ def check_photos(looker, item: dict) -> dict | None:
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
             "notes": str(found.get("notes") or "")[:200], "photos": len(urls),
             "shows_house": found.get("shows_house") is not False,
+            "gallery_hash": _gallery_hash(item),
             "by": getattr(looker, "model", looker.name), "at": utcnow_iso()}
 
 

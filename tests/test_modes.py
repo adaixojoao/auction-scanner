@@ -503,9 +503,11 @@ def test_investment_does_not_believe_an_impossible_discount(monkeypatch):
     assert not any("check why" in r for r in plausible_reasons)
     assert any("a year net of running costs" in r for r in plausible_reasons)
     import scoring
-    penalised = score_detail(absurd, mode="invest")[0]
-    monkeypatch.setattr(scoring, "INVEST_TOO_CHEAP", 0)
-    assert penalised == score_detail(absurd, mode="invest")[0] - 15
+    # F05 corrected contract: extreme discount is queued for investigation, not penalised.
+    absurd_score = score_detail(absurd, mode="invest")[0]
+    plausible_score = score_detail(plausible, mode="invest")[0]
+    assert absurd_score < plausible_score   # absurd gets no discount points and no rent
+    assert absurd.get("extreme_discount") is True
 
 
 def test_a_province_average_or_an_unseen_house_does_not_count_as_a_discount(monkeypatch):

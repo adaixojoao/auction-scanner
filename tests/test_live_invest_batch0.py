@@ -332,11 +332,11 @@ def test_li10_dropping_the_first_citius_lot_preserves_stable_identity(db, fake_h
     assert land_row is not None and land_row["price"] == 2000
 
 
-# LI-11. Past 70% under the adjusted local price, discount points become a penalty
-# and the rent is dropped.
+# LI-11. Past 70% under the adjusted local price, the listing enters the investigation
+# queue (no penalty, no discount points) and the rent is dropped (F05 corrected contract).
 
 
-def test_li11_discount_past_70_percent_penalises_and_drops_rent(monkeypatch):
+def test_li11_extreme_discount_queues_for_investigation_and_drops_rent(monkeypatch):
     import prices
     monkeypatch.setattr(scoring, "local_price", lambda item: (2000.0, "a city series"))
     monkeypatch.setattr(prices, "rent_per_m2", lambda *a, **k: (8.0, "town"))
@@ -355,6 +355,8 @@ def test_li11_discount_past_70_percent_penalises_and_drops_rent(monkeypatch):
     assert not any("a year net" in r for r in out_why)
     assert out_score < in_score
     assert deep_score == out_score
+    assert beyond.get("extreme_discount") is True    # investigation flag set (F05)
+    assert inside.get("extreme_discount") is None    # inside the trust threshold: no flag
 
 
 # LI-12. A positive bid seen shortly before the end is stored as sold.
