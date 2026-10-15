@@ -32,3 +32,7 @@ backups/
 .last-good
 .bad-update.json
 *.db.scores*
+# cProfile output (python -m cProfile -o …): holds local paths, never commit
+*.prof
+*.pstats
+/p[0-9]
