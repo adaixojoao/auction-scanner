@@ -1247,7 +1247,7 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
             "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
             "reasons", "excellent", "category", "kind", "live_score", "invest_score",
-            "research_only")
+            "research_only", "extreme_discount")
 _SCORED: dict[str, dict[str, tuple]] = {}      # mode → {listing id → (row key, results, inputs)}
 _UNSCORED = {"last_seen", "is_new"}
 # What a hidden listing keeps when load_listings(slim_hidden=True): what a list
@@ -1647,9 +1647,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                         item["open_homes_here"] = n - 1
             _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
                        climate_on, mode)
-            data = {k: item[k] for k in _DERIVED if k != "research_only"}
-            if "research_only" in item:
-                data["research_only"] = item["research_only"]
+            _optional = {"research_only", "extreme_discount"}
+            data = {k: item[k] for k in _DERIVED if k not in _optional}
+            for _k in _optional:
+                if _k in item:
+                    data[_k] = item[_k]
             if item.get("area_note"):
                 data["area_m2"] = item["area_m2"]
                 data["area_note"] = item["area_note"]
@@ -1672,6 +1674,13 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 reason = f"score {bar:.0f} < filters.min_score {min_score}"
                 if not include_hidden:
                     continue
+
+        # Extreme-discount items need manual investigation before they can become
+        # finalists (F05). A shortlisted listing has already passed that review.
+        if reason is None and item.get("extreme_discount") and item["status"] != "shortlisted":
+            reason = "extreme discount: needs investigation before shortlisting"
+            if not include_hidden:
+                continue
 
         # Price plus taxes, fees and repairs, against cash you can lose.
         # Live and invest always plans on the middle of the repair range,

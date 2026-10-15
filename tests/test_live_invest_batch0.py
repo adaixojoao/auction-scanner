@@ -477,7 +477,10 @@ def test_li16_cached_decisions_ignore_content_changes(db, add, monkeypatch):
     import climate
     from db import forget_scores, load_listings
 
-    add("eleiloes", "h", title="Moradia T3", tipo="moradia", area_m2=90, price=40000,
+    # area=25 and price=60000: all_in≈65k, local mv=4000*25=100k → 35% gap, within
+    # the 70% extreme-discount threshold. Also under the 100k check_max_price
+    # default so the listing is not hidden by the price cap (F05 gate tested separately).
+    add("eleiloes", "h", title="Moradia T3", tipo="moradia", area_m2=25, price=60000,
         concelho="Viseu", description="moradia em bom estado")
     series = {"eur": 4000.0}
 
