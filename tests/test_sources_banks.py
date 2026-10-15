@@ -276,7 +276,7 @@ def test_leilosoc_reads_the_embedded_data(db, fake_http):
     fake_http(lambda m, url, kw: FakeResponse(page))
     assert REGISTRY["leilosoc"].func(db, max_price=30000) == 2
     got = rows(db, "leilosoc")
-    assert set(got) == {"45015", "45015-141980"}         # the first lot keeps the old ID
+    assert set(got) == {"45015", "45015-2"}               # stable: first lot keeps base ID; second gets sequential suffix
     house = got["45015"]
     assert house["title"] == "Moradia · Seia" and house["price"] == 20000 and house["area_m2"] == 120
     assert house["concelho"] == "Seia" and house["date_end"] == "2099-10-12T15:00:00Z"

@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, uf_parish, utcnow_iso)
 from db import upsert_listing
+from identity_map import assign_citius_lot_id, assign_leilosoc_lot_id
 from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
 
@@ -458,7 +459,6 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
     """leilosoc.com — private auction house (court and insolvency sales)."""
     session = make_session(timeout=20)
     total = 0
-    per_auction = defaultdict(int)
     for page in range(1, 20):
         try:
             resp = session.get(f"{LEILOSOC}/en/category/5-real-estate/", params={"page": page})
@@ -469,11 +469,14 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
             break
         lots, more = leilosoc_lots(resp.text)
         for lot in sorted(lots, key=lambda x: (x.get("auctionId") or 0, x.get("order") or 0, x.get("batchId") or 0)):
-            # IDs were the auction's number; an auction with several lots gave them
-            # all the same ID, so the next lots now get "-<lot>" (the first keeps it).
             auction = str(lot.get("auctionId"))
-            per_auction[auction] += 1
-            eid = auction if per_auction[auction] == 1 else f"{auction}-{lot.get('batchId')}"
+            batch_id = lot.get("batchId")
+            if batch_id is None:
+                continue
+            # Stable identity via lot_map (F01 fix): batchId is the lot-level
+            # identifier Leilosoc assigns; it does not shift when another lot
+            # is removed from the same auction.
+            eid = assign_leilosoc_lot_id(db, auction, batch_id)
             row = leilosoc_listing(lot, eid)
             if row is None or (row["price"] and row["price"] > max_price):
                 continue
@@ -875,7 +878,6 @@ def scrape_citius(db, max_price: float = 50000, **_):
 
     today = datetime.now().strftime("%d/%m/%Y")
     past = (datetime.now() - timedelta(days=180)).strftime("%d/%m/%Y")
-    per_process = defaultdict(int)
 
     total_scraped = 0
     for i, (trib_id, trib_name) in enumerate(tribunais):
@@ -916,15 +918,13 @@ def scrape_citius(db, max_price: float = 50000, **_):
                 f["html_id"] = hid.group(1) if hid else None
 
                 if f["processo"]:
-                    eid = re.sub(r"[^A-Za-z0-9]", "", f["processo"])[:40]
+                    base_eid = re.sub(r"[^A-Za-z0-9]", "", f["processo"])[:40]
                 else:
-                    eid = stable_id(trib_id, f["desc"])
-                # One processo can sell several bens; before, they overwrote each
-                # other. The first keeps the old ID so existing rows still match.
-                # Counted before the budget filter, so an ID does not depend on the budget.
-                per_process[eid] += 1
-                if per_process[eid] > 1:
-                    eid = f"{eid}-{per_process[eid]}"
+                    base_eid = stable_id(trib_id, f["desc"])
+                # Stable identity via lot_map (F01 fix): lot_key is derived from
+                # legal identifiers (registo, art_matricial, description hash) so
+                # IDs survive lot reordering, pagination and html_id reassignment.
+                eid = assign_citius_lot_id(db, base_eid, base_eid, f)
                 if f["price"] and f["price"] > max_price:
                     continue
 

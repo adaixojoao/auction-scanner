@@ -41,7 +41,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -468,11 +468,38 @@ def _migrate_v20(db: sqlite3.Connection):
     _add_column(db, "listing_status", "reason", "TEXT")
 
 
+def _migrate_v21(db: sqlite3.Connection):
+    """Stable lot identity map for Citius and Leilosoc (F01 / Milestone B).
+
+    lot_map records (source, processo, lot_key) → listing_id so that scraper-local
+    encounter-order counters are replaced by persistent, legal-identifier-keyed
+    assignments.  conflict_details (JSON) is set when two lots resolve to the same
+    key or observable identifiers diverge.
+    """
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS lot_map (
+            source           TEXT NOT NULL,
+            processo         TEXT NOT NULL,
+            lot_key          TEXT NOT NULL,
+            listing_id       TEXT NOT NULL,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+            conflict_details TEXT,
+            PRIMARY KEY (source, processo, lot_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_lot_map_listing
+            ON lot_map(source, listing_id);
+    """)
+    # Backfill existing rows so historical IDs are preserved.
+    import identity_map as _im
+    _im.backfill_citius(db)
+    _im.backfill_leilosoc(db)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
-               19: _migrate_v19, 20: _migrate_v20}
+               19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21}
 
 
 def init_db(db: sqlite3.Connection):

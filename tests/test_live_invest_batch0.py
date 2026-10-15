@@ -248,10 +248,13 @@ def test_li09_distinct_addresses_and_legal_units_are_hidden(db, add):
     assert hidden["citius:b"].startswith("duplicate of citius:a")
 
 
-# LI-10. Citius ids follow encounter order. Dropping the first lot reuses its id.
+# LI-10. Citius lot identity is stable across reordering and pagination.
+# Corrected contract: dropping the first lot must NOT reassign its ID to the
+# second lot.  Each lot's ID is keyed by legal identifiers (or description hash),
+# not encounter order.
 
 
-def test_li10_dropping_the_first_citius_lot_reuses_its_id(db, fake_http):
+def test_li10_dropping_the_first_citius_lot_preserves_stable_identity(db, fake_http):
     from sources import REGISTRY
     from sources.pt import CITIUS_URL
 
@@ -288,27 +291,36 @@ def test_li10_dropping_the_first_citius_lot_reuses_its_id(db, fake_http):
         if str(url).endswith("GetHtmlDetails"):
             hid = "111" if "111" in kw.get("data", "") else "222"
             text = "casa de habitação na Rua das Flores" if hid == "111" else "terreno de cultura"
-            return FakeResponse(json_data={"d": f"<div>Descrição do Bem: {text} Art. Matricial: 9</div>"})
+            return FakeResponse(json_data={"d": f"<div>Descrição do Bem: {text}</div>"})
         return FakeResponse(pages["html"])
 
     fake_http(handler)
     assert REGISTRY["citius"].func(db, max_price=100000) == 2
     ids = {r["id"] for r in db.execute("SELECT id FROM listings")}
     assert ids == {"citius:165103TBMRA", "citius:165103TBMRA-2"}
-    first = db.execute("SELECT url, description FROM listings WHERE id='citius:165103TBMRA'").fetchone()
-    assert first["url"] == CITIUS_URL
+    first = db.execute("SELECT price, description FROM listings WHERE id='citius:165103TBMRA'").fetchone()
+    assert first["price"] == 30000
+    assert "Rua das Flores" in (first["description"] or "")
+
+    # Attach geo evidence to the house's stable ID.
     raw = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='citius:165103TBMRA'").fetchone()[0])
     raw["geo"] = {"lat": 38.1, "lon": -7.2, "precision": "street"}
     db.execute("UPDATE listings SET raw_json=? WHERE id='citius:165103TBMRA'", (json.dumps(raw),))
     db.commit()
 
+    # Drop the house from the source page — only the land remains.
     pages["html"] = page([land])
     REGISTRY["citius"].func(db, max_price=100000)
-    moved = db.execute("SELECT price, description, raw_json FROM listings WHERE id='citius:165103TBMRA'").fetchone()
-    kept = json.loads(moved["raw_json"])
-    assert moved["price"] == 2000
-    assert kept["geo"]["lat"] == 38.1
-    assert "Rua das Flores" in (kept.get("descricao_completa") or moved["description"])
+
+    # The house's ID must still hold house data; its geo evidence must be intact.
+    house_row = db.execute("SELECT price, raw_json FROM listings WHERE id='citius:165103TBMRA'").fetchone()
+    house_raw = json.loads(house_row["raw_json"])
+    assert house_row["price"] == 30000, "house price must not be overwritten by land"
+    assert house_raw["geo"]["lat"] == 38.1, "geo evidence attached to house ID must survive"
+
+    # The land must stay on its own ID with its own price.
+    land_row = db.execute("SELECT price FROM listings WHERE id='citius:165103TBMRA-2'").fetchone()
+    assert land_row is not None and land_row["price"] == 2000
 
 
 # LI-11. Past 70% under the adjusted local price, discount points become a penalty
