@@ -945,9 +945,10 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                     if other["id"] not in possible:
                         possible[other["id"]] = keeper["id"]
 
-    # The same house on two portals at a different price: the same size to 2%,
-    # price within 15%, and pins within 3 km (portals blur them) or the same
-    # wording. Corroborated — suppress the dearer one.
+    # The same house on two portals at a different price: size to 2%, price
+    # within 15%, pins within 3 km or same wording.  Geo/phrase match is
+    # circumstantial — two different addresses can satisfy it.  Record as a
+    # non-suppressive hint only.
     for group in buckets.values():
         for i, a in enumerate(group):
             for o in group[i + 1:]:
@@ -955,15 +956,25 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                     continue
                 if _same_house_elsewhere(a, o):
                     keep, drop = sorted((a, o), key=lambda r: (r["price"], r["id"]))
-                    dup_of[drop["id"]] = keep["id"]
-                    possible.pop(drop["id"], None)   # promoted to confirmed duplicate
+                    if drop["id"] not in possible:
+                        possible[drop["id"]] = keep["id"]
 
     # Flats of one building or promotion (same source, same title, price and
-    # size within 10%): one choice, so only the cheapest stays visible.
+    # size within 10%): suppress only when descriptions do not diverge beyond
+    # the opening — diverging tails indicate distinct legal units (e.g.
+    # "fração A artigo 1" vs "fração B artigo 2") and yield a hint only.
     for group in _twin_units(rows, dup_of):
         cheapest = min(group, key=lambda r: (r["price"], r["id"]))
         for r in group:
-            if r["id"] != cheapest["id"]:
+            if r["id"] == cheapest["id"]:
+                continue
+            tail_r = normalize(r["description"] or "")[TWIN_UNIT_OPENING:]
+            tail_c = normalize(cheapest["description"] or "")[TWIN_UNIT_OPENING:]
+            if tail_r and tail_c and tail_r != tail_c:
+                # Descriptions diverge past the opening: distinct legal units.
+                if r["id"] not in possible:
+                    possible[r["id"]] = cheapest["id"]
+            else:
                 dup_of[r["id"]] = cheapest["id"]
                 possible.pop(r["id"], None)
 

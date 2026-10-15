@@ -224,19 +224,22 @@ def test_li08_predicted_close_ranks_but_cash_uses_the_current_price(db, add, mon
 
 # LI-09. Cross-source similarity (price±€500, area±5m²) is NOT sufficient to
 # confirm same legal property.  Different-address listings must stay visible as
-# possible_match hints, not be hidden.  Same-source twin units (same court sale,
-# same title/opening/size) are still suppressed — that evidence is corroborated.
-# Corrected contract: distinct addresses visible; twin units hidden.
+# possible_match hints, not be hidden.  Geo/phrase match across portals is also
+# circumstantial and yields only a non-suppressive hint.  Distinct legal units
+# within one court sale (fractions with different identifiers past the opening)
+# must also stay visible: their diverging description tails prevent suppression.
+# Corroborated contract: only same-source same-price relistings and explicitly
+# linked pairs are suppressed.
 
 
-def test_li09_distinct_addresses_visible_twin_units_hidden(db, add):
+def test_li09_distinct_addresses_and_fractions_visible(db, add):
     from db import load_listings, mark_duplicates
 
     add("fotocasa", "1", "ES", title="Calle Mayor 1", description="Calle Mayor 1, piso primero",
         price=20000, area_m2=80, concelho="Ferrol")
     add("pisos", "2", "ES", title="Calle Nueva 9", description="Calle Nueva 9, un piso distinto",
         price=20200, area_m2=82, concelho="Ferrol")
-    # The unit identifiers sit past the 80 characters that are compared.
+    # Unit identifiers sit past the 80-character opening: description tails diverge.
     opening = "A" * 80
     add("citius", "a", title="Fracção autónoma", description=opening + " fração A artigo 1",
         price=19000, area_m2=80, concelho="Guarda")
@@ -246,15 +249,17 @@ def test_li09_distinct_addresses_visible_twin_units_hidden(db, add):
     all_items = {it["id"]: it for it in load_listings(db, include_hidden=True, apply_min_score=False)}
     hidden = {k: v["hidden_reason"] for k, v in all_items.items() if v.get("hidden_reason")}
 
-    # Different addresses: both must be visible (not hidden), only a possible_match hint.
+    # Different addresses: both must be visible, only a possible_match hint.
     assert "fotocasa:1" not in hidden, "distinct-address listing must not be hidden"
     assert "pisos:2" not in hidden
     foto = all_items["fotocasa:1"]
     assert foto.get("possible_match") == "pisos:2", "possible_match hint must be set"
 
-    # Twin units (same source, same title, same opening, size within 10%):
-    # still suppressed — corroborated evidence.
-    assert hidden["citius:b"].startswith("duplicate of citius:a")
+    # Fractions A/B: distinct description tails → both visible, only a hint.
+    assert "citius:a" not in hidden, "fraction A must not be hidden"
+    assert "citius:b" not in hidden, "fraction B must not be hidden"
+    assert all_items["citius:b"].get("possible_match") == "citius:a", \
+        "fraction B should carry a possible_match hint toward fraction A"
 
 
 # LI-10. Citius lot identity is stable across reordering and pagination.
