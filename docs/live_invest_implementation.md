@@ -57,11 +57,11 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 
 | Field | Detail |
 |---|---|
-| Requirement | Flag feeds a research queue before soft visibility cutoffs; unverified anomalies cannot become finalists |
-| Implementation | `scoring.py` — `item["extreme_discount"] = True` set during invest scoring when `too_far`; penalty removed |
-| Tests | `tests/test_extreme_discount_gallery.py` — 4 tests; `tests/test_modes.py::test_investment_does_not_believe_an_impossible_discount` |
+| Requirement | Flag feeds a research queue before soft visibility cutoffs; unverified anomalies cannot become finalists; items remain researchable/enrichable |
+| Implementation | `scoring.py` — `item["extreme_discount"] = True` set during invest scoring; `db.py` — `extreme_discount` in `_DERIVED` (persisted in score cache); `load_best()` collects flagged IDs across all mode passes and post-filters before returning finalist list |
+| Tests | `tests/test_extreme_discount_gallery.py` — 5 tests incl. `test_extreme_discount_visible_in_listing_blocked_from_load_best`; `tests/test_modes.py::test_investment_does_not_believe_an_impossible_discount` |
 | Status | **partial** |
-| Gap | **Critical gap: `item["extreme_discount"] = True` is an in-memory mutation during `score_detail()`. `load_best()` and `load_listings()` never read this flag. An extreme-discount item can still reach the shortlist and appear in the report with the same score as a verified one. The flag is not persisted to `raw_json` or any column, so it is lost after the score call returns. No research queue exists.** Implement: (1) gate in `load_listings()` that suppresses `extreme_discount=True` items from finalist promotion; or (2) persist the flag in `raw_json` so downstream callers see it. |
+| Gap | (1) The flag is stored in the per-mode score cache. All real `load_best` callers use `modes=None` or `EARNING_MODES` (includes "invest"), so invest-mode always runs in the same `load_best` call. The post-filter fires before the result is returned. A caller restricted to `modes=("home",)` would miss the flag — no such caller exists today. (2) **No investigation clearance record exists**: once flagged, an item can never reach `load_best` except after the score cache expires (cache key changes if the item's columns change). A dedicated clearance mechanism (investigation record, separate DB field) is needed for the "reviewed and promoted" path. |
 
 ---
 

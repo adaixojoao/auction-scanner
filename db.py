@@ -1675,13 +1675,6 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 if not include_hidden:
                     continue
 
-        # Extreme-discount items need manual investigation before they can become
-        # finalists (F05). A shortlisted listing has already passed that review.
-        if reason is None and item.get("extreme_discount") and item["status"] != "shortlisted":
-            reason = "extreme discount: needs investigation before shortlisting"
-            if not include_hidden:
-                continue
-
         # Price plus taxes, fees and repairs, against cash you can lose.
         # Live and invest always plans on the middle of the repair range,
         # including a home advertised as being in good condition. An unresolved
@@ -1748,6 +1741,11 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
     family_modes = {m for goals in FAMILY_GOALS.values() for m in goals}
     cfg = load_config()
     best: dict[str, dict] = {}
+    # Extreme-discount IDs collected across all mode passes (F05). The flag is
+    # set only during invest-mode scoring, so a home-mode pass for the same item
+    # would not see it. We collect across modes and post-filter so the gate fires
+    # regardless of which mode scored the item first.
+    extreme_ids: set[str] = set()
     for mode in chosen:
         if mode not in family_modes:
             continue
@@ -1757,6 +1755,8 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
             # cannot be bought for it, whatever it scores.
             if budget and (item.get("price") or 0) > budget:
                 continue
+            if item.get("extreme_discount"):
+                extreme_ids.add(item["id"])
             family = goal_family(item)
             allowed = FAMILY_GOALS.get(family)
             if allowed is not None and mode not in allowed:
@@ -1766,4 +1766,8 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
             # not on one scale. On a tie the goal earlier in MODES stays.
             if kept is None or (item.get("score") or 0) > (kept.get("score") or 0):
                 best[item["id"]] = {**item, "mode": mode, "mode_label": MODES[mode]}
-    return list(best.values())
+    # Extreme-discount items remain visible in the listing tab (researchable and
+    # enrichable) but must not reach reports, alerts or the Offers shortlist until
+    # the investigation flag is cleared (F05). Shortlist membership or offers do
+    # not waive this requirement; clearance needs a dedicated investigation record.
+    return [it for it in best.values() if it["id"] not in extreme_ids]

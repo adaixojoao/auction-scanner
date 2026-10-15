@@ -65,20 +65,24 @@ def test_extreme_discount_does_not_affect_home_score(monkeypatch):
     assert "extreme_discount" not in item or item.get("extreme_discount") is None
 
 
-def test_extreme_discount_hidden_from_load_listings(db, add, monkeypatch):
-    """An extreme-discount item is hidden by load_listings until reviewed (F05 gate)."""
-    from db import forget_scores, load_listings
+def test_extreme_discount_visible_in_listing_blocked_from_load_best(db, add, monkeypatch):
+    """Extreme-discount items remain visible in the listing tab (researchable/enrichable)
+    but are blocked from finalist promotion via load_best (F05 gate)."""
+    from db import forget_scores, load_best, load_listings
     # price=10000 area=80 local=2000 → mv=160k, all_in≈11k, gap=93% > 70% → extreme_discount
     add("eleiloes", "x1", title="Moradia T3", tipo="moradia",
         area_m2=80, price=10000, description="moradia em bom estado")
     monkeypatch.setattr(scoring, "local_price", lambda item: (2000.0, "city series"))
     forget_scores(db)
+    # Must still appear in the listing tab (for research and enrichment).
     visible = load_listings(db, apply_min_score=False, mode="invest", now=NOW)
-    hidden = load_listings(db, apply_min_score=False, mode="invest", now=NOW, include_hidden=True)
-    assert len(visible) == 0, "extreme-discount item must not appear in the visible listing"
-    assert len(hidden) == 1
-    assert hidden[0]["hidden_reason"] == "extreme discount: needs investigation before shortlisting"
-    assert hidden[0].get("extreme_discount") is True
+    assert len(visible) == 1, "extreme-discount item must remain visible for research"
+    assert visible[0].get("extreme_discount") is True
+    assert visible[0].get("hidden_reason") is None
+    # Must NOT appear in load_best (feeds reports, alerts, Offers shortlist).
+    best = load_best(db, now=NOW, apply_min_score=False)
+    ids = [it["id"] for it in best]
+    assert visible[0]["id"] not in ids, "extreme-discount item must not reach finalist path"
 
 
 # ─── F10: gallery-change requeue ─────────────────────────────────────────────
