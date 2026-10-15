@@ -870,6 +870,73 @@ TWIN_UNIT_TOLERANCE = 0.10
 TWIN_UNIT_OPENING = 80    # characters of description that must match: portals title by town only
 
 
+_FRACTION_RE = re.compile(r"\bfra(?:c|cc)ao\s+(?:autonoma\s+)?(?:designada\s+(?:pela\s+letra\s+)?)?\"?([a-z]{1,3})\b")
+_ARTICLE_RE = re.compile(r"\bartigo\s+(?:matricial\s+)?(?:urbano\s+|rustico\s+)?(?:n\.?\s*o?\s*)?(\d{1,6})\b")
+
+
+def _unit_markers(r) -> dict:
+    """What says which legal unit a row is: its street address and its land
+    registry identifiers (description number, fraction, tax articles), from
+    the stored raw data and from the wording ("fração B", "artigo 1234").
+    Empty values are left out: a missing marker neither confirms nor contradicts."""
+    try:
+        raw = json.loads(r["raw_json"] or "{}")
+    except (ValueError, TypeError, IndexError, KeyError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    address = None
+    for key in ("morada", "address", "street", "direccion"):
+        val = raw.get(key)
+        if isinstance(val, str) and val.strip():
+            address = re.sub(r"\s+", " ", normalize(val)).strip()
+            break
+    registry: set = set()
+    for entry in raw.get("registo_predial") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("descricao"):
+            registry.add(("descricao", str(entry["descricao"]).strip().lower(),
+                          str(entry.get("fracao") or "").strip().lower()))
+        for art in entry.get("artigos") or []:
+            if isinstance(art, dict) and art.get("numero"):
+                registry.add(("artigo", str(art["numero"]).strip()))
+    if raw.get("fracao"):
+        registry.add(("fracao", str(raw["fracao"]).strip().lower()))
+    for key in ("artigo", "artigos"):
+        val = raw.get(key)
+        for v in (val if isinstance(val, list) else [val]):
+            if isinstance(v, dict):
+                v = v.get("numero")
+            if v not in (None, ""):
+                registry.add(("artigo", str(v).strip()))
+    text = normalize(f"{r['title'] or ''} {r['description'] or ''}")
+    for m in _FRACTION_RE.finditer(text):
+        registry.add(("fracao", m.group(1)))
+    for m in _ARTICLE_RE.finditer(text):
+        registry.add(("artigo", m.group(1)))
+    return {"address": address, "registry": frozenset(registry)}
+
+
+def _unit_relation(a, b) -> str:
+    """'same' when the two rows share a unit marker and none disagrees,
+    'different' when any marker present on both disagrees, else 'unknown'
+    (price, size and wording alone never make two rows one legal unit)."""
+    ma, mb = _unit_markers(a), _unit_markers(b)
+    agree = False
+    if ma["address"] and mb["address"]:
+        if ma["address"] != mb["address"]:
+            return "different"
+        agree = True
+    ra, rb = ma["registry"], mb["registry"]
+    if ra and rb:
+        for kind in {k[0] for k in ra} & {k[0] for k in rb}:
+            if {k for k in ra if k[0] == kind} != {k for k in rb if k[0] == kind}:
+                return "different"
+            agree = True
+    return "same" if agree else "unknown"
+
+
 def _twin_units(rows, dup_of: dict) -> list[list]:
     """Groups of rows from one source with the same title, place and opening words whose price
     and size differ by at most 10%: the floors of one building in a court sale,
@@ -966,12 +1033,19 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                 if other["id"] in dup_of:
                     continue
                 if other["source"] == keeper["source"]:
-                    # Portals re-post the same house under a new id: the same price
-                    # and size there is the same house.
+                    # Portals re-post the same house under a new id. The same
+                    # price and size alone is only similarity: it hides the
+                    # re-post only when its address or registry unit is the same;
+                    # otherwise both stay visible with a possible_match hint.
                     if (keeper["source"] in RELISTING_SOURCES and other["price"] == keeper["price"]
                             and (keeper["area_m2"] is None or other["area_m2"] is None
                                  or other["area_m2"] == keeper["area_m2"])):
-                        dup_of[other["id"]] = keeper["id"]
+                        relation = _unit_relation(keeper, other)
+                        if relation == "same":
+                            dup_of[other["id"]] = keeper["id"]
+                            possible.pop(other["id"], None)
+                        elif other["id"] not in possible:
+                            possible[other["id"]] = keeper["id"]
                     continue
                 ka, oa = keeper["area_m2"], other["area_m2"]
                 area_match = (ka is None or oa is None or abs(ka - oa) < 5)
@@ -996,23 +1070,21 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                         possible[drop["id"]] = keep["id"]
 
     # Flats of one building or promotion (same source, same title, price and
-    # size within 10%): suppress only when descriptions do not diverge beyond
-    # the opening — diverging tails indicate distinct legal units (e.g.
-    # "fração A artigo 1" vs "fração B artigo 2") and yield a hint only.
+    # size within 10%) are similar, which is not the same legal unit: equal,
+    # missing or identical short descriptions prove nothing. Suppress only when
+    # the address or registry unit is the same; otherwise (different units
+    # such as "fração A" vs "fração B", or no marker) both stay, with a hint.
     for group in _twin_units(rows, dup_of):
         cheapest = min(group, key=lambda r: (r["price"], r["id"]))
         for r in group:
             if r["id"] == cheapest["id"]:
                 continue
-            tail_r = normalize(r["description"] or "")[TWIN_UNIT_OPENING:]
-            tail_c = normalize(cheapest["description"] or "")[TWIN_UNIT_OPENING:]
-            if tail_r and tail_c and tail_r != tail_c:
-                # Descriptions diverge past the opening: distinct legal units.
-                if r["id"] not in possible:
-                    possible[r["id"]] = cheapest["id"]
-            else:
+            relation = _unit_relation(cheapest, r)
+            if relation == "same":
                 dup_of[r["id"]] = cheapest["id"]
                 possible.pop(r["id"], None)
+            elif r["id"] not in possible:
+                possible[r["id"]] = cheapest["id"]
 
     # A Citius sale joined to its e-leilões auction (links.py) is one sale.
     from links import linked_pairs

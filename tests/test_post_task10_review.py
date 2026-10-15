@@ -186,3 +186,30 @@ def test_enrich_order_includes_research_selected_rows(db, add, monkeypatch):
     cfg = {**config.load_config(), "filters": {"min_score": 101}}
     order = pipeline.enrich_order(db, cfg)
     assert lid in [it["id"] for it in order]
+
+
+# ─── Unit C — no circumstantial suppression ─────────────────────────────────
+
+def test_same_portal_equal_price_different_addresses_stay_independent(db, add):
+    add("fotocasa", "1", "ES", title="Vivienda en Ferrol", price=19000, area_m2=87,
+        concelho="Ferrol", raw_json=json.dumps({"address": "Calle Real 5"}))
+    add("fotocasa", "2", "ES", title="Vivienda en Ferrol", price=19000, area_m2=87,
+        concelho="Ferrol", raw_json=json.dumps({"address": "Calle Mayor 12"}))
+    assert store.mark_duplicates(db) == 0
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE duplicate_of IS NOT NULL").fetchone()[0] == 0
+    shown = {it["id"] for it in store.load_listings(db, apply_min_score=False)}
+    assert {"fotocasa:1", "fotocasa:2"} <= shown
+
+
+def test_identical_short_text_different_registry_units_not_suppressed(db, add):
+    for ext, fracao, artigo in (("a", "A", "101"), ("b", "B", "102")):
+        add("citius", ext, title="Apartamento T2", description="Apartamento T2",
+            price=19000, area_m2=80, concelho="Guarda",
+            raw_json=json.dumps({"registo_predial": [
+                {"descricao": "555", "fracao": fracao, "artigos": [{"numero": artigo}]}]}))
+    assert store.mark_duplicates(db) == 0
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE duplicate_of IS NOT NULL").fetchone()[0] == 0
+    # Missing description tails are no proof either: still not suppressed.
+    add("citius", "c", title="Casa", price=10000, area_m2=60, concelho="Viseu")
+    add("citius", "d", title="Casa", price=10000, area_m2=60, concelho="Viseu")
+    assert store.mark_duplicates(db) == 0
