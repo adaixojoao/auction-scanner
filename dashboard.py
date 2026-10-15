@@ -618,6 +618,7 @@ def api_listing_detail():
         "how_to_find": listing_info.how_to_find(it),
         "official": listing_info.official_records(it),
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
+        "outline": listing_info.outline_panel(it),
         "user_note": user_note,
         "contact_log": contact_log,
     })

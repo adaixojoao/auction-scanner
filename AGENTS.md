@@ -89,6 +89,11 @@ answer "about". OpenStreetMap allows one request a second and wants the
 User-Agent that names this app; look each place up once and keep the answer,
 including "looked for, not found".
 
+`outline.py` (the house, its annexes and its plot, from the cadastre and
+OpenStreetMap) is looked up only at a pin that is the building (sale,
+cadastre, verified, advertised): at a street pin the outline is a neighbour's.
+Its figures are estimates shown beside the notice's; they never change a score.
+
 ## One app, one of each
 
 This is a desktop app (`app.py` → `dashboard.py` in its own window). Keep it
