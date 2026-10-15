@@ -6,7 +6,6 @@ import re
 import time
 import urllib.parse
 from html import unescape as _unescape
-import warnings
 from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
@@ -50,10 +49,8 @@ def eleiloes_tipo(item: dict) -> str:
 
 
 def _eleiloes_session():
-    # e-leiloes serves an incomplete certificate chain; verification stays off
-    # for this host only, and only its warning is silenced.
-    warnings.filterwarnings("ignore", message="Unverified HTTPS request")
-    return make_session(verify=False, timeout=30)
+    """Authenticate HTTPS normally; never bypass a certificate-chain failure."""
+    return make_session(verify=True, timeout=30)
 
 
 @register("eleiloes", "PT")
