@@ -1659,7 +1659,12 @@ def apply_climate_guardrail(result: dict, climate: dict) -> dict:
     types are never touched; the original figures are kept beside."""
     from letters import parse_bid
     grade, m = climate.get("grade", "unknown"), climate.get("bid_multiplier", 1.0)
-    if climate.get("confidence") != "exact":
+    confidence = climate.get("confidence", "unknown")
+    # "approximate" or "unknown" → position or data too coarse for a money decision.
+    # "exact" and "hazard_data_incomplete" → the grade is still evidence-based (a
+    # confirmed "poor" from extreme heat or burns applies even if flood/fire layers
+    # are absent), so the guardrail may fire for those.
+    if confidence in ("approximate", "unknown"):
         note = {"applied": False, "grade": grade,
                 "text": "Climate guardrail not applied: the position or the climate data is not exact."}
     elif m >= 1:

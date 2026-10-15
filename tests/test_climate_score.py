@@ -8,7 +8,10 @@ import dashboard
 from scoring import CLIMATE_BID_MULTIPLIER, climate_score, score_detail
 
 PLOT = dict(source="eleiloes", country="PT", title="Prédio rústico", tipo="terreno", area_m2=40000, price=9000)
-MILD = {"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1}}
+# Full hazard coverage: both flood_m and fire_danger present (benign values) so
+# climate_score's F03 hazard-completeness check passes for these test cases.
+MILD = {"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1},
+        "flood_m": 0.0, "fire_danger": {"high_days_2090": 0}}
 
 
 def test_water_with_low_flood_risk_is_a_plus():

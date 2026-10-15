@@ -746,6 +746,33 @@ EXACT_ENOUGH = {"sale", "street", "cadastre", "verified", "advertised"}
 # A hamlet or village pin is not the plot, but water within a kilometre of it
 # is still worth knowing (and says "approx.").
 NEAR_ENOUGH = {"village"}
+
+# Purpose-specific location capability tiers (F04).
+# "street" and "advertised" are close enough for distances and climate lookups
+# but cannot satisfy building-level due diligence — the pin may be the street
+# centre or an unverified seller-supplied pin, not the legal address of the unit.
+BUILDING_EXACT = frozenset({"sale", "cadastre", "verified"})
+# Precision values in EXACT_ENOUGH that are useful for research distances and
+# climate but are NOT building-level: street-centre and unverified advertised pins.
+RESEARCH_USABLE = EXACT_ENOUGH  # street + advertised are here; village is not
+
+
+def location_capability(precision: str | None) -> str:
+    """Return the highest capability level this precision supports.
+
+    "building"    — can satisfy building-level due diligence (sale, cadastre, verified).
+    "research"    — useful for distances and climate but not for building gate
+                    (street, advertised: close but unverified/unguaranteed).
+    "approximate" — town/parish/village: rough area, no local hazard conclusions.
+    "none"        — no position at all.
+    """
+    if not precision:
+        return "none"
+    if precision in BUILDING_EXACT:
+        return "building"
+    if precision in RESEARCH_USABLE:
+        return "research"
+    return "approximate"
 WATER_APPROX_RADIUS_M = 1000
 _WATER_KIND = {"river": "river", "stream": "stream", "canal": "canal", "reservoir": "reservoir",
                "lake": "lake", "pond": "pond", "water": "water"}

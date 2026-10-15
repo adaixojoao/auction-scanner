@@ -3,7 +3,8 @@ import json
 
 from scoring import score_detail
 
-MILD = {"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1}}
+MILD = {"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1},
+        "flood_m": 0.0, "fire_danger": {"high_days_2090": 0}}
 SALE = json.dumps({"lat": 41.18, "lon": -8.69})
 
 

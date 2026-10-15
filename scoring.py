@@ -2325,9 +2325,23 @@ def climate_score(c: dict | None, kind: str | None = None) -> dict:
         at_most("good")
         reasons.append("position approximate (town or parish): local risks count half and "
                        "cannot make the grade poor")
+    # F03: missing hazard layers mean we cannot rule out flood or fire risk.
+    # Both flood_m and fire_danger must be present for a grade above "caution".
+    hazard_incomplete = c.get("flood_m") is None or c.get("fire_danger") is None
+    confidence = "exact" if exact else "approximate"
+    if hazard_incomplete:
+        at_most("caution")
+        confidence = "hazard_data_incomplete"
+        missing = []
+        if c.get("flood_m") is None:
+            missing.append("flood")
+        if c.get("fire_danger") is None:
+            missing.append("fire danger")
+        reasons.append(f"hazard data incomplete ({', '.join(missing)} layer missing): "
+                       f"grade capped at caution")
     return {"score": round(score), "grade": grade, "reasons": reasons, "flags": flags,
             "bid_multiplier": CLIMATE_BID_MULTIPLIER[grade] if exact else 1.0,
-            "confidence": "exact" if exact else "approximate"}
+            "confidence": confidence}
 
 
 def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[str],

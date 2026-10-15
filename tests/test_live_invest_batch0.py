@@ -14,7 +14,8 @@ from conftest import FakeResponse
 from scoring import climate_score, score_detail
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
-MILD = {"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1}}
+MILD = {"hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1},
+        "flood_m": 0.0, "fire_danger": {"high_days_2090": 0}}
 SALE = json.dumps({"lat": 41.18, "lon": -8.69, "precision": "sale"})
 
 
@@ -109,8 +110,8 @@ def test_li03_both_mode_ignores_nested_goal_weights(monkeypatch):
 
 
 def test_li04_hazard_grade_moves_with_preference_weights():
-    # Heat only. At the default weight the grade is good; at weight 0 it is caution.
-    climate = {"hot_days": {"rcp45_2071-2100": 0}}
+    # Grade must be stable regardless of weight slider values (F03 corrected contract).
+    climate = {"hot_days": {"rcp45_2071-2100": 0}, "flood_m": 0.0, "fire_danger": {"high_days_2090": 0}}
     captured = {}
     real = scoring.climate_score
 
@@ -131,22 +132,22 @@ def test_li04_hazard_grade_moves_with_preference_weights():
     assert at_one == at_zero == "good"
 
 
-# LI-05. A reassuring grade does not require flood or fire coverage.
+# LI-05. Missing hazard layers must cap the grade at caution (F03 corrected contract).
 
 
-def test_li05_partial_climate_can_grade_excellent_without_flood_or_fire():
+def test_li05_partial_climate_cannot_grade_excellent_without_hazard_layers():
     climate = {"hot_days": {"rcp45_2071-2100": 0}, "water_km": 0.2,
                "stress": {"stress_2080": 1}}
     got = climate_score(climate, "home")
-    assert got["grade"] == "excellent"
-    assert "flood_m" not in climate and "fire" not in climate and "fire_danger" not in climate
-    assert "flood" not in got["flags"] and "fire" not in "".join(got["flags"])
+    assert got["grade"] in ("poor", "caution")
+    assert got["confidence"] == "hazard_data_incomplete"
+    assert "flood_m" not in climate and "fire_danger" not in climate
 
 
-# LI-06. Street and advertised pins pass the both-mode building gate.
+# LI-06. Street and advertised pins score normally but do not reach building-level (F04 corrected contract).
 
 
-def test_li06_street_and_advertised_pins_pass_the_building_gate(monkeypatch):
+def test_li06_street_and_advertised_pins_score_but_not_building_level(monkeypatch):
     import geo
     _priced(monkeypatch)
     # A top-level lat/lon is always precision "sale". The street pin has to sit in geo.
@@ -156,10 +157,8 @@ def test_li06_street_and_advertised_pins_pass_the_building_gate(monkeypatch):
         {"geo": {"lat": 41.18, "lon": -8.69, "precision": "advertised"}}))
     assert score_detail(street, mode="both", now=NOW)[0] > 0
     assert score_detail(advertised, mode="both", now=NOW)[0] > 0
-    assert geo.location_confidence(street)["level"] == "street"
-    # "advertised" is not in LEVEL_OF, so the confidence label falls through.
-    assert geo.location_confidence(advertised)["level"] == "area"
-    assert geo.location_confidence(advertised)["precision"] == "advertised"
+    assert geo.location_capability("street") == "research"   # not building-level (F04)
+    assert geo.location_capability("advertised") == "research"
 
 
 # LI-07. The gate uses the notice floor; valuation and the bid cap use the stored area.
