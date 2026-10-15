@@ -29,7 +29,6 @@ import logging
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -239,13 +238,12 @@ def _auto_enabled(root: str) -> bool:
 
 
 def _scan_running(root: str) -> bool:
-    """A scan holds scan.lock. A lock left behind by a scan that was stopped
-    (app closed or killed, PC shut down) does not count: its process is gone.
-    It used to count for 3 hours, and the app started without updating."""
+    """A live scan holds scan.lock's OS lock, however long it has run. A lock
+    left by a scan that was stopped (app closed or killed, PC shut down) does
+    not count: the system dropped it with the process. A lock file in the old
+    format counts for 3 hours while its pid is alive, as before."""
     from locks import lock_holder
-    lock = os.path.join(root, "scan.lock")
-    return (os.path.exists(lock) and time.time() - os.path.getmtime(lock) < 3 * 3600
-            and lock_holder(lock) is not None)
+    return lock_holder(os.path.join(root, "scan.lock"), legacy_max_age=3 * 3600) is not None
 
 
 def update_on_start(root: str = HERE) -> bool:
