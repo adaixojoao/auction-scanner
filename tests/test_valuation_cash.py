@@ -32,7 +32,17 @@ def _exact_evidence(grade="good"):
     return {"climate": clim, "location": {"level": "exact", "label": "Exact location"}}
 
 
-# ─── F07: renovation deducted once, not twice ────────────────────────────────
+# ─── F07: renovation deducted once, not twice; unknown MV blocks bid cap ─────
+
+def test_unknown_market_value_blocks_bid_cap():
+    """When market value is unknown, the bid cap must not be computed (F07 — unknown MV blocks)."""
+    # No local price series → value is None → bid cap blocked
+    cap = bidcap.calculate_bid_cap(_home(concelho="NoSuchPlace_XYZ"), _settings(), _exact_evidence())
+    assert cap["recommended_bid"] is None
+    assert cap["basis"] is None
+    assert cap["market_value_confidence"] == "unknown"
+    assert any("market value is unknown" in r.lower() for r in cap["reasons"])
+
 
 def test_ruin_value_base_equals_sound_home_value_base():
     """After F07 fix, the estimated value base is the after-work market price for both (F07)."""
@@ -101,3 +111,62 @@ def test_all_in_changes_when_contingency_changes():
     low_cont = bidcap.calculate_bid_cap(_home(), _settings(contingency_pct=5), _exact_evidence())
     high_cont = bidcap.calculate_bid_cap(_home(), _settings(contingency_pct=20), _exact_evidence())
     assert low_cont["all_in_high"] != high_cont["all_in_high"]
+
+
+# ─── F08: over_cash uses the same scenario as bidcap (reserve in filter) ─────
+
+def test_over_cash_includes_reserve_when_settings_given():
+    """over_cash with settings must include reserve; without settings it must not (F08)."""
+    item = _home(price=80000)
+    # money_out (no reserve) gives the baseline all-in
+    baseline = costs.money_out(item)["amount"]
+    # With reserve the total must be higher
+    reserve = costs.risk_reserve(item, _settings()["bid_cap"])
+    assert reserve > 0, "test requires nonzero reserve"
+    result_with = costs.over_cash(item, baseline, settings=_settings())
+    result_without = costs.over_cash(item, baseline)
+    # Without reserve the item is exactly at the cash limit — not hidden
+    assert result_without is None, "without reserve, baseline cash should pass"
+    # With reserve the total exceeds baseline cash — item is hidden
+    assert result_with is not None, "with reserve, same cash limit should fail"
+    assert "reserve" in result_with
+
+
+def test_over_cash_reserve_matches_bidcap_scenario():
+    """reserve used in over_cash must equal the bidcap-style risk_reserve (F08 — one scenario)."""
+    item = _home(price=80000)
+    bid_cap_reserve = costs.risk_reserve(item, _settings()["bid_cap"])
+    baseline = costs.money_out(item)["amount"]
+    # Cash set to exactly baseline + reserve should pass
+    assert costs.over_cash(item, baseline + bid_cap_reserve, settings=_settings()) is None
+    # Cash set to one euro below baseline + reserve should fail
+    assert costs.over_cash(item, baseline + bid_cap_reserve - 1, settings=_settings()) is not None
+
+
+def test_risk_reserve_base_matches_bidcap_base():
+    """risk_reserve and bidcap must use the same market-value base (F08 — unified scenario).
+
+    Both use market_value_estimate when available; both fall back to price when not.
+    This ensures the shortlist cash filter and the bid cap display are one scenario.
+    """
+    import scoring
+    item = _home(price=80000)
+    mv = scoring.market_value_estimate(item)
+    if mv is not None:
+        # When MV is available, risk_reserve base == MV
+        reserve_from_costs = costs.risk_reserve(item, _settings()["bid_cap"])
+        expected = mv * _settings()["bid_cap"]["contingency_pct"] / 100 + _settings()["bid_cap"]["adviser_reserve_eur"]
+        assert abs(reserve_from_costs - expected) < 0.01, (
+            f"risk_reserve={reserve_from_costs:.2f}, expected MV-based={expected:.2f}")
+        # bidcap's internal reserve field must equal risk_reserve
+        cap = bidcap.calculate_bid_cap(item, _settings(), _exact_evidence())
+        assert cap["risk_reserve"] is not None
+        assert abs(cap["risk_reserve"] - reserve_from_costs) < 1, (
+            f"bidcap reserve={cap['risk_reserve']}, risk_reserve={reserve_from_costs:.2f}")
+    else:
+        # When MV is not available, risk_reserve falls back to acquisition price
+        from common import price_to_pay
+        price = float(price_to_pay(item) or item.get("price") or 0)
+        reserve_from_costs = costs.risk_reserve(item, _settings()["bid_cap"])
+        expected = price * _settings()["bid_cap"]["contingency_pct"] / 100 + _settings()["bid_cap"]["adviser_reserve_eur"]
+        assert abs(reserve_from_costs - expected) < 0.01

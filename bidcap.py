@@ -128,9 +128,14 @@ def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | Non
     if p.get("require_exact") and not (exact_location and exact_climate):
         reasons.append("No bid cap: Settings → Maximum bid asks for an exact location and climate data first.")
         return out
-    base = value["amount"] if value else budget
+    if value is None:
+        # Unknown valuation support blocks financial promotion (F07).
+        reasons.append("No bid cap: market value is unknown"
+                       + (f" — {unknowns[0]} is missing." if unknowns else "."))
+        return out
+    base = value["amount"]
     if not base:
-        reasons.append("No bid cap: nothing to work from" + (f" ({unknowns[0]} is missing)." if unknowns else "."))
+        reasons.append("No bid cap: nothing to work from.")
         return out
 
     adviser = float((p.get("adviser_reserve_by_country") or {}).get(country, p.get("adviser_reserve_eur") or 0))
@@ -147,10 +152,10 @@ def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | Non
     elif value and not exact_climate and clim.get("grade") in ("caution", "poor"):
         reasons.append(f"Climate {clim.get('grade')} from an approximate position: not held back until "
                        "the location is exact.")
-    margin = base * float(p.get("margin_pct") or 0) / 100 if value else 0.0
+    margin = base * float(p.get("margin_pct") or 0) / 100
 
-    room_max = (value["amount"] - reno_low - reserve - climate_adj) if value else budget - reno_low - reserve
-    room_rec = (value["amount"] - reno_high - reserve - climate_adj - margin) if value else budget - reno_high - reserve
+    room_max = value["amount"] - reno_low - reserve - climate_adj
+    room_rec = value["amount"] - reno_high - reserve - climate_adj - margin
     budget_binds = False
     if value and budget:
         budget_binds = budget - reno_high < room_rec
@@ -169,9 +174,8 @@ def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | Non
                 "all_in_high": round(recommended + fees_high + reno_high + reserve),
                 "recommended_bid": recommended, "absolute_max_bid": absolute})
 
-    rows = [{"label": "Estimated value" if value and value["basis"] == "market"
-             else "Your land target" if value else "Your all-in budget", "amount": base,
-             "note": value["note"] if value else "Settings → Maximum bid: no value to work from, so your budget"}]
+    rows = [{"label": "Estimated value" if value["basis"] == "market" else "Your land target",
+             "amount": base, "note": value["note"]}]
     if work:
         rows.append({"label": "Renovation allowance", "amount": -reno_high, "note": work["note"] + " (high end)"})
     rows.append({"label": "Taxes and fees", "amount": -fees_high,

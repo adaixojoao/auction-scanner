@@ -55,6 +55,70 @@ def test_courtbid_without_token_is_an_error_not_a_silent_zero(db):
     assert result["status"] == "error" and "apify_token" in result["message"]
 
 
+# ---------------------------------------------------------------------------
+# F13 — scan scope tracking
+# ---------------------------------------------------------------------------
+
+def test_run_source_dict_return_passes_scope_to_scrape_log(db):
+    """Sources returning a dict set scope/pages_seen in scrape_log (F13)."""
+    from sources import Source, run_source
+
+    def _partial_source(db, max_price=100000, **_):
+        return {"count": 3, "scope": "partial", "pages_seen": 2}
+
+    src = Source("_test_partial", "PT", _partial_source)
+    result = run_source(db, src, max_price=100000)
+    assert result["status"] == "ok"
+    assert result["count"] == 3
+    row = db.execute("SELECT scope, pages_seen FROM scrape_log WHERE source='_test_partial'").fetchone()
+    assert row["scope"] == "partial"
+    assert row["pages_seen"] == 2
+
+
+def test_run_source_int_return_records_full_scope(db):
+    """Legacy int return is treated as a full run (F13 backward compat)."""
+    from sources import Source, run_source
+
+    def _legacy_source(db, max_price=100000, **_):
+        return 5
+
+    src = Source("_test_legacy", "PT", _legacy_source)
+    run_source(db, src, max_price=100000)
+    row = db.execute("SELECT scope FROM scrape_log WHERE source='_test_legacy'").fetchone()
+    assert row["scope"] == "full"
+
+
+def test_run_source_error_records_partial_scope(db, fake_http):
+    """Errors (and blocked) record scope='partial' so freshness clock does not advance (F13)."""
+    from sources import Source, run_source, SourceUnavailable
+
+    def _blocked_source(db, max_price=100000, **_):
+        raise SourceUnavailable("bot wall")
+
+    src = Source("_test_blocked", "PT", _blocked_source)
+    run_source(db, src, max_price=100000)
+    row = db.execute("SELECT scope, status FROM scrape_log WHERE source='_test_blocked'").fetchone()
+    assert row["status"] == "blocked"
+    assert row["scope"] == "partial"
+
+
+def test_partial_scope_does_not_advance_freshness_clock(db):
+    """last_ok_by_source excludes partial-scope runs (F13)."""
+    from db import last_ok_by_source, record_scrape
+
+    record_scrape(db, "mysrc", count=10, status="ok", scope="full",
+                  timestamp="2026-01-01T00:00:00+00:00")
+    full_ts = last_ok_by_source(db).get("mysrc")
+    assert full_ts is not None
+
+    record_scrape(db, "mysrc", count=5, status="ok", scope="partial",
+                  timestamp="2026-06-01T00:00:00+00:00")
+    after_partial_ts = last_ok_by_source(db).get("mysrc")
+    assert after_partial_ts == full_ts, (
+        "partial scope run must not advance the freshness clock"
+    )
+
+
 ELEILOES_PAGE = {
     "list": [
         {"id": 101, "titulo": "Moradia em Arganil", "subtipoId": 21, "valorBase": 30000,

@@ -97,20 +97,29 @@ def test_good_condition_planning_uses_the_same_midpoint(db, add, monkeypatch):
     assert planned["incomplete"] is False
     _, why = score_detail(house, mode="invest", now=NOW)
     assert any(f"€{planned['amount']:,.0f}" in line for line in why)
-    cash = low + 1
-    assert low < cash < planned["amount"]
+    # Reserve is always included in the cash check (F08). Use low + reserve + 1 so that
+    # home mode (uses low end) passes while both mode (uses midpoint) fails.
     import config
+    from config import load_config
+    from costs import risk_reserve
     from db import load_listings
+    reserve = risk_reserve(house, load_config().get("bid_cap"))
+    cash = low + reserve + 1
+    assert low + reserve < cash < planned["amount"] + reserve
     config.save_config({"cash_on_hand": cash, "filters": {"min_score": 0}})
     add("eleiloes", "midpoint", title="Moradia em bom estado", price=20000, area_m2=80,
         description="moradia em bom estado")
     hidden = [it for it in load_listings(db, filters={"min_score": 0}, mode="both", include_hidden=True)
               if it["id"] == "eleiloes:midpoint"]
-    assert hidden and f"{planned['amount']:,.0f}" in hidden[0]["hidden_reason"]
+    # The hidden reason includes the midpoint planning text. With reserve from config the
+    # total shown may exceed planned["amount"], so we check for the midpoint label instead.
+    assert hidden and "middle of the repair range" in hidden[0]["hidden_reason"]
     assert "eleiloes:midpoint" not in {it["id"] for it in load_listings(db, filters={"min_score": 0}, mode="both")}
     home_ids = {it["id"] for it in load_listings(db, filters={"min_score": 0}, mode="home")}
     assert "eleiloes:midpoint" in home_ids
-    view = costs.planning_view(house, cash)
+    # Verify planning_view uses the midpoint. Use a budget just above the low
+    # end (no reserve) so planning_view itself says "over" the midpoint.
+    view = costs.planning_view(house, low + 1)
     assert view["planning_amount"] == planned["amount"]
     assert view["status"] == "over"
     assert view["renovation_point"] == "middle"

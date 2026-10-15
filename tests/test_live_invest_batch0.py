@@ -207,12 +207,12 @@ def test_li08_predicted_close_ranks_but_cash_uses_the_current_price(db, add, mon
     seen = {}
     real = costs.over_cash
 
-    def wrap(item, cash, bid=None, typical=False):
+    def wrap(item, cash, bid=None, typical=False, basis=None, settings=None):
         if item["id"] == "eleiloes:live":
             seen["bid"] = bid
             seen["predicted"] = (item.get("predicted_final") or {}).get("price")
             seen["pay"] = costs.money_out(item, bid=bid, typical=typical)["amount"]
-        return real(item, cash, bid=bid, typical=typical)
+        return real(item, cash, bid=bid, typical=typical, basis=basis, settings=settings)
 
     monkeypatch.setattr(costs, "over_cash", wrap)
     rows = {it["id"]: it for it in load_listings(db, apply_min_score=False, mode="invest", now=NOW)}

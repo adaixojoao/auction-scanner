@@ -151,7 +151,8 @@ def test_shortlisted_listing_joins_offers_even_below_the_candidate_score(client,
 
 
 def test_offers_rank_court_and_bank_sales_not_portal_ads_or_a_home_to_live_in(client, add):
-    add("fotocasa", "ad", "ES", title="Casa en buen estado junto al mar", price=20000,
+    # price=80000, area=100, Lugo ES (€1404/m² → 33% gap, under 70% extreme-discount threshold)
+    add("fotocasa", "ad", "ES", title="Casa en buen estado junto al mar", price=80000,
         area_m2=100, concelho="Lugo", district="Lugo")
     add("citius", "court", title="Moradia em bom estado", price=20000, area_m2=100, concelho="Moura")
     review = client.get("/api/offers").get_json()["review"]

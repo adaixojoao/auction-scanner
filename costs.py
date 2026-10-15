@@ -30,7 +30,7 @@ import re
 
 from common import (counted_flats, find_floor_area, footprint_figure, land_figure, normalize,
                     parse_price, price_to_pay)
-from scoring import INVEST_VALUE_MAX_M2, categorize, condition, property_kind
+from scoring import INVEST_VALUE_MAX_M2, categorize, condition, market_value_estimate, property_kind
 
 IMT_YEAR = 2025
 
@@ -950,20 +950,50 @@ def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
             "status": status, "note": note}
 
 
+def risk_reserve(item: dict, settings: dict | None = None) -> float:
+    """The risk reserve for one listing, using the same base as the bid cap (F08).
+
+    Base is estimated market value (area × local_price_per_m²), matching bidcap.
+    Falls back to acquisition price when market value is not established (same
+    fallback as bidcap's `value if value else budget`). Returns 0 when settings
+    is None or empty — caller passes config["bid_cap"]; no config fallback here.
+    """
+    if not settings:
+        return 0.0
+    base = market_value_estimate(item)
+    if base is None:
+        from common import price_to_pay
+        base = float(price_to_pay(item) or item.get("price") or 0)
+    if not base:
+        return 0.0
+    country = (item.get("country") or "PT").upper()
+    adviser = float((settings.get("adviser_reserve_by_country") or {}).get(country,
+                     settings.get("adviser_reserve_eur") or 0))
+    return base * float(settings.get("contingency_pct") or 0) / 100 + adviser
+
+
 def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: bool = False,
-              basis: str | None = None) -> str | None:
+              basis: str | None = None, settings: dict | None = None) -> str | None:
     """Why this purchase is over the cash you can lose, or None.
 
     A cash figure of 0 is not set, and hides nothing: the Offers page refuses
-    the bid instead.
+    the bid instead. `settings` is the full config dict; when given, the risk
+    reserve (contingency + adviser) is added to the all-in figure so the cash
+    check uses the same scenario as the bid cap display (F08).
     """
     if not cash or cash <= 0:
         return None
     out = (selected_planning(item, bid=bid, basis=basis) if typical
            else money_out(item, bid=bid, typical=False, basis=basis))
-    if not out or out["amount"] <= cash:
+    if not out:
         return None
-    return f"cash €{out['amount']:,.0f} all-in is over the €{cash:,.0f} you can lose ({out['detail']})"
+    reserve = risk_reserve(item, (settings or {}).get("bid_cap"))
+    total = out["amount"] + reserve
+    if total <= cash:
+        return None
+    res_str = f" + €{reserve:,.0f} reserve" if reserve else ""
+    return (f"cash €{total:,.0f} all-in{res_str} is over the €{cash:,.0f} you can lose "
+            f"({out['detail']})")
 
 
 def over_before_repairs(item: dict, cash: float) -> bool:

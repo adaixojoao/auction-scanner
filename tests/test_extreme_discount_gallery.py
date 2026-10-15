@@ -85,6 +85,45 @@ def test_extreme_discount_visible_in_listing_blocked_from_load_best(db, add, mon
     assert visible[0]["id"] not in ids, "extreme-discount item must not reach finalist path"
 
 
+def test_cleared_extreme_discount_reaches_load_best(db, add, monkeypatch):
+    """After clear_extreme_discount(), the item graduates to the finalist path (F05 clearance)."""
+    from db import clear_extreme_discount, forget_scores, load_best, load_listings, revoke_extreme_clearance
+    add("eleiloes", "x2", title="Moradia T3", tipo="moradia",
+        area_m2=80, price=10000, description="moradia em bom estado")
+    monkeypatch.setattr(scoring, "local_price", lambda item: (2000.0, "city series"))
+    forget_scores(db)
+    listing_id = "eleiloes:x2"
+    # Before clearance: blocked from load_best
+    best_before = {it["id"] for it in load_best(db, now=NOW, apply_min_score=False)}
+    assert listing_id not in best_before, "should be blocked before clearance"
+    # After clearance: passes the gate
+    clear_extreme_discount(db, listing_id, note="price confirmed by court record")
+    best_after = {it["id"] for it in load_best(db, now=NOW, apply_min_score=False)}
+    assert listing_id in best_after, "cleared item must reach finalist path"
+    # Still visible in listing tab with extreme_discount flag (unchanged)
+    visible = load_listings(db, apply_min_score=False, mode="invest", now=NOW)
+    item = next((it for it in visible if it["id"] == listing_id), None)
+    assert item is not None and item.get("extreme_discount") is True
+    # Revoking clearance re-blocks the item
+    revoke_extreme_clearance(db, listing_id)
+    best_revoked = {it["id"] for it in load_best(db, now=NOW, apply_min_score=False)}
+    assert listing_id not in best_revoked, "revoked clearance must re-block the item"
+
+
+def test_clearance_does_not_affect_unflagged_items(db, add, monkeypatch):
+    """clear_extreme_discount on an item without the flag has no side effects (F05)."""
+    from db import clear_extreme_discount, forget_scores, load_best
+    add("eleiloes", "x3", title="Moradia T3", tipo="moradia",
+        area_m2=80, price=55000, description="moradia em bom estado")
+    monkeypatch.setattr(scoring, "local_price", lambda item: (2000.0, "city series"))
+    forget_scores(db)
+    listing_id = "eleiloes:x3"
+    # No extreme_discount flag (55k / 160k mv = 66% gap, under 70% threshold)
+    clear_extreme_discount(db, listing_id, note="pre-emptive clearance — no-op")
+    best = {it["id"] for it in load_best(db, now=NOW, apply_min_score=False)}
+    assert listing_id in best, "non-flagged item must still reach finalist path"
+
+
 # ─── F10: gallery-change requeue ─────────────────────────────────────────────
 
 def _with_photo_check(urls, shows_house=True, gallery_hash_override=None):

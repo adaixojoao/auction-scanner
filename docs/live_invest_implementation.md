@@ -10,10 +10,10 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | `evaluate(evidence, policy, now) → Decision` with 14 requirement checks; pure, no I/O |
-| Implementation | `evaluator.py` — `evaluate()`, `Requirement`, `Decision` dataclasses |
+| Implementation | `evaluator.py` — `evaluate()`, `Requirement`, `Decision` dataclasses; `db.py` — `_shadow_evaluate(item, now)` builds evidence from a scored item and calls `evaluate()` in shadow mode (result logged at DEBUG, never gates the item); called from `load_listings()` for mode "both" and "invest" after `_score_one()` |
 | Tests | `tests/test_evaluator.py` |
 | Status | **partial** |
-| Gap | Shadow mode: `evaluate()` is never called from `db.load_listings()`, `dashboard.py`, or any publication path. It exists and is tested in isolation but has zero production wiring. Decision-time historical records and benchmark tooling: **not implemented**. |
+| Gap | Shadow wiring is now in the invest/both path; `dashboard.py`, `report.py`, `telegram_*.py` and the AI export path are not wired (they all call `load_listings()` which does invoke shadow-eval). Decision-time historical records (persisting `Decision` per listing per revision) and benchmark tooling: **not implemented**. The evidence dict built by `_shadow_evaluate` is best-effort from scoring fields; some evaluator evidence keys (e.g. `ownership_type`, `delivery_terms`, `title_status`) are not populated by scrapers today and will produce UNKNOWN outcomes. |
 
 ---
 
@@ -58,10 +58,10 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | Flag feeds a research queue before soft visibility cutoffs; unverified anomalies cannot become finalists; items remain researchable/enrichable |
-| Implementation | `scoring.py` — `item["extreme_discount"] = True` set during invest scoring; `db.py` — `extreme_discount` in `_DERIVED` (persisted in score cache); `load_best()` collects flagged IDs across all mode passes and post-filters before returning finalist list |
-| Tests | `tests/test_extreme_discount_gallery.py` — 5 tests incl. `test_extreme_discount_visible_in_listing_blocked_from_load_best`; `tests/test_modes.py::test_investment_does_not_believe_an_impossible_discount` |
-| Status | **partial** |
-| Gap | (1) The flag is stored in the per-mode score cache. All real `load_best` callers use `modes=None` or `EARNING_MODES` (includes "invest"), so invest-mode always runs in the same `load_best` call. The post-filter fires before the result is returned. A caller restricted to `modes=("home",)` would miss the flag — no such caller exists today. (2) **No investigation clearance record exists**: once flagged, an item can never reach `load_best` except after the score cache expires (cache key changes if the item's columns change). A dedicated clearance mechanism (investigation record, separate DB field) is needed for the "reviewed and promoted" path. |
+| Implementation | `scoring.py` — `item["extreme_discount"] = True` set during invest scoring; `db.py` — `extreme_discount` in `_DERIVED` (persisted in score cache); `load_best()` collects flagged IDs across all mode passes and post-filters; `investigation_clearances` table (v25 migration) + `clear_extreme_discount()` / `revoke_extreme_clearance()` / `_extreme_clearances()` — cleared items pass the gate |
+| Tests | `tests/test_extreme_discount_gallery.py` — 7 tests incl. `test_extreme_discount_visible_in_listing_blocked_from_load_best`, `test_cleared_extreme_discount_reaches_load_best`, `test_clearance_does_not_affect_unflagged_items`; `tests/test_modes.py::test_investment_does_not_believe_an_impossible_discount` |
+| Status | **implemented and verified** |
+| Gap | A caller restricted to `modes=("home",)` would miss the flag — no such caller exists today. The flag is set only during invest-mode scoring; all real callers include invest. |
 
 ---
 
@@ -82,10 +82,10 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | Do not assume raw local benchmark is after-work value; explicit supported as-is/after-work bases; unknown valuation support blocks financial promotion |
-| Implementation | `bidcap.py` — `_value()` returns raw `mv` (no condition factor); note says "After-work value — renovation is deducted separately" |
-| Tests | `tests/test_valuation_cash.py` — 3 tests for F07 |
+| Implementation | `bidcap.py` — `_value()` returns market value (area × local_price_per_m²) with `basis="market"`, note says "After-work value — renovation is deducted separately"; when `value is None` (no area or no local price), `calculate_bid_cap` returns early with "No bid cap: market value is unknown" and `basis=None` — the bid cap is blocked |
+| Tests | `tests/test_valuation_cash.py` — 4 tests for F07 incl. `test_unknown_market_value_blocks_bid_cap` |
 | Status | **partial** |
-| Gap | The note says "after-work value" but `mv = area × local_price_per_m2` is a municipal median, not a surveyed value. There is no explicit "as-is" basis separate from "after-work". `market_value_confidence == "unknown"` does not block the bid cap or financial promotion — the cap is computed regardless. The "basis" field exists but `bidcap.py` has no code path to return `basis = None` when confidence is unknown; it only adds to `unknowns[]`. |
+| Gap | No explicit "as-is" basis separate from "after-work". The note says "after-work value" but `mv = area × local_price_per_m²` is a municipal median, not a surveyed after-work valuation. When `value["confidence"] == "low"` (city estimate or unknown condition) the bid cap is still computed — only a fully missing `value` (None) is blocked. |
 
 ---
 
@@ -94,10 +94,10 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | `bid + obligations + fees + required_works + risk_reserve` fits `available_cash`; bid ceiling, shortlist, detail view and offer checks use the same scenario |
-| Implementation | `bidcap.py` — `all_in_low/high` now include `risk_reserve`; `costs.py` — `over_cash()` calls `money_out()` |
-| Tests | `tests/test_valuation_cash.py` — 4 tests for F08 |
-| Status | **partial** |
-| Gap | `money_out()` (used by `over_cash()` for listing filter) computes `all_in["low"]` from `estimate()`, which sums `price + fees + renovation["low"]` — it does **not** include `risk_reserve`. The bidcap display shows `all_in_low = bid + fees + reno + reserve`, but the listing-filter gate (`over_cash`) does not include reserve. A property that is just within the visible cash threshold without reserve counted would be hidden by bidcap's all_in but visible in the listing filter. The two checks use different cash definitions. |
+| Implementation | `bidcap.py` — `all_in_low/high` include `risk_reserve`; `costs.py` — `risk_reserve()` uses `market_value_estimate(item)` as the contingency base (matching bidcap), falling back to acquisition price when MV is unavailable; `over_cash(item, cash, settings=cfg)` adds reserve to the all-in total; `db.py` — `load_listings` loads full config once via `_load_config_safe()` and passes it to both `over_cash` call sites (both-mode and standard mode) |
+| Tests | `tests/test_valuation_cash.py` — 10 tests for F07/F08 incl. `test_over_cash_includes_reserve_when_settings_given`, `test_over_cash_reserve_matches_bidcap_scenario`, `test_risk_reserve_base_matches_bidcap_base` (cross-checks `risk_reserve` against `bidcap.calculate_bid_cap`'s reserve field) |
+| Status | **implemented and verified** |
+| Gap | None. Both `risk_reserve()` and `bidcap.calculate_bid_cap` use `market_value_estimate(item)` as the reserve base (with the same acquisition-price fallback), so filtering, bid ceilings, and offer checks use one scenario. |
 
 ---
 
@@ -130,10 +130,10 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | Content changes without count changes invalidate affected decisions; freshness expiry invalidates location, market data, hazards, checklist, identity and price revisions |
-| Implementation | `db.py` — `evidence_revisions` table, `record_evidence_revision()`, content-hash-based revision counter |
-| Tests | No dedicated test file for F11; revision recording is called from `load_listings()` climate writes |
+| Implementation | `db.py` — `evidence_revisions` table, `record_evidence_revision()`, content-hash-based revision counter; `load_listings()` batch-fetches `SUM(rev)` per listing from `evidence_revisions` before the scoring loop and includes it in the score cache key — any revision increment busts the cache and triggers re-scoring |
+| Tests | `tests/test_db.py::test_evidence_revision_busts_score_cache` |
 | Status | **partial** |
-| Gap | Revision records are stored but the score cache key (`sha1(repr(scored_cols, status, offer_outcome, context, unconfirmed_since))`) does not include `evidence_revisions` state. A location or hazard revision does not automatically invalidate the cached score unless a scored column also changed. No freshness expiry logic exists that consults `evidence_revisions` to expire decisions. |
+| Gap | No freshness expiry logic consults `evidence_revisions` to expire *decisions* (F01 evaluator decisions — not yet wired). The revision-to-rescore path is implemented; the revision-to-expire-decision path requires F01 wiring. |
 
 ---
 
@@ -154,10 +154,10 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | Source adapters emit scan completeness; `scope = "partial"` does not advance freshness clock; `last_ok_by_source()` excludes partial runs |
-| Implementation | `db.py` — `scope TEXT`, `pages_seen INTEGER` in `scrape_log`; `log_scrape()` accepts `scope`; `last_ok_by_source()` excludes `scope = 'partial'` |
-| Tests | `tests/test_db.py` (pre-existing scope tests) |
-| Status | **partial** |
-| Gap | No adapter in `adapters/` was found to pass `scope=` to `log_scrape()`. The schema and `last_ok_by_source()` logic are in place but no adapter writes a scope value — all runs record `scope = NULL`, which is treated as "full". The feature is inert. |
+| Implementation | `db.py` — `scope TEXT`, `pages_seen INTEGER` in `scrape_log`; `record_scrape()` accepts `scope` and `pages_seen`; `last_ok_by_source()` excludes `scope = 'partial'`; `sources/__init__.py` — `run_source()` accepts dict returns `{"count", "scope", "pages_seen"}` from source functions; legacy int returns write `scope="full"`; errors and blocked sources write `scope="partial"` so a failed run does not advance the freshness clock |
+| Tests | `tests/test_sources.py` — 4 new F13 tests: `test_run_source_dict_return_passes_scope_to_scrape_log`, `test_run_source_int_return_records_full_scope`, `test_run_source_error_records_partial_scope`, `test_partial_scope_does_not_advance_freshness_clock` |
+| Status | **implemented and verified** |
+| Gap | No adapter yet returns a dict with `scope="partial"` (no adapter has mid-run budget truncation). The infrastructure is complete: any adapter can now opt in by returning `{"count": N, "scope": "partial", "pages_seen": N}`. NULL scope (if somehow written directly via `record_scrape`) is treated as full for backward compat. |
 
 ---
 
@@ -195,26 +195,31 @@ See F11 above.
 
 | Req | Description | Status |
 |---|---|---|
-| F01 | Pure evaluator / shadow mode | partial — wired to nothing |
+| F01 | Pure evaluator / shadow mode | partial — shadow call wired in invest/both path; no Decision persistence |
 | F02 | Identity map, stable keys | **implemented and verified** |
 | F03 | Hazard coverage cap | **implemented and verified** |
 | F04 | Location capability tiers | **implemented and verified** |
-| F05 | Extreme-discount finalist gate | **partial — critical gap** |
+| F05 | Extreme-discount finalist gate | **implemented and verified** |
 | F06 | Duplicate relations | **implemented and verified** |
 | F07 | Valuation basis | partial — no as-is basis, unknown doesn't block |
-| F08 | Cash scenario (reserve in filter) | partial — `over_cash` excludes reserve |
+| F08 | Cash scenario — unified MV-based reserve | **implemented and verified** |
 | F09 | Photo evidence quality gate | partial — `shows_house` single-boolean |
 | F10 | Gallery URL hash requeue | **implemented and verified** |
-| F11 | Evidence revision tracking | partial — revisions not in score cache key |
+| F11 | Evidence revision tracking | partial — rev-to-rescore wired; decision expiry needs F01 |
 | F12 | Typed availability states | **implemented and verified** |
-| F13 | Scan scope tracking | partial — no adapter writes scope value |
+| F13 | Scan scope tracking | **implemented and verified** |
 | F14 | Sale state disambiguation | **implemented and verified** |
 | F15 | Publication snapshot | **not implemented** |
 | F16 | (see F11) | partial |
 
-**Highest-risk unfinished prerequisite: F05 — extreme-discount finalist gate.**
-An `extreme_discount=True` item can appear in the shortlist, report, and Telegram
-alert at the same rank as a verified one. The flag is set during scoring but not
-persisted and not read by `load_best()` or the listing filter. Fix: persist the
-flag into `raw_json` during scoring, then gate finalist promotion in
-`load_listings()`.
+**Highest-risk remaining gap: F01 — evaluator in shadow mode only; no Decision persistence.**
+`evaluate()` is now called for every invest/both-mode listing from `load_listings()` via
+`_shadow_evaluate()`. Results are logged at DEBUG level but never persisted — there is no
+`evaluator_decisions` table, no per-listing Decision history, and no expiry check against
+`evidence_revisions`. Until a Decision store is added, the evaluator's outputs are
+observability-only (searchable in logs) and cannot drive finalist promotion.
+
+**Next highest-risk gap: F15 — no publication snapshot.**
+Each consumer (dashboard, report, Telegram, AI export) calls `load_listings()`/`load_best()`
+independently. A listing can appear in different states to different consumers if enrichment
+runs between calls. No central post-enrichment snapshot is serialised or shared.

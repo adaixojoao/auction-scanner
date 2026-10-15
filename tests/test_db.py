@@ -396,3 +396,26 @@ def test_a_hidden_listing_kept_slim_is_the_same_listing_read_in_full(db):
     from_kept = {it["id"]: it for it in load_listings(db, include_hidden=True, filters={"min_score": 99})}
     again = load_listings(db, include_hidden=True, filters={"min_score": 99}, where="id = ?", params=("eleiloes:2",))
     assert again[0] == from_kept["eleiloes:2"]
+
+
+def test_evidence_revision_busts_score_cache(db):
+    """An evidence update (location, hazard, etc.) invalidates the score cache (F11)."""
+    import db as dbmod
+    from common import make_listing
+    from db import load_listings, record_evidence_revision, upsert_listing
+    upsert_listing(db, make_listing("eleiloes", "1", title="Moradia T3", price=20000, area_m2=120,
+                                    description="Casa em bom estado"))
+    db.commit()
+    first = load_listings(db, apply_min_score=False)[0]
+    first_key = dbmod._SCORED["home"]["eleiloes:1"][0]
+    # Simulate an evidence update (e.g. climate or location revision)
+    record_evidence_revision(db, "eleiloes:1", "climate", {"grade": "good", "version": 1})
+    db.commit()
+    # Load again — the rev sum changed, so the cache key must change and score must be re-computed
+    calls = []
+    real = dbmod._score_one
+    dbmod.forget_scores(db)
+    monkeypatch_target = real  # use directly below
+    load_listings(db, apply_min_score=False)
+    new_key = dbmod._SCORED["home"]["eleiloes:1"][0]
+    assert new_key != first_key, "evidence revision must change the score cache key"

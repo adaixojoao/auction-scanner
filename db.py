@@ -41,7 +41,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -540,12 +540,29 @@ def _migrate_v24(db: sqlite3.Connection):
     _add_column(db, "scrape_log", "pages_seen", "INTEGER")
 
 
+def _migrate_v25(db: sqlite3.Connection):
+    """Investigation clearances for extreme-discount items (F05 / Milestone G).
+
+    An extreme-discount item is blocked from finalist promotion (load_best)
+    until it has been reviewed and cleared.  This table records that clearance.
+    Items without a row here remain in the research tab but never reach reports,
+    alerts or the Offers shortlist.
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS investigation_clearances (
+            listing_id  TEXT PRIMARY KEY,
+            cleared_at  TEXT NOT NULL,
+            note        TEXT
+        )
+    """)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
-               23: _migrate_v23, 24: _migrate_v24}
+               23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25}
 
 
 def init_db(db: sqlite3.Connection):
@@ -599,6 +616,42 @@ def get_evidence_revisions(db: sqlite3.Connection, listing_id: str) -> dict[str,
         "SELECT evidence_key, rev FROM evidence_revisions WHERE listing_id=?", (listing_id,)
     ).fetchall()
     return {r["evidence_key"]: r["rev"] for r in rows}
+
+
+# ─── Investigation clearances (F05) ──────────────────────────────────
+
+def clear_extreme_discount(db: sqlite3.Connection, listing_id: str,
+                           note: str | None = None) -> None:
+    """Record that `listing_id` has been investigated and cleared for finalist promotion.
+
+    After this call the item will pass the extreme-discount gate in load_best and
+    can appear in reports, alerts and the Offers shortlist.  The item remains visible
+    in the listing tab (load_listings) regardless.
+    """
+    db.execute(
+        "INSERT OR REPLACE INTO investigation_clearances (listing_id, cleared_at, note)"
+        " VALUES (?, ?, ?)",
+        (listing_id, utcnow_iso(), note),
+    )
+    db.commit()
+
+
+def revoke_extreme_clearance(db: sqlite3.Connection, listing_id: str) -> None:
+    """Remove an investigation clearance (e.g. after a re-score still shows extreme discount)."""
+    db.execute("DELETE FROM investigation_clearances WHERE listing_id=?", (listing_id,))
+    db.commit()
+
+
+def _extreme_clearances(db: sqlite3.Connection, listing_ids: set[str]) -> set[str]:
+    """Return the subset of `listing_ids` that have been cleared for finalist promotion."""
+    if not listing_ids:
+        return set()
+    placeholders = ",".join("?" * len(listing_ids))
+    rows = db.execute(
+        f"SELECT listing_id FROM investigation_clearances WHERE listing_id IN ({placeholders})",
+        tuple(listing_ids),
+    ).fetchall()
+    return {r["listing_id"] for r in rows}
 
 
 # ─── Writes ──────────────────────────────────────────────────────────
@@ -1105,6 +1158,15 @@ def _cash_on_hand() -> float:
         return 0.0
 
 
+def _load_config_safe() -> dict:
+    """Full config dict, or {} on any error."""
+    try:
+        from config import load_config
+        return load_config()
+    except Exception:
+        return {}
+
+
 def _work_limits() -> tuple[float, float]:
     """(common.check_max_price, common.light_checks_from) from the settings."""
     from common import check_max_price, light_checks_from
@@ -1509,6 +1571,45 @@ def _both_worth_reading(item: dict) -> bool:
     return not heavy_checks_spared(item, _cash_on_hand(), _work_limits()[1])
 
 
+def _shadow_evaluate(item: dict, now) -> None:
+    """Call evaluator.evaluate() in shadow mode and log the decision (F01).
+
+    Pure side-effect-free: result is logged at DEBUG, never gates the item.
+    Exceptions are swallowed so a broken evaluator cannot affect the UI.
+    """
+    try:
+        import evaluator
+        evidence = {
+            "property_identity": item.get("identity") or {},
+            "ownership_type": item.get("ownership_type"),
+            "occupation": item.get("occupation"),
+            "delivery_terms": item.get("delivery_terms"),
+            "title_status": item.get("title_status"),
+            "legal_access": item.get("legal_access"),
+            "raw_json": item.get("raw_json"),
+            "location_precision": item.get("location_precision"),
+            "beach": item.get("beach"),
+            "floor_m2": item.get("area_m2"),
+            "floor_source": item.get("area_source"),
+            "climate": item.get("climate"),
+            "sale_availability": item.get("sale_availability"),
+            "apparent_discount_pct": item.get("invest_discount_pct"),
+            "anomaly_investigated": bool(item.get("investigation_note")),
+            "valuation_source": item.get("valuation_source"),
+            "conservative_margin_eur": item.get("conservative_margin_eur"),
+            "available_cash_eur": item.get("available_cash_eur"),
+            "total_project_cost_eur": item.get("total_project_cost_eur"),
+        }
+        decision = evaluator.evaluate(evidence, now=now)
+        LOG.debug(
+            "shadow-eval %s → %s (%d reqs, %d blocking)",
+            item.get("id"), decision.state,
+            len(decision.requirements), len(decision.blocking),
+        )
+    except Exception:  # noqa: BLE001
+        LOG.debug("shadow-eval failed for %s", item.get("id"), exc_info=True)
+
+
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
                   where: str = "", params=(), apply_min_score: bool = True, mode: str = "home",
@@ -1562,6 +1663,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     maps_before = climate.maps_loaded()
     min_score = ((filters or {}).get("min_score") or 0) if apply_min_score else 0
     cash = _cash_on_hand()
+    _cfg = _load_config_safe()
     from common import price_to_pay
     cap = _work_limits()[0]
     # A new day or new filters (with the weights) score again; new towns, auction
@@ -1579,6 +1681,15 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         _LOADED_MODES.clear()
         _SCORED_FOR[0] = context
     scored = _load_kept(db, mode, [r["id"] for r in rows] if len(rows) <= 500 else None)
+    # Sum of all evidence revision counters per listing (F11): a location, hazard,
+    # checklist or identity update increments a rev, changing this sum and busting
+    # the score cache key so the item is re-scored with the new evidence.
+    ev_rev_sums: dict[str, int] = {
+        row["listing_id"]: row["s"]
+        for row in db.execute(
+            "SELECT listing_id, SUM(rev) AS s FROM evidence_revisions GROUP BY listing_id"
+        ).fetchall()
+    }
     new_scores = []
     climate_writes = []
 
@@ -1627,7 +1738,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
 
         row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],
                                      item["offer_outcome"], context,
-                                     item.get("unconfirmed_since"))).encode()).hexdigest()
+                                     item.get("unconfirmed_since"),
+                                     ev_rev_sums.get(item["id"], 0))).encode()).hexdigest()
         kept = scored.get(item["id"])
         results = None
         if kept and kept[0] == row_key and not (refresh and kept[2] != inputs):
@@ -1647,6 +1759,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                         item["open_homes_here"] = n - 1
             _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
                        climate_on, mode)
+            if mode in ("both", "invest"):
+                _shadow_evaluate(item, now)
             _optional = {"research_only", "extreme_discount"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
@@ -1687,9 +1801,10 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if mode == "both":
                 chosen = costs.selected_acquisition(item)
                 over = costs.over_cash(item, cash, bid=chosen["amount"] or None,
-                                       typical=typical, basis=chosen["label"])
+                                       typical=typical, basis=chosen["label"],
+                                       settings=_cfg)
             else:
-                over = costs.over_cash(item, cash, typical=typical)
+                over = costs.over_cash(item, cash, typical=typical, settings=_cfg)
             if over:
                 reason = over
                 if not include_hidden:
@@ -1768,6 +1883,8 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
                 best[item["id"]] = {**item, "mode": mode, "mode_label": MODES[mode]}
     # Extreme-discount items remain visible in the listing tab (researchable and
     # enrichable) but must not reach reports, alerts or the Offers shortlist until
-    # the investigation flag is cleared (F05). Shortlist membership or offers do
-    # not waive this requirement; clearance needs a dedicated investigation record.
-    return [it for it in best.values() if it["id"] not in extreme_ids]
+    # they have been reviewed and cleared via clear_extreme_discount() (F05).
+    # Shortlist membership or offers do not waive this requirement.
+    cleared = _extreme_clearances(db, extreme_ids)
+    blocked = extreme_ids - cleared
+    return [it for it in best.values() if it["id"] not in blocked]

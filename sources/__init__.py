@@ -112,29 +112,45 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
 
     Statuses: ok (listings), empty (page ok, nothing kept), error (HTTP/network
     or unexpected), blocked (SourceUnavailable — bot wall, closed site, login).
+
+    Source functions may return either an int (count) or a dict:
+        {"count": int, "scope": "full"|"partial", "pages_seen": int | None}
+    When scope="partial" the run stopped early (budget, timeout, mid-scrape
+    error) and last_ok_by_source() will not advance the freshness clock for
+    this source (F13). Sources that return an int are treated as full runs.
     """
     from db import record_scrape
 
     started_iso = utcnow_iso()
     t0 = time.monotonic()
     message = None
+    scope: str | None = None
+    pages_seen: int | None = None
     try:
-        count = source.func(db, max_price=max_price, config=config or {}) or 0
+        result = source.func(db, max_price=max_price, config=config or {})
         db.commit()
+        if isinstance(result, dict):
+            count = int(result.get("count") or 0)
+            scope = result.get("scope")   # "full" | "partial" | None
+            pages_seen = result.get("pages_seen")
+        else:
+            count = int(result or 0)
+            scope = "full"               # legacy int return → implicit full run
         status = "ok" if count > 0 else "empty"
     except SourceUnavailable as e:
         db.rollback()
-        count, status = 0, "blocked"
+        count, status, scope = 0, "blocked", "partial"
         message = str(e)
         LOG.warning(f"Source {source.name} blocked: {e}")
     except Exception as e:  # noqa: BLE001 — one broken site must not stop the run
         db.rollback()
-        count, status = 0, "error"
+        count, status, scope = 0, "error", "partial"
         message = describe_error(e)
         LOG.error(f"Source {source.name} failed: {type(e).__name__}: {e}")
     duration = round(time.monotonic() - t0, 1)
     record_scrape(db, source.name, count=count, status=status, message=message,
-                  duration_s=duration, timestamp=started_iso)
+                  duration_s=duration, timestamp=started_iso, scope=scope,
+                  pages_seen=pages_seen)
     LOG.info(f"{source.name}: {count} listings ({status}, {duration}s)")
     return {"source": source.name, "count": count, "status": status,
             "message": message, "duration_s": duration}
