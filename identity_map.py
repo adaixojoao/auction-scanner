@@ -35,6 +35,18 @@ import sqlite3
 LOG = logging.getLogger(__name__)
 
 
+# ─── Processo-key canonicalisation ───────────────────────────────────────────
+
+def canonical_processo(p: str | None) -> str:
+    """Strip all non-alphanumeric characters, preserving original case.
+
+    Used by both the scraper (when building base_eid) and backfill so the
+    lot_map processo key is the same regardless of how the raw text arrived.
+    E.g. "9/21.0TBLSB" → "9210TBLSB".
+    """
+    return re.sub(r"[^A-Za-z0-9]", "", (p or ""))
+
+
 # ─── Lot-key derivation ──────────────────────────────────────────────────────
 
 def _norm(s: str | None) -> str:
@@ -72,13 +84,33 @@ def lot_key_leilosoc(batch_id: str | int) -> str:
 
 def _next_eid_for_processo(db: sqlite3.Connection, source: str,
                             processo: str, base_eid: str) -> str:
-    """Return the next unused eid in the processo's sequence."""
-    existing = db.execute(
-        "SELECT listing_id FROM lot_map WHERE source=? AND processo=? ORDER BY rowid",
-        (source, processo)).fetchall()
-    if not existing:
-        return base_eid
-    return f"{base_eid}-{len(existing) + 1}"
+    """Return the next unused eid in the processo's sequence.
+
+    Checks both lot_map rows and existing listing IDs so that a candidate eid
+    is never allocated if a listing under that ID already exists.
+    """
+    existing_in_map = {
+        row["listing_id"]
+        for row in db.execute(
+            "SELECT listing_id FROM lot_map WHERE source=? AND processo=?",
+            (source, processo)).fetchall()
+    }
+    if not existing_in_map:
+        candidate = base_eid
+    else:
+        candidate = f"{base_eid}-{len(existing_in_map) + 1}"
+
+    # Ensure the candidate listing_id is not already taken by any listing.
+    n = len(existing_in_map) + 1
+    while True:
+        candidate_id = f"{source}:{candidate}"
+        taken_in_map = candidate_id in existing_in_map
+        taken_in_listings = db.execute(
+            "SELECT 1 FROM listings WHERE id=?", (candidate_id,)).fetchone() is not None
+        if not taken_in_map and not taken_in_listings:
+            return candidate
+        n += 1
+        candidate = f"{base_eid}-{n}"
 
 
 def assign_citius_lot_id(
@@ -226,7 +258,7 @@ def backfill_citius(db: sqlite3.Connection) -> int:
             raw = json.loads(row["raw_json"] or "{}")
         except (ValueError, TypeError):
             raw = {}
-        processo = _norm(raw.get("processo") or "")
+        processo = canonical_processo(raw.get("processo") or "")
         if not processo:
             # Fall back to the id itself as its own processo group
             processo = row["id"].removeprefix("citius:")

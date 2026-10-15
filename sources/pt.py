@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, uf_parish, utcnow_iso)
 from db import upsert_listing
-from identity_map import assign_citius_lot_id, assign_leilosoc_lot_id
+from identity_map import assign_citius_lot_id, assign_leilosoc_lot_id, canonical_processo
 from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
 
@@ -918,7 +918,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
                 f["html_id"] = hid.group(1) if hid else None
 
                 if f["processo"]:
-                    base_eid = re.sub(r"[^A-Za-z0-9]", "", f["processo"])[:40]
+                    base_eid = canonical_processo(f["processo"])[:40]
                 else:
                     base_eid = stable_id(trib_id, f["desc"])
                 # Stable identity via lot_map (F01 fix): lot_key is derived from

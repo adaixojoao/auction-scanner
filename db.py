@@ -41,7 +41,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -557,12 +557,72 @@ def _migrate_v25(db: sqlite3.Connection):
     """)
 
 
+def _migrate_v26(db: sqlite3.Connection):
+    """Normalise lot_map processo keys to match the scraper's canonical form (F01 fix).
+
+    backfill_citius (v21) stored processo as _norm(raw_json.processo), which kept
+    punctuation (e.g. "9/21.0TBLSB").  The live scraper strips all non-alphanumeric
+    characters (e.g. "9210TBLSB").  On first rescan after v21 the process keys never
+    matched so every lot appeared new and risked getting a fresh ID.
+
+    This migration rewrites each citius lot_map row to the canonical form used by
+    the scraper.  Collisions (two raw strings that canonicalise to the same key but
+    with different lot_keys) are resolved by keeping the existing canonical row and
+    marking the old-form row as superseded in conflict_details.
+    """
+    import json as _json
+    import identity_map as _im
+
+    rows = db.execute(
+        "SELECT source, processo, lot_key, listing_id, conflict_details"
+        " FROM lot_map WHERE source='citius'"
+    ).fetchall()
+
+    for row in rows:
+        canonical = _im.canonical_processo(row["processo"])
+        if canonical == row["processo"]:
+            continue  # already normalised
+
+        # Check whether the canonical key already exists in lot_map.
+        existing = db.execute(
+            "SELECT lot_key, listing_id FROM lot_map"
+            " WHERE source='citius' AND processo=? AND lot_key=?",
+            (canonical, row["lot_key"])).fetchone()
+
+        if existing:
+            # Collision: a canonical row already exists for this lot_key.
+            # Record the conflict and remove the stale punctuated row.
+            conflict = {
+                "superseded_by": f"citius:{canonical}:{row['lot_key']}",
+                "reason": "processo_canonicalisation_collision",
+                "old_processo": row["processo"],
+            }
+            db.execute(
+                "DELETE FROM lot_map WHERE source='citius' AND processo=? AND lot_key=?",
+                (row["processo"], row["lot_key"]))
+            db.execute(
+                "UPDATE lot_map SET conflict_details=? WHERE source='citius' AND processo=? AND lot_key=?",
+                (_json.dumps(conflict), canonical, row["lot_key"]))
+        else:
+            # No collision: rename the row to the canonical processo key.
+            # SQLite PRIMARY KEY cannot be updated directly; delete-then-insert.
+            db.execute(
+                "DELETE FROM lot_map WHERE source='citius' AND processo=? AND lot_key=?",
+                (row["processo"], row["lot_key"]))
+            db.execute(
+                "INSERT OR IGNORE INTO lot_map"
+                " (source, processo, lot_key, listing_id, conflict_details)"
+                " VALUES (?,?,?,?,?)",
+                ("citius", canonical, row["lot_key"],
+                 row["listing_id"], row["conflict_details"]))
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
-               23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25}
+               23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26}
 
 
 def init_db(db: sqlite3.Connection):

@@ -519,3 +519,204 @@ class TestLeilosocIntegration:
             "SELECT lot_key FROM lot_map WHERE source='leilosoc'"
         ).fetchone()
         assert row and row["lot_key"] == "batch:77"
+
+
+# ─── Task 1: processo-key canonicalisation ───────────────────────────────────
+
+class TestCanonicalProcesso:
+    def test_strips_punctuation_and_uppercases(self):
+        from identity_map import canonical_processo
+        assert canonical_processo("9/21.0TBLSB") == "9210TBLSB"
+        assert canonical_processo("165103/TB.MRA") == "165103TBMRA"
+        assert canonical_processo("ABC 123") == "ABC123"
+
+    def test_empty_and_none(self):
+        from identity_map import canonical_processo
+        assert canonical_processo(None) == ""
+        assert canonical_processo("") == ""
+
+    def test_already_canonical_unchanged(self):
+        from identity_map import canonical_processo
+        assert canonical_processo("9210TBLSB") == "9210TBLSB"
+
+
+class TestBackfillUsesCanonicalProcesso:
+    """backfill_citius must store canonical processo keys, not punctuated raw strings."""
+
+    def test_backfill_stores_canonical_key(self, memdb):
+        # Insert a listing whose raw_json has a punctuated processo string.
+        memdb.execute(
+            "INSERT INTO listings (id, source, external_id, raw_json) VALUES"
+            " ('citius:9210TBLSB', 'citius', '9210TBLSB', ?)",
+            (json.dumps({"processo": "9/21.0TBLSB", "registo": "R1"}),))
+        backfill_citius(memdb)
+        row = memdb.execute(
+            "SELECT processo FROM lot_map WHERE source='citius'"
+        ).fetchone()
+        assert row is not None
+        assert row["processo"] == "9210TBLSB", (
+            f"Expected canonical processo '9210TBLSB', got {row['processo']!r}")
+
+    def test_rescan_finds_backfilled_lot_key(self, memdb):
+        """The scraper passes canonical_processo(raw) as processo; backfill must store the same key."""
+        memdb.execute(
+            "INSERT INTO listings (id, source, external_id, raw_json) VALUES"
+            " ('citius:9210TBLSB', 'citius', '9210TBLSB', ?)",
+            (json.dumps({"processo": "9/21.0TBLSB", "registo": "REGA"}),))
+        backfill_citius(memdb)
+        # Simulate the scraper's first rescan: it uses canonical_processo("9/21.0TBLSB")="9210TBLSB"
+        eid = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB", {"registo": "REGA"})
+        assert eid == "9210TBLSB", (
+            "Rescan must find the existing lot_map row, not allocate a new eid")
+
+
+class TestMigrateV26ProcessoNormalisation:
+    """_migrate_v26 normalises punctuated processo keys from v21 backfill."""
+
+    def _v21_db(self):
+        """In-memory DB at schema v21 with a punctuated processo row."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE lot_map (
+                source           TEXT NOT NULL,
+                processo         TEXT NOT NULL,
+                lot_key          TEXT NOT NULL,
+                listing_id       TEXT NOT NULL,
+                created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+                conflict_details TEXT,
+                PRIMARY KEY (source, processo, lot_key)
+            );
+            CREATE INDEX idx_lot_map_listing ON lot_map(source, listing_id);
+            CREATE TABLE listings (
+                id TEXT PRIMARY KEY,
+                source TEXT,
+                external_id TEXT,
+                raw_json TEXT
+            );
+        """)
+        return conn
+
+    def test_migration_normalises_punctuated_processo(self):
+        import importlib, sys
+        import db as db_mod
+
+        conn = self._v21_db()
+        conn.execute(
+            "INSERT INTO lot_map (source, processo, lot_key, listing_id)"
+            " VALUES ('citius', '9/21.0TBLSB', 'reg:REGA', 'citius:9210TBLSB')")
+
+        db_mod._migrate_v26(conn)
+
+        rows = conn.execute("SELECT processo FROM lot_map WHERE source='citius'").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["processo"] == "9210TBLSB"
+
+    def test_migration_idempotent_on_already_canonical(self):
+        import db as db_mod
+
+        conn = self._v21_db()
+        conn.execute(
+            "INSERT INTO lot_map (source, processo, lot_key, listing_id)"
+            " VALUES ('citius', '9210TBLSB', 'reg:REGA', 'citius:9210TBLSB')")
+
+        db_mod._migrate_v26(conn)
+
+        rows = conn.execute("SELECT processo FROM lot_map WHERE source='citius'").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["processo"] == "9210TBLSB"
+
+    def test_migration_collision_records_conflict(self):
+        """When both punctuated and canonical rows exist for the same lot_key, the
+        punctuated row is removed and conflict_details is set on the canonical row."""
+        import db as db_mod
+
+        conn = self._v21_db()
+        # Canonical row already present (created by scraper on same process)
+        conn.execute(
+            "INSERT INTO lot_map (source, processo, lot_key, listing_id)"
+            " VALUES ('citius', '9210TBLSB', 'reg:REGA', 'citius:9210TBLSB')")
+        # Punctuated row from backfill
+        conn.execute(
+            "INSERT INTO lot_map (source, processo, lot_key, listing_id)"
+            " VALUES ('citius', '9/21.0TBLSB', 'reg:REGA', 'citius:9210TBLSB')")
+
+        db_mod._migrate_v26(conn)
+
+        rows = conn.execute("SELECT processo, conflict_details FROM lot_map WHERE source='citius'").fetchall()
+        # Only one row remains (canonical)
+        assert len(rows) == 1
+        assert rows[0]["processo"] == "9210TBLSB"
+        # Conflict is recorded
+        details = json.loads(rows[0]["conflict_details"] or "null")
+        assert details and "superseded_by" in details
+
+
+class TestLegacyUpgradeThreeUnits:
+    """Full scenario: legacy processo 9/21.0TBLSB with three units and attachments."""
+
+    def _setup_legacy_db(self, memdb):
+        """Insert three units from processo 9/21.0TBLSB as if v21 backfill ran."""
+        units = [
+            ("citius:9210TBLSB", "REGA", "Unit A ground floor"),
+            ("citius:9210TBLSB-2", "REGB", "Unit B first floor"),
+            ("citius:9210TBLSB-3", "REGC", "Unit C second floor"),
+        ]
+        for lid, registo, desc in units:
+            ext = lid.removeprefix("citius:")
+            memdb.execute(
+                "INSERT INTO listings (id, source, external_id, raw_json) VALUES (?,?,?,?)",
+                (lid, "citius", ext,
+                 json.dumps({"processo": "9/21.0TBLSB", "registo": registo, "desc": desc})))
+        # Simulate v21 backfill with punctuated processo key.
+        for lid, registo, _ in units:
+            ext = lid.removeprefix("citius:")
+            key = f"reg:{_norm(registo)}"
+            memdb.execute(
+                "INSERT INTO lot_map (source, processo, lot_key, listing_id) VALUES (?,?,?,?)",
+                ("citius", "9/21.0TBLSB", key, lid))
+        return units
+
+    def test_after_migration_and_rescan_ids_preserved(self, memdb):
+        """After v26 migration, a rescan that drops unit A must preserve B and C IDs."""
+        import db as db_mod
+        from identity_map import canonical_processo
+
+        self._setup_legacy_db(memdb)
+        db_mod._migrate_v26(memdb)
+
+        # Verify all three rows are now under canonical processo.
+        rows = memdb.execute(
+            "SELECT lot_key, listing_id FROM lot_map WHERE source='citius' ORDER BY rowid"
+        ).fetchall()
+        assert all(r["listing_id"].startswith("citius:9210TBLSB") for r in rows)
+        assert all(
+            memdb.execute("SELECT processo FROM lot_map WHERE listing_id=?", (r["listing_id"],)).fetchone()["processo"] == "9210TBLSB"
+            for r in rows
+        )
+
+        # Rescan: unit A is absent; B and C still present.
+        eid_b = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
+                                      {"registo": "REGB"})
+        eid_c = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
+                                      {"registo": "REGC"})
+        assert eid_b == "9210TBLSB-2", f"Expected 9210TBLSB-2, got {eid_b}"
+        assert eid_c == "9210TBLSB-3", f"Expected 9210TBLSB-3, got {eid_c}"
+
+    def test_sparse_suffixes_not_overwritten(self, memdb):
+        """After v26 migration, a new lot in the same processo gets the next free suffix."""
+        import db as db_mod
+
+        self._setup_legacy_db(memdb)
+        db_mod._migrate_v26(memdb)
+
+        # Add a new unit D — should get suffix -4.
+        eid_d = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
+                                      {"registo": "REGD"})
+        assert eid_d == "9210TBLSB-4"
+
+
+def _norm(s):
+    """Local _norm for test use."""
+    import re
+    return re.sub(r"\s+", "", (s or "").upper())
