@@ -299,3 +299,45 @@ def test_backfill_truncates_processo_root_like_the_scraper(db):
     root = identity_map.canonical_processo(long_processo)[:40]
     assert keys == [root]
     assert identity_map.processo_root(long_processo) == root
+
+
+# ─── Unit A — financial consumer alignment ──────────────────────────────────
+
+def test_actual_offer_gate_includes_adviser_reserve(db, add):
+    import config
+    import dashboard
+    add("eleiloes", "res1", title="Moradia T2", tipo="moradia", price=20000, area_m2=None,
+        description="moradia")
+    item = next(it for it in store.load_listings(db, include_hidden=True, apply_min_score=False)
+                if it["id"] == "eleiloes:res1")
+    cfg = config.load_config()
+    reserve = round(costs.risk_reserve(item, cfg["bid_cap"]))
+    assert reserve >= cfg["bid_cap"]["adviser_reserve_eur"] > 0
+    spent = costs.money_out(item)["amount"]
+    cash = spent + reserve // 2          # covers the purchase, not the reserve
+    config.save_config({"cash_on_hand": cash, "filters": {"min_score": 0}})
+
+    # The listing filter hides it ...
+    hidden = {it["id"]: it["hidden_reason"]
+              for it in store.load_listings(db, filters={"min_score": 0}, include_hidden=True)}
+    assert hidden["eleiloes:res1"] and hidden["eleiloes:res1"].startswith("cash")
+    assert "eleiloes:res1" not in {it["id"] for it in store.load_listings(db, filters={"min_score": 0})}
+
+    # ... and the offer gate agrees: same reserve, so the offer is over.
+    state = dashboard._cash_state(item)
+    assert state["spent"] == spent and state["reserve"] == reserve
+    assert state["total"] == spent + reserve
+    assert state["over"] is True
+    with dashboard.app.app_context():
+        refused, _ = dashboard._cash_gate(item, True, {}, "")
+    assert refused is not None and refused[1] == 409
+
+    # Planning shows the total and its parts; prices stay separate.
+    plan = costs.planning_view(item, cash, settings=cfg)
+    assert plan["reserve"] == reserve
+    assert plan["total_required"] == plan["planning_amount"] + reserve
+    assert plan["components"]["reserve"] == reserve
+    assert plan["status"] == "over"
+    typed = costs.cash_view(item, cash, bid=15000, settings=cfg)
+    assert typed["typed_bid"] == 15000 and typed["current_amount"] == 20000
+    assert typed["predicted_close"] is None

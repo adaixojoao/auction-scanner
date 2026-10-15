@@ -430,11 +430,12 @@ def _research_candidates(items: list, cash: float, full=None) -> dict:
     # Task 8: extreme-discount leads bypass only the soft "low score" hiding;
     # hard exclusions (dismissed, duplicate, expired, gone, stale, cash,
     # keyword/config filters) are exact categories and are never bypassed.
+    settings = _config()
     valued, unvalued = research_selection(items)
     if full is not None:
         valued, unvalued = full(valued), full(unvalued)
     def card(it, group):
-        plan = costs.planning_view(it, cash)
+        plan = costs.planning_view(it, cash, settings=settings)
         level = (geo.location_confidence(it) or {}).get("level")
         gaps = []
         if group == "unvalued":
@@ -606,6 +607,9 @@ def api_listing_detail():
         "excellent": it.get("excellent"),
         "facts": listing_info.facts(it), "related": related, "same_case": lots, "past_results": results,
         "costs": costs.estimate(it),
+        # Planning total with the required reserve, as the Live and invest filter counts it.
+        "planning": costs.planning_view(it, float(_config().get("cash_on_hand") or 0),
+                                        settings=_config()),
         "bid_cap": _bid_cap(it),
         "climate": listing_info.climate_panel(it),
         "stewardship": _stewardship(it),
@@ -1341,8 +1345,10 @@ def _cash_state(item: dict, bid: str = "", letter_type: str | None = None, is_of
     import costs
     from letters import parse_bid
     amount = parse_bid(bid) if bid else None
-    return costs.cash_view(item, float(_config().get("cash_on_hand") or 0), bid=amount,
-                           cheque=_wants_cheque(item, letter_type, is_offer))
+    cfg = _config()
+    # The same required reserve as the listing filter (db.load_listings → over_cash).
+    return costs.cash_view(item, float(cfg.get("cash_on_hand") or 0), bid=amount,
+                           cheque=_wants_cheque(item, letter_type, is_offer), settings=cfg)
 
 
 def _cash_gate(item: dict, is_offer: bool, data: dict, bid: str):

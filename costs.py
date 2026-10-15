@@ -897,13 +897,18 @@ def selected_planning(item: dict, *, bid: float | None = None,
     return out
 
 
-def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
+def planning_view(item: dict, cash: float, *, typical: bool = False,
+                  settings: dict | None = None) -> dict:
     """Affordability on the Live and invest planning figure.
 
     ``typical`` is ignored: this view always uses ``selected_planning``, the
     midpoint, including a home advertised as being in good condition. A missing
     budget is not affordable. An unresolved floor is not a complete within-budget
     result. A shortlist does not change this label.
+
+    ``settings`` is the full config: the required risk reserve (contingency +
+    adviser, ``risk_reserve``) is then added, exactly as the Live and invest
+    filter does (``over_cash``), and the view shows the total and its parts.
     """
     del typical
     acq = selected_acquisition(item)
@@ -912,6 +917,10 @@ def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
     work = est.get("renovation")
     point = "middle" if work else None
     subtotal = est.get("total")
+    reserve = round(risk_reserve(item, (settings or {}).get("bid_cap"))) if out else 0
+    res_str = f" + €{reserve:,.0f} required reserve" if reserve else ""
+    total_required = (out["amount"] + reserve) if out else None
+    known_required = (subtotal + reserve) if (out and subtotal) else None
     if not cash or cash <= 0:
         status = "budget_not_set"
         note = "Cash you can lose is not set."
@@ -925,28 +934,34 @@ def planning_view(item: dict, cash: float, *, typical: bool = False) -> dict:
         else:
             note = "No planning cost: there is no price to work from."
     elif out.get("incomplete"):
-        if subtotal and subtotal > cash:
+        if known_required and known_required > cash:
             status = "over"
-            note = (f"Known subtotal €{out['amount']:,.0f} (price, taxes and fees) is already "
-                    f"over the €{cash:,.0f} you can lose. Repairs are not priced because the "
-                    "floor area is not established.")
+            note = (f"Known subtotal €{out['amount']:,.0f} (price, taxes and fees){res_str} is "
+                    f"already over the €{cash:,.0f} you can lose. Repairs are not priced because "
+                    "the floor area is not established.")
         else:
             status = "incomplete"
-            note = (f"Known subtotal €{out['amount']:,.0f} (price, taxes and fees). Repairs are "
-                    "not priced because the floor area is not established. This is not a "
-                    "complete planning cost.")
-    elif out["amount"] > cash:
+            note = (f"Known subtotal €{out['amount']:,.0f} (price, taxes and fees){res_str}. "
+                    "Repairs are not priced because the floor area is not established. This is "
+                    "not a complete planning cost.")
+    elif total_required > cash:
         status = "over"
-        note = (f"Planning cost €{out['amount']:,.0f} is over the €{cash:,.0f} you can lose"
-                f" ({out['detail']}).")
+        note = (f"Planning cost €{out['amount']:,.0f}{res_str} = €{total_required:,.0f} is over the "
+                f"€{cash:,.0f} you can lose ({out['detail']}).")
     else:
         status = "within"
-        note = f"Planning cost €{out['amount']:,.0f} fits the €{cash:,.0f} you can lose ({out['detail']})."
+        note = (f"Planning cost €{out['amount']:,.0f}{res_str} = €{total_required:,.0f} fits the "
+                f"€{cash:,.0f} you can lose ({out['detail']}).")
     return {"acquisition": {k: acq.get(k) for k in (
                 "amount", "kind", "estimate", "label", "current_amount", "current_kind",
                 "reference_amount")},
             "all_in": est.get("all_in"), "renovation": work, "renovation_point": point,
             "known_subtotal": subtotal, "planning_amount": (out or {}).get("amount"),
+            "reserve": reserve, "total_required": total_required,
+            "components": ({"acquisition": est.get("base"), "taxes_fees": est.get("fees"),
+                            "works": (round(out["amount"] - est["total"])
+                                      if work and est.get("total") is not None else None),
+                            "reserve": reserve} if out else None),
             "status": status, "note": note}
 
 
@@ -1029,15 +1044,30 @@ def sealed_cheque(item: dict, amount: float) -> str | None:
             "Confirm the amount in the notice. The cheque counts toward the price.")
 
 
-def cash_view(item: dict, cash: float, *, bid: float | None = None, cheque: bool = False) -> dict:
-    """What the Offers page shows next to an amount, and whether it is over the cash."""
+def cash_view(item: dict, cash: float, *, bid: float | None = None, cheque: bool = False,
+              settings: dict | None = None) -> dict:
+    """What the Offers page shows next to an amount, and whether it is over the cash.
+
+    With ``settings`` (the full config) the required risk reserve is added, the
+    same reserve the listing filter adds (``over_cash``): an offer whose
+    purchase fits the cash but whose reserve does not is over. ``spent`` is the
+    purchase alone, ``reserve`` the reserve and ``total`` the two together. The
+    typed bid, the current bid and a predicted close are reported separately.
+    """
     limit = float(cash or 0)
     out = money_out(item, bid=bid)
     spent = out["amount"] if out else None
+    reserve = round(risk_reserve(item, (settings or {}).get("bid_cap"))) if out else 0
+    total = (spent + reserve) if out else None
     base = out["estimate"]["base"] if out else 0
     deposit = sealed_cheque(item, base) if cheque and out else None
+    acq = selected_acquisition(item)
+    prices = {"typed_bid": bid, "current_amount": acq.get("current_amount"),
+              "current_kind": acq.get("current_kind"),
+              "predicted_close": acq["amount"] if acq.get("kind") == "predicted" else None}
+    common = {"spent": spent, "reserve": reserve, "total": total, "deposit": deposit, **prices}
     if limit <= 0:
-        return {"set": False, "limit": None, "spent": spent, "over": False, "deposit": deposit,
+        return {"set": False, "limit": None, "over": False, **common,
                 "text": "Cash you can lose is not set. Set it under Settings → Budget before an offer."}
     if out is None:
         if item.get("price_unusable"):
@@ -1046,13 +1076,15 @@ def cash_view(item: dict, cash: float, *, bid: float | None = None, cheque: bool
         else:
             text = f"Within the €{limit:,.0f} you can lose. This listing has no price to add taxes to."
         over = False
-    elif spent > limit:
-        text = over_cash(item, limit, bid=bid) or ""
+    elif total > limit:
+        text = over_cash(item, limit, bid=bid, settings=settings) or ""
         over = True
     else:
-        text = f"About €{spent:,.0f} all-in, within the €{limit:,.0f} you can lose ({out['detail']})."
+        res_str = f" + €{reserve:,.0f} required reserve = €{total:,.0f}" if reserve else ""
+        text = (f"About €{spent:,.0f} all-in{res_str}, within the €{limit:,.0f} you can lose "
+                f"({out['detail']}).")
         over = False
-    return {"set": True, "limit": limit, "spent": spent, "over": over, "deposit": deposit, "text": text}
+    return {"set": True, "limit": limit, "over": over, **common, "text": text}
 
 
 def as_text(est: dict | None) -> str:
