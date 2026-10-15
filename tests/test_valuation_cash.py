@@ -170,3 +170,33 @@ def test_risk_reserve_base_matches_bidcap_base():
         reserve_from_costs = costs.risk_reserve(item, _settings()["bid_cap"])
         expected = price * _settings()["bid_cap"]["contingency_pct"] / 100 + _settings()["bid_cap"]["adviser_reserve_eur"]
         assert abs(reserve_from_costs - expected) < 0.01
+
+
+def test_rural_plot_reserve_includes_land_component():
+    """costs.risk_reserve must include rural_reserve_per_ha for plots (Task 5).
+
+    bidcap adds (ha * rural_reserve_per_ha + rural_reserve_fixed) to the reserve for rural_plot.
+    over_cash uses costs.risk_reserve, so omitting the land component lets a plot purchase
+    pass the cash check with more cash than actually required.
+    """
+    plot = {"id": "citius:p1", "source": "citius", "country": "PT", "kind": "rural_plot",
+            "title": "Terreno rústico", "area_m2": 20000, "price": 5000, "category": "imoveis"}
+    settings = _settings(rural_reserve_per_ha=500, rural_reserve_fixed=200)
+    ha = 20000 / 10000   # 2 ha
+    land_component = ha * 500 + 200   # 1200
+    reserve = costs.risk_reserve(plot, settings["bid_cap"])
+    # Must include the land component on top of contingency + adviser
+    assert reserve >= land_component, (
+        f"rural reserve {reserve:.0f} does not include land component {land_component:.0f}")
+
+    # over_cash must reject a purchase when the land reserve pushes it over cash
+    out = costs.money_out(plot)
+    if out:
+        # cash set to exactly price+fees with no room for land reserve should now fail
+        barely = out["amount"] + reserve - 1
+        assert costs.over_cash(plot, barely, settings=settings) is not None, \
+            "over_cash should fail when land reserve pushes all-in over cash"
+        # cash set to price+fees+reserve should pass
+        enough = out["amount"] + reserve + 1
+        assert costs.over_cash(plot, enough, settings=settings) is None, \
+            "over_cash should pass when cash covers land reserve"

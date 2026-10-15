@@ -957,6 +957,10 @@ def risk_reserve(item: dict, settings: dict | None = None) -> float:
     Falls back to acquisition price when market value is not established (same
     fallback as bidcap's `value if value else budget`). Returns 0 when settings
     is None or empty — caller passes config["bid_cap"]; no config fallback here.
+
+    For rural plots, also adds the land-maintenance component
+    (rural_reserve_per_ha × ha + rural_reserve_fixed) so over_cash uses the
+    same scenario as the bid cap display.
     """
     if not settings:
         return 0.0
@@ -969,7 +973,12 @@ def risk_reserve(item: dict, settings: dict | None = None) -> float:
     country = (item.get("country") or "PT").upper()
     adviser = float((settings.get("adviser_reserve_by_country") or {}).get(country,
                      settings.get("adviser_reserve_eur") or 0))
-    return base * float(settings.get("contingency_pct") or 0) / 100 + adviser
+    land = 0.0
+    kind = item.get("kind") or property_kind(item)
+    if kind == "rural_plot":
+        ha = (item.get("area_m2") or 0) / 10000
+        land = ha * float(settings.get("rural_reserve_per_ha") or 0) + float(settings.get("rural_reserve_fixed") or 0)
+    return base * float(settings.get("contingency_pct") or 0) / 100 + adviser + land
 
 
 def over_cash(item: dict, cash: float, *, bid: float | None = None, typical: bool = False,
