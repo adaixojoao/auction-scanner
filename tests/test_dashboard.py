@@ -630,3 +630,45 @@ def test_a_page_of_hidden_listings_shows_them_in_full(client, db, add, monkeypat
     for a, b in zip(plain, kept):
         assert a["items"] == b["items"] and a["stats"] == b["stats"]
     assert plain[1]["items"] and plain[1]["items"][0]["reasons"]            # a hidden row, in full
+
+
+def test_settings_page_round_trip_keeps_hidden_secrets(client):
+    """The Settings page loads secrets as null (shown blank), then saves every
+    field back with blank secrets: that must keep them, while a new value
+    replaces one and clear_secrets empties one. No response carries a secret."""
+    import config
+    config.update_config({"telegram": {"token": "old-bot-token", "chat_id": "1"},
+                          "notifications": {"smtp_password": "old-smtp-pw", "smtp_user": "a@example.com"},
+                          "ai": {"anthropic_key": "old-ai-key"}})
+    page = client.get("/api/settings")
+    shown = page.get_json()
+    for secret in ("old-bot-token", "old-smtp-pw", "old-ai-key"):
+        assert secret not in page.get_data(as_text=True)
+    assert shown["telegram"]["token"] is None and shown["telegram"]["has_token"] is True
+    # What settings.html sends: setv() shows null as "", and every field goes back.
+    blank = lambda v: "" if v is None else v
+    r = client.post("/api/settings", json={
+        "telegram": {"token": blank(shown["telegram"]["token"]), "chat_id": "2"},
+        "notifications": {"smtp_password": blank(shown["notifications"]["smtp_password"]),
+                          "smtp_user": "b@example.com"},
+        "ai": {"anthropic_key": blank(shown["ai"]["anthropic_key"])},
+    })
+    assert r.status_code == 200
+    saved = config.load_user_config()
+    assert saved["telegram"] == {"token": "old-bot-token", "chat_id": "2"}
+    assert saved["notifications"]["smtp_password"] == "old-smtp-pw"
+    assert saved["notifications"]["smtp_user"] == "b@example.com"
+    assert saved["ai"]["anthropic_key"] == "old-ai-key"
+    for secret in ("old-bot-token", "old-smtp-pw", "old-ai-key"):
+        assert secret not in r.get_data(as_text=True)
+
+    r = client.post("/api/settings", json={"telegram": {"token": "new-bot-token"}})
+    assert r.status_code == 200 and "new-bot-token" not in r.get_data(as_text=True)
+    assert config.load_user_config()["telegram"]["token"] == "new-bot-token"
+
+    r = client.post("/api/settings", json={"clear_secrets": ["ai.anthropic_key"]})
+    assert r.status_code == 200
+    assert config.load_user_config()["ai"]["anthropic_key"] == ""
+    after = client.get("/api/settings").get_json()
+    assert after["ai"]["has_anthropic_key"] is False and after["telegram"]["has_token"] is True
+    assert "new-bot-token" not in client.get("/api/settings").get_data(as_text=True)

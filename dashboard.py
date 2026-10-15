@@ -1864,6 +1864,14 @@ EDITABLE = {
 }
 
 
+def _setting_is_secret(section: str, key: str) -> bool:
+    return (section, key) in {
+        ("notifications", "smtp_password"),
+        ("telegram", "token"),
+        ("ai", "anthropic_key"),
+    }
+
+
 @app.route("/api/settings", methods=["GET"])
 def api_settings_get():
     cfg = _config()
@@ -1872,7 +1880,15 @@ def api_settings_get():
         if keys is None:
             out[section] = cfg.get(section)
         else:
-            out[section] = {k: (cfg.get(section) or {}).get(k) for k in keys}
+            values = {}
+            for key in keys:
+                value = (cfg.get(section) or {}).get(key)
+                if _setting_is_secret(section, key):
+                    values[key] = None
+                    values[f"has_{key}"] = bool(value)
+                else:
+                    values[key] = value
+            out[section] = values
     return jsonify(out)
 
 
@@ -1892,9 +1908,21 @@ def api_settings_save():
             continue
         if not isinstance(data[section], dict):
             return jsonify({"error": f"{section} must be an object"}), 400
-        vals = {k: v for k, v in data[section].items() if k in keys and v is not None}
+        vals = {k: v for k, v in data[section].items()
+                if k in keys and v is not None
+                and (not _setting_is_secret(section, k) or v != "")}
         if vals:
             changes[section] = vals
+    clear_secrets = data.get("clear_secrets", [])
+    if not isinstance(clear_secrets, list):
+        return jsonify({"error": "clear_secrets must be a list of section.key names"}), 400
+    for field in clear_secrets:
+        if not isinstance(field, str) or "." not in field:
+            return jsonify({"error": "invalid secret field"}), 400
+        section, key = field.split(".", 1)
+        if not _setting_is_secret(section, key):
+            return jsonify({"error": "unsupported secret field"}), 400
+        changes.setdefault(section, {})[key] = ""
     weights = (changes.get("filters") or {}).get("weights")
     if weights is not None:
         from scoring import MODE_WEIGHTS, WEIGHTS
