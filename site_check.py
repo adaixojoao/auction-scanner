@@ -68,21 +68,28 @@ def parcels_shape(session, refs: list[str]):
     return unary_union(shapes)
 
 
+def _reproject(geom, src: str, dst: str):
+    """The shape in another coordinate system (x = longitude, y = latitude)."""
+    import numpy as np
+    import shapely
+    from pyproj import Transformer
+    to = Transformer.from_crs(src, dst, always_xy=True).transform
+    return shapely.transform(geom, lambda xy: np.column_stack(to(xy[:, 0], xy[:, 1])))
+
+
+def to_metres(geom):
+    """A WGS84 shape in metres (ETRS89-LAEA, EPSG:3035), for areas and distances."""
+    return _reproject(geom, "EPSG:4326", "EPSG:3035")
+
+
 def circle(lat: float, lon: float, radius_m: float):
     """A circle of radius_m around a point, as a WGS84 polygon."""
-    from pyproj import Transformer
     from shapely.geometry import Point
-    from shapely.ops import transform
-    to_m = Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True).transform
-    to_deg = Transformer.from_crs("EPSG:3035", "EPSG:4326", always_xy=True).transform
-    return transform(to_deg, transform(to_m, Point(lon, lat)).buffer(radius_m))
+    return _reproject(to_metres(Point(lon, lat)).buffer(radius_m), "EPSG:3035", "EPSG:4326")
 
 
 def area_ha(shape_wgs84) -> float:
-    from pyproj import Transformer
-    from shapely.ops import transform
-    return transform(Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True).transform,
-                     shape_wgs84).area / 10000
+    return to_metres(shape_wgs84).area / 10000
 
 
 # ─── Slope ──────────────────────────────────────────────────────────
@@ -300,10 +307,8 @@ def tracks_near(session, lat: float, lon: float, radius_m: int, land=None) -> di
             break
         time.sleep(10 * (attempt + 1))                 # the public server is busy: wait and ask again
     r.raise_for_status()
-    from pyproj import Transformer
     from shapely.geometry import LineString
-    from shapely.ops import transform
-    to_m = Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True).transform
+    land_m = to_metres(land) if land is not None else None
     out: dict = {}
     nearest = None
     for el in r.json().get("elements", []):
@@ -311,8 +316,8 @@ def tracks_near(session, lat: float, lon: float, radius_m: int, land=None) -> di
         kind = tags["highway"] + (f" (grade {tags['tracktype'][-1]})" if tags.get("tracktype") else "")
         out[kind] = out.get(kind, 0) + 1
         pts = [(g["lon"], g["lat"]) for g in el.get("geometry") or []]
-        if land is not None and len(pts) >= 2:
-            d = transform(to_m, LineString(pts)).distance(transform(to_m, land))
+        if land_m is not None and len(pts) >= 2:
+            d = to_metres(LineString(pts)).distance(land_m)
             nearest = d if nearest is None else min(nearest, d)
     out["_nearest_m"] = nearest
     return out

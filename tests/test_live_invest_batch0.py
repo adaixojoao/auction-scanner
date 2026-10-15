@@ -270,7 +270,6 @@ def test_li09_distinct_addresses_and_fractions_visible(db, add):
 
 def test_li10_dropping_the_first_citius_lot_preserves_stable_identity(db, fake_http):
     from sources import REGISTRY
-    from sources.pt import CITIUS_URL
 
     form = """
     <select id="ctl00_ContentPlaceHolder1_ddlTribunais">

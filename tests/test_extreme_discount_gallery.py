@@ -4,11 +4,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-import pytest
-
 import scoring
 from photos import _gallery_hash, needs_photo_check
-from scoring import climate_score, score_detail
+from scoring import score_detail
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
 

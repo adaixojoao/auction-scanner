@@ -15,11 +15,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-import identity_map
+from conftest import FakeResponse as FR
 from identity_map import (
     assign_citius_lot_id,
     assign_leilosoc_lot_id,
@@ -270,7 +269,7 @@ class TestConflictQuarantine:
         """A quarantined ResolutionResult has eid=None."""
         from identity_map import ResolutionKind
         # Create a mapping then manually mark it quarantined.
-        res1 = assign_citius_lot_id(memdb, "QQ", "QQ", {"registo": "RR"})
+        assign_citius_lot_id(memdb, "QQ", "QQ", {"registo": "RR"})
         memdb.execute(
             "UPDATE lot_map SET conflict_details=? WHERE source='citius' AND processo='QQ'",
             (json.dumps({"test": "quarantine"}),))
@@ -347,19 +346,6 @@ class TestBackfillLeilosoc:
 
 # ─── Integration: scraper-level reorder and removal (uses db fixture) ────────
 
-FakeResponse = None  # populated by _load_fake_response
-
-
-def _load_fake_response():
-    global FakeResponse
-    if FakeResponse is None:
-        import importlib, sys
-        # FakeResponse is defined in conftest imported by the test modules.
-        conf = importlib.import_module("conftest")
-        FakeResponse = conf.FakeResponse
-    return FakeResponse
-
-
 class TestCitiusIntegration:
     """Integration tests using the db fixture (real schema + migration)."""
 
@@ -390,14 +376,12 @@ class TestCitiusIntegration:
         )
 
     def _page(self, block_list):
-        FR = _load_fake_response()
         pager = ('<input type="image" id="ctl00_ContentPlaceHolder1_Pager1_btnNextPage" '
                  'name="ctl00$ContentPlaceHolder1$Pager1$btnNextPage" disabled="disabled"/>')
         return (f'<input type="hidden" name="__VIEWSTATE" value="p"/>{pager}'
                 f'<span id="ctl00_ContentPlaceHolder1_dlVenda">{"".join(block_list)}</span>')
 
     def test_three_lots_stable_after_middle_removed(self, db, fake_http):
-        FR = _load_fake_response()
         from sources import REGISTRY
 
         apt_a = self._block(11, "25.000,00", "Apartamento T1 rua A", registo="REG-A")
@@ -417,22 +401,21 @@ class TestCitiusIntegration:
         id_a = "citius:9210TBLSB"
         id_b = "citius:9210TBLSB-2"
         id_c = "citius:9210TBLSB-3"
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 25000
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 18000
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_c,)).fetchone()["price"] == 12000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 25000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 18000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_c,)).fetchone()["price"] == 12000
 
         # Remove lot B; rescan.
         pages["html"] = self._page([apt_a, apt_c])
         REGISTRY["citius"].func(db, max_price=100000)
 
         # A and C must keep their IDs and prices.
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 25000
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_c,)).fetchone()["price"] == 12000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 25000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_c,)).fetchone()["price"] == 12000
         # B row stays (never deleted), price unchanged.
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 18000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 18000
 
     def test_lot_map_populated_after_scrape(self, db, fake_http):
-        FR = _load_fake_response()
         from sources import REGISTRY
 
         block = self._block(55, "8.000,00", "Studio em Torres Novas", registo="REG-TN")
@@ -486,7 +469,6 @@ class TestLeilosocIntegration:
         }
 
     def test_two_lots_same_auction_stable_ids(self, db, fake_http):
-        FR = _load_fake_response()
         from sources import REGISTRY
 
         lot_a = self._lot(1001, 10, 30000)
@@ -500,21 +482,20 @@ class TestLeilosocIntegration:
         REGISTRY["leilosoc"].func(db, max_price=100000)
         id_a = "leilosoc:1001"
         id_b = "leilosoc:1001-2"
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 30000
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 15000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 30000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 15000
 
         # Remove lot A; rescan.
         pages["html"] = self._page_html([lot_b])
         REGISTRY["leilosoc"].func(db, max_price=100000)
         # Lot B must keep its ID.
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 15000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_b,)).fetchone()["price"] == 15000
         # Lot A row unchanged.
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 30000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_a,)).fetchone()["price"] == 30000
 
     def test_budget_change_does_not_reassign_id(self, db, fake_http):
         """A lot that was above max_price in scan 1 and below in scan 2 must get
         a new entry in lot_map, not steal the ID of the first lot."""
-        FR = _load_fake_response()
         from sources import REGISTRY
 
         cheap = self._lot(2000, 50, 5000, title="Box")
@@ -528,12 +509,12 @@ class TestLeilosocIntegration:
         # Scan 1: expensive is filtered out; cheap gets first slot.
         REGISTRY["leilosoc"].func(db, max_price=50000)
         id_cheap = "leilosoc:2000"
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_cheap,)).fetchone()["price"] == 5000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_cheap,)).fetchone()["price"] == 5000
 
         # Scan 2: both visible.
         REGISTRY["leilosoc"].func(db, max_price=100000)
         # Cheap must keep its ID.
-        assert db.execute(f"SELECT price FROM listings WHERE id=?", (id_cheap,)).fetchone()["price"] == 5000
+        assert db.execute("SELECT price FROM listings WHERE id=?", (id_cheap,)).fetchone()["price"] == 5000
         # Expensive gets a new ID, not the cheap slot.
         expensive_row = db.execute(
             "SELECT id, price FROM listings WHERE source='leilosoc' AND price=80000"
@@ -542,7 +523,6 @@ class TestLeilosocIntegration:
         assert expensive_row["id"] != id_cheap
 
     def test_pagination_second_page_lots_get_stable_ids(self, db, fake_http):
-        FR = _load_fake_response()
         from sources import REGISTRY
 
         lot_p1 = self._lot(3000, 1, 10000)
@@ -561,7 +541,6 @@ class TestLeilosocIntegration:
         assert db.execute("SELECT COUNT(*) FROM lot_map WHERE source='leilosoc'").fetchone()[0] >= 1
 
     def test_lot_map_batch_id_stored(self, db, fake_http):
-        FR = _load_fake_response()
         from sources import REGISTRY
 
         lot = self._lot(4000, 77, 25000)
@@ -655,7 +634,6 @@ class TestMigrateV26ProcessoNormalisation:
         return conn
 
     def test_migration_normalises_punctuated_processo(self):
-        import importlib, sys
         import db as db_mod
 
         conn = self._v21_db()
@@ -737,7 +715,6 @@ class TestLegacyUpgradeThreeUnits:
     def test_after_migration_and_rescan_ids_preserved(self, memdb):
         """After v26 migration, a rescan that drops unit A must preserve B and C IDs."""
         import db as db_mod
-        from identity_map import canonical_processo
 
         self._setup_legacy_db(memdb)
         db_mod._migrate_v26(memdb)
