@@ -394,6 +394,40 @@ async function clearLocation(btn) {
   await refreshDetails(btn);
 }
 
+// The house and its plot as the map draws them (outline.py): a sketch from
+// stored coordinates (numbers only), the plot pale, the house solid, annexes lighter.
+function outlineSvg(o) {
+  const shapes = [o.plot || [], ...(o.buildings || [])].filter(s => s.length);
+  const pts = shapes.flat().concat(o.pin ? [o.pin] : []);
+  if (!shapes.length) return "";
+  const k = Math.cos(pts[0][0] * Math.PI / 180);
+  const xy = p => [p[1] * k, -p[0]];
+  const xs = pts.map(p => xy(p)[0]), ys = pts.map(p => xy(p)[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const W = 260, H = 190, pad = 10;
+  const s = Math.min((W - 2 * pad) / ((x1 - x0) || 1e-6), (H - 2 * pad) / ((y1 - y0) || 1e-6));
+  const dx = (W - (x1 - x0) * s) / 2, dy = (H - (y1 - y0) * s) / 2;     // centred
+  const at = p => { const [x, y] = xy(p); return [dx + (x - x0) * s, dy + (y - y0) * s]; };
+  const poly = (ring, cls) => `<polygon class="${cls}" points="${ring.map(p => at(p).map(n => n.toFixed(1)).join(",")).join(" ")}"/>`;
+  const pin = o.pin ? at(o.pin) : null;
+  return `<svg class="outline-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Plot and buildings from the map">
+    ${(o.plot || []).length ? poly(o.plot, "ol-plot") : ""}
+    ${(o.buildings || []).map((b, i) => poly(b, i ? "ol-annex" : "ol-house")).join("")}
+    ${pin ? `<circle class="ol-pin" cx="${pin[0].toFixed(1)}" cy="${pin[1].toFixed(1)}" r="3"/>` : ""}
+  </svg>`;
+}
+
+function outlineHtml(o) {
+  if (!o || !(o.rows || []).length) return "";
+  return `<div class="guide outline">
+    <b>House and plot on the map</b> <span class="small muted">(estimates from OpenStreetMap and the cadastre, not the deed)</span>
+    <div class="outline-body">${outlineSvg(o)}
+      <div class="facts">${o.rows.map(r => `<div class="fact"><span class="k">${AS.esc(r.label)}</span><span class="v">${AS.esc(r.value)}</span></div>`).join("")}</div>
+    </div>
+    ${(o.notes || []).map(n => `<p class="small"><b>${AS.esc(n)}</b></p>`).join("")}
+  </div>`;
+}
+
 function detailsHtml(d) {
   const facts = d.facts.map(f => `<div class="fact"><span class="k">${AS.esc(f.label)}</span><span class="v">${factValue(f)}</span></div>`).join("");
   const links = [d.url && d.source !== "citius" ? AS.link(d.url, "Open the listing ↗") : "",
@@ -430,6 +464,7 @@ function detailsHtml(d) {
       ${guide}
       ${locationHtml(d)}
       ${streetView}
+      ${outlineHtml(d.outline)}
       ${official}
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${costsHtml(d.costs)}
