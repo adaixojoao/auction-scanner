@@ -574,12 +574,12 @@ def _migrate_v26(db: sqlite3.Connection):
     import identity_map as _im
 
     rows = db.execute(
-        "SELECT source, processo, lot_key, listing_id, conflict_details"
+        "SELECT source, processo, lot_key, listing_id, created_at, conflict_details"
         " FROM lot_map WHERE source='citius'"
     ).fetchall()
 
     for row in rows:
-        canonical = _im.canonical_processo(row["processo"])
+        canonical = _im.processo_root(row["processo"])
         if canonical == row["processo"]:
             continue  # already normalised
 
@@ -604,17 +604,11 @@ def _migrate_v26(db: sqlite3.Connection):
                 "UPDATE lot_map SET conflict_details=? WHERE source='citius' AND processo=? AND lot_key=?",
                 (_json.dumps(conflict), canonical, row["lot_key"]))
         else:
-            # No collision: rename the row to the canonical processo key.
-            # SQLite PRIMARY KEY cannot be updated directly; delete-then-insert.
+            # No collision: rename the row to the canonical processo key,
+            # keeping when the mapping was first made (created_at).
             db.execute(
-                "DELETE FROM lot_map WHERE source='citius' AND processo=? AND lot_key=?",
-                (row["processo"], row["lot_key"]))
-            db.execute(
-                "INSERT OR IGNORE INTO lot_map"
-                " (source, processo, lot_key, listing_id, conflict_details)"
-                " VALUES (?,?,?,?,?)",
-                ("citius", canonical, row["lot_key"],
-                 row["listing_id"], row["conflict_details"]))
+                "UPDATE lot_map SET processo=? WHERE source='citius' AND processo=? AND lot_key=?",
+                (canonical, row["processo"], row["lot_key"]))
 
 
 def _migrate_v27(db: sqlite3.Connection):

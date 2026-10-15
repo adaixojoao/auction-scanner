@@ -6,6 +6,8 @@ import pytest
 import costs
 import db as store
 import evaluator
+import identity_map
+from identity_map import ResolutionKind
 from tests.test_evaluator import FULL_EVIDENCE
 
 NOW = datetime(2026, 10, 15, 14, 0, tzinfo=timezone.utc)
@@ -213,3 +215,87 @@ def test_identical_short_text_different_registry_units_not_suppressed(db, add):
     add("citius", "c", title="Casa", price=10000, area_m2=60, concelho="Viseu")
     add("citius", "d", title="Casa", price=10000, area_m2=60, concelho="Viseu")
     assert store.mark_duplicates(db) == 0
+
+
+# ─── Unit B — identity collision detection ──────────────────────────────────
+
+_BOILER = ("Prédio urbano destinado a habitação, composto por rés-do-chão e primeiro andar, "
+           "sito na Rua das Flores, freguesia de Santa Maria, concelho de Exemplo, descrito ")
+assert len(_BOILER) >= 160
+
+
+def _citius_row(db, eid, desc, raw):
+    from common import make_listing
+    store.upsert_listing(db, make_listing("citius", eid, "PT", title=desc[:120],
+                                          description=desc, price=20000,
+                                          raw_json=json.dumps(raw)))
+    db.commit()
+
+
+def test_description_prefix_collision_cannot_reuse_protected_id(db):
+    first = _BOILER + "fração A, artigo matricial 1234, com garagem"
+    second = _BOILER + "fração B, artigo matricial 5678, sem garagem"
+    assert first[:160] == second[:160]
+    assert identity_map.lot_key_citius({"desc": first}) == identity_map.lot_key_citius({"desc": second})
+
+    res1 = identity_map.assign_citius_lot_id(db, "P1", "P1", {"desc": first})
+    assert res1.kind is ResolutionKind.PROVISIONAL
+    raw = {"processo": "P1", "marker": "original"}
+    _citius_row(db, res1.eid, first, raw)
+    protected = db.execute("SELECT raw_json, description FROM listings WHERE id=?",
+                           (f"citius:{res1.eid}",)).fetchone()
+
+    res2 = identity_map.assign_citius_lot_id(db, "P1", "P1", {"desc": second})
+    assert res2.kind is ResolutionKind.QUARANTINED or res2.eid != res1.eid
+    if res2.kind is ResolutionKind.QUARANTINED:
+        assert res2.eid is None
+    after = db.execute("SELECT raw_json, description FROM listings WHERE id=?",
+                       (f"citius:{res1.eid}",)).fetchone()
+    assert tuple(after) == tuple(protected)
+    assert json.loads(after["raw_json"])["marker"] == "original"
+
+
+def test_cut_list_copy_of_same_lot_is_not_a_collision(db):
+    full = _BOILER + "fração A, artigo matricial 1234, com garagem e quintal"
+    res1 = identity_map.assign_citius_lot_id(db, "P2", "P2", {"desc": full})
+    _citius_row(db, res1.eid, full, {"processo": "P2"})
+    cut = full[:200] + " ..."
+    res2 = identity_map.assign_citius_lot_id(db, "P2", "P2", {"desc": cut})
+    assert res2.kind is not ResolutionKind.QUARANTINED and res2.eid == res1.eid
+
+
+def test_weak_identity_does_not_become_confirmed_on_repeat(db):
+    lot = {"desc": "Moradia T2 em Exemplo"}
+    first = identity_map.assign_citius_lot_id(db, "P3", "P3", lot)
+    assert first.kind is ResolutionKind.PROVISIONAL
+    _citius_row(db, first.eid, lot["desc"], {"processo": "P3"})
+    for _ in range(3):
+        again = identity_map.assign_citius_lot_id(db, "P3", "P3", dict(lot))
+        assert again.kind is ResolutionKind.PROVISIONAL
+        assert again.eid == first.eid
+    # A registry-keyed lot is confirmed on repeat.
+    strong = {"desc": "Moradia", "registo": "1234/20200101"}
+    a = identity_map.assign_citius_lot_id(db, "P4", "P4", strong)
+    b = identity_map.assign_citius_lot_id(db, "P4", "P4", strong)
+    assert a.kind is ResolutionKind.NEW and b.kind is ResolutionKind.RESOLVED
+
+
+def test_processo_normalisation_preserves_created_at(db):
+    db.execute("INSERT INTO lot_map (source, processo, lot_key, listing_id, created_at)"
+               " VALUES ('citius', '9/21.0TBLSB', 'reg:1', 'citius:9210TBLSB', '2020-01-02 03:04:05')")
+    store._migrate_v26(db)
+    row = db.execute("SELECT processo, created_at FROM lot_map WHERE lot_key='reg:1'").fetchone()
+    assert row["processo"] == "9210TBLSB"
+    assert row["created_at"] == "2020-01-02 03:04:05"
+
+
+def test_backfill_truncates_processo_root_like_the_scraper(db):
+    long_processo = "1234/" + "9" * 60 + ".TBLSB"
+    db.execute("DELETE FROM lot_map")
+    _citius_row(db, "x1", "Casa", {"processo": long_processo, "registo": "77"})
+    db.execute("DELETE FROM lot_map")
+    identity_map.backfill_citius(db)
+    keys = [r["processo"] for r in db.execute("SELECT processo FROM lot_map WHERE source='citius'")]
+    root = identity_map.canonical_processo(long_processo)[:40]
+    assert keys == [root]
+    assert identity_map.processo_root(long_processo) == root
