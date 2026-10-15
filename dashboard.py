@@ -1156,7 +1156,20 @@ def api_offers():
     review = [_offer_view(it, it["id"], checks=checks, cfg=cfg) for it in
               sorted(shortlisted, key=mixed_order) + candidates[:size]]
 
+    # Sent/closed history must show every offer, regardless of whether the
+    # listing scores for an EARNING_MODE goal today.  Load missing listings
+    # individually so a home or forestry offer is never silently dropped.
     sent, closed = [], []
+    missing_ids = {log["listing_id"] for log in logs if log["listing_id"] not in by_id}
+    if missing_ids:
+        _db = get_db()
+        try:
+            extra = load_listings(_db, filters=_config().get("filters"), include_hidden=True,
+                                  where=f"id IN ({','.join('?' * len(missing_ids))})",
+                                  params=list(missing_ids))
+            by_id = {**by_id, **{it["id"]: it for it in extra}}
+        finally:
+            _db.close()
     for log in logs:
         it = by_id.get(log["listing_id"])
         if not it:

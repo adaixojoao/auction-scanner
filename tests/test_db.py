@@ -299,9 +299,12 @@ def test_the_same_house_at_a_different_price_on_another_portal(db):
     upsert_listing(db, make_listing("pisos", "3", "ES", title="Casa en Muxía", price=15500, area_m2=90,
                                     concelho="Muxía", raw_json=geo_a))                          # another size
     db.commit()
-    assert mark_duplicates(db) == 1
-    dup = dict(db.execute("SELECT id, duplicate_of FROM listings WHERE duplicate_of IS NOT NULL").fetchone())
-    assert dup == {"id": "fotocasa:1", "duplicate_of": "pisos:2"}           # the cheaper one stays
+    # geo/phrase match is circumstantial — two different addresses can satisfy it
+    # so it is a non-suppressive hint, not a confirmed duplicate
+    assert mark_duplicates(db) == 0
+    assert db.execute("SELECT duplicate_of FROM listings WHERE duplicate_of IS NOT NULL").fetchone() is None
+    pm = db.execute("SELECT possible_match FROM listings WHERE id='fotocasa:1'").fetchone()["possible_match"]
+    assert pm == "pisos:2"           # hint: the closer address is the reference
 
 
 def test_scores_are_kept_but_a_changed_listing_or_weight_is_scored_again(db):
