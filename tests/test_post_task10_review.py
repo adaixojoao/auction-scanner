@@ -111,3 +111,78 @@ def test_shadow_mapping_reads_stored_photo_payload():
     ev = {**deepcopy(FULL_EVIDENCE), "photo_check": store._shadow_evidence(item)["photo_check"]}
     dec = evaluator.evaluate(ev, now=NOW)
     assert next(r for r in dec.requirements if r.key == "photo_suitability").outcome == evaluator.PASS
+
+
+# ─── Unit D — research selection wiring ─────────────────────────────────────
+
+def _extreme_lead(db, add, monkeypatch, external_id="lead1"):
+    import scoring
+    import climate
+    import geo
+    # local 2000 €/m² × 80 m² = 160k against ≈11k all-in: an extreme discount.
+    monkeypatch.setattr(scoring, "local_price", lambda item: (2000.0, "city series"))
+    # Live and invest needs a building pin, the sea close by and a good climate.
+    monkeypatch.setattr(geo, "nearest_beach", lambda item, towns=None: {
+        "km": 0.4, "approx": False, "name": "Praia", "text": "0.4 km"})
+    monkeypatch.setattr(climate, "stored", lambda item: {
+        "hot_days": {"rcp45_2071-2100": 2}, "stress": {"stress_2080": 1},
+        "flood_m": 0.0, "fire_danger": {"rcp45_2079-2098": 5}})
+    add(external_id=external_id, title="Moradia T3", tipo="moradia", price=10000, area_m2=80,
+        description="moradia em bom estado", url="https://example.test/" + external_id,
+        raw_json=json.dumps({"lat": 41.18, "lon": -8.69, "precision": "sale"}))
+    store.forget_scores(db)
+    return f"eleiloes:{external_id}"
+
+
+def test_slim_hidden_retains_investigation_metadata(db, add, monkeypatch):
+    lid = _extreme_lead(db, add, monkeypatch)
+    for key in ("extreme_discount", "invest_score", "live_score", "research_only",
+                "investigation_cleared"):
+        assert key in store._SLIM, key
+    items = store.load_listings(db, filters={"min_score": 101}, include_hidden=True,
+                                mode="both", slim_hidden=True)
+    it = next(i for i in items if i["id"] == lid)
+    assert it.get("_slim") and it["hidden_reason"]
+    assert it.get("extreme_discount") is True
+    assert "invest_score" in it and "live_score" in it
+    assert "research_only" in it and "investigation_cleared" in it
+
+
+@pytest.mark.parametrize("reason", [
+    "cash €90,000 all-in is over the €50,000 you can lose (price)",
+    "keyword 'ruina'",
+    "district Faro not in filters.districts",
+    "dismissed: not interested",
+    "duplicate of eleiloes:x",
+    "gone: withdrawn",
+    "stale: gone from eleiloes since 2026-01-01",
+    "expired",
+])
+def test_research_helper_does_not_bypass_cash_exclusion(reason):
+    lead = {"id": "x:1", "extreme_discount": True, "invest_score": 80, "score": 80,
+            "research_only": False, "hidden_reason": reason}
+    assert not store.research_eligible(lead)
+    assert store.research_selection([lead]) == ([], [])
+    low = {**lead, "hidden_reason": "score 10 < filters.min_score 40"}
+    assert store.research_eligible(low)
+    # A plain (non-extreme) low-score row is not pulled in either.
+    assert not store.research_eligible({**low, "extreme_discount": False})
+
+
+def test_real_api_research_survives_request_score_cutoff(db, add, monkeypatch):
+    import dashboard
+    lid = _extreme_lead(db, add, monkeypatch)
+    dashboard._LISTS.clear()
+    dashboard.app.config["TESTING"] = True
+    body = dashboard.app.test_client().get("/api/listings?mode=both&min_score=100").get_json()
+    assert all(it["id"] != lid for it in body["items"])
+    assert lid in [c["id"] for c in body["research"]["valued"]]
+
+
+def test_enrich_order_includes_research_selected_rows(db, add, monkeypatch):
+    import config
+    import pipeline
+    lid = _extreme_lead(db, add, monkeypatch)
+    cfg = {**config.load_config(), "filters": {"min_score": 101}}
+    order = pipeline.enrich_order(db, cfg)
+    assert lid in [it["id"] for it in order]

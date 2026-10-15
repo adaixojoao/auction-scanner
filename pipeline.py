@@ -189,9 +189,30 @@ def enrich_order(db, cfg: dict) -> list[dict]:
     from photos import KEEP_SCORE
     high = [it for it in order if best.get(it["id"], 0) >= KEEP_SCORE]
     rest = [it for it in order if best.get(it["id"], 0) < KEEP_SCORE]
-    for it in high + rest:
-        it["best_rank"] = best.get(it["id"], 0)
-    return high + rest
+    # Research candidates (an extreme-discount lead hidden only by its score)
+    # are what investigation needs located and assessed: the same selection
+    # the Listings research panel shows (db.research_selection).
+    research = [it for it in _research_rows(db, cfg) if it["id"] not in {h["id"] for h in high}]
+    research_ids = {it["id"] for it in research}
+    rest = [it for it in rest if it["id"] not in research_ids]
+    for it in high + research + rest:
+        it["best_rank"] = best.get(it["id"], it.get("rank") or it.get("score") or 0)
+    return high + research + rest
+
+
+def _research_rows(db, cfg: dict) -> list[dict]:
+    """The research-selected Live and invest rows, read in full."""
+    from db import load_listings, research_selection
+    slim = load_listings(db, filters=cfg.get("filters"), mode="both", include_hidden=True,
+                         slim_hidden=True)
+    valued, unvalued = research_selection(slim)
+    ids = [it["id"] for it in valued + unvalued]
+    if not ids:
+        return []
+    full = {it["id"]: it for it in load_listings(
+        db, filters=cfg.get("filters"), mode="both", include_hidden=True,
+        where=f"id IN ({','.join('?' * len(ids))})", params=tuple(ids))}
+    return [full[i] for i in ids if i in full]
 
 
 def _plots_for_site_check(db, cfg: dict) -> list[dict]:

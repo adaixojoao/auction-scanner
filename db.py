@@ -1396,6 +1396,47 @@ def hidden_category(reason: str | None) -> str | None:
     return "filtered"
 
 
+# hidden_category() labels that research selection never overrides. Exact
+# membership on the category, never a substring test on the reason text: a
+# cash or keyword exclusion ("cash …", "keyword '…'") is as final as a dismissal.
+RESEARCH_HARD_HIDDEN = frozenset({"dismissed", "expired", "duplicate", "gone", "stale",
+                                  "over cash", "filtered"})
+# The only hidden categories an extreme-discount lead may bypass for research.
+RESEARCH_SOFT_HIDDEN = frozenset({"low score"})
+
+
+def research_eligible(item: dict) -> bool:
+    """Whether a scored item may be a research candidate (Live and invest)."""
+    reason = item.get("hidden_reason")
+    if not reason:
+        return True
+    category = hidden_category(reason)
+    if category in RESEARCH_HARD_HIDDEN:
+        return False
+    return bool(item.get("extreme_discount")) and category in RESEARCH_SOFT_HIDDEN
+
+
+def research_selection(items: list, per_group: int = 3) -> tuple[list, list]:
+    """Up to `per_group` priced leads and, separately, unvalued ones.
+
+    The one selection the Listings research panel and the scan's enrichment
+    order both use. Pass the full scored list (hidden rows included, before any
+    request score cutoff): selection happens first, a view's cutoff after.
+    """
+    valued, unvalued = [], []
+    ranked = sorted((it for it in items if research_eligible(it)),
+                    key=lambda it: it.get("score") or 0, reverse=True)
+    for it in ranked:
+        unpriced = bool(it.get("research_only"))
+        if not unpriced and it.get("invest_score") is None:
+            continue
+        bucket = unvalued if unpriced else valued
+        if unpriced or (it.get("score") or 0) > 0 or it.get("extreme_discount"):
+            if len(bucket) < per_group:
+                bucket.append(it)
+    return valued, unvalued
+
+
 def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
     first = {}
     for lid, price in db.execute(
@@ -1426,7 +1467,10 @@ _UNSCORED = {"last_seen", "is_new"}
 # shows hidden ones reads those rows in full (dashboard._full_rows).
 _SLIM = ("id", "source", "country", "tipo", "title", "description", "concelho", "district", "price",
          "current_bid", "area_m2", "date_end", "first_seen", "raw_json", "status", "hidden_reason",
-         "score", "rank", "category", "kind", "climate", "is_recent")
+         "score", "rank", "category", "kind", "climate", "is_recent",
+         # what research selection reads (research_selection): a hidden lead
+         # must still be selectable for investigation from the slim list.
+         "extreme_discount", "invest_score", "live_score", "research_only", "investigation_cleared")
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
 

@@ -630,7 +630,7 @@ def test_map_and_climate_lookups_take_the_best_of_every_tab_in_turn(monkeypatch)
              "invest": [{"id": "shared", "score": 70}],
              "land": [{"id": "l1", "score": 75}],
              "forest": [{"id": "f1", "score": 85}, {"id": "f2", "score": 60}]}
-    monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home": lists[mode])
+    monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home", **kw: lists[mode])
     assert [it["id"] for it in pipeline.enrich_order(None, {})] == [
         "live", "h1", "f1", "shared", "l1", "f2"]
     # 85 or more in any goal is taken first; f1 is 85, so it jumps the lower ones.
