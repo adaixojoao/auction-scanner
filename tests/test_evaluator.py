@@ -52,6 +52,8 @@ FULL_EVIDENCE = {
         "fire_danger": {"rcp45_2079-2098": 10},
         "hot_days": {"rcp45_2071-2100": 3},
     },
+    # Photo suitability (Task 10)
+    "photo_check": {"shows_house": True, "condition": "good", "confidence": "high", "notes": ""},
     # Sale availability
     "sale_availability": "available",
     # Financial

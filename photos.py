@@ -291,7 +291,9 @@ def check_photos(looker, item: dict) -> dict | None:
         raise ValueError(f"unexpected answer {found!r:.80}")
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
             "notes": str(found.get("notes") or "")[:200], "photos": len(urls),
-            "shows_house": found.get("shows_house") is not False,
+            # Task 10: missing shows_house (None/absent) must remain unknown, not True.
+            # Only an explicit True from the model counts as confirmed.
+            "shows_house": found.get("shows_house") is True,
             "gallery_hash": _gallery_hash(item),
             "by": getattr(looker, "model", looker.name), "at": utcnow_iso()}
 
@@ -555,7 +557,8 @@ def check_outside(looker, item: dict, session) -> dict | None:
         raise ValueError(f"unexpected answer {found!r:.80}")
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
             "notes": str(found.get("notes") or "")[:200], "photos": len(images),
-            "sources": sources, "shows_house": found.get("shows_house") is not False,
+            # Task 10: missing shows_house must remain unknown (False), not True.
+            "sources": sources, "shows_house": found.get("shows_house") is True,
             "by": getattr(looker, "model", None) or getattr(looker, "name", "outside"),
             "at": utcnow_iso()}
 
