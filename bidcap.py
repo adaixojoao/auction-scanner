@@ -42,7 +42,10 @@ def _value(item: dict, kind: str | None, targets: dict, unknowns: list[str]) -> 
         if not area:
             unknowns.append("the floor area")
             return None
-        if floor_source not in ("stored", "notice", "catastro"):
+        if floor_source == "guess":                 # guesses rank, facts bid
+            unknowns.append("the floor area (only guessed — a bid needs the notice's or the register's)")
+            return None
+        if floor_source not in costs.STATED_FLOORS:
             unknowns.append("the floor area (the stored figure is not an established floor)")
             return None
         mv = market_value_estimate(item)

@@ -214,11 +214,9 @@ def outline_panel(item: dict) -> dict | None:
 
     None until it is looked up for the listing's current pin: an outline found
     for an earlier pin is somebody else's building."""
-    import geo
     import outline
-    found = geo._raw(item).get("outline")
-    pos = geo.position(item)
-    if not isinstance(found, dict) or not pos or found.get("pin") != outline._pin_key(pos):
+    found = outline.current(item)
+    if not found:
         return None
     shapes = found.get("shapes") or {}
     return {"rows": outline.summary(found), "notes": outline.notes(item, found),

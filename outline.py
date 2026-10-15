@@ -339,6 +339,17 @@ def _pin_key(pos: dict) -> list[float]:
     return [round(float(pos["lat"]), 6), round(float(pos["lon"]), 6)]
 
 
+def current(item: dict) -> dict | None:
+    """The stored outline when it was looked up for the listing's current pin;
+    one found for an earlier pin is somebody else's building."""
+    import geo
+    found = geo._raw(item).get("outline")
+    pos = geo.position(item)
+    if not isinstance(found, dict) or not pos or found.get("pin") != _pin_key(pos):
+        return None
+    return found
+
+
 def wanted(item: dict) -> bool:
     """A home whose pin is the building and whose outline is not looked up yet
     for this pin (a pin you verify later is looked up again)."""

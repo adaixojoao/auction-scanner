@@ -722,9 +722,9 @@ def market_value_estimate(item: dict) -> float | None:
     exactly (accent-insensitive). The old substring match priced Porto de Mós
     as Porto and anything containing "a" as something.
     """
-    from costs import building_m2
+    from costs import SCORED_FLOORS, building_m2
     area, source = building_m2(item)
-    if source not in ("stored", "notice", "catastro") or area < 5:
+    if source not in SCORED_FLOORS or area < 5:
         return None
     found = local_price(item)
     return area * found[0] if found else None
@@ -1613,7 +1613,7 @@ def score_detail(item: dict, now: datetime | None = None,
     mode_token = _MODE.set(mode if mode in MODES else "home")
     try:
         if mode == "invest":
-            return _score_invest(item, now, targets)
+            return _charged(item, *_score_invest(item, now, targets))
         if mode == "land":
             return _score_land(item, now, targets)
         if mode == "forest":
@@ -1622,10 +1622,30 @@ def score_detail(item: dict, now: datetime | None = None,
             return _score_both(item, now, targets)
         # A place to live. Investment land used to share this scorer, so a plot
         # picked up Portugal, summer heat and a cheap total in euros.
-        return _score_detail(item, now, targets)
+        return _charged(item, *_score_detail(item, now, targets))
     finally:
         _WEIGHTS.reset(token)
         _MODE.reset(mode_token)
+
+
+def _floor_guessed(item: dict) -> str | None:
+    """What the floor was guessed from, when the score rests on a guessed floor."""
+    from costs import building_m2
+    if property_kind(item) != "home":
+        return None
+    area, source = building_m2(item)
+    guess = item.get("floor_guess") or {}
+    return f"floor about {area:.0f} m² ({guess['basis']})" if source == "guess" and guess else None
+
+
+def _charged(item: dict, rank: float, reasons: list[str]) -> tuple[float, list[str]]:
+    """A home or investment score that rests on a guessed floor: the guess
+    costs its share of the rank (guesses.py) and is named first."""
+    import guesses
+    floor = _floor_guessed(item) if rank > 0 else None
+    if not floor:
+        return rank, reasons
+    return guesses.charge(rank, [floor]), [guesses.reason([floor]), *reasons]
 
 
 def _investment_unpriced(item: dict) -> bool:
@@ -1647,9 +1667,14 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
     higher), the climate good or excellent, and the floor area a real floor. It is then the worse of
     the living score and the investment score, so a beach flat with no resale
     case and a cheap inland yield both stay off this list.
+
+    Two gaps may be filled with an educated guess (guesses.py), named in the
+    reasons and charged on the rank: a floor the notice does not state, and,
+    for a village, parish or town pin, the sea at its farthest from the house.
     """
     import geo
-    from costs import building_m2
+    import guesses
+    from costs import SCORED_FLOORS, building_m2
 
     title = item.get("title") or ""
     full = f"{title} {item.get('description') or ''}"
@@ -1660,11 +1685,17 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         return 0.0, ["not a home — a plot is Investment land or Forestry"]
     blocked = []
     pos = geo.position(item) or {}
-    if pos.get("precision") not in geo.EXACT_ENOUGH:
-        blocked.append("position is the town, not the house — the beach and the climate are not this building's")
     beach = item.get("beach") or {}
     km = beach.get("km")
-    if km is None or beach.get("approx") or km > SWIM_MAX_KM:
+    # A village, parish or town pin: the sea is guessed at its farthest from
+    # the house (guesses.beach_worst_case). Within reach even then, the sale
+    # goes on as a guess; otherwise the pin cannot say.
+    worst = guesses.beach_worst_case(item) if pos.get("precision") not in geo.EXACT_ENOUGH else None
+    if not (worst and worst["km"] <= SWIM_MAX_KM):
+        worst = None
+    if not worst and pos.get("precision") not in geo.EXACT_ENOUGH:
+        blocked.append("position is the town, not the house — the beach and the climate are not this building's")
+    if not worst and (km is None or beach.get("approx") or km > SWIM_MAX_KM):
         if km is None or beach.get("approx"):
             blocked.append("not by the beach — the distance is not the house's")
         else:
@@ -1673,14 +1704,23 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
     if grade not in ("good", "excellent"):
         blocked.append(f"climate {grade} — living here needs a good or excellent grade")
     area, source = building_m2(item)
-    if source not in ("stored", "notice", "catastro") or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
+    if source not in SCORED_FLOORS or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
         blocked.append("floor area unknown, or the figure is the plot rather than the building")
     if blocked:
         return 0.0, blocked
     # Each component under that goal's own weights. score_detail restores the
-    # caller's weight context when it returns.
-    home_raw, home_why = score_detail(item, now, targets, mode="home")
-    inv_raw, inv_why = score_detail(item, now, targets, mode="invest")
+    # caller's weight context when it returns. A guessed beach is scored at
+    # its worst case.
+    if worst:
+        item["beach"] = {**beach, "km": worst["km"], "approx": True,
+                         "text": f"at worst about {worst['km']:.1f} km from the beach "
+                                 f"(a {worst['precision']} pin, ±{worst['spread']:g} km)"}
+    try:
+        home_raw, home_why = score_detail(item, now, targets, mode="home")
+        inv_raw, inv_why = score_detail(item, now, targets, mode="invest")
+    finally:
+        if worst:
+            item["beach"] = beach
     item["live_score"] = display_score(home_raw)
     item["research_only"] = False
     if _investment_unpriced(item):
@@ -1692,9 +1732,19 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         ]
     item["invest_score"] = display_score(inv_raw)
     weaker = home_why if home_raw <= inv_raw else inv_why
-    return min(home_raw, inv_raw), [
+    # The floor guess is charged inside each score already; the beach guess here.
+    named = [g for g in (_floor_guessed(item),) if g]
+    rank = min(home_raw, inv_raw)
+    if worst:
+        place = (f"the sea within {worst['km']:.1f} km at worst "
+                 f"(the {worst['precision']} pin, ±{worst['spread']:g} km)")
+        rank = guesses.charge(rank, [place])
+        named.append(place)
+    weaker = [r for r in weaker if not r.startswith("ranked on ")]
+    return rank, [
         f"the worse of the two ({display_score(home_raw):.0f} to live in, "
         f"{display_score(inv_raw):.0f} as an investment)",
+        *([guesses.reason(named)] if named else []),
         *weaker[:6],
     ]
 
@@ -1898,15 +1948,15 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         area = find_floor_area(title) or find_floor_area(desc) or 0
         area = _catastro_floor(item, area, reasons)
     if kind == "home":
-        from costs import building_m2
+        from costs import SCORED_FLOORS, building_m2
         floor, floor_source = building_m2(item)
-        if floor and floor_source in ("stored", "notice", "catastro"):
+        if floor and floor_source in SCORED_FLOORS:
             area = floor
             if floor_source == "notice":
                 reasons.append(f"floor {floor:.0f} m² from the notice, not a land area stored on the listing")
             elif floor_source == "catastro":
                 reasons.append(f"floor {floor:.0f} m² from Catastro")
-        elif floor_source not in ("stored", "notice", "catastro"):
+        elif floor_source not in SCORED_FLOORS:
             area = 0
             reasons.append("floor area not established — no size claim uses a land or footprint figure")
 
