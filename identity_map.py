@@ -11,18 +11,19 @@ mapping from (source, processo, lot_key) → listing_id.  The lot_key is derived
 from legal identifiers that survive re-publication (land-registry reference, tax
 matricial reference, or a deterministic hash of the description excerpt).
 
-Conflict quarantine: when two scraped lots resolve to the same lot_key within the
-same processo, or when observable identifiers diverge from what was stored, the
-conflict is recorded in `lot_map.conflict_details` and the listing is left as-is.
-The conflicting lot is not silently updated or merged.
+Resolution result: assign_citius_lot_id / assign_leilosoc_lot_id return a
+ResolutionResult whose .kind distinguishes:
+  - RESOLVED:    existing mapping, identifiers confirmed.
+  - NEW:         first time this lot_key seen; fresh eid allocated.
+  - PROVISIONAL: new lot matched by weak description-hash only.
+  - QUARANTINED: existing mapping has a recorded conflict; the caller MUST NOT
+                 update the protected listing or inherit its attachments.
 
-Interface used by sources/pt.py:
-    eid = assign_citius_lot_id(db, processo, base_eid, lot_data)
-    eid = assign_leilosoc_lot_id(db, auction_id, batch_id)
-
-The returned `eid` is the external_id component of the listing id (without the
-source: prefix).  It is the same across scans as long as the lot's legal identity
-is stable.
+Callers must check result.kind before upsert:
+    result = assign_citius_lot_id(db, processo, base_eid, lot_data)
+    if result.kind is ResolutionKind.QUARANTINED:
+        continue  # skip upsert
+    upsert_listing(db, make_row(result.eid))
 """
 from __future__ import annotations
 
@@ -31,8 +32,27 @@ import json
 import logging
 import re
 import sqlite3
+from dataclasses import dataclass, field
+from enum import Enum
 
 LOG = logging.getLogger(__name__)
+
+
+# ─── Resolution result ────────────────────────────────────────────────────────
+
+class ResolutionKind(str, Enum):
+    RESOLVED    = "resolved"     # existing mapping, identifiers confirmed
+    NEW         = "new"          # new lot, fresh eid allocated
+    PROVISIONAL = "provisional"  # new lot matched by weak desc-hash only
+    QUARANTINED = "quarantined"  # existing mapping in conflict; skip upsert
+
+
+@dataclass
+class ResolutionResult:
+    kind: ResolutionKind
+    eid: str | None         # None when QUARANTINED
+    lot_key: str
+    conflict_details: dict | None = field(default=None)
 
 
 # ─── Processo-key canonicalisation ───────────────────────────────────────────
@@ -118,19 +138,21 @@ def assign_citius_lot_id(
         processo: str,
         base_eid: str,
         lot_data: dict,
-) -> str:
-    """Return the stable eid for this Citius lot, creating a mapping if needed.
+) -> ResolutionResult:
+    """Return a ResolutionResult for this Citius lot.
 
     Parameters
     ----------
     processo:
-        Normalised court-case string used as the processo key (same as base_eid
-        before the suffix is added, e.g. "165103TBMRA").
+        Canonical court-case string used as the processo key (e.g. "9210TBLSB").
     base_eid:
-        The ID root derived from the processo (or stable_id fallback); used when
-        creating a new entry.
+        The ID root derived from the processo (or stable_id fallback).
     lot_data:
         The parsed lot dict from parse_citius_item; used to derive the lot_key.
+
+    Callers MUST check result.kind before calling upsert_listing.  When
+    result.kind is QUARANTINED, result.eid is None and the listing must not
+    be updated.
     """
     lot_key = lot_key_citius(lot_data)
     return _resolve(db, "citius", processo, lot_key, base_eid, lot_data)
@@ -140,8 +162,8 @@ def assign_leilosoc_lot_id(
         db: sqlite3.Connection,
         auction_id: str,
         batch_id: str | int,
-) -> str:
-    """Return the stable eid for this Leilosoc lot, creating a mapping if needed.
+) -> ResolutionResult:
+    """Return a ResolutionResult for this Leilosoc lot.
 
     Parameters
     ----------
@@ -149,6 +171,8 @@ def assign_leilosoc_lot_id(
         The Leilosoc auction identifier (used as both processo key and base_eid).
     batch_id:
         The lot's batchId; forms the lot_key.
+
+    Callers MUST check result.kind before calling upsert_listing.
     """
     lot_key = lot_key_leilosoc(batch_id)
     return _resolve(db, "leilosoc", auction_id, lot_key, auction_id, {})
@@ -161,10 +185,11 @@ def _resolve(
         lot_key: str,
         base_eid: str,
         lot_data: dict,
-) -> str:
+) -> ResolutionResult:
     """Core resolve: look up existing mapping or create a new one.
 
-    Returns the external_id component (without the source: prefix).
+    Returns a ResolutionResult.  Callers must not update the protected
+    listing when kind is QUARANTINED.
     """
     row = db.execute(
         "SELECT listing_id, conflict_details FROM lot_map"
@@ -172,45 +197,110 @@ def _resolve(
         (source, processo, lot_key)).fetchone()
 
     if row:
+        eid = row["listing_id"].removeprefix(f"{source}:")
         if row["conflict_details"]:
+            cd = json.loads(row["conflict_details"])
             LOG.warning(
                 "lot_map: %s %s lot_key=%s is in conflict quarantine: %s",
-                source, processo, lot_key, row["conflict_details"])
-        listing_id = row["listing_id"]
-        return listing_id.removeprefix(f"{source}:")
+                source, processo, lot_key, cd)
+            return ResolutionResult(
+                kind=ResolutionKind.QUARANTINED,
+                eid=None,
+                lot_key=lot_key,
+                conflict_details=cd,
+            )
+        # Existing mapping — verify material identifiers have not diverged.
+        divergence = _check_identifier_divergence(db, source, eid, lot_data)
+        if divergence:
+            # Record divergence in the existing row and quarantine.
+            LOG.warning(
+                "lot_map: %s %s lot_key=%s identifier divergence from stored: %s",
+                source, processo, lot_key, divergence)
+            db.execute(
+                "UPDATE lot_map SET conflict_details=? WHERE source=? AND processo=? AND lot_key=?",
+                (json.dumps(divergence), source, processo, lot_key))
+            return ResolutionResult(
+                kind=ResolutionKind.QUARANTINED,
+                eid=None,
+                lot_key=lot_key,
+                conflict_details=divergence,
+            )
+        return ResolutionResult(kind=ResolutionKind.RESOLVED, eid=eid, lot_key=lot_key)
 
-    # New lot_key for this processo — check for potential conflicts before inserting.
-    conflict_details = _check_conflict(db, source, processo, lot_key, base_eid, lot_data)
+    # New lot_key for this processo — check for same-key conflicts before inserting.
+    conflict_details = _check_same_key_conflict(db, source, processo, lot_key, lot_data)
     new_eid = _next_eid_for_processo(db, source, processo, base_eid)
     new_listing_id = f"{source}:{new_eid}"
+    is_provisional = lot_key.startswith("desc:")
 
     db.execute(
         "INSERT INTO lot_map (source, processo, lot_key, listing_id, conflict_details)"
         " VALUES (?,?,?,?,?)",
         (source, processo, lot_key, new_listing_id,
          json.dumps(conflict_details) if conflict_details else None))
-    return new_eid
+
+    kind = (ResolutionKind.QUARANTINED if conflict_details
+            else ResolutionKind.PROVISIONAL if is_provisional
+            else ResolutionKind.NEW)
+    return ResolutionResult(
+        kind=kind,
+        eid=None if kind is ResolutionKind.QUARANTINED else new_eid,
+        lot_key=lot_key,
+        conflict_details=conflict_details,
+    )
 
 
-def _check_conflict(
+def _check_same_key_conflict(
         db: sqlite3.Connection,
         source: str,
         processo: str,
         lot_key: str,
-        base_eid: str,
         lot_data: dict,
 ) -> dict | None:
-    """Return a conflict dict if this new lot appears to conflict with an existing
-    listing stored under the base_eid, otherwise None.
+    """Return a conflict dict when the same lot_key is already mapped to a different
+    listing_id in this processo (i.e. two physically different lots share a key).
 
-    A conflict arises when:
-    - The base_eid listing already exists with a different stable legal identifier
-      (registo or art_matricial) than this lot's lot_key.
-    - This suggests the existing entry belongs to a different legal property.
+    A second lot with a *different* registry number in the same processo is not a
+    conflict — it is a distinct legal unit and will receive a new suffixed eid.
+    A conflict only arises when the *same* lot_key would be mapped twice.
     """
-    existing_id = f"{source}:{base_eid}"
+    existing = db.execute(
+        "SELECT listing_id FROM lot_map"
+        " WHERE source=? AND processo=? AND lot_key=?",
+        (source, processo, lot_key)).fetchone()
+    if not existing:
+        return None
+    conflict = {
+        "same_lot_key_collision": {
+            "lot_key": lot_key,
+            "existing_listing_id": existing["listing_id"],
+        }
+    }
+    LOG.warning(
+        "lot_map: %s %s lot_key=%s already mapped to %s; quarantining new observation",
+        source, processo, lot_key, existing["listing_id"])
+    return conflict
+
+
+def _check_identifier_divergence(
+        db: sqlite3.Connection,
+        source: str,
+        eid: str,
+        lot_data: dict,
+) -> dict | None:
+    """Return a conflict dict when the current lot_data's strong identifiers diverge
+    from those stored in the existing listing, otherwise None.
+
+    Divergence is only flagged when both the stored record and the new observation
+    carry a non-empty value for the same strong identifier (registo or art_matricial)
+    and those values differ.  Empty fields or additions (one side is empty) are not
+    divergences — they represent data enrichment.
+    """
+    if not lot_data:
+        return None
+    listing_id = f"{source}:{eid}"
     row = db.execute(
-        "SELECT raw_json FROM listings WHERE id=?", (existing_id,)).fetchone()
+        "SELECT raw_json FROM listings WHERE id=?", (listing_id,)).fetchone()
     if not row or not row["raw_json"]:
         return None
     try:
@@ -223,19 +313,14 @@ def _check_conflict(
     new_registo = _norm(lot_data.get("registo"))
     new_mat = _norm(lot_data.get("art_matricial"))
 
-    conflicts = {}
+    divergence = {}
     if stored_registo and new_registo and stored_registo != new_registo:
-        conflicts["registo_mismatch"] = {
+        divergence["registo_divergence"] = {
             "stored": stored_registo, "new": new_registo}
     if stored_mat and new_mat and stored_mat != new_mat:
-        conflicts["art_matricial_mismatch"] = {
+        divergence["art_matricial_divergence"] = {
             "stored": stored_mat, "new": new_mat}
-
-    if conflicts:
-        LOG.warning(
-            "lot_map: %s %s NEW lot_key=%s conflicts with %s: %s",
-            source, processo, lot_key, existing_id, conflicts)
-    return conflicts or None
+    return divergence or None
 
 
 # ─── Migration helpers ───────────────────────────────────────────────────────

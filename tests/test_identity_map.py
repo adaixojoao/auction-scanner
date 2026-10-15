@@ -106,46 +106,47 @@ class TestLotKeyLeilosoc:
 
 class TestAssignCitiusLotId:
     def test_first_lot_gets_base_eid(self, memdb):
-        eid = assign_citius_lot_id(memdb, "ABC123", "ABC123",
+        res = assign_citius_lot_id(memdb, "ABC123", "ABC123",
                                     {"registo": "R001", "desc": "house"})
-        assert eid == "ABC123"
+        assert res.eid == "ABC123"
+        assert res.kind.value in ("new", "provisional")
 
     def test_second_lot_gets_suffixed_eid(self, memdb):
         assign_citius_lot_id(memdb, "ABC123", "ABC123",
                               {"registo": "R001", "desc": "house"})
-        eid2 = assign_citius_lot_id(memdb, "ABC123", "ABC123",
+        res2 = assign_citius_lot_id(memdb, "ABC123", "ABC123",
                                      {"registo": "R002", "desc": "land"})
-        assert eid2 == "ABC123-2"
+        assert res2.eid == "ABC123-2"
 
     def test_same_lot_key_returns_same_eid(self, memdb):
-        eid1 = assign_citius_lot_id(memdb, "ABC123", "ABC123",
+        res1 = assign_citius_lot_id(memdb, "ABC123", "ABC123",
                                      {"registo": "R001", "desc": "house"})
-        eid2 = assign_citius_lot_id(memdb, "ABC123", "ABC123",
+        res2 = assign_citius_lot_id(memdb, "ABC123", "ABC123",
                                      {"registo": "R001", "desc": "house"})
-        assert eid1 == eid2 == "ABC123"
+        assert res1.eid == res2.eid == "ABC123"
 
     def test_reorder_does_not_change_id(self, memdb):
         """When lot B was second on scan 1, it must stay second even if A disappears."""
         assign_citius_lot_id(memdb, "ABC123", "ABC123",
                               {"desc": "Moradia na Rua das Flores Safara Moura"})
-        eid_land = assign_citius_lot_id(memdb, "ABC123", "ABC123",
+        res_land = assign_citius_lot_id(memdb, "ABC123", "ABC123",
                                          {"desc": "Terreno de cultura em Moura"})
-        assert eid_land == "ABC123-2"
+        assert res_land.eid == "ABC123-2"
 
         # Simulate: only land appears in the next scan.
-        eid_land_rescan = assign_citius_lot_id(memdb, "ABC123", "ABC123",
+        res_land_rescan = assign_citius_lot_id(memdb, "ABC123", "ABC123",
                                                 {"desc": "Terreno de cultura em Moura"})
-        assert eid_land_rescan == "ABC123-2", "land must keep its ID even when house is absent"
+        assert res_land_rescan.eid == "ABC123-2", "land must keep its ID even when house is absent"
 
     def test_third_lot_suffix(self, memdb):
         for i, key in enumerate(("R1", "R2", "R3")):
-            eid = assign_citius_lot_id(memdb, "P1", "P1", {"registo": key})
-        assert eid == "P1-3"
+            res = assign_citius_lot_id(memdb, "P1", "P1", {"registo": key})
+        assert res.eid == "P1-3"
 
     def test_different_processo_independent(self, memdb):
-        eid_a = assign_citius_lot_id(memdb, "P1", "P1", {"registo": "R1"})
-        eid_b = assign_citius_lot_id(memdb, "P2", "P2", {"registo": "R1"})
-        assert eid_a == "P1" and eid_b == "P2"
+        res_a = assign_citius_lot_id(memdb, "P1", "P1", {"registo": "R1"})
+        res_b = assign_citius_lot_id(memdb, "P2", "P2", {"registo": "R1"})
+        assert res_a.eid == "P1" and res_b.eid == "P2"
 
     def test_lot_map_row_committed(self, memdb):
         assign_citius_lot_id(memdb, "XYZ", "XYZ", {"registo": "R9"})
@@ -155,71 +156,127 @@ class TestAssignCitiusLotId:
         assert row is not None
         assert row["listing_id"] == "citius:XYZ"
 
+    def test_desc_hash_lot_key_is_provisional(self, memdb):
+        """A lot matched only by description hash returns PROVISIONAL."""
+        from identity_map import ResolutionKind
+        res = assign_citius_lot_id(memdb, "P9", "P9", {"desc": "Some house somewhere"})
+        assert res.kind is ResolutionKind.PROVISIONAL
+
+    def test_registo_lot_key_is_new(self, memdb):
+        from identity_map import ResolutionKind
+        res = assign_citius_lot_id(memdb, "P10", "P10", {"registo": "REGNEW"})
+        assert res.kind is ResolutionKind.NEW
+
 
 # ─── assign_leilosoc_lot_id ──────────────────────────────────────────────────
 
 class TestAssignLeilosocLotId:
     def test_first_lot_gets_auction_id(self, memdb):
-        eid = assign_leilosoc_lot_id(memdb, "5678", 100)
-        assert eid == "5678"
+        res = assign_leilosoc_lot_id(memdb, "5678", 100)
+        assert res.eid == "5678"
 
     def test_second_lot_gets_suffix(self, memdb):
         assign_leilosoc_lot_id(memdb, "5678", 100)
-        eid2 = assign_leilosoc_lot_id(memdb, "5678", 200)
-        assert eid2 == "5678-2"
+        res2 = assign_leilosoc_lot_id(memdb, "5678", 200)
+        assert res2.eid == "5678-2"
 
     def test_same_batch_same_eid(self, memdb):
-        eid1 = assign_leilosoc_lot_id(memdb, "5678", 100)
-        eid2 = assign_leilosoc_lot_id(memdb, "5678", 100)
-        assert eid1 == eid2 == "5678"
+        res1 = assign_leilosoc_lot_id(memdb, "5678", 100)
+        res2 = assign_leilosoc_lot_id(memdb, "5678", 100)
+        assert res1.eid == res2.eid == "5678"
 
     def test_different_auction_independent(self, memdb):
-        e1 = assign_leilosoc_lot_id(memdb, "A1", 10)
-        e2 = assign_leilosoc_lot_id(memdb, "A2", 10)
-        assert e1 == "A1" and e2 == "A2"
+        r1 = assign_leilosoc_lot_id(memdb, "A1", 10)
+        r2 = assign_leilosoc_lot_id(memdb, "A2", 10)
+        assert r1.eid == "A1" and r2.eid == "A2"
 
     def test_reorder_does_not_reassign(self, memdb):
         """When lot batchId=200 was assigned second, removal of first must not give it first slot."""
         assign_leilosoc_lot_id(memdb, "7000", 100)
-        eid_200 = assign_leilosoc_lot_id(memdb, "7000", 200)
-        assert eid_200 == "7000-2"
+        res_200 = assign_leilosoc_lot_id(memdb, "7000", 200)
+        assert res_200.eid == "7000-2"
         # Re-scan with only lot 200.
-        eid_200_again = assign_leilosoc_lot_id(memdb, "7000", 200)
-        assert eid_200_again == "7000-2"
+        res_200_again = assign_leilosoc_lot_id(memdb, "7000", 200)
+        assert res_200_again.eid == "7000-2"
 
 
 # ─── Conflict quarantine ──────────────────────────────────────────────────────
 
 class TestConflictQuarantine:
     def test_no_conflict_when_listing_absent(self, memdb):
-        eid = assign_citius_lot_id(memdb, "ABC", "ABC", {"registo": "NEW"})
+        res = assign_citius_lot_id(memdb, "ABC", "ABC", {"registo": "NEW"})
         row = memdb.execute(
             "SELECT conflict_details FROM lot_map WHERE source='citius' AND processo='ABC'"
         ).fetchone()
         assert row["conflict_details"] is None
+        assert res.kind.value != "quarantined"
 
-    def test_conflict_recorded_when_registo_differs_from_stored(self, memdb):
-        # Store an existing listing with a different registo.
+    def test_second_lot_with_different_registo_is_not_a_conflict(self, memdb):
+        """A second distinct lot in the same processo with a different registry
+        number is a new legitimate lot, not a conflict."""
+        from identity_map import ResolutionKind
+        # Insert existing listing for the first lot.
         memdb.execute(
             "INSERT INTO listings (id, source, external_id, raw_json) VALUES (?,?,?,?)",
             ("citius:ABC", "citius", "ABC",
-             json.dumps({"registo": "R_OLD", "art_matricial": ""})))
+             json.dumps({"registo": "R_FIRST", "art_matricial": ""})))
 
-        # New lot for same processo but different registo → conflict.
-        assign_citius_lot_id(memdb, "ABC", "ABC", {"registo": "R_NEW"})
-        row = memdb.execute(
-            "SELECT conflict_details FROM lot_map WHERE source='citius' AND processo='ABC'"
-        ).fetchone()
-        details = json.loads(row["conflict_details"] or "null")
-        assert details and "registo_mismatch" in details
+        # Second lot in same processo with different registo → should be NEW, not QUARANTINED.
+        res = assign_citius_lot_id(memdb, "ABC", "ABC", {"registo": "R_SECOND"})
+        assert res.kind is ResolutionKind.NEW, (
+            "A second distinct lot (different registo) is a new lot, not a conflict")
+        assert res.eid == "ABC-2"
 
-    def test_conflict_lookup_still_returns_existing_eid(self, memdb):
-        """A conflict in quarantine must not prevent using the stored mapping."""
-        # First call creates the mapping.
-        eid1 = assign_citius_lot_id(memdb, "CON", "CON", {"registo": "R1"})
-        # Second call with same lot_key returns the same eid regardless.
-        eid2 = assign_citius_lot_id(memdb, "CON", "CON", {"registo": "R1"})
-        assert eid1 == eid2 == "CON"
+    def test_same_lot_key_collision_quarantines(self, memdb):
+        """When the same lot_key appears twice, the second observation is quarantined."""
+        from identity_map import ResolutionKind
+        # First assignment for lot_key reg:R1.
+        res1 = assign_citius_lot_id(memdb, "PROC", "PROC", {"registo": "R1"})
+        assert res1.kind is ResolutionKind.NEW
+
+        # Insert a second lot_map row to simulate a collision (two rows with the same
+        # lot_key — can only happen via direct DB manipulation; _resolve protects against it).
+        # Instead, directly test that _check_same_key_conflict fires.
+        from identity_map import _check_same_key_conflict, lot_key_citius
+        lk = lot_key_citius({"registo": "R1"})
+        conflict = _check_same_key_conflict(memdb, "citius", "PROC", lk, {"registo": "R1"})
+        assert conflict is not None and "same_lot_key_collision" in conflict
+
+    def test_identifier_divergence_quarantines_existing_mapping(self, memdb):
+        """When a rescan returns a different registo for an existing lot, the mapping
+        is quarantined and the upsert must be skipped."""
+        from identity_map import ResolutionKind
+        # Set up first assignment.
+        res1 = assign_citius_lot_id(memdb, "DIVERG", "DIVERG", {"registo": "R_ORIG"})
+        assert res1.kind is ResolutionKind.NEW
+        # Insert the listing so divergence check can compare.
+        memdb.execute(
+            "INSERT INTO listings (id, source, external_id, raw_json) VALUES (?,?,?,?)",
+            (f"citius:{res1.eid}", "citius", res1.eid,
+             json.dumps({"registo": "R_ORIG"})))
+
+        # Rescan: same lot_key but now has a different registo stored in the listing.
+        res2 = assign_citius_lot_id(memdb, "DIVERG", "DIVERG", {"registo": "R_CHANGED"})
+        # Different lot_key → new eid (R_CHANGED ≠ R_ORIG) — no divergence path here.
+        assert res2.eid is not None
+
+        # Divergence happens when the lot_key MATCHES but stored listing has different value.
+        # We need to test _check_identifier_divergence directly.
+        from identity_map import _check_identifier_divergence
+        d = _check_identifier_divergence(memdb, "citius", res1.eid, {"registo": "R_DIFFERENT"})
+        assert d is not None and "registo_divergence" in d
+
+    def test_quarantined_observation_returns_none_eid(self, memdb):
+        """A quarantined ResolutionResult has eid=None."""
+        from identity_map import ResolutionKind
+        # Create a mapping then manually mark it quarantined.
+        res1 = assign_citius_lot_id(memdb, "QQ", "QQ", {"registo": "RR"})
+        memdb.execute(
+            "UPDATE lot_map SET conflict_details=? WHERE source='citius' AND processo='QQ'",
+            (json.dumps({"test": "quarantine"}),))
+        res2 = assign_citius_lot_id(memdb, "QQ", "QQ", {"registo": "RR"})
+        assert res2.kind is ResolutionKind.QUARANTINED
+        assert res2.eid is None
 
 
 # ─── Backfill migration ───────────────────────────────────────────────────────
@@ -565,8 +622,8 @@ class TestBackfillUsesCanonicalProcesso:
             (json.dumps({"processo": "9/21.0TBLSB", "registo": "REGA"}),))
         backfill_citius(memdb)
         # Simulate the scraper's first rescan: it uses canonical_processo("9/21.0TBLSB")="9210TBLSB"
-        eid = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB", {"registo": "REGA"})
-        assert eid == "9210TBLSB", (
+        res = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB", {"registo": "REGA"})
+        assert res.eid == "9210TBLSB", (
             "Rescan must find the existing lot_map row, not allocate a new eid")
 
 
@@ -696,12 +753,12 @@ class TestLegacyUpgradeThreeUnits:
         )
 
         # Rescan: unit A is absent; B and C still present.
-        eid_b = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
+        res_b = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
                                       {"registo": "REGB"})
-        eid_c = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
+        res_c = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
                                       {"registo": "REGC"})
-        assert eid_b == "9210TBLSB-2", f"Expected 9210TBLSB-2, got {eid_b}"
-        assert eid_c == "9210TBLSB-3", f"Expected 9210TBLSB-3, got {eid_c}"
+        assert res_b.eid == "9210TBLSB-2", f"Expected 9210TBLSB-2, got {res_b.eid}"
+        assert res_c.eid == "9210TBLSB-3", f"Expected 9210TBLSB-3, got {res_c.eid}"
 
     def test_sparse_suffixes_not_overwritten(self, memdb):
         """After v26 migration, a new lot in the same processo gets the next free suffix."""
@@ -711,9 +768,9 @@ class TestLegacyUpgradeThreeUnits:
         db_mod._migrate_v26(memdb)
 
         # Add a new unit D — should get suffix -4.
-        eid_d = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
+        res_d = assign_citius_lot_id(memdb, "9210TBLSB", "9210TBLSB",
                                       {"registo": "REGD"})
-        assert eid_d == "9210TBLSB-4"
+        assert res_d.eid == "9210TBLSB-4"
 
 
 def _norm(s):

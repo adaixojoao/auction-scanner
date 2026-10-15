@@ -15,7 +15,8 @@ from bs4 import BeautifulSoup
 from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, uf_parish, utcnow_iso)
 from db import upsert_listing
-from identity_map import assign_citius_lot_id, assign_leilosoc_lot_id, canonical_processo
+from identity_map import (assign_citius_lot_id, assign_leilosoc_lot_id,
+                           canonical_processo, ResolutionKind)
 from sources import SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
 
@@ -476,7 +477,12 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
             # Stable identity via lot_map (F01 fix): batchId is the lot-level
             # identifier Leilosoc assigns; it does not shift when another lot
             # is removed from the same auction.
-            eid = assign_leilosoc_lot_id(db, auction, batch_id)
+            res = assign_leilosoc_lot_id(db, auction, batch_id)
+            if res.kind is ResolutionKind.QUARANTINED:
+                LOG.warning("Leilosoc lot quarantined, skipping upsert: %s %s",
+                            auction, res.conflict_details)
+                continue
+            eid = res.eid
             row = leilosoc_listing(lot, eid)
             if row is None or (row["price"] and row["price"] > max_price):
                 continue
@@ -924,7 +930,12 @@ def scrape_citius(db, max_price: float = 50000, **_):
                 # Stable identity via lot_map (F01 fix): lot_key is derived from
                 # legal identifiers (registo, art_matricial, description hash) so
                 # IDs survive lot reordering, pagination and html_id reassignment.
-                eid = assign_citius_lot_id(db, base_eid, base_eid, f)
+                res = assign_citius_lot_id(db, base_eid, base_eid, f)
+                if res.kind is ResolutionKind.QUARANTINED:
+                    LOG.warning("Citius lot quarantined, skipping upsert: %s %s",
+                                base_eid, res.conflict_details)
+                    continue
+                eid = res.eid
                 if f["price"] and f["price"] > max_price:
                     continue
 
