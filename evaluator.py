@@ -422,53 +422,63 @@ def _req_floor_area(evidence: dict, policy: dict) -> Requirement:
 
 
 def _req_hazard_coverage(evidence: dict, policy: dict) -> Requirement:
-    """Critical hazard layers present and no severe hazard confirmed at the building."""
+    """Require usable flood and fire metrics; adverse facts outrank missing data."""
+    import math
+
     climate = _climate(evidence)
     required = policy.get("required_hazard_layers", DEFAULT_POLICY["required_hazard_layers"])
     reject_flood = policy.get("reject_flood_m", DEFAULT_POLICY["reject_flood_m"])
     reject_fire = policy.get("reject_fire_days", DEFAULT_POLICY["reject_fire_days"])
-
     if climate is None:
-        return Requirement(
-            key="hazard_coverage", outcome=UNKNOWN,
-            code="DATA_HAZARD_NO_CLIMATE",
-            message="No climate data; hazard layers cannot be evaluated.",
-            next_evidence_needed="Run climate assessment for the building's position.",
-        )
+        return Requirement(key="hazard_coverage", outcome=UNKNOWN, code="DATA_HAZARD_NO_CLIMATE",
+                           message="No climate data; hazard layers cannot be evaluated.",
+                           next_evidence_needed="Run climate assessment for the building's position.")
 
-    missing = [layer for layer in required
-               if climate.get(layer) is None or climate.get(layer) in ({}, [], "")]
+    def number(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value) if math.isfinite(value) and value >= 0 else None
+
+    flood = number(climate.get("flood_m"))
+    danger = climate.get("fire_danger")
+    days = None
+    if isinstance(danger, dict):
+        for key in ("high_days_2090", "rcp45_2079-2098"):
+            if key in danger:
+                days = number(danger[key])
+                # A present but invalid canonical metric must not be rescued by
+                # an older contradictory metric. It remains unresolved.
+                break
+    if days is None and not (isinstance(danger, dict)
+                             and any(k in danger for k in ("high_days_2090", "rcp45_2079-2098"))):
+        days = number(climate.get("fire_danger_days"))
+
+    if flood is not None and flood >= reject_flood:
+        return Requirement(key="hazard_coverage", outcome=FAIL, code="PHYS_FLOOD_SEVERE",
+                           message=f"JRC 100-year flood depth {flood:.1f} m at building "
+                                   f"(reject threshold {reject_flood:.1f} m).", dangerous=True)
+    if days is not None and days >= reject_fire:
+        return Requirement(key="hazard_coverage", outcome=FAIL, code="PHYS_FIRE_SEVERE",
+                           message=f"Fire danger {days:.0f} days/year at building "
+                                   f"(reject threshold {reject_fire}).", dangerous=True)
+
+    missing = []
+    for layer in required:
+        value = climate.get(layer)
+        if layer == "flood_m":
+            absent = flood is None
+        elif layer == "fire_danger":
+            absent = days is None
+        else:
+            absent = value is None or value in ({}, [], "")
+        if absent:
+            missing.append(layer)
     if missing:
-        return Requirement(
-            key="hazard_coverage", outcome=UNKNOWN,
-            code="DATA_HAZARD_MISSING",
-            message=f"Required hazard layers missing: {', '.join(missing)}.",
-            next_evidence_needed=f"Obtain data for: {', '.join(missing)}.",
-        )
-
-    # Severe confirmed hazards block regardless of preferences.
-    flood_m = climate.get("flood_m")
-    if flood_m is not None and flood_m >= reject_flood:
-        return Requirement(
-            key="hazard_coverage", outcome=FAIL,
-            code="PHYS_FLOOD_SEVERE",
-            message=f"JRC 100-year flood depth {flood_m:.1f} m at building (reject threshold {reject_flood:.1f} m).",
-            dangerous=True,
-        )
-    fire_danger = (climate.get("fire_danger") or {}).get("rcp45_2079-2098") or climate.get("fire_danger_days")
-    if fire_danger is not None and fire_danger >= reject_fire:
-        return Requirement(
-            key="hazard_coverage", outcome=FAIL,
-            code="PHYS_FIRE_SEVERE",
-            message=f"Fire danger {fire_danger:.0f} days/year at building (reject threshold {reject_fire}).",
-            dangerous=True,
-        )
-
-    return Requirement(
-        key="hazard_coverage", outcome=PASS,
-        code="DATA_HAZARD_OK",
-        message="Required hazard layers present; no severe hazard at building.",
-    )
+        return Requirement(key="hazard_coverage", outcome=UNKNOWN, code="DATA_HAZARD_MISSING",
+                           message=f"Required hazard layers missing or invalid: {', '.join(missing)}.",
+                           next_evidence_needed=f"Obtain usable data for: {', '.join(missing)}.")
+    return Requirement(key="hazard_coverage", outcome=PASS, code="DATA_HAZARD_OK",
+                       message="Required hazard metrics present; no severe hazard at building.")
 
 
 def _req_sale_availability(evidence: dict, policy: dict) -> Requirement:
