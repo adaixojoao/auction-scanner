@@ -126,15 +126,28 @@ def photo_urls(item: dict, limit: int | None = None) -> list[str]:
 
 
 def needs_photo_check(item: dict) -> bool:
-    """True when this home still has photos and no stored answer."""
+    """True when this home has photos and either no stored answer or a useless answer.
+
+    A stored answer with shows_house=False means the vision model saw only
+    documents, maps or generic images — not the building.  That is not useful
+    evidence of condition, so the listing is re-queued the next time real photos
+    appear (F09).
+    """
     kind = item.get("kind")
     if kind is None:
         from scoring import property_kind
         kind = property_kind(item)
     if kind != "home":
         return False
-    if '"photo_check"' in (item.get("raw_json") or ""):
-        return False
+    rj = item.get("raw_json") or ""
+    if '"photo_check"' in rj:
+        try:
+            pc = json.loads(rj).get("photo_check") or {}
+        except (ValueError, TypeError):
+            pass
+        else:
+            if pc.get("shows_house") is not False:
+                return False  # already have a useful check
     return bool(photo_urls(item))
 
 
@@ -699,6 +712,10 @@ def keep_one(db, session, item: dict) -> bool:
     raw["kept_photos"] = names
     db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
                (json.dumps(raw, ensure_ascii=False), item["id"]))
+    from db import record_evidence_revision
+    record_evidence_revision(db, item["id"], "kept_photos", names)
+    # Track gallery URL list so callers can detect when new photos arrive (F10).
+    record_evidence_revision(db, item["id"], "gallery_urls", sorted(urls))
     db.commit()
     return True
 
@@ -786,6 +803,8 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
             raw = {}
         raw[field] = found
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        from db import record_evidence_revision
+        record_evidence_revision(db, item["id"], field, found)
         db.commit()
         done += 1
     if done:

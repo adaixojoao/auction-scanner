@@ -41,7 +41,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -505,11 +505,33 @@ def _migrate_v22(db: sqlite3.Connection):
     _add_column(db, "listings", "possible_match", "TEXT")
 
 
+def _migrate_v23(db: sqlite3.Connection):
+    """Evidence revision tracking — content-hash per evidence key (F16 / Milestone D).
+
+    evidence_revisions records a sha1 of each evidence payload the last time it
+    was stored.  When the content changes the rev counter increments so the
+    evaluator can tell whether a cached Decision is still fresh without
+    re-running every check.
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS evidence_revisions (
+            listing_id   TEXT NOT NULL,
+            evidence_key TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            rev          INTEGER NOT NULL DEFAULT 1,
+            observed_at  TEXT NOT NULL,
+            PRIMARY KEY (listing_id, evidence_key)
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_ev_rev_listing ON evidence_revisions(listing_id)")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
-               19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22}
+               19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
+               23: _migrate_v23}
 
 
 def init_db(db: sqlite3.Connection):
@@ -520,6 +542,49 @@ def init_db(db: sqlite3.Connection):
         db.commit()
     if version < SCHEMA_VERSION:
         LOG.debug(f"Database schema migrated from v{version} to v{SCHEMA_VERSION}")
+
+
+# ─── Evidence revisions ──────────────────────────────────────────────
+
+def record_evidence_revision(db: sqlite3.Connection, listing_id: str, key: str, content) -> int:
+    """Record or update the revision counter for one evidence payload.
+
+    Computes a content hash of `content` (JSON-serialised, keys sorted).  If
+    the hash differs from the last stored value the rev counter increments.
+    Returns the current rev (1 on first write, higher when the content changed).
+    """
+    h = hashlib.sha1(
+        json.dumps(content, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+    row = db.execute(
+        "SELECT content_hash, rev FROM evidence_revisions WHERE listing_id=? AND evidence_key=?",
+        (listing_id, key),
+    ).fetchone()
+    now = utcnow_iso()
+    if row is None:
+        db.execute(
+            "INSERT INTO evidence_revisions (listing_id, evidence_key, content_hash, rev, observed_at)"
+            " VALUES (?,?,?,1,?)",
+            (listing_id, key, h, now),
+        )
+        return 1
+    if row["content_hash"] == h:
+        return row["rev"]
+    new_rev = row["rev"] + 1
+    db.execute(
+        "UPDATE evidence_revisions SET content_hash=?, rev=?, observed_at=?"
+        " WHERE listing_id=? AND evidence_key=?",
+        (h, new_rev, now, listing_id, key),
+    )
+    return new_rev
+
+
+def get_evidence_revisions(db: sqlite3.Connection, listing_id: str) -> dict[str, int]:
+    """Return {evidence_key: rev} for all evidence recorded for a listing."""
+    rows = db.execute(
+        "SELECT evidence_key, rev FROM evidence_revisions WHERE listing_id=?", (listing_id,)
+    ).fetchall()
+    return {r["evidence_key"]: r["rev"] for r in rows}
 
 
 # ─── Writes ──────────────────────────────────────────────────────────
@@ -1606,6 +1671,13 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         items.append(item)
     if climate_writes:
         db.executemany("UPDATE listings SET raw_json = ? WHERE id = ?", climate_writes)
+        for rj, lid in climate_writes:
+            try:
+                climate_payload = json.loads(rj).get("climate")
+                if climate_payload is not None:
+                    record_evidence_revision(db, lid, "climate", climate_payload)
+            except (ValueError, TypeError):
+                pass
         db.commit()
     _save_kept(db, mode, new_scores)
     if not _kept_in_memory(mode):

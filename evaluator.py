@@ -632,5 +632,9 @@ def evaluate(
             "evaluated_at": now.isoformat(),
             "policy_keys": sorted(pol.keys()),
             "milestone": "A-shadow",
+            # evidence_revs supplied by caller (e.g. db.get_evidence_revisions) so
+            # the decision record captures which revision of each evidence piece was
+            # used — stale decisions can be detected without re-evaluating (F16).
+            "evidence_revs": evidence.get("_evidence_revs") or {},
         },
     )

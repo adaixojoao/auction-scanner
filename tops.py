@@ -13,8 +13,21 @@ SEEN_GOALS = ("home", "invest")
 
 
 def looked_at(item: dict) -> bool:
-    """True once a photo check has been stored, whatever it concluded."""
-    return '"photo_check"' in (item.get("raw_json") or "")
+    """True when a photo check has been stored AND the photos actually show the house.
+
+    Key presence alone is not enough: a check that concluded shows_house=False
+    (only documents, maps, or a logo was provided) is not useful evidence about
+    the building's condition.
+    """
+    import json
+    rj = item.get("raw_json") or ""
+    if '"photo_check"' not in rj:
+        return False
+    try:
+        pc = json.loads(rj).get("photo_check") or {}
+    except (ValueError, TypeError):
+        return False
+    return bool(pc.get("shows_house"))
 
 
 def place_unseen_homes_after(items: list[dict], mode: str) -> list[dict]:
