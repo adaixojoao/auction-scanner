@@ -18,6 +18,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -41,7 +42,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -622,13 +623,37 @@ def _migrate_v27(db: sqlite3.Connection):
     _add_column(db, "investigation_clearances", "evidence_rev_sum", "INTEGER")
 
 
+def _migrate_v28(db: sqlite3.Connection):
+    """Persist evaluator Decisions for freshness tracking (F11 / F16 / Milestone D).
+
+    evaluator_decisions stores the most recent shadow-eval result per listing.
+    evidence_rev_sum is the SUM(rev) from evidence_revisions at evaluation time.
+    A stored Decision is considered stale when the current evidence_rev_sum differs,
+    causing the next load to re-evaluate and overwrite this row.
+
+    state is one of: "research" | "finalist" | "bid_ready".
+    requirements_json is a JSON array of {name, outcome, dangerous, reason?} dicts.
+    provenance_json is the Decision.provenance dict serialised as JSON.
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS evaluator_decisions (
+            listing_id        TEXT PRIMARY KEY,
+            state             TEXT NOT NULL,
+            requirements_json TEXT NOT NULL,
+            provenance_json   TEXT NOT NULL,
+            evidence_rev_sum  INTEGER,
+            evaluated_at      TEXT NOT NULL
+        )
+    """)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
-               27: _migrate_v27}
+               27: _migrate_v27, 28: _migrate_v28}
 
 
 def init_db(db: sqlite3.Connection):
@@ -1834,11 +1859,13 @@ def _shadow_evidence(item: dict) -> dict:
     }
 
 
-def _shadow_evaluate(item: dict, now) -> None:
-    """Call evaluator.evaluate() in shadow mode and log the decision (F01).
+def _shadow_evaluate(item: dict, now, db: sqlite3.Connection | None = None,
+                     ev_rev_sum: int | None = None) -> None:
+    """Call evaluator.evaluate() in shadow mode, log and persist the decision (F01/F11).
 
-    Pure side-effect-free: result is logged at DEBUG, never gates the item.
-    Exceptions are swallowed so a broken evaluator cannot affect the UI.
+    Never gates the item — the result is observability only until Decision promotion
+    is wired.  Persists the Decision to evaluator_decisions (F11/F16) so freshness
+    can be checked against evidence_revisions without re-evaluating.
     """
     try:
         import evaluator
@@ -1849,8 +1876,65 @@ def _shadow_evaluate(item: dict, now) -> None:
             item.get("id"), decision.state,
             len(decision.requirements), len(decision.blocking),
         )
+        item["evaluator_state"] = decision.state
+        if db is not None and item.get("id"):
+            _persist_decision(db, item["id"], decision, ev_rev_sum)
     except Exception:  # noqa: BLE001
         LOG.debug("shadow-eval failed for %s", item.get("id"), exc_info=True)
+
+
+def _persist_decision(db: sqlite3.Connection, listing_id: str, decision, ev_rev_sum) -> None:
+    """Upsert a Decision row into evaluator_decisions (F11/F16)."""
+    try:
+        reqs_json = json.dumps([
+            {"key": r.key, "outcome": r.outcome, "dangerous": r.dangerous,
+             "code": r.code, "message": r.message}
+            for r in decision.requirements
+        ])
+        prov_json = json.dumps(decision.provenance)
+        db.execute(
+            """INSERT INTO evaluator_decisions
+               (listing_id, state, requirements_json, provenance_json,
+                evidence_rev_sum, evaluated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(listing_id) DO UPDATE SET
+                   state=excluded.state,
+                   requirements_json=excluded.requirements_json,
+                   provenance_json=excluded.provenance_json,
+                   evidence_rev_sum=excluded.evidence_rev_sum,
+                   evaluated_at=excluded.evaluated_at""",
+            (listing_id, decision.state, reqs_json, prov_json,
+             ev_rev_sum, decision.provenance.get("evaluated_at", utcnow_iso()))
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001
+        LOG.debug("persist_decision failed for %s", listing_id, exc_info=True)
+
+
+def load_decision(db: sqlite3.Connection, listing_id: str,
+                  ev_rev_sum: int | None = None) -> dict | None:
+    """Return the stored Decision for listing_id if still fresh, else None.
+
+    A Decision is stale when ev_rev_sum is provided and does not match the
+    stored evidence_rev_sum.  Pass ev_rev_sum=None to skip the freshness check
+    and always return whatever is stored (useful for audits and tests).
+    """
+    row = db.execute(
+        "SELECT state, requirements_json, provenance_json, evidence_rev_sum, evaluated_at"
+        " FROM evaluator_decisions WHERE listing_id = ?",
+        (listing_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    if ev_rev_sum is not None and row["evidence_rev_sum"] != ev_rev_sum:
+        return None  # stale
+    return {
+        "state": row["state"],
+        "requirements": json.loads(row["requirements_json"]),
+        "provenance": json.loads(row["provenance_json"]),
+        "evidence_rev_sum": row["evidence_rev_sum"],
+        "evaluated_at": row["evaluated_at"],
+    }
 
 
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
@@ -2018,7 +2102,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
                        climate_on, mode)
             if mode in ("both", "invest"):
-                _shadow_evaluate(item, now)
+                _shadow_evaluate(item, now, db=db,
+                                 ev_rev_sum=ev_rev_sums.get(item["id"]))
             _optional = {"research_only", "extreme_discount"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
@@ -2160,3 +2245,59 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
     cleared = _extreme_clearances(db, extreme_ids, ev_rev_sums=ev_rev_sums_best)
     blocked = extreme_ids - cleared
     return [it for it in best.values() if it["id"] not in blocked]
+
+
+# ─── Publication snapshot (F15) ─────────────────────────────────────────────
+
+_SNAP_LOCK = threading.Lock()
+# {cache_key: (monotonic_time, listings_list)}
+_SNAP_CACHE: dict[str, tuple[float, list[dict]]] = {}
+# How long (seconds) a snapshot is considered fresh.  Multiple consumers within
+# the same enrichment cycle see the same listing states; after the TTL the next
+# call re-runs load_listings so a new scrape is reflected promptly.
+SNAP_TTL: float = 10.0
+
+
+def publication_snapshot(db: sqlite3.Connection, *,
+                         filters: dict | None = None,
+                         mode: str = "home",
+                         include_hidden: bool = False,
+                         slim_hidden: bool = False,
+                         now: datetime | None = None,
+                         ttl: float | None = None) -> list[dict]:
+    """Central post-enrichment snapshot (F15).
+
+    Returns the same in-memory listing list to every caller within `ttl`
+    seconds (default SNAP_TTL).  All consumers that call this function during
+    the same enrichment cycle see an identical, immutable view of the data.
+
+    Keyed on (db path, mode, include_hidden, slim_hidden, filters hash) so
+    different consumers with different args each get their own consistent view,
+    but two consumers with the same args share one call.
+    """
+    effective_ttl = ttl if ttl is not None else SNAP_TTL
+    filters_key = json.dumps(filters, sort_keys=True, default=str) if filters else "null"
+    db_path = getattr(db, "database", "") or ""
+    cache_key = f"{db_path}|{mode}|{include_hidden}|{slim_hidden}|{filters_key}"
+    ts_now = time.monotonic()
+    with _SNAP_LOCK:
+        entry = _SNAP_CACHE.get(cache_key)
+        if entry is not None and ts_now - entry[0] < effective_ttl:
+            return entry[1]
+    listings = load_listings(db, filters=filters, mode=mode,
+                             include_hidden=include_hidden,
+                             slim_hidden=slim_hidden, now=now)
+    with _SNAP_LOCK:
+        _SNAP_CACHE[cache_key] = (ts_now, listings)
+    return listings
+
+
+def invalidate_snapshot(mode: str | None = None) -> None:
+    """Drop cached snapshots.  Pass mode to invalidate only that mode's entries."""
+    with _SNAP_LOCK:
+        if mode is None:
+            _SNAP_CACHE.clear()
+        else:
+            for k in list(_SNAP_CACHE.keys()):
+                if f"|{mode}|" in k:
+                    del _SNAP_CACHE[k]

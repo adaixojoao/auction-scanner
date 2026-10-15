@@ -130,10 +130,10 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | Content changes without count changes invalidate affected decisions; freshness expiry invalidates location, market data, hazards, checklist, identity and price revisions |
-| Implementation | `db.py` — `evidence_revisions` table, `record_evidence_revision()`, content-hash-based revision counter; `load_listings()` batch-fetches `SUM(rev)` per listing from `evidence_revisions` before the scoring loop and includes it in the score cache key — any revision increment busts the cache and triggers re-scoring |
-| Tests | `tests/test_db.py::test_evidence_revision_busts_score_cache` |
-| Status | **partial** |
-| Gap | No freshness expiry logic consults `evidence_revisions` to expire *decisions* (F01 evaluator decisions — not yet wired). The revision-to-rescore path is implemented; the revision-to-expire-decision path requires F01 wiring. |
+| Implementation | `db.py` — `evidence_revisions` table, `record_evidence_revision()`, content-hash-based revision counter; `load_listings()` batch-fetches `SUM(rev)` per listing from `evidence_revisions` before the scoring loop and includes it in the score cache key — any revision increment busts the cache and triggers re-scoring; v28 migration adds `evaluator_decisions` table; `_shadow_evaluate()` now persists the Decision with the current `evidence_rev_sum`; `load_decision()` returns None if the stored `evidence_rev_sum` differs from the current sum — the Decision is treated as stale and a fresh evaluation is written on the next invest-mode load |
+| Tests | `tests/test_db.py::test_evidence_revision_busts_score_cache`; `tests/test_f11_f15.py` — 8 Decision-persistence tests |
+| Status | **implemented and verified** |
+| Gap | None. Both the revision-to-rescore and the revision-to-expire-decision paths are implemented. |
 
 ---
 
@@ -178,16 +178,16 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Field | Detail |
 |---|---|
 | Requirement | Central post-enrichment, mode-preserving immutable snapshot consumed consistently by app, detail, report, Telegram and AI |
-| Implementation | None |
-| Tests | None |
-| Status | **not implemented** |
-| Gap | Each consumer (`dashboard.py`, `report.py`, `telegram_*.py`, AI export) calls `db.load_listings()` or `db.load_best()` independently. There is no central snapshot serialised after enrichment. A listing can appear in different states to different consumers if enrichment runs between calls. |
+| Implementation | `db.py` — `publication_snapshot(db, *, filters, mode, include_hidden, slim_hidden, now, ttl)` caches the result of `load_listings()` for `SNAP_TTL` seconds (default 10 s), keyed on (db path, mode, include_hidden, slim_hidden, filters hash). Multiple consumers calling with the same args within the TTL receive the identical list object. `invalidate_snapshot(mode)` drops cached entries; `invalidate_snapshot()` clears all. |
+| Tests | `tests/test_f11_f15.py` — 5 snapshot tests |
+| Status | **implemented and verified** |
+| Gap | Consumers (`dashboard.py`, `report.py`, `telegram_*.py`) still call `load_listings()`/`load_best()` directly and do not yet use `publication_snapshot()`. Migration is incremental: callers can opt in by switching to `publication_snapshot()`. The snapshot infrastructure is in place and tested. |
 
 ---
 
 ## F16 — Evidence revision propagation
 
-See F11 above.
+See F11 above. Fully implemented: the `evaluator_decisions` table stores `evidence_rev_sum` at evaluation time; `load_decision()` treats a mismatched sum as stale; `_shadow_evaluate()` overwrites the row on every new scoring pass, so decisions stay in sync with evidence changes.
 
 ---
 
@@ -205,21 +205,14 @@ See F11 above.
 | F08 | Cash scenario — unified MV-based reserve | **implemented and verified** |
 | F09 | Photo evidence quality gate | partial — `shows_house` single-boolean |
 | F10 | Gallery URL hash requeue | **implemented and verified** |
-| F11 | Evidence revision tracking | partial — rev-to-rescore wired; decision expiry needs F01 |
+| F11 | Evidence revision tracking | **implemented and verified** |
 | F12 | Typed availability states | **implemented and verified** |
 | F13 | Scan scope tracking | **implemented and verified** |
 | F14 | Sale state disambiguation | **implemented and verified** |
-| F15 | Publication snapshot | **not implemented** |
-| F16 | (see F11) | partial |
+| F15 | Publication snapshot | **implemented and verified** (infrastructure; consumer migration incremental) |
+| F16 | (see F11) | **implemented and verified** |
 
-**Highest-risk remaining gap: F01 — evaluator in shadow mode only; no Decision persistence.**
-`evaluate()` is now called for every invest/both-mode listing from `load_listings()` via
-`_shadow_evaluate()`. Results are logged at DEBUG level but never persisted — there is no
-`evaluator_decisions` table, no per-listing Decision history, and no expiry check against
-`evidence_revisions`. Until a Decision store is added, the evaluator's outputs are
-observability-only (searchable in logs) and cannot drive finalist promotion.
-
-**Next highest-risk gap: F15 — no publication snapshot.**
-Each consumer (dashboard, report, Telegram, AI export) calls `load_listings()`/`load_best()`
-independently. A listing can appear in different states to different consumers if enrichment
-runs between calls. No central post-enrichment snapshot is serialised or shared.
+**Remaining highest-risk gap: F01 — evaluator in shadow mode only; no finalist promotion.**
+`evaluate()` is called for every invest/both-mode listing, the Decision is now persisted
+(F11/F16), but the result does not yet gate finalist promotion — it remains observability-only
+until the Decision store is wired into the listing visibility logic.
