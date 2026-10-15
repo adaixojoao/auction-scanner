@@ -163,6 +163,15 @@ def _req_full_ownership(evidence: dict, policy: dict) -> Requirement:
             message=f"Sale is for {ownership}, not full ownership.",
             dangerous=True,
         )
+    if ownership not in ("full",):
+        # Unrecognised or non-affirmative value — fail closed, not an implicit PASS.
+        return Requirement(
+            key="full_ownership", outcome=UNKNOWN,
+            code="DATA_OWNERSHIP_UNRECOGNISED",
+            message=f"Ownership type {ownership!r} is not a recognised affirmative value.",
+            dangerous=True,
+            next_evidence_needed="Confirm ownership as 'full' from sale notice or registry.",
+        )
     return Requirement(
         key="full_ownership", outcome=PASS,
         code="LEGAL_OWNERSHIP_OK",
@@ -188,6 +197,30 @@ def _req_possession(evidence: dict, policy: dict) -> Requirement:
             code="PHYS_OCCUPIED_NO_DELIVERY",
             message="Property is occupied with no confirmed vacant-possession delivery terms.",
             dangerous=True,
+        )
+    # "tenant" occupation without confirmed vacant-on-completion delivery means no vacant possession.
+    if occupation == "tenant" or delivery == "with_tenant":
+        return Requirement(
+            key="possession", outcome=FAIL,
+            code="PHYS_TENANT_NO_VACANT_POSSESSION",
+            message="Property has a tenant; vacant possession on completion not confirmed.",
+            dangerous=True,
+        )
+    # "occupied" with vacant-on-completion delivery is an affirmed state.
+    if occupation == "occupied" and delivery == "vacant_on_completion":
+        return Requirement(
+            key="possession", outcome=PASS,
+            code="PHYS_POSSESSION_OK",
+            message="Occupied now but vacant possession confirmed on completion.",
+        )
+    # Any other non-None occupation values that aren't explicitly affirmed → unknown.
+    if occupation is not None and occupation not in ("vacant",):
+        return Requirement(
+            key="possession", outcome=UNKNOWN,
+            code="DATA_POSSESSION_UNRECOGNISED",
+            message=f"Occupation value {occupation!r} is not a recognised affirmed state.",
+            dangerous=True,
+            next_evidence_needed="Confirm occupation as 'vacant' or resolve delivery terms.",
         )
     return Requirement(
         key="possession", outcome=PASS,
@@ -223,6 +256,23 @@ def _req_title_and_charges(evidence: dict, policy: dict) -> Requirement:
             code="LEGAL_TITLE_DEFECTIVE",
             message="Title is defective.",
             dangerous=True,
+        )
+    if title_status == "unknown":
+        return Requirement(
+            key="title_and_charges", outcome=UNKNOWN,
+            code="DATA_TITLE_STATUS_UNKNOWN",
+            message="Title status is explicitly unknown; registry check needed.",
+            dangerous=True,
+            next_evidence_needed="Obtain land registry certificate (certidão permanente).",
+        )
+    if title_status not in ("clear", "encumbered"):
+        # Unrecognised value — fail closed.
+        return Requirement(
+            key="title_and_charges", outcome=UNKNOWN,
+            code="DATA_TITLE_UNRECOGNISED",
+            message=f"Title status {title_status!r} is not a recognised value.",
+            dangerous=True,
+            next_evidence_needed="Confirm title status from land registry.",
         )
     return Requirement(
         key="title_and_charges", outcome=PASS,
@@ -412,6 +462,29 @@ def _req_sale_availability(evidence: dict, policy: dict) -> Requirement:
             key="sale_availability", outcome=FAIL,
             code="PROC_SALE_ENDED",
             message=f"Sale status: {avail}.",
+        )
+    if avail in ("reserved",):
+        # Reserved is an adverse state — not available for a new bid.
+        return Requirement(
+            key="sale_availability", outcome=FAIL,
+            code="PROC_SALE_RESERVED",
+            message="Sale is reserved; not available for a new bid.",
+        )
+    if avail in ("blocked", "error"):
+        # Network error or challenge page — cannot confirm availability; do not retain an old PASS.
+        return Requirement(
+            key="sale_availability", outcome=UNKNOWN,
+            code="DATA_AVAILABILITY_CHECK_FAILED",
+            message=f"Availability check result: {avail}. Source-specific confirmation required.",
+            next_evidence_needed="Re-check sale availability from the source's own sale page.",
+        )
+    if avail != "available":
+        # Unrecognised value — fail closed.
+        return Requirement(
+            key="sale_availability", outcome=UNKNOWN,
+            code="DATA_AVAILABILITY_UNRECOGNISED",
+            message=f"Sale availability value {avail!r} is not recognised.",
+            next_evidence_needed="Re-check sale availability from the source's own sale page.",
         )
     return Requirement(
         key="sale_availability", outcome=PASS,

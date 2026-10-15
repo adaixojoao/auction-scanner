@@ -162,6 +162,14 @@ class TestFullOwnership:
         r = _req("full_ownership", dec)
         assert r.outcome == UNKNOWN and "DATA_OWNERSHIP_MISSING" == r.code
 
+    @pytest.mark.parametrize("val", ["", "unknown", "nonempty_unrecognised", "partial", "xyz"])
+    def test_unrecognised_ownership_is_unknown_not_pass(self, val):
+        """Task 9: nonempty unrecognised ownership value must not fall through to PASS."""
+        dec = _eval({"ownership_type": val})
+        r = _req("full_ownership", dec)
+        assert r.outcome == UNKNOWN, f"ownership={val!r} should be UNKNOWN, got {r.outcome}"
+        assert r.dangerous, "unrecognised ownership should be dangerous"
+
 
 # ─── Possession ───────────────────────────────────────────────────────────────
 
@@ -186,6 +194,32 @@ class TestPossession:
         r = _req("possession", dec)
         assert r.outcome == UNKNOWN and r.dangerous
 
+    def test_tenant_without_delivery_fails(self):
+        """Task 9: tenant occupation without vacant-on-completion delivery is FAIL, not PASS."""
+        dec = _eval({"occupation": "tenant", "delivery_terms": None})
+        r = _req("possession", dec)
+        assert r.outcome == FAIL, "tenant + no delivery should be FAIL"
+        assert r.dangerous
+
+    def test_tenant_with_tenant_delivery_fails(self):
+        """Task 9: with_tenant delivery explicitly signals no vacant possession."""
+        dec = _eval({"occupation": "tenant", "delivery_terms": "with_tenant"})
+        r = _req("possession", dec)
+        assert r.outcome == FAIL and r.dangerous
+
+    def test_with_tenant_delivery_alone_fails(self):
+        """Task 9: delivery_terms='with_tenant' must fail even without occupation."""
+        dec = _eval({"occupation": None, "delivery_terms": "with_tenant"})
+        r = _req("possession", dec)
+        assert r.outcome == FAIL and r.dangerous
+
+    @pytest.mark.parametrize("occ", ["", "unknown", "xyz"])
+    def test_unrecognised_occupation_is_unknown(self, occ):
+        """Task 9: unrecognised occupation string must not pass."""
+        dec = _eval({"occupation": occ, "delivery_terms": None})
+        r = _req("possession", dec)
+        assert r.outcome == UNKNOWN, f"occupation={occ!r} should be UNKNOWN"
+
 
 # ─── Title ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +241,20 @@ class TestTitle:
         dec = _eval({"title_status": "defective"})
         r = _req("title_and_charges", dec)
         assert r.outcome == FAIL and r.dangerous
+
+    def test_unknown_title_status_is_unknown_not_pass(self):
+        """Task 9: title_status='unknown' must be UNKNOWN, not PASS (fall-through bug)."""
+        dec = _eval({"title_status": "unknown"})
+        r = _req("title_and_charges", dec)
+        assert r.outcome == UNKNOWN, "title_status='unknown' must not fall through to PASS"
+        assert r.dangerous
+
+    @pytest.mark.parametrize("val", ["", "unverified", "xyz"])
+    def test_unrecognised_title_status_is_unknown(self, val):
+        """Task 9: unrecognised title_status must not pass."""
+        dec = _eval({"title_status": val})
+        r = _req("title_and_charges", dec)
+        assert r.outcome == UNKNOWN, f"title_status={val!r} should be UNKNOWN"
 
 
 # ─── Location ─────────────────────────────────────────────────────────────────
@@ -362,6 +410,28 @@ class TestSaleAvailability:
         dec = _eval({"sale_availability": None})
         r = _req("sale_availability", dec)
         assert r.outcome == UNKNOWN
+
+    def test_reserved_fails(self):
+        """Task 9: reserved sale is adverse — FAIL, not PASS."""
+        dec = _eval({"sale_availability": "reserved"})
+        r = _req("sale_availability", dec)
+        assert r.outcome == FAIL, "reserved availability must be FAIL"
+        assert r.code == "PROC_SALE_RESERVED"
+
+    @pytest.mark.parametrize("val", ["blocked", "error"])
+    def test_blocked_or_error_is_unknown(self, val):
+        """Task 9: network error / challenge page must not retain a passing state."""
+        dec = _eval({"sale_availability": val})
+        r = _req("sale_availability", dec)
+        assert r.outcome == UNKNOWN, f"availability={val!r} should be UNKNOWN"
+        assert r.code == "DATA_AVAILABILITY_CHECK_FAILED"
+
+    @pytest.mark.parametrize("val", ["", "xyz", "pending"])
+    def test_unrecognised_availability_is_unknown(self, val):
+        """Task 9: unrecognised availability value must not pass."""
+        dec = _eval({"sale_availability": val})
+        r = _req("sale_availability", dec)
+        assert r.outcome == UNKNOWN, f"availability={val!r} should be UNKNOWN"
 
 
 # ─── Anomaly investigation (F05) ─────────────────────────────────────────────
