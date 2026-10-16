@@ -609,13 +609,19 @@ def parse_portal(name: str, html: str) -> list[dict]:
 
 
 def scrape_named(db, name: str, max_price: float) -> int:
-    """Save listings at or under max_price. The first page's failure propagates."""
+    """Save listings at or under max_price. The first page's failure propagates.
+
+    Returns a ScanCount, "partial" when a later page could not be read: the
+    listings it would have shown are not marked as gone."""
+    from sources import ScanCount
+
     portal = PORTALS[name]
     parser = PARSERS[portal.parser]
     session = make_session(timeout=25)
     total = 0
     seen: set[str] = set()
     first = True
+    skipped = 0
     for template in portal.urls:
         url = template.format(max=int(max_price))
         try:
@@ -625,6 +631,7 @@ def scrape_named(db, name: str, max_price: float) -> int:
             if first:
                 raise
             LOG.info(f"{name}: skipped a later page ({url})")
+            skipped += 1
             continue
         first = False
         kept = 0
@@ -646,5 +653,5 @@ def scrape_named(db, name: str, max_price: float) -> int:
             total += kept
             db.commit()
             time.sleep(0.8)
-    LOG.info(f"{name}: {total} listings")
-    return total
+    LOG.info(f"{name}: {total} listings" + (f", {skipped} page(s) unread" if skipped else ""))
+    return ScanCount(total, "partial" if skipped else "full", len(portal.urls) - skipped)
