@@ -1,7 +1,9 @@
 name: tests
 
 on:
+  # PRs are tested by pull_request; push only covers master after a merge.
   push:
+    branches: [master]
   pull_request:
 
 jobs:
