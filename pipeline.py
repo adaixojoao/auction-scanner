@@ -13,16 +13,16 @@ import contextlib
 import json
 import os
 import sys
-import time
 from datetime import timedelta
 
-from common import LOG, configure_http, make_session, parse_dt, utcnow, utcnow_iso
+import locks
+from common import LOG, configure_http, make_session, utcnow_iso
 from locks import lock_holder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCK_PATH = os.path.join(HERE, "scan.lock")
 REPORTS_DIR = os.path.join(HERE, "reports")
-# A scan that has not finished after this long crashed; its lock and state are stale.
+# A scan lock in the old format (no OS lock) older than this is stale.
 STALE_SCAN = timedelta(hours=3)
 
 
@@ -54,26 +54,18 @@ def _below_other_programs():
 
 @contextlib.contextmanager
 def scan_lock():
-    for _ in range(2):
-        try:
-            fd = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                f.write(f"{os.getpid()} {utcnow_iso()}\n")
-            break
-        except FileExistsError:
-            fresh = time.time() - os.path.getmtime(LOCK_PATH) < STALE_SCAN.total_seconds()
-            if fresh and lock_holder(LOCK_PATH):
-                raise ScanBusy("another scan is running")
-            LOG.warning("Removing stale scan.lock (its process is gone)")
-            with contextlib.suppress(FileNotFoundError):
-                os.remove(LOCK_PATH)
-    else:
-        raise ScanBusy("could not take scan.lock")
+    """Hold scan.lock for the whole scan (locks.py: an OS lock, so a reused pid
+    never looks like a live scan, and a scan never removes another's lock)."""
+    try:
+        lock = locks.acquire(LOCK_PATH, legacy_max_age=STALE_SCAN.total_seconds())
+    except locks.LockBusy as e:
+        raise ScanBusy("another scan is running") from e
+    if lock.took_over:
+        LOG.warning(f"Took over a stale scan.lock from an older version ({lock.took_over})")
     try:
         yield
     finally:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(LOCK_PATH)
+        locks.release(lock)
 
 
 def _set_state(db, **fields):
@@ -123,12 +115,11 @@ def _close_dead_scan(db, state) -> None:
 def scan_status(db) -> dict:
     row = db.execute("SELECT * FROM scan_state WHERE id = 1").fetchone()
     state = dict(row) if row else {"running": 0}
-    started = parse_dt(state.get("started_at"))
-    holder = lock_holder(LOCK_PATH)
+    # The OS lock says whether the scan's process is alive; a long scan that
+    # is still running is shown as running, however long it takes.
+    holder = lock_holder(LOCK_PATH, legacy_max_age=STALE_SCAN.total_seconds())
     if state.get("running") and not holder:
         _close_dead_scan(db, state)
-    elif state.get("running") and started and utcnow() - started > STALE_SCAN:
-        state["running"] = 0  # still alive, but far too long: show it as finished
     state["running"] = bool(state.get("running"))
     state["stop"] = bool(state.get("stop"))
     if isinstance(state.get("summary"), str):
