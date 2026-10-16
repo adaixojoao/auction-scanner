@@ -125,6 +125,22 @@ def describe_error(e: Exception) -> str:
     return f"{type(e).__name__}: {e}"[:300]
 
 
+def _source_count(result) -> int:
+    """Reject missing/invalid counts rather than reporting a successful empty scan."""
+    from operator import index
+
+    value = result.get("count") if isinstance(result, dict) else result
+    if isinstance(value, bool):
+        raise ValueError("scraper must return a non-negative integer count")
+    try:
+        count = index(value)
+    except TypeError as exc:
+        raise ValueError("scraper must return a non-negative integer count") from exc
+    if count < 0:
+        raise ValueError("scraper must return a non-negative integer count")
+    return count
+
+
 def run_source(db, source: Source, *, max_price: float, config: dict | None = None) -> dict:
     """Run one scraper, never raising. Records the outcome in scrape_log.
 
@@ -137,6 +153,8 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
     When scope="partial" the run stopped early (budget, timeout, mid-scrape
     error) and last_ok_by_source() will not advance the freshness clock for
     this source (F13). Sources that return an int are treated as full runs.
+    Counts must be non-negative integers; missing counts, None, booleans and
+    coerced strings/floats are invalid and recorded as errors.
     """
     from db import record_scrape
 
@@ -147,17 +165,16 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
     pages_seen: int | None = None
     try:
         result = source.func(db, max_price=max_price, config=config or {})
-        db.commit()
+        count = _source_count(result)
         if isinstance(result, dict):
-            count = int(result.get("count") or 0)
-            scope = result.get("scope")   # "full" | "partial" | None
+            scope = result.get("scope")
             pages_seen = result.get("pages_seen")
         else:
-            count = int(result or 0)
-            # A ScanCount says how far the scrape got; a plain int is a full run.
+            # A ScanCount reports coverage; a plain integer retains legacy full scope.
             scope = getattr(result, "scope", "full")
             pages_seen = getattr(result, "pages_seen", None)
         status = "ok" if count > 0 else "empty"
+        db.commit()
     except SourceUnavailable as e:
         db.rollback()
         count, status, scope = 0, "blocked", "partial"
