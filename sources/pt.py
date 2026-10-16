@@ -15,7 +15,7 @@ from common import (LOG, find_area, find_price, make_listing, make_session, norm
 from db import upsert_listing
 from identity_map import (assign_citius_lot_id, assign_leilosoc_lot_id,
                            canonical_processo, ResolutionKind)
-from sources import SourceUnavailable, register
+from sources import ScanCount, SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
 
 # ─── e-leiloes.pt ───────────────────────────────────────────────────
@@ -59,6 +59,8 @@ def scrape_eleiloes(db, max_price: float = 50000, page_size: int = 100, **_):
     session = _eleiloes_session()
     total_scraped = 0
     offset = 0
+    scope = "full"
+    pages_seen = 0
 
     while True:
         params = {
@@ -75,15 +77,21 @@ def scrape_eleiloes(db, max_price: float = 50000, page_size: int = 100, **_):
             resp = session.get(url)
             resp.raise_for_status()
             data = resp.json()
+            if not isinstance(data, dict) or not isinstance(data.get("list"), list):
+                raise ValueError("e-leiloes: expected JSON list field")
         except Exception as e:
             if offset == 0:
                 raise
             LOG.warning(f"e-leiloes API error at offset {offset}: {e}")
+            scope = "partial"
             break
 
-        items = data.get("list", [])
+        pages_seen += 1
+        items = data["list"]
         total = data.get("pagination", {}).get("total", 0)
         if not items:
+            if offset < total:
+                scope = "partial"
             break
 
         for item in items:
@@ -105,7 +113,7 @@ def scrape_eleiloes(db, max_price: float = 50000, page_size: int = 100, **_):
         time.sleep(0.5)
 
     fetch_eleiloes_details(db, limit=80, max_price=max_price)
-    return total_scraped
+    return ScanCount(total_scraped, scope=scope, pages_seen=pages_seen)
 
 
 def _eleiloes_to_listing(item: dict) -> dict:
