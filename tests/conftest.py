@@ -10,18 +10,33 @@ sys.path.insert(0, ROOT)
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """Tests must never reach the real sites (or Telegram, or SMTP)."""
-    def refuse(self, method, url, *a, **kw):
-        raise AssertionError(f"test tried to reach the network: {method} {url}")
-    monkeypatch.setattr(requests.Session, "request", refuse)
-    import urllib.request
-    monkeypatch.setattr(urllib.request, "urlretrieve",
-                        lambda *a, **k: (_ for _ in ()).throw(OSError("no network in tests")))
-    import smtplib
+    """Block common outbound APIs; not a subprocess/OS sandbox.
 
-    def no_smtp(*a, **k):
-        raise AssertionError("test tried to send e-mail")
+    Never echo URLs or arguments: they may contain credentials.
+    Preserve urlretrieve's historical OSError for download tests.
+    Fixtures run after collection; imports must stay side-effect free.
+    """
+    import smtplib
+    import socket
+    import urllib.request
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("test tried to reach the network: disabled in tests")
+
+    def no_smtp(*args, **kwargs):
+        raise AssertionError("test tried to send e-mail: disabled in tests")
+
+    def no_download(*args, **kwargs):
+        raise OSError("no network in tests")
+
+    monkeypatch.setattr(requests.Session, "request", refuse)
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(urllib.request, "urlretrieve", no_download)
     monkeypatch.setattr(smtplib, "SMTP", no_smtp)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", no_smtp)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
 
 
 @pytest.fixture(autouse=True)
