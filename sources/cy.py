@@ -33,7 +33,13 @@ def scrape_cyprus(db, max_price: float = 50000, **_):
         if price and price > max_price:
             continue
         # Was str(hash(...)): a new ID every run, so every row was "new" every run.
-        eid = stable_id(title, text[:100])
+        # Key on the sale's link; without one, on the cells that carry no price,
+        # so a price change updates the listing instead of creating a new one.
+        if link:
+            eid = stable_id(link["href"])
+        else:
+            eid = stable_id(title, *(c.get_text(" ", strip=True) for c in cells
+                                     if find_price(c.get_text(" ", strip=True)) is None))
         upsert_listing(db, make_listing(
             "cyprus", eid, "CY",
             title=title or f"Cyprus sale {eid}", description=text[:500],
