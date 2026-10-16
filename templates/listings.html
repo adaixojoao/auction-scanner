@@ -428,6 +428,35 @@ function outlineHtml(o) {
   </div>`;
 }
 
+// research_indicators: what the stored evidence shows, and what it cannot show.
+// Research notes only: they change no score, bid cap or alert.
+const RESEARCH_LABELS = {
+  property_specific_comparables: "Comparable sales", document_contradictions: "Documents disagree",
+  sale_event_history: "Sale history", acquisition_feasibility: "Can it be bought",
+  local_liquidity: "Local market", travel_access: "Travel to services", parcel_geometry: "The plot",
+  historical_imagery: "Past aerial images", ecological_connectivity: "Habitat and protected areas",
+  restoration_feasibility: "Restoration effort",
+};
+function researchHtml(r) {
+  if (!r || !r.indicators) return "";
+  const known = r.indicators.filter(i => i.status !== "unknown");
+  const unknown = r.indicators.filter(i => i.status === "unknown");
+  const show = v => typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+  const rows = known.map(i => `<div class="research-item">
+      <b>${AS.esc(RESEARCH_LABELS[i.category] || i.category)}</b>
+      <span class="small muted">(${AS.esc(i.status)}; evidence ${AS.esc(i.evidence_ids.join(", "))})</span>
+      <ul class="small">${Object.entries(i.value).map(([k, v]) =>
+        `<li>${AS.esc(k.replace(/_/g, " "))}: <code>${AS.esc(show(v))}</code></li>`).join("")}</ul>
+      <ul class="small faint">${i.caveats.map(c => `<li>${AS.esc(c)}</li>`).join("")}</ul>
+    </div>`).join("");
+  return `<div class="guide research">
+      <b>Research notes</b> <span class="small muted">from what the scanner has stored; not a score or a bid</span>
+      ${rows || `<p class="small">No stored evidence yet.</p>`}
+      ${unknown.length ? `<p class="small faint">No evidence yet: ${unknown.map(i =>
+        AS.esc(RESEARCH_LABELS[i.category] || i.category)).join(", ")}.</p>` : ""}
+    </div>`;
+}
+
 function detailsHtml(d) {
   const facts = d.facts.map(f => `<div class="fact"><span class="k">${AS.esc(f.label)}</span><span class="v">${factValue(f)}</span></div>`).join("");
   const links = [d.url && d.source !== "citius" ? AS.link(d.url, "Open the listing ↗") : "",
@@ -455,6 +484,7 @@ function detailsHtml(d) {
       ${off.links.map(l => AS.link(l.url, l.label + " ↗")).join(" · ")}
     </div>` : "";
   const imgs = (d.images && d.images.length) ? d.images : (d.image ? [d.image] : []);
+  const research = researchHtml(d.research);
   const gallery = imgs.length ? `<div class="d-gallery">${imgs.map(src =>
     `<img class="d-img" src="${AS.esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join("")}</div>` : "";
   return `<div class="details">
@@ -466,6 +496,7 @@ function detailsHtml(d) {
       ${streetView}
       ${outlineHtml(d.outline)}
       ${official}
+      ${research}
       ${links ? `<p class="d-links">${links}</p>` : ""}
       ${costsHtml(d.costs)}
       ${AS.bidCapHtml(d.bid_cap)}
