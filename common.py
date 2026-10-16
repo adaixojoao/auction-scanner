@@ -829,10 +829,32 @@ def parse_dt(value) -> datetime | None:
 
 
 def effective_end(date_end) -> datetime | None:
-    """When a listing stops being biddable. A bare date (midnight) means that whole day."""
+    """Interpret a deadline without extending an explicit midnight instant.
+
+    Date-only and legacy naive-midnight values retain the whole-day policy.
+    An explicitly aware timestamp, including midnight, is an exact instant.
+    Year 9999 is the source's unknown-date sentinel, not a bidding deadline.
+    Naive values retain parse_dt's legacy UTC interpretation.
+    """
     dt = parse_dt(date_end)
-    if dt is not None and (dt.hour, dt.minute, dt.second, dt.microsecond) == (0, 0, 0, 0)             and dt.year < 9999:          # Citius writes 9999-01-01 for "no date set"
-        dt = dt + timedelta(days=1) - timedelta(seconds=1)
+    if dt is None or dt.year == 9999:
+        return None
+
+    explicit_timezone = False
+    if isinstance(date_end, datetime):
+        explicit_timezone = date_end.utcoffset() is not None
+    elif isinstance(date_end, str):
+        text = date_end.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            original = datetime.fromisoformat(text)
+        except ValueError:
+            original = None
+        explicit_timezone = original is not None and original.utcoffset() is not None
+
+    if not explicit_timezone and (dt.hour, dt.minute, dt.second, dt.microsecond) == (0, 0, 0, 0):
+        return dt + timedelta(days=1) - timedelta(seconds=1)
     return dt
 
 
