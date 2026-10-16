@@ -576,6 +576,7 @@ def api_listing_detail():
     """Everything known about one listing, for the detail panel on Listings."""
     import costs
     import listing_info
+    import research_evidence
     from photos import KEEP_SCORE
     from scoring import wishes
     listing_id = request.args.get("id", "")
@@ -590,6 +591,11 @@ def api_listing_detail():
         results = listing_info.past_results(db, it)
         lots = listing_info.same_case_lots(db, it)
         history = geo.location_history(db, it["id"])
+        try:
+            research = research_evidence.research_panel(db, it)
+        except Exception:  # noqa: BLE001 — research notes must never break the panel
+            logging.getLogger("auction-scanner").exception("Research indicators failed for %s", listing_id)
+            research = None
         user_note = db.execute("SELECT user_note FROM listings WHERE id=?", (listing_id,)).fetchone()
         user_note = (user_note["user_note"] or "") if user_note else ""
         contact_log = [dict(r) for r in db.execute(
@@ -621,6 +627,7 @@ def api_listing_detail():
         "outline": listing_info.outline_panel(it),
         "user_note": user_note,
         "contact_log": contact_log,
+        "research": research,
     })
 
 @app.route("/api/listing/note", methods=["POST"])
