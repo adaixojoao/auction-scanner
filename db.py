@@ -1294,17 +1294,19 @@ def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
 
 
 def last_ok_by_source(db: sqlite3.Connection) -> dict[str, datetime]:
-    """Most-recent full-scope successful run per source.
+    """Most-recent positive-count successful full run per source.
 
-    A partial-scope run (scope='partial') does not advance the freshness clock:
-    listings the scraper did not reach in that run are still as fresh as the
-    last full run (F13).  Old rows with scope NULL are treated as full runs for
-    backwards compatibility.
+    Only status='ok' and scope='full' advance the freshness clock. Partial
+    and unknown non-NULL scopes do not prove that unseen listings left the
+    source. NULL scope retains the legacy full-run interpretation.
+    Zero-count runs do not advance this clock: no retained rows alone is
+    insufficient evidence that previously stored listings disappeared.
     """
     out = {}
     for source, ts in db.execute(
             "SELECT source, MAX(timestamp) FROM scrape_log"
-            " WHERE count > 0 AND (scope IS NULL OR scope != 'partial')"
+            " WHERE count > 0 AND status = 'ok'"
+            " AND (scope IS NULL OR scope = 'full')"
             " GROUP BY source"):
         dt = parse_dt(ts)
         if dt:
