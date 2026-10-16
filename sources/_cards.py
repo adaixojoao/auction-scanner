@@ -66,10 +66,16 @@ def _text(el) -> str:
 
 
 def scrape_cards(db, site: CardSite, max_price: float) -> int:
+    """Save the site's cards. Returns a ScanCount: "full" when the scrape
+    reached the last results page, "partial" when a later page failed or
+    max_pages ran out with more pages still coming."""
+    from sources import ScanCount
+
     session = make_session()
     seen: set[str] = set()
     total = 0
     pages = range(1, site.max_pages + 1) if site.page_param else [None]
+    scope, pages_seen = "partial", 0   # stays partial unless the last page is reached
 
     for page in pages:
         params = {k: (int(max_price) if v == "{max_price}" else v) for k, v in site.params.items()}
@@ -84,9 +90,11 @@ def scrape_cards(db, site: CardSite, max_price: float) -> int:
             LOG.warning(f"{site.source}: page {page} failed, keeping earlier pages")
             break
 
+        pages_seen += 1
         soup = BeautifulSoup(resp.text, "html.parser")
         cards = soup.select(site.card_selector)
         if not cards:
+            scope = "full"
             break
 
         for card in cards:
@@ -131,6 +139,9 @@ def scrape_cards(db, site: CardSite, max_price: float) -> int:
 
         db.commit()
         if page is None or len(cards) < site.min_cards:
+            scope = "full"
             break
         time.sleep(site.delay)
-    return total
+    if scope == "partial":
+        LOG.info(f"{site.source}: stopped after {pages_seen} pages; unseen listings are not marked stale")
+    return ScanCount(total, scope, pages_seen)

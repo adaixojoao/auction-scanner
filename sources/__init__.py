@@ -37,6 +37,24 @@ class Source:
     parser_version: str = ""
 
 
+class ScanCount(int):
+    """A listing count that also says how much of the site the scrape covered.
+
+    It is an int, so a scraper can return it where it used to return a count.
+    scope "full": every results page was read, so a listing not seen has left
+    the site. scope "partial": the scrape stopped early (a later page failed,
+    the page limit was reached), so unseen listings say nothing about the site.
+    """
+
+    def __new__(cls, count: int, scope: str = "full", pages_seen: int | None = None):
+        if scope not in ("full", "partial"):
+            raise ValueError(f"unknown scan scope {scope!r}")
+        obj = super().__new__(cls, count)
+        obj.scope = scope
+        obj.pages_seen = pages_seen
+        return obj
+
+
 class SourceUnavailable(RuntimeError):
     """The site cannot be scraped (closed, login-only, bot wall). Its message
     is shown as-is on the Sources page. run_source records status "blocked"."""
@@ -113,7 +131,8 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
     Statuses: ok (listings), empty (page ok, nothing kept), error (HTTP/network
     or unexpected), blocked (SourceUnavailable — bot wall, closed site, login).
 
-    Source functions may return either an int (count) or a dict:
+    Source functions may return an int (count), a ScanCount (a count with
+    .scope and .pages_seen) or a dict:
         {"count": int, "scope": "full"|"partial", "pages_seen": int | None}
     When scope="partial" the run stopped early (budget, timeout, mid-scrape
     error) and last_ok_by_source() will not advance the freshness clock for
@@ -135,7 +154,9 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
             pages_seen = result.get("pages_seen")
         else:
             count = int(result or 0)
-            scope = "full"               # legacy int return → implicit full run
+            # A ScanCount says how far the scrape got; a plain int is a full run.
+            scope = getattr(result, "scope", "full")
+            pages_seen = getattr(result, "pages_seen", None)
         status = "ok" if count > 0 else "empty"
     except SourceUnavailable as e:
         db.rollback()
