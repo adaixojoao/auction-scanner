@@ -74,8 +74,15 @@ def isolated_files(tmp_path, monkeypatch):
     monkeypatch.setattr(prices, "PT_PARISH_FILE", str(tmp_path / "no_pt_parish_prices.csv"))
 
 
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path, monkeypatch):
+    """Keep default database opens inside this test's temporary directory."""
+    import db as dbmod
+    monkeypatch.setattr(dbmod, "DB_PATH", str(tmp_path / "default-test.db"))
+
+
 @pytest.fixture
-def db(tmp_path, monkeypatch):
+def db(tmp_path, monkeypatch, isolated_database):
     import db as dbmod
     path = str(tmp_path / "test.db")
     monkeypatch.setattr(dbmod, "DB_PATH", path)
