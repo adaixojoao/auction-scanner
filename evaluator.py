@@ -353,31 +353,53 @@ def _req_title_and_charges(evidence: dict, policy: dict) -> Requirement:
 
 
 def _req_legal_access(evidence: dict, policy: dict) -> Requirement:
-    """Legal road/pedestrian access confirmed."""
-    access = evidence.get("legal_access")   # "confirmed" | "denied" | "unknown" | None
+    """Screen resolved lawful access, not map proximity or physical reachability.
+
+    The evaluator does not independently establish a right of passage. Missing
+    or unrecognised legal-access evidence is a critical acquisition blocker.
+    """
+    access = evidence.get("legal_access")
+    needed = (
+        "Establish the lawful access basis for this specific lot and the "
+        "relevant restrictions using appropriate documentary evidence or "
+        "qualified local verification. A visible route or physical inspection "
+        "alone does not establish a right of passage."
+    )
     if access is None or access == "unknown":
         return Requirement(
             key="legal_access", outcome=UNKNOWN,
             code="DATA_ACCESS_MISSING",
-            message="Legal access not confirmed.",
-            next_evidence_needed="Confirm legal road access from registry or inspection.",
+            message="Lawful access to this specific lot is unresolved.",
+            dangerous=True,
+            next_evidence_needed=needed,
         )
     if access == "denied":
         return Requirement(
             key="legal_access", outcome=FAIL,
             code="PHYS_LANDLOCKED",
-            message="Property has no confirmed legal access.",
+            message=(
+                "Resolved legal-access input is denied. Physical reachability "
+                "does not override this adverse classification."
+            ),
             dangerous=True,
         )
     if access != "confirmed":
         return Requirement(
             key="legal_access", outcome=UNKNOWN,
             code="DATA_ACCESS_UNRECOGNISED",
-            message=f"Legal access value {access!r} is not a recognised affirmed state.",
-            next_evidence_needed="Confirm legal road access from registry or inspection.",
+            message="Legal-access input is not a recognised resolved state.",
+            dangerous=True,
+            next_evidence_needed=needed,
         )
-    return Requirement(key="legal_access", outcome=PASS, code="PHYS_ACCESS_OK",
-                       message="Legal access confirmed.")
+    return Requirement(
+        key="legal_access", outcome=PASS,
+        code="PHYS_ACCESS_OK",
+        message=(
+            "Resolved input states lawful access is confirmed. This evaluator "
+            "does not independently verify access rights, restrictions or "
+            "physical suitability for the intended use."
+        ),
+    )
 
 
 def _req_location_building(evidence: dict, policy: dict) -> Requirement:
