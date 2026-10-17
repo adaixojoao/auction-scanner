@@ -297,6 +297,7 @@ function renderChecklist(c, ck) {
       <select class="ck-status" onchange="saveCheck(this)">${ckStatuses.map(([k, v]) =>
         `<option value="${k}" ${k === x.status ? "selected" : ""}>${AS.esc(v)}</option>`).join("")}</select>
       <span class="${x.status === "concern" ? "bad" : ""}">${AS.esc(x.label)}${x.blocking ? ' <span class="badge b-hidden">blocking</span>' : ""}</span>
+      ${x.needs_recheck ? `<span class="small warn">${AS.esc(x.freshness_note)} Recorded: ${AS.esc(x.recorded_status || "unknown")}</span>` : ""}
       <details class="ck-more"><summary class="faint">notes${x.notes || x.reference ? " ✎" : ""}</summary>
         <input class="ck-notes" placeholder="notes" value="${AS.esc(x.notes)}">
         <input class="ck-ref" placeholder="a link, or where the document is" value="${AS.esc(x.reference)}">
