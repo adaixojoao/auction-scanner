@@ -1,15 +1,16 @@
 """research_evidence: the listing panel's research notes come only from data the
 scanner stored, keep research_indicators' limits, and never touch the score."""
 import json
-from datetime import date
 
 import pytest
 
 import dashboard
 import research_evidence
+from common import utcnow
 from db import load_listings
 
-TODAY = date(2026, 10, 16)
+# Rows added in a test are stamped with the real clock: a fixed date drifts into their past.
+TODAY = utcnow().date()
 
 
 def _set_raw(db, listing_id, **values):
