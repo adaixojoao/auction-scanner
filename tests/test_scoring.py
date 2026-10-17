@@ -475,7 +475,9 @@ def test_a_home_bigger_than_1000_m2_is_valued_as_a_building_on_the_investment_go
     _, scraped = score(item(**house, area_m2=20000), mode="invest")
     _, lived = score(item(**house, area_m2=150))
     assert any("below local prices all-in" in r for r in floor)
-    assert any("below local prices all-in" in r for r in scraped)   # 250 m² of building, not 2 ha
+    # A capped 250 m² building with unpriced repairs is not a discount claim (6B).
+    assert not any("below local prices all-in" in r for r in scraped)
+    assert any("discount not established" in r for r in scraped)
     assert not any("below local prices" in r for r in lived)
 
 

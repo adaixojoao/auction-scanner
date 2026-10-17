@@ -2981,6 +2981,35 @@ def _occupied(item: dict, full: str) -> bool:
     return occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS))
 
 
+def _investment_discount(area, floor_source, all_in, eur_m2, factor, *,
+                         planning_complete: bool) -> float | None:
+    """Estimated benchmark gap only when the existing planning inputs are usable.
+
+    Returns a share (0.3 means 30%), not percent or a verified market discount.
+    Missing/invalid inputs remain unavailable rather than becoming zero.
+    """
+    from costs import SCORED_FLOORS
+
+    if planning_complete is not True or floor_source not in SCORED_FLOORS:
+        return None
+    values = (area, all_in, eur_m2, factor)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           for value in values):
+        return None
+    try:
+        if any(not math.isfinite(value) or value <= 0 for value in values):
+            return None
+        if factor > 1:
+            return None
+        benchmark = eur_m2 * min(area, INVEST_VALUE_MAX_M2) * factor
+        if not math.isfinite(benchmark) or benchmark <= 0:
+            return None
+        gap = (benchmark - all_in) / benchmark
+    except (OverflowError, ZeroDivisionError):
+        return None
+    return gap if math.isfinite(gap) else None
+
+
 def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     """A home to make money on: resale under the local price, holiday or long rent."""
     title, desc = item.get("title") or "", item.get("description") or ""
@@ -3027,26 +3056,37 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
 
     found = local_price(item) if area else None
     unbelievable = False
+    planning_complete = isinstance(planned, dict) and planned.get("incomplete") is False
     if found and all_in:
-        # A listing's area is often the plot: value at most INVEST_VALUE_MAX_M2 of building.
         factor, why = local_value_factor(item)
-        mv = found[0] * min(area, INVEST_VALUE_MAX_M2) * factor
-        disc = (mv - all_in) / mv
-        too_far = _too_far_below(item, area, all_in, found[0])
-        if disc > 0.1:
+        disc = _investment_discount(
+            area, floor_source, all_in, found[0], factor,
+            planning_complete=planning_complete,
+        )
+        # The anomaly check keeps its own arithmetic: an absurd gap is flagged
+        # for investigation even when the discount itself is not established.
+        sane = all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                   and math.isfinite(v) and v > 0 for v in (area, all_in, found[0]))
+        too_far = sane and _too_far_below(item, area, all_in, found[0])
+        if disc is None:
+            reasons.append(
+                "discount not established — complete repair planning, a usable floor "
+                "and finite positive benchmark inputs are required"
+            )
+        elif disc > 0.1:
             adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
             skipped = _discount_skipped(item, why)
-            # The wide-gap case has its own reason just below.
             if skipped and not too_far:
                 adjusted += skipped
             reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
         if too_far:
-            # Queued for investigation — not penalised (F05). The gap is shown but no points either way.
             unbelievable = True
             item["extreme_discount"] = True
-            reasons.append("so far below the local price usually means a share, a tenant, a ruin or a wrong area"
-                           " — check why")
-        elif not _discount_skipped(item, why):
+            reasons.append(
+                "so far below the local price usually means a share, a tenant, a ruin or a wrong area"
+                " — check why"
+            )
+        elif disc is not None and not _discount_skipped(item, why):
             s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
     _mention_sold_move(item, reasons)
     # A price this far under local sales is not a rent. Drop whatever figure was
