@@ -148,13 +148,59 @@ def bid_card(item: dict) -> dict | None:
     return dict(zip(("title", "text", "button"), card)) if card else None
 
 
+def _citius_guidance(item: dict) -> str:
+    """Stored evidence and next verification action, not bidding authorization."""
+    from common import effective_end
+
+    raw = _raw(item)
+    label = raw.get("modalidade")
+    evidence = " ".join(label.split())[:200] if isinstance(label, str) else ""
+    kind = pt_sale_kind(label)
+    actions = {
+        "carta_fechada": (
+            "Stored method: sealed bid (carta fechada). Next action: obtain the current sale notice "
+            "and confirm the sealed-proposal delivery method, recipient, location, cutoff and "
+            "any security requirements. An email or a draft letter is not proof of valid submission."
+        ),
+        "negociacao": (
+            "Stored method: private negotiation (negociação particular). Next action: confirm "
+            "the authorised person handling the sale and request the current written offer "
+            "procedure, acceptance conditions and any security requirements."
+        ),
+        "leilao_eletronico": (
+            "Stored method: electronic auction. Next action: obtain the official auction link "
+            "from the current sale notice and confirm registration, cutoff and any security "
+            "requirements. A letter does not place an online bid."
+        ),
+        "leilao_presencial": (
+            "Stored method: in-person auction. Next action: obtain the current sale notice and "
+            "confirm the venue, time, participation or representation requirements and any "
+            "security requirements. Do not treat the app's letter as a bid."
+        ),
+    }
+    text = actions.get(kind, (
+        "Sale method unconfirmed. Next action: request the current sale notice and confirmation "
+        "of the method from the responsible authority before preparing or submitting an offer. "
+        "Do not assume sealed bids or infer a method from an adjudication stage."
+    ))
+    text += (f" Evidence: raw_json.modalidade = {evidence!r}." if evidence
+             else " Evidence: no usable raw_json.modalidade supplied.")
+    deadline = item.get("date_end")
+    if effective_end(deadline) is None:
+        text += " Deadline unknown or invalid: request the actual submission cutoff and timezone."
+    else:
+        shown = " ".join(str(deadline).split())[:100]
+        text += (f" Stored date_end = {shown!r}; its submission meaning, precision and timezone "
+                 "must be confirmed against the current notice. A date-only display is not "
+                 "permission to submit until midnight.")
+    return text + " This guidance does not confirm that the sale is active or that the property is safe to buy."
+
+
 def guidance(item: dict) -> str:
     """One paragraph for the Offers page: how this kind of sale is actually bid on."""
     src, country = item.get("source") or "", item.get("country") or "PT"
-    if src in PT_COURT_SOURCES:
-        return ("Portuguese court sale. A sealed-bid offer (carta fechada) goes to the court in a sealed "
-                "envelope before the deadline; in negociação particular you deal with the agente de "
-                "execução. In carta fechada, offers below 85% of the valor base are normally not accepted.")
+    if country == "PT" and src in PT_COURT_SOURCES:
+        return _citius_guidance(item)
     if src == "eleiloes":
         return ("Online auction on e-leiloes.pt: bids are placed on the site (Cartão de Cidadão or Chave "
                 "Móvel Digital). Log your bid here to track it; a letter to the court can only ask for "
