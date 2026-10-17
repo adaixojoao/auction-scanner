@@ -9,31 +9,38 @@
 {% block head %}{% endblock %}
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 <header class="topbar">
   <div class="brand"><span>EU</span> Auction Scanner</div>
-  <nav class="nav">
+  <nav class="nav" aria-label="Main navigation">
     {% for key, label, href in nav %}
-      <a href="{{ href }}" class="{{ 'active' if key == active else '' }}">{{ label }}{% if key == 'offers' and offers_waiting %}<span class="count">{{ offers_waiting }}</span>{% endif %}</a>
+      <a href="{{ href }}" class="{{ 'active' if key == active else '' }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}{% if key == 'offers' and offers_waiting %}<span class="count">{{ offers_waiting }}</span>{% endif %}</a>
     {% endfor %}
   </nav>
   <div class="scan">
     <div class="scan-status" id="scan-status"></div>
     <button class="btn btn-danger btn-sm" id="scan-stop" type="button" hidden onclick="AS.stopScan()">Stop</button>
     <div class="menu">
-      <button class="btn btn-primary" id="scan-btn" data-menu>Scan now ▾</button>
+      <button class="btn btn-primary" id="scan-btn" type="button" aria-expanded="false" data-menu>Scan now ▾</button>
       <div class="menu-list">
-        <button onclick="AS.startScan({countries: ['PT']})">Portugal</button>
-        <button onclick="AS.startScan({countries: null})">All countries</button>
+        <button type="button" onclick="AS.startScan({countries: ['PT']})">Portugal</button>
+        <button type="button" onclick="AS.startScan({countries: null})">All countries</button>
         <a href="/sources">One source…</a>
       </div>
     </div>
   </div>
 </header>
-{% block body %}<main class="page">{% block content %}{% endblock %}</main>{% endblock %}
+{% block body %}<main class="page" id="main-content" tabindex="-1">
+  {% block content %}{% endblock %}
+</main>{% endblock %}
 <div id="toast"></div>
-<dialog id="dismiss-dialog">
+<div id="scan-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="ui-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<dialog id="dismiss-dialog" aria-labelledby="dismiss-title">
   <form method="dialog">
-    <p><b>Why are you rejecting this?</b></p>
+    <p id="dismiss-title"><b>Why are you dismissing this listing?</b></p>
+    <p class="small muted">You can restore it from Listings → Hidden.</p>
+    <label for="dismiss-reason">Reason</label>
     <select id="dismiss-reason">
       <option value="occupied">Occupied</option>
       <option value="heavy work">Heavy work</option>
@@ -44,8 +51,8 @@
       <option value="other">Other</option>
     </select>
     <div class="row" style="margin-top:12px">
-      <button class="btn" type="button" value="cancel">Cancel</button>
-      <button class="btn btn-primary" id="dismiss-ok" type="button" value="ok">Reject</button>
+      <button class="btn" type="submit" value="cancel">Cancel</button>
+      <button class="btn btn-primary" id="dismiss-ok" type="button" value="ok">Dismiss</button>
     </div>
   </form>
 </dialog>

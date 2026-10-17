@@ -74,6 +74,15 @@ task that does the same when the app is closed. When the app starts it scores
 Live and invest and My home, and writes to its log how much memory that used
 and how much was still free. The other goals are scored when you open them.
 
+**Keyboard and screen readers.** Tab first reaches *Skip to main content*.
+On Listings the goal tabs move with ←/→ (Home/End) and open with Enter or
+Space; each column heading is a button that sorts it; the *Scan now* and
+*Export report* lists open with ↓ and close with Esc. Scan start and finish,
+and the confirmations, are announced to screen readers. Dismissing asks for a
+reason; Cancel or Esc never dismisses, and a dismissed listing can be restored
+from *Status → Hidden*. The wide Listings table still scrolls sideways on a
+narrow window.
+
 ### Offers, step by step
 
 1. A listing you ☆ on Listings, or a strong sale where the offer is a letter,
