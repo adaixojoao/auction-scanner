@@ -62,9 +62,10 @@ def place_of(item: dict) -> str:
 
 def _raw(item: dict) -> dict:
     try:
-        return json.loads(item.get("raw_json") or "{}") or {}
+        raw = json.loads(item.get("raw_json") or "{}")
     except (TypeError, ValueError):
         return {}
+    return raw if isinstance(raw, dict) else {}
 
 
 def sale_kind(modalidade: str | None) -> str:
@@ -76,12 +77,49 @@ def sale_kind(modalidade: str | None) -> str:
     return "carta_fechada"
 
 
+def pt_sale_kind(modalidade: str | None) -> str:
+    """Classify an explicit PT method label, never infer sealed bids by default."""
+    import unicodedata
+
+    if not isinstance(modalidade, str):
+        return "unknown"
+    text = "".join(ch for ch in unicodedata.normalize("NFKD", modalidade.casefold())
+                   if not unicodedata.combining(ch))
+    text = re.sub(r"[\s_-]+", " ", text).strip().rstrip(".").strip()
+    labels = {
+        "carta fechada": "carta_fechada",
+        "proposta em carta fechada": "carta_fechada",
+        "propostas em carta fechada": "carta_fechada",
+        "venda por propostas em carta fechada": "carta_fechada",
+        "venda mediante propostas em carta fechada": "carta_fechada",
+        "negociacao particular": "negociacao",
+        "venda por negociacao particular": "negociacao",
+        "leilao eletronico": "leilao_eletronico",
+        "leilao electronico": "leilao_eletronico",
+        "venda em leilao eletronico": "leilao_eletronico",
+        "venda em leilao electronico": "leilao_eletronico",
+        "leilao online": "leilao_eletronico",
+        "leilao presencial": "leilao_presencial",
+        "venda em leilao presencial": "leilao_presencial",
+    }
+    return labels.get(text, "unknown")
+
+
+def _item_sale_kind(item: dict, raw: dict) -> str:
+    if (item.get("country") or "PT") == "PT" and item.get("source") in PT_COURT_SOURCES:
+        return pt_sale_kind(raw.get("modalidade"))
+    return sale_kind(raw.get("modalidade"))
+
+
 def channel(item: dict) -> str:
     """How a bid is made: "letter" (the offer is a letter), "online" (on a
     website), "hearing" (in person at a court hearing), "formal" (a formal
     offer on the court's form, online or in a sealed envelope) or "lawyer"
     (only a lawyer can bid)."""
     src = item.get("source") or ""
+    if ((item.get("country") or "PT") == "PT" and src in PT_COURT_SOURCES
+            and _item_sale_kind(item, _raw(item)) == "leilao_eletronico"):
+        return "online"
     if src in FR_COURT_SOURCES:
         return "lawyer"
     if src in DE_COURT_SOURCES:
@@ -786,7 +824,7 @@ def _is(country: str, sources: set[str] | None = None, kind: str | None = None):
             return False
         if sources is not None and item.get("source") not in sources:
             return False
-        return kind is None or sale_kind(raw.get("modalidade")) == kind
+        return kind is None or _item_sale_kind(item, raw) == kind
     return applies
 
 
@@ -1024,7 +1062,7 @@ def build_letter(item: dict, bid: str, bid_text: str | None, proponente: dict,
         body=body,
         processo=processo,
         to_email=to_email,
-        kind=sale_kind(raw.get("modalidade")),
+        kind=_item_sale_kind(item, raw),
         type_key=ltype.key,
         item_id=item.get("id") or "",
         is_offer=ltype.is_offer,
