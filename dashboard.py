@@ -1660,6 +1660,42 @@ def api_offers_calendar():
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+def _advisory_acquisition_result(result: dict) -> dict:
+    """AI advice cannot establish purchase readiness or set a bid.
+
+    Override any model-supplied readiness flags. No positive readiness path
+    is enabled until an operational, evidence-backed gate is implemented.
+    """
+    import copy
+
+    out = copy.deepcopy(result)
+    if "verdict" not in out:
+        return out
+    if out["verdict"] == "BUY":
+        out["verdict"] = "REVIEW"
+    out["recommended_bid"] = None
+    out["max_bid"] = None
+    # A climate adjustment may retain the original AI bid in 'was'. Do not
+    # leak those amounts as an alternative usable suggestion.
+    guard = out.get("climate_guardrail")
+    if isinstance(guard, dict):
+        guard.pop("was", None)
+        guard["applied"] = False
+        guard["text"] = (
+            "AI bid suggestions are withheld: acquisition readiness is not established."
+        )
+    out["acquisition_ready"] = False
+    out["advisory_only"] = True
+    out["bid_suggestions_available"] = False
+    out["readiness_notice"] = (
+        "Research advice only — acquisition readiness is not established. "
+        "Neither the discovery score, an AI opinion nor a shadow-evaluator result "
+        "verifies ownership, possession, title, lawful access or complete project costs. "
+        "AI bid suggestions are withheld; complete evidence-backed diligence before a binding offer."
+    )
+    return out
+
+
 @app.route("/api/analyze-property", methods=["POST"])
 def api_analyze_property():
     from analysis import analyze_property
@@ -1682,6 +1718,7 @@ def api_analyze_property():
     result = analyze_property(data)
     if "verdict" in result and (_config().get("climate") or {}).get("bid_guardrail") and found:
         apply_climate_guardrail(result, _climate_of(found))
+    result = _advisory_acquisition_result(result)
     return jsonify(result), (502 if "verdict" not in result else 200)
 
 
