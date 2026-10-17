@@ -27,7 +27,8 @@ def listings(client):
 def _static(client, name):
     r = client.get(f"/static/{name}")
     try:
-        return r.get_data(as_text=True)
+        # A Windows checkout has CRLF line endings; compare as LF.
+        return r.get_data(as_text=True).replace("\r\n", "\n")
     finally:
         r.close()
 
