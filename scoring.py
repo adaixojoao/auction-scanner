@@ -3063,28 +3063,31 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
             area, floor_source, all_in, found[0], factor,
             planning_complete=planning_complete,
         )
+        # The anomaly check keeps its own arithmetic: an absurd gap is flagged
+        # for investigation even when the discount itself is not established.
+        sane = all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                   and math.isfinite(v) and v > 0 for v in (area, all_in, found[0]))
+        too_far = sane and _too_far_below(item, area, all_in, found[0])
         if disc is None:
             reasons.append(
                 "discount not established — complete repair planning, a usable floor "
                 "and finite positive benchmark inputs are required"
             )
-        else:
-            too_far = _too_far_below(item, area, all_in, found[0])
-            if disc > 0.1:
-                adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
-                skipped = _discount_skipped(item, why)
-                if skipped and not too_far:
-                    adjusted += skipped
-                reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
-            if too_far:
-                unbelievable = True
-                item["extreme_discount"] = True
-                reasons.append(
-                    "so far below the local price usually means a share, a tenant, a ruin or a wrong area"
-                    " — check why"
-                )
-            elif not _discount_skipped(item, why):
-                s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
+        elif disc > 0.1:
+            adjusted = f"; counted at {factor:.0%}: {', '.join(why)}" if why else ""
+            skipped = _discount_skipped(item, why)
+            if skipped and not too_far:
+                adjusted += skipped
+            reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
+        if too_far:
+            unbelievable = True
+            item["extreme_discount"] = True
+            reasons.append(
+                "so far below the local price usually means a share, a tenant, a ruin or a wrong area"
+                " — check why"
+            )
+        elif disc is not None and not _discount_skipped(item, why):
+            s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
     _mention_sold_move(item, reasons)
     # A price this far under local sales is not a rent. Drop whatever figure was
     # worked out, including when the comparison was a province average.
