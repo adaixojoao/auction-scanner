@@ -912,15 +912,27 @@ def _listing_material_changes(before, after) -> dict:
     return changes
 
 
-def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
-    """Preserve original upsert semantics and atomically journal material changes.
+_LISTING_SOURCE_EVIDENCE_KEY = "listing_source"
 
-    No commit: caller retains transaction ownership. Initial insertion is not
-    a change event. History reflects effective stored values, not rejected thin
-    or shortened input. Direct SQL writes are outside this journal boundary.
+
+def _listing_source_snapshot(row) -> dict:
+    """Effective source inputs to aggregate decision/clearance freshness.
+
+    Locally learned payloads keep their existing independent revision paths.
+    No inference of legal facts or source-specific metadata equivalence.
     """
-    # Opening a transaction first prevents releasing the outermost SAVEPOINT
-    # from implicitly committing when the caller had no transaction yet.
+    snapshot = {field: row[field] for field in _MATERIAL_LISTING_FIELDS}
+    snapshot["raw_json"] = _source_payload_for_history(row["raw_json"])
+    snapshot["image_url"] = row["image_url"]
+    return snapshot
+
+
+def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
+    """Journal accepted changes and bind source inputs to evidence freshness.
+
+    Caller owns commit/rollback. A first observation of an existing listing
+    baselines its old source state before recording the effective new state.
+    """
     if not db.in_transaction:
         db.execute("BEGIN")
     db.execute("SAVEPOINT listing_change_upsert")
@@ -928,11 +940,20 @@ def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
         before = db.execute(
             "SELECT * FROM listings WHERE id = ?", (row["id"],)
         ).fetchone()
-        result = _upsert_listing_without_change_log(db, row)
         if before is not None:
-            after = db.execute(
-                "SELECT * FROM listings WHERE id = ?", (row["id"],)
-            ).fetchone()
+            record_evidence_revision(
+                db, before["id"], _LISTING_SOURCE_EVIDENCE_KEY,
+                _listing_source_snapshot(before),
+            )
+        result = _upsert_listing_without_change_log(db, row)
+        after = db.execute(
+            "SELECT * FROM listings WHERE id = ?", (row["id"],)
+        ).fetchone()
+        record_evidence_revision(
+            db, after["id"], _LISTING_SOURCE_EVIDENCE_KEY,
+            _listing_source_snapshot(after),
+        )
+        if before is not None:
             changes = _listing_material_changes(before, after)
             if changes:
                 db.execute(
@@ -2010,6 +2031,11 @@ def _shadow_evaluate(item: dict, now, db: sqlite3.Connection | None = None,
         )
         item["evaluator_state"] = decision.state
         if db is not None and item.get("id"):
+            if ev_rev_sum is None:
+                ev_rev_sum = db.execute(
+                    "SELECT COALESCE(SUM(rev), 0) FROM evidence_revisions"
+                    " WHERE listing_id = ?", (item["id"],)
+                ).fetchone()[0]
             _persist_decision(db, item["id"], decision, ev_rev_sum)
     except Exception:  # noqa: BLE001
         LOG.debug("shadow-eval failed for %s", item.get("id"), exc_info=True)
@@ -2044,28 +2070,39 @@ def _persist_decision(db: sqlite3.Connection, listing_id: str, decision, ev_rev_
 
 
 def load_decision(db: sqlite3.Connection, listing_id: str,
-                  ev_rev_sum: int | None = None) -> dict | None:
-    """Return the stored Decision for listing_id if still fresh, else None.
+                  ev_rev_sum: int | None = None, *,
+                  allow_stale: bool = False) -> dict | None:
+    """Return a fresh stored decision, or explicitly labeled audit data.
 
-    A Decision is stale when ev_rev_sum is provided and does not match the
-    stored evidence_rev_sum.  Pass ev_rev_sum=None to skip the freshness check
-    and always return whatever is stored (useful for audits and tests).
+    Omitting ev_rev_sum no longer bypasses freshness. A supplied sum must
+    agree with the authoritative DB sum as well as the stored decision.
+    This read does not reevaluate, delete, commit or promote a listing.
     """
+    if not isinstance(allow_stale, bool):
+        raise ValueError("allow_stale must be a boolean")
     row = db.execute(
         "SELECT state, requirements_json, provenance_json, evidence_rev_sum, evaluated_at"
-        " FROM evaluator_decisions WHERE listing_id = ?",
-        (listing_id,)
+        " FROM evaluator_decisions WHERE listing_id = ?", (listing_id,)
     ).fetchone()
     if row is None:
         return None
-    if ev_rev_sum is not None and row["evidence_rev_sum"] != ev_rev_sum:
-        return None  # stale
+    current = db.execute(
+        "SELECT COALESCE(SUM(rev), 0) FROM evidence_revisions WHERE listing_id = ?",
+        (listing_id,),
+    ).fetchone()[0]
+    stale = (row["evidence_rev_sum"] is None
+             or row["evidence_rev_sum"] != current
+             or (ev_rev_sum is not None and ev_rev_sum != current))
+    if stale and not allow_stale:
+        return None
     return {
         "state": row["state"],
         "requirements": json.loads(row["requirements_json"]),
         "provenance": json.loads(row["provenance_json"]),
         "evidence_rev_sum": row["evidence_rev_sum"],
         "evaluated_at": row["evaluated_at"],
+        "current_evidence_rev_sum": current,
+        "stale": stale,
     }
 
 
@@ -2236,7 +2273,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                        climate_on, mode, floor_market)
             if mode in ("both", "invest"):
                 _shadow_evaluate(item, now, db=db,
-                                 ev_rev_sum=ev_rev_sums.get(item["id"]))
+                                 ev_rev_sum=ev_rev_sums.get(item["id"], 0))
             _optional = {"research_only", "extreme_discount", "floor_guess"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
