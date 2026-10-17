@@ -92,16 +92,18 @@ def test_decision_reruns_when_evidence_changes(tmp_path):
     db = _fresh_db(tmp_path)
     lid = _invest_listing(db)
     load_listings(db, mode="invest", include_hidden=True, now=NOW)
-    assert load_decision(db, lid)["evidence_rev_sum"] is None   # no evidence recorded yet
+    # The upsert recorded the listing's source snapshot as revision 1 (4C).
+    assert load_decision(db, lid)["evidence_rev_sum"] == 1
 
     # Record an evidence revision to bump the rev_sum
     rev = record_evidence_revision(db, lid, "location", {"lat": 41.0, "lon": -8.0})
     db.commit()
+    assert load_decision(db, lid) is None   # outdated until re-evaluated
     # No refresh=True: the changed rev_sum alone must bust the kept score.
     load_listings(db, mode="invest", include_hidden=True, now=NOW)
     stored = load_decision(db, lid)
-    assert stored["evidence_rev_sum"] == rev
-    assert load_decision(db, lid, ev_rev_sum=rev) is not None
+    assert stored["evidence_rev_sum"] == 1 + rev
+    assert load_decision(db, lid, ev_rev_sum=1 + rev) is not None
 
 
 def test_evaluator_state_set_on_item(tmp_path):
