@@ -3,10 +3,10 @@
 <div class="page-head">
   <div>
     <h1>Listings</h1>
-    <p>Everything the scanner found, scored. ☆ puts a listing on your Offers list; ✕ dismisses it for good.</p>
+    <p>Everything the scanner found, scored. Shortlist a listing to review it in Offers; dismiss it to hide it. Restore dismissed listings from Hidden.</p>
   </div>
   <div class="menu">
-    <button class="btn" data-menu>Export report ▾</button>
+    <button class="btn" type="button" aria-expanded="false" data-menu>Export report ▾</button>
     <div class="menu-list">
       <a href="/export/report.docx">Word (.docx)</a>
       <a href="/export/report.pdf">PDF</a>
@@ -16,23 +16,24 @@
 </div>
 
 <div class="tabs" id="modes" role="tablist" aria-label="What to rank for">
-  <button data-mode="both" role="tab">Live and invest</button>
-  <button data-mode="home" role="tab">My home</button>
-  <button data-mode="invest" role="tab">Investment home</button>
-  <button data-mode="land" role="tab">Investment land</button>
-  <button data-mode="forest" role="tab">Forestry</button>
+  <button type="button" id="goal-both" data-mode="both" role="tab" aria-controls="goal-results" aria-selected="true" tabindex="0">Live and invest</button>
+  <button type="button" id="goal-home" data-mode="home" role="tab" aria-controls="goal-results" aria-selected="false" tabindex="-1">My home</button>
+  <button type="button" id="goal-invest" data-mode="invest" role="tab" aria-controls="goal-results" aria-selected="false" tabindex="-1">Investment home</button>
+  <button type="button" id="goal-land" data-mode="land" role="tab" aria-controls="goal-results" aria-selected="false" tabindex="-1">Investment land</button>
+  <button type="button" id="goal-forest" data-mode="forest" role="tab" aria-controls="goal-results" aria-selected="false" tabindex="-1">Forestry</button>
 </div>
+<section id="goal-results" role="tabpanel" aria-labelledby="goal-both" tabindex="0">
 <p class="small muted" id="mode-note"></p>
 <p class="small" id="cash-note"></p>
 
 <div class="stats" id="stats"></div>
 
 <div class="card filters">
-  <div class="field"><label>Country</label>
+  <div class="field"><label for="f-country">Country</label>
     <select id="f-country"><option value="">All</option>
       {% for code, name in countries %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
     </select></div>
-  <div class="field"><label>Property type</label>
+  <div class="field"><label for="f-kind">Property type</label>
     <select id="f-kind">
       <option value="">Everything</option>
       <option value="home">Homes</option>
@@ -40,19 +41,19 @@
       <option value="rural_plot">Rural plots</option>
       <option value="other">Other (shops, garages…)</option>
     </select></div>
-  <div class="field"><label>Source</label><select id="f-source"><option value="">All</option></select></div>
-  <div class="field"><label>Status</label>
+  <div class="field"><label for="f-source">Source</label><select id="f-source"><option value="">All</option></select></div>
+  <div class="field"><label for="f-status">Status</label>
     <select id="f-status">
       <option value="">Open</option>
       <option value="shortlisted">On Offers</option>
       <option value="hidden">Hidden</option>
     </select></div>
-  <div class="field"><label>Max price</label><input type="number" id="f-maxprice" value="{{ max_price }}" step="5000"></div>
-  <div class="field wide"><label>Search</label><input type="text" id="f-search" placeholder="title, place, description…"></div>
+  <div class="field"><label for="f-maxprice">Max price</label><input type="number" id="f-maxprice" value="{{ max_price }}" step="5000"></div>
+  <div class="field wide"><label for="f-search">Search</label><input type="text" id="f-search" placeholder="title, place, description…"></div>
   <label class="check"><input type="checkbox" id="f-properties" checked> Property only</label>
   <details class="more-filters">
     <summary>More filters</summary>
-    <div class="field"><label>Climate</label>
+    <div class="field"><label for="f-climate">Climate</label>
       <select id="f-climate">
         <option value="">Any</option>
         <option value="excellent">Excellent</option>
@@ -61,7 +62,7 @@
         <option value="poor">Poor only</option>
         <option value="unknown">No climate data</option>
       </select></div>
-    <div class="field"><label>Min score</label><input type="number" id="f-minscore" value="0" step="5" min="0" max="100"></div>
+    <div class="field"><label for="f-minscore">Min score</label><input type="number" id="f-minscore" value="0" step="5" min="0" max="100"></div>
     <label class="check" title="Only listings whose climate was read at their own position, not their town's"><input type="checkbox" id="f-climate-exact"> Exact climate data only</label>
   </details>
   <button class="btn btn-primary" onclick="page=1; load()">Apply</button>
@@ -71,19 +72,20 @@
 
 <table class="list">
   <thead><tr>
-    <th class="sortable" data-sort="score">Score</th>
-    <th class="sortable" data-sort="country"></th>
-    <th class="sortable" data-sort="title">Title</th>
-    <th class="sortable" data-sort="price">Asking</th>
-    <th class="sortable" data-sort="current_bid">Current bid</th>
-    <th>Location</th>
-    <th class="sortable" data-sort="date_end">Ends</th>
-    <th>Why</th>
-    <th></th>
+    <th scope="col" class="sortable" data-sort="score" aria-sort="descending"><button type="button" class="sort-button" data-sort="score" data-label="Score">Score <span class="sort-indicator" aria-hidden="true">↓</span></button></th>
+    <th scope="col" class="sortable" data-sort="country" aria-sort="none"><button type="button" class="sort-button" data-sort="country" data-label="Country">Country <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+    <th scope="col" class="sortable" data-sort="title" aria-sort="none"><button type="button" class="sort-button" data-sort="title" data-label="Title">Title <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+    <th scope="col" class="sortable" data-sort="price" aria-sort="none"><button type="button" class="sort-button" data-sort="price" data-label="Asking price">Asking <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+    <th scope="col" class="sortable" data-sort="current_bid" aria-sort="none"><button type="button" class="sort-button" data-sort="current_bid" data-label="Current bid">Current bid <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+    <th scope="col">Location</th>
+    <th scope="col" class="sortable" data-sort="date_end" aria-sort="none"><button type="button" class="sort-button" data-sort="date_end" data-label="End date">Ends <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+    <th scope="col">Why</th>
+    <th scope="col"><span class="sr-only">Actions</span></th>
   </tr></thead>
   <tbody id="rows"></tbody>
 </table>
 <div class="pagination" id="pagination"></div>
+</section>
 {% endblock %}
 
 {% block scripts %}
@@ -105,20 +107,29 @@ let mode = "both";
 try { mode = localStorage.getItem("listings-mode") || "both"; } catch (e) { /* private window */ }
 if (!MODE_NOTE[mode]) mode = "home";
 function showMode() {
-  document.querySelectorAll("#modes button").forEach(b => {
-    const on = b.dataset.mode === mode;
-    b.classList.toggle("active", on);
-    b.setAttribute("aria-selected", on ? "true" : "false");
+  document.querySelectorAll("#modes button").forEach(button => {
+    const selected = button.dataset.mode === mode;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    if (selected) $("goal-results").setAttribute("aria-labelledby", button.id);
   });
   $("mode-note").textContent = MODE_NOTE[mode];
 }
-document.querySelectorAll("#modes button").forEach(b => b.addEventListener("click", () => {
-  mode = b.dataset.mode;
+// One activation per Enter, Space or click; arrow keys only move focus (AS.initGoalTabs).
+function activateGoal(button) {
+  const nextMode = button.dataset.mode;
+  if (nextMode === mode) { showMode(); return; }
+  mode = nextMode;
   try { localStorage.setItem("listings-mode", mode); } catch (e) { /* private window */ }
   showMode();
   page = 1;
   load();
-}));
+}
+document.querySelectorAll("#modes button").forEach(button => {
+  button.addEventListener("click", () => activateGoal(button));
+});
+AS.initGoalTabs($("modes"), activateGoal);
 showMode();
 
 async function load() {
@@ -187,8 +198,8 @@ function candidateCard(it) {
     <p class="small">${AS.esc(it.valuation || "")}</p>
     <ul class="small">${(it.gaps || []).map(g => `<li>${AS.esc(g)}</li>`).join("")}</ul>
     <p>
-      <button class="btn btn-sm" data-id="${id}" onclick="openCandidate(this.dataset.id)">Details</button>
-      <button class="btn btn-sm" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "On Offers" : "Shortlist"}</button>
+      <button class="btn btn-sm" aria-label="Details: ${AS.esc(it.title || "this listing")}" aria-expanded="false" data-id="${id}" onclick="openCandidate(this.dataset.id, this)">Details</button>
+      <button class="btn btn-sm" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${AS.esc(it.title || "this listing")}" aria-pressed="${starred}" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "On Offers" : "Shortlist"}</button>
     </p>
   </article>`;
 }
@@ -205,16 +216,26 @@ function renderResearch(research) {
     ${unvalued ? `<h3 class="small">Unvalued — investment value not established</h3><div class="research-grid">${unvalued}</div>` : ""}`;
 }
 
-async function openCandidate(id) {
+// Detail panels get DOM IDs from a counter, never from scraped listing IDs.
+let detailsSeq = 0;
+function nextDetailsId() { detailsSeq += 1; return `details-panel-${detailsSeq}`; }
+
+async function openCandidate(id, button) {
   const card = [...document.querySelectorAll("#research-candidates article")].find(el => el.dataset.id === id);
   if (!card) return;
   const existing = card.querySelector(".candidate-details");
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    existing.remove();
+    if (button) { button.setAttribute("aria-expanded", "false"); button.removeAttribute("aria-controls"); }
+    return;
+  }
   const d = await AS.api("/api/listing?id=" + encodeURIComponent(id) + "&mode=" + mode);
   const panel = document.createElement("div");
   panel.className = "candidate-details";
+  panel.id = nextDetailsId();
   panel.innerHTML = detailsHtml(d);
   card.appendChild(panel);
+  if (button) { button.setAttribute("aria-expanded", "true"); button.setAttribute("aria-controls", panel.id); }
 }
 
 function renderRows(items, hiddenView) {
@@ -237,37 +258,49 @@ function renderRows(items, hiddenView) {
     const starred = it.status === "shortlisted";
     // IDs go through data-id, never into the onclick source.
     const id = AS.esc(it.id);
+    const propertyLabel = AS.esc(it.title || "this listing");
     const actions = it.status === "dismissed"
-      ? `<button class="btn btn-sm" data-id="${id}" onclick="setStatus(this.dataset.id, null)">Restore</button>`
-      : `<button class="icon-btn ${starred ? "on" : ""}" title="${starred ? "Remove from Offers" : "Add to Offers"}" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "★" : "☆"}</button>
-         <button class="icon-btn" title="Dismiss" data-id="${id}" onclick="setStatus(this.dataset.id, 'dismissed')">✕</button>`;
+      ? `<button class="btn btn-sm" aria-label="Restore ${propertyLabel}" data-id="${id}" onclick="setStatus(this.dataset.id, null)">Restore</button>`
+      : `<button class="icon-btn ${starred ? "on" : ""}" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${propertyLabel}" aria-pressed="${starred}" title="${starred ? "Remove from Offers" : "Add to Offers"}" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "★" : "☆"}</button>
+         <button class="icon-btn" aria-label="Dismiss ${propertyLabel}" title="Dismiss" data-id="${id}" onclick="setStatus(this.dataset.id, 'dismissed')">✕</button>`;
     // Citius has no page per sale: its title opens the details, with the way to find it.
     const titleLink = it.source === "citius"
-      ? `<a href="#" data-id="${id}" onclick="toggleDetails(this); return false">${AS.esc(it.title || "?")}</a>`
+      ? `<a href="#" aria-expanded="false" data-id="${id}" onclick="toggleDetails(this); return false">${AS.esc(it.title || "?")}</a>`
       : AS.link(it.url, it.title || "?");
     return `<tr class="${it.hidden_reason ? "dim" : ""}">
       <td>${AS.scoreBadge(it.score, it.rank, it.excellent)}</td>
       <td>${AS.flag(it.country)}</td>
       <td class="t-title">${titleLink}${badges}${mode === "home" ? AS.wishesHtml(it.wishes, true) : ""}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
-      <td class="nowrap"><b>${AS.money(it.price)}</b>${it.price_unusable ? `<div class="small faint">Not a purchase price</div>` : ""}${it.with_tax ? `<div class="small faint" title="${AS.esc(it.tax_note || "")}">~${AS.money(it.with_tax)} with tax</div>` : ""}</td>
-      <td class="nowrap muted">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
+      <td class="nowrap"><b class="money">${AS.money(it.price)}</b>${it.price_unusable ? `<div class="small faint">Not a purchase price</div>` : ""}${it.with_tax ? `<div class="small faint" title="${AS.esc(it.tax_note || "")}">~${AS.money(it.with_tax)} with tax</div>` : ""}</td>
+      <td class="nowrap muted money">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
       <td class="small muted">${AS.esc(loc)}</td>
       <td class="nowrap small">${AS.esc(it.date_end ? it.date_end.slice(0, 10) : "–")}</td>
       <td class="t-why">${AS.esc((it.reasons || []).join(", "))}</td>
-      <td class="nowrap"><button class="icon-btn" title="Details" data-id="${id}" onclick="toggleDetails(this)">ⓘ</button>${actions}</td>
+      <td class="nowrap"><button class="icon-btn" aria-label="Details: ${propertyLabel}" aria-expanded="false" title="Details" data-id="${id}" onclick="toggleDetails(this)">ⓘ</button>${actions}</td>
     </tr>`;
   }).join("");
 }
 
 // ── Details panel: everything known about one listing (listing_info.py) ──
+function setDetailsTriggers(row, panelId) {
+  // Both the ⓘ button and a Citius title open the same panel.
+  row.querySelectorAll("[aria-expanded][data-id]").forEach(t => {
+    t.setAttribute("aria-expanded", String(!!panelId));
+    if (panelId) t.setAttribute("aria-controls", panelId); else t.removeAttribute("aria-controls");
+  });
+}
+
 async function toggleDetails(el) {
   const row = el.closest("tr"), next = row.nextElementSibling;
-  if (next && next.classList.contains("details-row")) { next.remove(); return; }
+  if (next && next.classList.contains("details-row")) { next.remove(); setDetailsTriggers(row, null); return; }
+  // On an API failure AS.api throws: nothing is marked expanded.
   const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id) + "&mode=" + mode);
   const tr = document.createElement("tr");
   tr.className = "details-row";
+  tr.id = nextDetailsId();
   tr.innerHTML = `<td colspan="9">${detailsHtml(d)}</td>`;
   row.after(tr);
+  setDetailsTriggers(row, tr.id);
 }
 
 function factValue(f) {
@@ -355,8 +388,8 @@ function locationHtml(d) {
     <p class="small">${AS.esc(l.reliable)}</p>
     ${l.scanner ? `<p class="small muted">The scanner's own position is kept: ${AS.esc(ll(l.scanner.lat, l.scanner.lon))} (${AS.esc(l.scanner.source)}).</p>` : ""}
     <div class="loc-form">
-      <select class="loc-method">${methods.map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
-      <input class="loc-value" type="text" placeholder="latitude, longitude · a Google Maps link · street, village, town">
+      <select class="loc-method" aria-label="How to give the location">${methods.map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
+      <input class="loc-value" type="text" aria-label="Location" placeholder="latitude, longitude · a Google Maps link · street, village, town">
       <button class="btn btn-sm btn-primary" data-id="${id}" onclick="verifyLocation(this)">Verify location</button>
       ${l.verified ? `<button class="btn btn-sm" data-id="${id}" onclick="clearLocation(this)">Use the scanner's position</button>` : ""}
     </div>
@@ -553,9 +586,9 @@ function renderPages(total) {
   const pages = Math.ceil(total / PER_PAGE), el = $("pagination");
   if (pages <= 1) { el.innerHTML = ""; return; }
   const first = Math.max(1, Math.min(page - 4, pages - 9)), last = Math.min(pages, first + 9);
-  let html = `<button class="btn btn-sm" ${page === 1 ? "disabled" : ""} onclick="go(${page - 1})">‹</button>`;
-  for (let i = first; i <= last; i++) html += `<button class="btn btn-sm ${i === page ? "active" : ""}" onclick="go(${i})">${i}</button>`;
-  el.innerHTML = html + `<button class="btn btn-sm" ${page === pages ? "disabled" : ""} onclick="go(${page + 1})">›</button><span class="small muted" style="align-self:center">${countText()}</span>`;
+  let html = `<button class="btn btn-sm" aria-label="Previous page" ${page === 1 ? "disabled" : ""} onclick="go(${page - 1})">‹</button>`;
+  for (let i = first; i <= last; i++) html += `<button class="btn btn-sm ${i === page ? "active" : ""}" ${i === page ? 'aria-current="page"' : ""} onclick="go(${i})">${i}</button>`;
+  el.innerHTML = html + `<button class="btn btn-sm" aria-label="Next page" ${page === pages ? "disabled" : ""} onclick="go(${page + 1})">›</button><span class="small muted" style="align-self:center">${countText()}</span>`;
 }
 let lastFound = 0, lastCap = 100;
 function countText() {
@@ -577,12 +610,33 @@ async function setStatus(id, status) {
   load();
 }
 
-document.querySelectorAll("th.sortable").forEach(th => th.addEventListener("click", () => {
-  const col = th.dataset.sort;
-  if (sort === col) dir = dir === "desc" ? "asc" : "desc";
-  else { sort = col; dir = col === "date_end" || col === "price" ? "asc" : "desc"; }
-  load();
-}));
+// Native buttons in the headers: Enter and Space already work, one handler sorts once.
+function nextSortDirection(column) {
+  if (sort === column) return dir === "desc" ? "asc" : "desc";
+  return column === "date_end" || column === "price" ? "asc" : "desc";
+}
+function updateSortHeaders() {
+  document.querySelectorAll("table.list th[data-sort]").forEach(header => {
+    const column = header.dataset.sort;
+    const active = column === sort;
+    header.setAttribute("aria-sort", active ? (dir === "asc" ? "ascending" : "descending") : "none");
+    const button = header.querySelector(".sort-button");
+    if (!button) return;
+    button.querySelector(".sort-indicator").textContent = active ? (dir === "asc" ? "↑" : "↓") : "↕";
+    const next = nextSortDirection(column) === "asc" ? "ascending" : "descending";
+    button.setAttribute("aria-label", `Sort by ${button.dataset.label}, ${next}`);
+  });
+}
+document.querySelectorAll("table.list .sort-button").forEach(button => {
+  button.addEventListener("click", () => {
+    const column = button.dataset.sort;
+    dir = nextSortDirection(column);
+    sort = column;
+    updateSortHeaders();
+    load();
+  });
+});
+updateSortHeaders();
 $("f-search").addEventListener("keydown", e => { if (e.key === "Enter") { page = 1; load(); } });
 ["f-country", "f-kind", "f-source", "f-status", "f-properties", "f-climate", "f-climate-exact"].forEach(id => $(id).addEventListener("change", () => { page = 1; load(); }));
 document.addEventListener("scan-finished", load);

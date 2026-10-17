@@ -107,14 +107,30 @@ const AS = (() => {
     return `${Math.round(mins / 1440)} days ago`;
   }
 
+  /* Screen-reader announcements go to persistent live regions (base.html),
+     emptied first so the same message twice is still read. */
+  const announcementTimers = new Map();
+  function announce(message, regionId = "ui-announcement") {
+    const region = document.getElementById(regionId);
+    if (!region) return;
+    clearTimeout(announcementTimers.get(regionId));
+    region.textContent = "";
+    announcementTimers.set(regionId, setTimeout(() => {
+      region.textContent = String(message ?? "");
+      announcementTimers.delete(regionId);
+    }, 60));
+  }
+
   let toastTimer;
-  function toast(msg, kind = "ok", ms = 2800) {
+  function toast(msg, kind = "ok", ms = 2800, shouldAnnounce = true) {
+    if (shouldAnnounce) announce(msg);
     const t = document.getElementById("toast");
+    if (!t) return;
     t.textContent = msg;
     t.style.background = kind === "bad" ? "#7f1d1d" : kind === "warn" ? "#78350f" : "#14532d";
     t.style.display = "block";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (t.style.display = "none"), ms);
+    toastTimer = setTimeout(() => { t.style.display = "none"; }, ms);
   }
 
   async function api(url, opts = {}) {
@@ -131,16 +147,37 @@ const AS = (() => {
 
   /* ── Scan button & progress (top bar) ───────────────────── */
   let wasRunning = false, pollTimer;
+  // Announced only at lifecycle transitions, never on every polling tick.
+  let scanAnnouncementState = "idle";
+  function announceScanState(s) {
+    const next = s.running ? (s.stop ? "stopping" : "running") : "idle";
+    if (next === scanAnnouncementState) return;
+    const previous = scanAnnouncementState;
+    scanAnnouncementState = next;
+    if (next === "running") {
+      announce("Scan started.", "scan-announcement");
+    } else if (next === "stopping") {
+      announce("Scan will stop after the current source.", "scan-announcement");
+    } else if (previous !== "idle") {
+      const summary = s.summary;
+      announce(summary && summary.stopped ? "Scan stopped."
+        : `Scan finished: ${summary ? summary.listings : 0} listings.`, "scan-announcement");
+    }
+  }
   function renderScan(s) {
     const el = document.getElementById("scan-status");
     const btn = document.getElementById("scan-btn");
     if (!el) return;
+    announceScanState(s);
     const stop = document.getElementById("scan-stop");
     if (s.running) {
-      const pct = s.total ? Math.round(100 * (s.done || 0) / s.total) : 0;
+      const total = Number(s.total);
+      const known = Number.isFinite(total) && total > 0;
+      const pct = known ? Math.min(100, Math.max(0, Math.round(100 * (Number(s.done) || 0) / total))) : 0;
       const verb = s.stop ? "Stopping after" : "Scanning";
       el.innerHTML = `${verb} ${esc(s.label || "")} · ${s.done || 0}/${s.total || "?"}` +
-        `${s.current ? " · " + esc(s.current) : ""}<div class="scan-bar"><div style="width:${pct}%"></div></div>`;
+        `${s.current ? " · " + esc(s.current) : ""}<div class="scan-bar" role="progressbar" aria-label="Scan progress"` +
+        ` aria-valuemin="0" aria-valuemax="100"${known ? ` aria-valuenow="${pct}"` : ""}><div style="width:${pct}%"></div></div>`;
       btn.disabled = true;
       if (stop) { stop.hidden = false; stop.disabled = !!s.stop; }
     } else {
@@ -153,8 +190,8 @@ const AS = (() => {
     }
     if (wasRunning && !s.running) {
       const sum = s.summary;
-      if (sum && sum.stopped) toast("Scan stopped");
-      else toast(`Scan finished: ${sum ? sum.listings : 0} listings`);
+      if (sum && sum.stopped) toast("Scan stopped", "ok", 2800, false);
+      else toast(`Scan finished: ${sum ? sum.listings : 0} listings`, "ok", 2800, false);
       document.dispatchEvent(new CustomEvent("scan-finished"));
     }
     wasRunning = s.running;
@@ -165,9 +202,11 @@ const AS = (() => {
     pollTimer = setTimeout(pollScan, wasRunning ? 2000 : 20000);
   }
   async function startScan(body) {
-    document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open"));
+    document.querySelectorAll(".menu.open").forEach(menu => {
+      setMenuOpen(menu, false);
+    });
     await api("/api/scan", {method: "POST", body});
-    toast("Scan started");
+    toast("Scan started", "ok", 2800, false);
     wasRunning = true;
     pollScan();
   }
@@ -175,19 +214,97 @@ const AS = (() => {
     const stop = document.getElementById("scan-stop");
     if (stop) stop.disabled = true;
     await api("/api/scan/stop", {method: "POST"});
-    toast("Stopping after the current source");
+    toast("Stopping after the current source", "ok", 2800, false);
     pollScan();
   }
 
+  /* Disclosure dropdowns (Scan now, Export report): plain lists of links and
+     buttons, not ARIA menus, so Tab stays native. */
+  function setMenuOpen(menu, open, returnFocus = false) {
+    if (!menu) return;
+    menu.classList.toggle("open", open);
+    const toggle = menu.querySelector("[data-menu]");
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", String(open));
+      if (returnFocus) toggle.focus();
+    }
+  }
   function initMenus() {
-    document.addEventListener("click", e => {
-      const toggle = e.target.closest("[data-menu]");
-      const menu = toggle ? toggle.parentElement : null;
-      document.querySelectorAll(".menu.open").forEach(m => {
-        if (m !== menu && !m.contains(e.target)) m.classList.remove("open");
-      });
-      if (menu) menu.classList.toggle("open");
+    document.querySelectorAll("[data-menu]").forEach(button => {
+      button.setAttribute("aria-expanded", "false");
     });
+    document.addEventListener("click", event => {
+      const toggle = event.target.closest("[data-menu]");
+      const menu = toggle ? toggle.closest(".menu") : null;
+      document.querySelectorAll(".menu.open").forEach(openMenu => {
+        if (openMenu !== menu && !openMenu.contains(event.target)) setMenuOpen(openMenu, false);
+      });
+      if (menu) setMenuOpen(menu, !menu.classList.contains("open"));
+      // An activated item closes its list; focus goes back to the toggle so it
+      // is not left on a hidden item.
+      const item = event.target.closest(".menu-list a, .menu-list button");
+      if (item) setMenuOpen(item.closest(".menu"), false, true);
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        const menu = event.target.closest(".menu.open");
+        if (menu) {
+          event.preventDefault();
+          setMenuOpen(menu, false, true);
+        }
+      }
+      if (event.key === "ArrowDown") {
+        const toggle = event.target.closest("[data-menu]");
+        const menu = toggle && toggle.closest(".menu");
+        if (!menu) return;
+        event.preventDefault();
+        setMenuOpen(menu, true);
+        const first = menu.querySelector(".menu-list button:not(:disabled), .menu-list a[href]");
+        if (first) first.focus();
+      }
+    });
+    document.addEventListener("focusin", event => {
+      document.querySelectorAll(".menu.open").forEach(menu => {
+        if (!menu.contains(event.target)) setMenuOpen(menu, false);
+      });
+    });
+  }
+
+  /* Tabs with manual activation: arrows, Home and End move focus only;
+     Enter, Space or a click activates. */
+  function initGoalTabs(tablist, activate) {
+    if (!tablist) return;
+    const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+    tablist.addEventListener("keydown", event => {
+      const index = tabs.indexOf(event.target.closest('[role="tab"]'));
+      if (index < 0) return;
+      let next = index;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabs.length - 1;
+      else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activate(tabs[index]);
+        return;
+      } else return;
+      event.preventDefault();
+      tabs.forEach(tab => { tab.tabIndex = tab === tabs[next] ? 0 : -1; });
+      tabs[next].focus();
+    });
+  }
+
+  /* Sticky offsets follow the top bar, which wraps on narrow windows. */
+  function initTopbarHeight() {
+    const topbar = document.querySelector(".topbar");
+    if (!topbar) return;
+    const update = () => {
+      const height = Math.ceil(topbar.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--topbar-height", `${height}px`);
+    };
+    update();
+    if (typeof ResizeObserver !== "undefined") new ResizeObserver(update).observe(topbar);
+    else window.addEventListener("resize", update, {passive: true});
   }
 
   /* The desktop app shuts itself down a few minutes after the last window
@@ -232,17 +349,20 @@ const AS = (() => {
       const onClose = () => finish(dlg.returnValue === "ok");
       reject.addEventListener("click", onOk);
       dlg.addEventListener("close", onClose);
+      // A previous confirmation must not make Cancel or Escape count as one.
+      dlg.returnValue = "";
       dlg.showModal();
     });
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     initMenus();
+    initTopbarHeight();
     pollScan();
     heartbeat();
     setInterval(heartbeat, 15000);
     announceUpdate();
   });
 
-  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, api, startScan, stopScan, pollScan, dismiss};
+  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, announce, api, startScan, stopScan, pollScan, dismiss, initGoalTabs};
 })();

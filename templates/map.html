@@ -3,7 +3,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 {% endblock %}
-{% block body %}<div id="map"></div>{% endblock %}
+{% block body %}<main id="main-content" tabindex="-1"><h1 class="sr-only">Map</h1><div id="map"></div></main>{% endblock %}
 {% block scripts %}
 <script>
 if (typeof L === "undefined") {
