@@ -42,7 +42,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -647,13 +647,32 @@ def _migrate_v28(db: sqlite3.Connection):
     """)
 
 
+def _migrate_v29(db: sqlite3.Connection):
+    """Append-only history of effective material changes accepted by upsert."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS listing_change_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            previous_url TEXT,
+            current_url TEXT,
+            changes_json TEXT NOT NULL
+        )
+    """)
+    db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_listing_change_log
+        ON listing_change_log(listing_id, id)
+    """)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
                15: _migrate_v15, 16: _migrate_v16, 17: _migrate_v17, 18: _migrate_v18,
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
-               27: _migrate_v27, 28: _migrate_v28}
+               27: _migrate_v27, 28: _migrate_v28, 29: _migrate_v29}
 
 
 def init_db(db: sqlite3.Connection):
@@ -812,7 +831,7 @@ def _keep_learned(new: str | None, old: str | None) -> str | None:
     return json.dumps({**fresh, **kept}, ensure_ascii=False) if kept else new
 
 
-def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
+def _upsert_listing_without_change_log(db: sqlite3.Connection, row: dict) -> str:
     """Insert or refresh one listing. Returns "inserted" or "updated".
 
     Updates use COALESCE so a thin search-page scrape never wipes fields a
@@ -861,6 +880,105 @@ def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
             (row["id"], now, new_price, new_bid),
         )
     return "inserted"
+
+
+_MATERIAL_LISTING_FIELDS = (
+    "title", "description", "tipo", "area_m2", "price", "current_bid",
+    "min_price", "district", "concelho", "freguesia", "date_end",
+)
+
+
+def _source_payload_for_history(value):
+    """Semantic source payload, excluding established locally learned keys."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return value
+    if isinstance(value, dict):
+        return {key: val for key, val in value.items() if key not in LEARNED_RAW_KEYS}
+    return value
+
+
+def _listing_material_changes(before, after) -> dict:
+    changes = {}
+    for field in _MATERIAL_LISTING_FIELDS:
+        if before[field] != after[field]:
+            changes[field] = {"before": before[field], "after": after[field]}
+    old_payload = _source_payload_for_history(before["raw_json"])
+    new_payload = _source_payload_for_history(after["raw_json"])
+    if old_payload != new_payload:
+        changes["raw_json"] = {"before": old_payload, "after": new_payload}
+    return changes
+
+
+def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
+    """Preserve original upsert semantics and atomically journal material changes.
+
+    No commit: caller retains transaction ownership. Initial insertion is not
+    a change event. History reflects effective stored values, not rejected thin
+    or shortened input. Direct SQL writes are outside this journal boundary.
+    """
+    # Opening a transaction first prevents releasing the outermost SAVEPOINT
+    # from implicitly committing when the caller had no transaction yet.
+    if not db.in_transaction:
+        db.execute("BEGIN")
+    db.execute("SAVEPOINT listing_change_upsert")
+    try:
+        before = db.execute(
+            "SELECT * FROM listings WHERE id = ?", (row["id"],)
+        ).fetchone()
+        result = _upsert_listing_without_change_log(db, row)
+        if before is not None:
+            after = db.execute(
+                "SELECT * FROM listings WHERE id = ?", (row["id"],)
+            ).fetchone()
+            changes = _listing_material_changes(before, after)
+            if changes:
+                db.execute(
+                    "INSERT INTO listing_change_log"
+                    " (listing_id, source, observed_at, previous_url, current_url, changes_json)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (after["id"], after["source"], after["last_seen"],
+                     safe_url(before["url"]), safe_url(after["url"]),
+                     json.dumps(changes, sort_keys=True, ensure_ascii=False)),
+                )
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT listing_change_upsert")
+        db.execute("RELEASE SAVEPOINT listing_change_upsert")
+        raise
+    db.execute("RELEASE SAVEPOINT listing_change_upsert")
+    return result
+
+
+def listing_changes(db: sqlite3.Connection, listing_id: str, *,
+                    limit: int = 100, before_id: int | None = None) -> list[dict]:
+    """Newest-first structured change explanations for a known listing ID.
+
+    Read-only history access; not an alternative listing loader. Consumers must
+    first obtain visible listings through load_listings/load_best and escape
+    every historical value on output. before_id enables bounded pagination.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+        raise ValueError("history limit must be an integer between 1 and 1000")
+    if before_id is not None and (
+            isinstance(before_id, bool) or not isinstance(before_id, int) or before_id < 1):
+        raise ValueError("before_id must be a positive integer")
+    sql = "SELECT * FROM listing_change_log WHERE listing_id = ?"
+    params = [listing_id]
+    if before_id is not None:
+        sql += " AND id < ?"
+        params.append(before_id)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    events = []
+    for row in db.execute(sql, params):
+        event = dict(row)
+        event["changes"] = json.loads(event.pop("changes_json"))
+        event["previous_url"] = safe_url(event["previous_url"])
+        event["current_url"] = safe_url(event["current_url"])
+        events.append(event)
+    return events
 
 
 def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: str,
