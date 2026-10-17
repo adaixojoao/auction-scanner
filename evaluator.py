@@ -154,35 +154,55 @@ def _req_residential_identity(evidence: dict, policy: dict) -> Requirement:
 
 
 def _req_full_ownership(evidence: dict, policy: dict) -> Requirement:
-    """Full ownership (not a share, usufruct, or timeshare) is being sold."""
+    """Screen the resolved interest sold; do not independently verify title.
+
+    Only exact 'full' satisfies ownership scope. Missing/malformed inputs remain
+    blockers. Title and charges are evaluated by a separate requirement.
+    """
     ownership = evidence.get("ownership_type")
     if ownership is None:
         return Requirement(
             key="full_ownership", outcome=UNKNOWN,
             code="DATA_OWNERSHIP_MISSING",
-            message="Ownership type not determined.",
-            next_evidence_needed="Confirm full ownership vs share/usufruct from sale notice.",
+            message="Ownership interest being sold is not determined.",
+            dangerous=True,
+            next_evidence_needed=(
+                "Confirm the rights sold for this specific lot from the sale "
+                "notice and appropriate supporting documents."
+            ),
         )
     if ownership in ("share", "usufruct", "timeshare", "co_ownership"):
         return Requirement(
             key="full_ownership", outcome=FAIL,
             code="LEGAL_PARTIAL_OWNERSHIP",
-            message=f"Sale is for {ownership}, not full ownership.",
+            message=f"Resolved sale interest is {ownership}, not full ownership.",
             dangerous=True,
         )
-    if ownership not in ("full",):
-        # Unrecognised or non-affirmative value — fail closed, not an implicit PASS.
+    if ownership == "bare_ownership":
+        return Requirement(
+            key="full_ownership", outcome=FAIL,
+            code="LEGAL_BARE_OWNERSHIP",
+            message="Resolved sale interest is bare ownership, not full ownership.",
+            dangerous=True,
+        )
+    if ownership != "full":
         return Requirement(
             key="full_ownership", outcome=UNKNOWN,
             code="DATA_OWNERSHIP_UNRECOGNISED",
-            message=f"Ownership type {ownership!r} is not a recognised affirmative value.",
+            message="Ownership input is not a recognised resolved interest.",
             dangerous=True,
-            next_evidence_needed="Confirm ownership as 'full' from sale notice or registry.",
+            next_evidence_needed=(
+                "Resolve the rights sold for this specific lot from the sale "
+                "notice and appropriate supporting documents; do not assume full ownership."
+            ),
         )
     return Requirement(
         key="full_ownership", outcome=PASS,
         code="LEGAL_OWNERSHIP_OK",
-        message="Full ownership confirmed.",
+        message=(
+            "Resolved input states full ownership is being sold. "
+            "This does not independently verify title or retained charges."
+        ),
     )
 
 
