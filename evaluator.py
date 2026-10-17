@@ -606,38 +606,81 @@ def _req_sale_availability(evidence: dict, policy: dict) -> Requirement:
 
 
 def _req_anomaly_investigation(evidence: dict, policy: dict) -> Requirement:
-    """Extreme discounts must be investigated before financial evaluation proceeds."""
-    discount_pct = evidence.get("apparent_discount_pct")   # float or None
-    anomaly_threshold = policy.get("anomaly_discount_pct", DEFAULT_POLICY["anomaly_discount_pct"])
-    if discount_pct is None:
-        # No discount calculable yet — not a blocker at this stage
+    """Validate the percentage-based anomaly gate and resolved review boolean.
+
+    A review does not make an extreme discount ordinary or waive other checks.
+    None means no percentage-based assessment, preserving the existing policy.
+    """
+    import math
+
+    discount = evidence.get("apparent_discount_pct")
+    threshold = policy.get("anomaly_discount_pct", DEFAULT_POLICY["anomaly_discount_pct"])
+
+    def finite_number(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
+
+    if not finite_number(threshold) or not 0 < threshold <= 100:
+        return Requirement(
+            key="anomaly_investigation", outcome=UNKNOWN,
+            code="DATA_ANOMALY_POLICY_INVALID",
+            message="Anomaly investigation threshold is missing or invalid.",
+            next_evidence_needed="Set a finite numeric threshold greater than zero and at most 100 percent.",
+        )
+    if discount is None:
         return Requirement(
             key="anomaly_investigation", outcome=PASS,
             code="FIN_DISCOUNT_NOT_COMPUTED",
-            message="Discount not yet computed (no benchmark).",
+            message=(
+                "Discount not computed; no percentage-based anomaly assessment was made. "
+                "This is not evidence that the property has no anomaly."
+            ),
         )
-    if discount_pct >= anomaly_threshold:
-        investigated = evidence.get("anomaly_investigated", False)
-        if not investigated:
+    if not finite_number(discount) or discount > 100:
+        return Requirement(
+            key="anomaly_investigation", outcome=UNKNOWN,
+            code="DATA_ANOMALY_DISCOUNT_INVALID",
+            message="Discount input is invalid; the percentage-based anomaly gate cannot be assessed.",
+            next_evidence_needed=(
+                "Resolve price semantics, units and benchmark inputs to obtain a finite numeric "
+                "discount percentage at most 100. Do not substitute a share for a percentage."
+            ),
+        )
+    if discount >= threshold:
+        if evidence.get("anomaly_investigated") is not True:
             return Requirement(
                 key="anomaly_investigation", outcome=UNKNOWN,
                 code="FIN_ANOMALY_PENDING",
                 message=(
-                    f"Apparent discount {discount_pct:.0f}% exceeds the {anomaly_threshold:.0f}% "
-                    "investigation threshold. Verify: price semantics, full ownership, occupancy, "
-                    "correct floor, condition, access and benchmark relevance."
+                    f"Apparent discount {discount:.0f}% meets or exceeds the {threshold:.0f}% "
+                    "investigation threshold. A resolved review result is required; "
+                    "a truthy string or number does not establish investigation."
                 ),
                 next_evidence_needed=(
-                    "Investigate anomaly: confirm price is for full ownership of this specific "
-                    "unit, not a share or a placeholder."
+                    "Investigate this specific lot: price semantics, rights sold, occupancy and "
+                    "delivery, correct floor/plot units, condition and costs, lawful access, "
+                    "and benchmark comparability. Retain findings and unresolved questions."
                 ),
             )
+        return Requirement(
+            key="anomaly_investigation", outcome=PASS,
+            code="FIN_ANOMALY_REVIEWED",
+            message=(
+                f"Extreme apparent discount {discount:.0f}% has a resolved investigation result. "
+                "The anomaly remains extreme; this does not establish a safe bargain or waive "
+                "ownership, possession, title, access or financial requirements."
+            ),
+        )
     return Requirement(
         key="anomaly_investigation", outcome=PASS,
         code="FIN_DISCOUNT_OK",
         message=(
-            f"Discount {discount_pct:.0f}% within normal range."
-            if discount_pct is not None else "Anomaly investigation not required."
+            f"Apparent discount {discount:.0f}% is below the {threshold:.0f}% investigation threshold. "
+            "This threshold result alone does not establish acquisition safety."
         ),
     )
 
