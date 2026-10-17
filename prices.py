@@ -323,33 +323,129 @@ def population_outlook(country: str, place: str | None) -> dict | None:
 SALE_MOVE_MIN_PCT = 2
 
 
-def _resolve_price(country: str, place: str | None, fallback: dict[str, dict[str, float]],
-                   district: str | None = None, parish: str | None = None) -> tuple | None:
-    """(€/m², label, previous €/m² or None, previous period or None) for the series
-    `local_price` would use, or None."""
+def _benchmark_record(country, place, district, parish, found, *,
+                      scope, lookup_key=None, dataset_path=None, fallback=False):
+    limitations = [
+        "Not a property-specific valuation or matched comparable transaction.",
+        "Property type, condition, rights sold and precise location comparability are not established.",
+        "The source/period label is retained as stored; freshness is not independently verified.",
+    ]
+    if scope == "province":
+        limitations.append("Province-level coverage may not represent this municipality or property.")
+    if fallback:
+        limitations.append("Hand-maintained city estimate; no dataset provenance or observation period is established.")
+    return {
+        "eur_m2": found[0],
+        "label": found[1],
+        "previous_eur_m2": found[2],
+        "previous_period": found[3],
+        "country": country,
+        "requested_place": place,
+        "requested_district": district,
+        "requested_parish": parish,
+        "geographic_scope": scope,
+        "lookup_key": lookup_key,
+        "dataset_path": dataset_path,
+        "fallback": fallback,
+        "property_specific": False,
+        "comparability": "unverified_city_estimate" if fallback else "aggregate_only",
+        "limitations": limitations,
+    }
+
+
+def _resolve_price_record(country: str, place: str | None,
+                          fallback: dict[str, dict[str, float]],
+                          district: str | None = None,
+                          parish: str | None = None) -> dict | None:
+    """The existing price-selection order with explicit aggregate provenance."""
     if not place:
         return None
     key = place_key(place)
     if country == "PT":
         found = parish_price(place, parish)
         if found:
-            return found
+            record = _benchmark_record(
+                country, place, district, parish, found,
+                scope="parish", dataset_path=PT_PARISH_FILE,
+            )
+            record["limitations"].append(
+                "The parish helper does not expose the exact matched parish key or validate regional ambiguity."
+            )
+            return record
         table = pt_table()
         region = region_of_place(district)
-        found = (table.get(f"{key}|{region}") if region else None) or table.get(key)
+        qualified = f"{key}|{region}" if region else None
+        found = table.get(qualified) if qualified else None
+        selected = qualified if found else key
+        found = found or table.get(key)
         if found:
-            return found
+            record = _benchmark_record(
+                country, place, district, parish, found,
+                scope="municipality", lookup_key=selected, dataset_path=PT_FILE,
+            )
+            if selected == key:
+                record["limitations"].append(
+                    "Unqualified municipality-name lookup; regional disambiguation is not established."
+                )
+            return record
     path = PRICE_FILES.get(country)
     if path and os.path.exists(path):
         table = pt_table(path)
-        found = (table.get(f"{key}|{place_key(district)}") if district else None) or table.get(key)
+        qualified = f"{key}|{place_key(district)}" if district else None
+        found = table.get(qualified) if qualified else None
+        selected = qualified if found else key
+        found = found or table.get(key)
+        scope = "municipality"
         if not found and district:
-            found = table.get("prov:" + place_key(district))
-            found = (found[0], found[1] + ", province average", found[2], found[3]) if found else None
+            selected = "prov:" + place_key(district)
+            found = table.get(selected)
+            if found:
+                found = (found[0], found[1] + ", province average", found[2], found[3])
+                scope = "province"
         if found:
-            return found
+            record = _benchmark_record(
+                country, place, district, parish, found,
+                scope=scope, lookup_key=selected, dataset_path=path,
+            )
+            if scope == "municipality" and selected == key:
+                record["limitations"].append(
+                    "Unqualified municipality-name lookup; district disambiguation is not established."
+                )
+            return record
     value = fallback.get(country, {}).get(key)
-    return (value, "city estimate", None, None) if value else None
+    if value:
+        return _benchmark_record(
+            country, place, district, parish,
+            (value, "city estimate", None, None),
+            scope="city_estimate", lookup_key=key, fallback=True,
+        )
+    return None
+
+
+def local_price_record(country: str, place: str | None,
+                       fallback: dict[str, dict[str, float]],
+                       district: str | None = None,
+                       parish: str | None = None) -> dict | None:
+    """Structured home benchmark provenance; not acquisition-grade valuation.
+
+    Each call returns a fresh record. Existing local_price and sale_move use
+    this same selection boundary through the compatibility adapter.
+    """
+    return _resolve_price_record(country, place, fallback, district, parish)
+
+
+def _resolve_price(country: str, place: str | None,
+                   fallback: dict[str, dict[str, float]],
+                   district: str | None = None,
+                   parish: str | None = None) -> tuple | None:
+    """Compatibility tuple for the single structured benchmark resolver."""
+    record = local_price_record(country, place, fallback, district, parish)
+    if record is None:
+        return None
+    return (
+        record["eur_m2"], record["label"],
+        record["previous_eur_m2"], record["previous_period"],
+    )
 
 
 def local_price(country: str, place: str | None, fallback: dict[str, dict[str, float]],
