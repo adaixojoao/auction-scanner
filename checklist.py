@@ -13,6 +13,8 @@ which is kept (checklist_log). Settings → Checklist changes which items block.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 from common import utcnow_iso
@@ -208,15 +210,91 @@ def items_for(item: dict) -> tuple[str, list[Item]]:
     return route, [it for it in TEMPLATES[route][1] if not it.rural_only or kind == "rural_plot"]
 
 
+_BINDING_VERSION = 1
+_PRICE_DEPENDENT = frozenset({"all_in", "fees", "debts", "minimum", "deposit", "financing"})
+_TERMS_DEPENDENT = frozenset({"terms", "minimum", "deposit", "account", "id_ready", "lawyer", "financing"})
+_PERSON_PREPARATION = frozenset({"account", "id_ready"})
+_PHOTO_DEPENDENT = frozenset({"visit", "report"})
+_LOCATION_DEPENDENT = frozenset({
+    "location", "climate", "land_access", "land_boundaries", "land_use", "land_water", "land_hazards",
+})
+_CONTEXT_FIELDS = ("title", "description", "tipo", "area_m2", "district", "concelho", "freguesia")
+_LOCATION_RAW_KEYS = (
+    "geo", "verified_geo", "climate", "site_check", "water_check", "catastro", "fr_cadastre", "outline",
+)
+
+
+def _evidence_binding(listing: dict, key: str) -> str:
+    """Dependency-context hash, not certification of external documents."""
+    from db import _source_payload_for_history
+
+    snapshot = {"version": _BINDING_VERSION, "item_key": key,
+                "id": listing["id"], "source": listing.get("source"),
+                "country": listing.get("country")}
+    raw = listing.get("raw_json")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            pass
+    if key not in _PERSON_PREPARATION:
+        snapshot.update({field: listing.get(field) for field in _CONTEXT_FIELDS})
+        snapshot["source_payload"] = _source_payload_for_history(raw)
+    if key in _PRICE_DEPENDENT:
+        snapshot.update({field: listing.get(field) for field in ("price", "current_bid", "min_price")})
+    if key in _TERMS_DEPENDENT:
+        snapshot["date_end"] = listing.get("date_end")
+    if key in _PHOTO_DEPENDENT:
+        snapshot["image_url"] = listing.get("image_url")
+        if isinstance(raw, dict):
+            snapshot["photo_inputs"] = {k: raw.get(k) for k in ("photo_check", "outside_check")}
+    if key in _LOCATION_DEPENDENT and isinstance(raw, dict):
+        snapshot["location_inputs"] = {k: raw.get(k) for k in _LOCATION_RAW_KEYS}
+    payload = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _effective_row(row: dict, listing: dict | None) -> dict:
+    """Retain recorded status; expose outdated completion as unresolved."""
+    out = dict(row)
+    recorded = out.get("status")
+    out.update(recorded_status=recorded, needs_recheck=False, freshness_note="")
+    if recorded not in DONE:
+        return out
+    binding = out.get("evidence_binding")
+    try:
+        current = _evidence_binding(listing, out["item_key"]) if listing is not None else None
+    except (ValueError, TypeError, OverflowError):
+        current = None
+    if not binding or current is None or binding != current:
+        out["status"] = "requested"
+        out["needs_recheck"] = True
+        out["freshness_note"] = (
+            "Needs rechecking: relevant listing inputs changed, are unavailable, "
+            "or completion predates evidence binding. The original status is preserved; "
+            "explicitly reconfirm after reviewing the evidence."
+        )
+    return out
+
+
 def stored(db, listing_id: str) -> dict[str, dict]:
+    listing = db.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    context = dict(listing) if listing is not None else None
     rows = db.execute("SELECT * FROM checklist_items WHERE listing_id = ?", (listing_id,)).fetchall()
-    return {r["item_key"]: dict(r) for r in rows}
+    return {r["item_key"]: _effective_row(dict(r), context) for r in rows}
 
 
 def stored_all(db) -> dict[str, dict[str, dict]]:
+    contexts = {r["id"]: dict(r) for r in db.execute(
+        "SELECT l.* FROM listings l WHERE EXISTS"
+        " (SELECT 1 FROM checklist_items c WHERE c.listing_id = l.id)"
+    )}
     out: dict[str, dict[str, dict]] = {}
-    for r in db.execute("SELECT * FROM checklist_items"):
-        out.setdefault(r["listing_id"], {})[r["item_key"]] = dict(r)
+    for row in db.execute("SELECT * FROM checklist_items"):
+        r = dict(row)
+        out.setdefault(r["listing_id"], {})[r["item_key"]] = _effective_row(
+            r, contexts.get(r["listing_id"])
+        )
     return out
 
 
@@ -230,7 +308,10 @@ def build(item: dict, rows: dict[str, dict], cfg: dict | None) -> dict:
         out.append({"key": it.key, "category": it.category, "label": it.label, "blocking": it.key in blocking,
                     "status": row.get("status") or "not_started", "notes": row.get("notes") or "",
                     "reference": row.get("reference") or "", "checked_on": row.get("checked_on") or "",
-                    "verified_by": row.get("verified_by") or "", "updated_at": row.get("updated_at") or ""})
+                    "verified_by": row.get("verified_by") or "", "updated_at": row.get("updated_at") or "",
+                    "recorded_status": row.get("recorded_status", row.get("status") or "not_started"),
+                    "needs_recheck": row.get("needs_recheck", False),
+                    "freshness_note": row.get("freshness_note") or ""})
     done = sum(1 for x in out if x["status"] in DONE)
     left = [x["key"] for x in out if x["blocking"] and x["status"] not in DONE]
     concerns = [x["key"] for x in out if x["status"] == "concern"]
@@ -244,25 +325,48 @@ def build(item: dict, rows: dict[str, dict], cfg: dict | None) -> dict:
 
 def set_status(db, item: dict, key: str, status: str, *, notes: str = "", reference: str = "",
                checked_on: str = "", verified_by: str = "") -> None:
-    """Your status for one item, logged with the one it replaces. ValueError
-    for an item this listing's checklist does not have, or an unknown status."""
+    """Explicit manual completion binds current persisted evidence context."""
     _route, items = items_for(item)
     if key not in {it.key for it in items}:
         raise ValueError(f"no checklist item {key!r} for this listing")
     if status not in STATUSES:
         raise ValueError(f"status must be one of {', '.join(STATUSES)}")
-    old = stored(db, item["id"]).get(key) or {}
-    now = utcnow_iso()
-    db.execute("""
-        INSERT INTO checklist_items (listing_id, item_key, status, notes, reference, checked_on, verified_by,
-                                     updated_at)
-        VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(listing_id, item_key) DO UPDATE SET status=excluded.status, notes=excluded.notes,
-            reference=excluded.reference, checked_on=excluded.checked_on, verified_by=excluded.verified_by,
-            updated_at=excluded.updated_at""",
-               (item["id"], key, status, notes[:2000], reference[:500], checked_on[:10], verified_by[:100], now))
-    db.execute("INSERT INTO checklist_log (listing_id, item_key, action, old_status, new_status, created_at) "
-               "VALUES (?,?,?,?,?,?)", (item["id"], key, "status", old.get("status"), status, now))
+    if not db.in_transaction:
+        db.execute("BEGIN")
+    db.execute("SAVEPOINT checklist_status_write")
+    try:
+        db.execute("UPDATE listings SET id = id WHERE id = ?", (item["id"],))
+        listing = db.execute("SELECT * FROM listings WHERE id = ?", (item["id"],)).fetchone()
+        if listing is None:
+            raise ValueError("cannot record checklist status for an unknown listing")
+        old = db.execute(
+            "SELECT status FROM checklist_items WHERE listing_id = ? AND item_key = ?",
+            (item["id"], key),
+        ).fetchone()
+        binding = _evidence_binding(dict(listing), key) if status in DONE else None
+        now = utcnow_iso()
+        db.execute("""
+            INSERT INTO checklist_items
+            (listing_id, item_key, status, notes, reference, checked_on, verified_by,
+             updated_at, evidence_binding)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(listing_id, item_key) DO UPDATE SET
+                status=excluded.status, notes=excluded.notes, reference=excluded.reference,
+                checked_on=excluded.checked_on, verified_by=excluded.verified_by,
+                updated_at=excluded.updated_at, evidence_binding=excluded.evidence_binding
+        """, (item["id"], key, status, notes[:2000], reference[:500], checked_on[:10],
+              verified_by[:100], now, binding))
+        db.execute(
+            "INSERT INTO checklist_log"
+            " (listing_id, item_key, action, old_status, new_status, created_at, evidence_binding)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (item["id"], key, "status", old["status"] if old else None, status, now, binding),
+        )
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT checklist_status_write")
+        db.execute("RELEASE SAVEPOINT checklist_status_write")
+        raise
+    db.execute("RELEASE SAVEPOINT checklist_status_write")
     db.commit()
 
 
@@ -276,7 +380,8 @@ def record_offer(db, listing_id: str, carta_log_id: int, summary: str, reason: s
 
 
 def history(db, listing_id: str) -> list[dict]:
-    rows = db.execute("SELECT item_key, carta_log_id, action, old_status, new_status, reason, created_at "
+    rows = db.execute("SELECT item_key, carta_log_id, action, old_status, new_status, reason, created_at, "
+                      "evidence_binding "
                       "FROM checklist_log WHERE listing_id = ? ORDER BY created_at DESC, id DESC",
                       (listing_id,)).fetchall()
     return [dict(r) for r in rows]
@@ -302,6 +407,9 @@ def as_text(item: dict, checklist: dict) -> str:
                                            f"by {x['verified_by']}" if x["verified_by"] else "",
                                            "blocking" if x["blocking"] else "") if v)
             lines.append(f"{mark} {x['label']} ({extra})")
+            if x.get("needs_recheck"):
+                lines.append("      Needs rechecking; recorded status: "
+                             + str(x.get("recorded_status") or "unknown") + ".")
             for v in (x["notes"], x["reference"]):
                 if v:
                     lines.append(f"      {v}")

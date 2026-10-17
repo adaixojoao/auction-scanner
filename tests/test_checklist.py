@@ -119,7 +119,7 @@ def test_an_offer_with_blocking_items_needs_your_reason_and_keeps_it(client, db,
     override = [h for h in checklist.history(db, lid) if h["action"] == "override"]
     assert override == [{"item_key": None, "carta_log_id": sent["log_id"], "action": "override",
                          "old_status": None, "new_status": None, "reason": "the agent confirmed no charges",
-                         "created_at": override[0]["created_at"]}]
+                         "created_at": override[0]["created_at"], "evidence_binding": None}]
     offer = next(o for o in client.get("/api/offers").get_json()["sent"] if o["offer"]["is_offer"])["offer"]
     assert "2 blocking items remain" in offer["checklist_summary"]
 
