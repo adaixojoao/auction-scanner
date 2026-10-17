@@ -121,10 +121,15 @@ def test_the_ai_check_applies_the_guardrail_only_when_it_is_on(client, add, monk
     monkeypatch.setattr(analysis, "analyze_property",
                         lambda data: {"verdict": "BUY", "recommended_bid": "10.000,00", "max_bid": "12.000,00"})
     off = client.post("/api/analyze-property", json={"id": "eleiloes:hot", "bid": "9.000,00"}).get_json()
-    assert off["recommended_bid"] == "10.000,00" and "climate_guardrail" not in off
+    assert "climate_guardrail" not in off
     config.update_config({"climate": {"bid_guardrail": True}})
     on = client.post("/api/analyze-property", json={"id": "eleiloes:hot", "bid": "9.000,00"}).get_json()
-    assert on["recommended_bid"] == "6.000,00" and on["climate_guardrail"]["grade"] == "poor"
+    assert on["climate_guardrail"]["grade"] == "poor"
+    # 9A: AI bid amounts are withheld from the response, reduced or not.
+    for res in (off, on):
+        assert res["verdict"] == "REVIEW"
+        assert res["recommended_bid"] is None and res["max_bid"] is None
+        assert "was" not in res.get("climate_guardrail", {})
 
 
 def test_listings_filter_by_climate_grade_and_exact_data(client, add):
