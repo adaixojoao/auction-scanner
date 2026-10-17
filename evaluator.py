@@ -207,62 +207,96 @@ def _req_full_ownership(evidence: dict, policy: dict) -> Requirement:
 
 
 def _req_possession(evidence: dict, policy: dict) -> Requirement:
-    """Vacant possession or confirmed delivery terms on completion."""
-    occupation = evidence.get("occupation")    # "vacant" | "occupied" | "tenant" | None
-    delivery = evidence.get("delivery_terms")  # "vacant_on_completion" | "with_tenant" | None
-    if delivery == "unknown":
-        delivery = None
+    """Screen resolved occupancy and delivery without independently verifying them.
+
+    Adverse tenant states retain the existing conservative exclusion. Explicit
+    unrecognised delivery cannot be ignored merely because occupancy is vacant.
+    """
+    occupation = evidence.get("occupation")
+    delivery = evidence.get("delivery_terms")
     if occupation == "unknown":
         occupation = None
-    if occupation is None and delivery is None:
-        return Requirement(
-            key="possession", outcome=UNKNOWN,
-            code="DATA_POSSESSION_MISSING",
-            message="Occupation status and delivery terms unknown.",
-            dangerous=True,
-            next_evidence_needed="Confirm current occupation and possession terms from sale notice.",
-        )
-    if occupation in ("occupied",) and delivery not in ("vacant_on_completion",):
-        return Requirement(
-            key="possession", outcome=FAIL,
-            code="PHYS_OCCUPIED_NO_DELIVERY",
-            message="Property is occupied with no confirmed vacant-possession delivery terms.",
-            dangerous=True,
-        )
-    # "tenant" occupation without confirmed vacant-on-completion delivery means no vacant possession.
-    if occupation == "tenant" or delivery == "with_tenant":
+    if delivery == "unknown":
+        delivery = None
+
+    if delivery == "with_tenant" or occupation == "tenant":
         return Requirement(
             key="possession", outcome=FAIL,
             code="PHYS_TENANT_NO_VACANT_POSSESSION",
-            message="Property has a tenant; vacant possession on completion not confirmed.",
+            message=(
+                "Resolved evidence indicates a tenant or delivery with a tenant. "
+                "The conservative possession policy excludes this state, "
+                "including a separate claim of vacant delivery."
+            ),
             dangerous=True,
         )
-    # "occupied" with vacant-on-completion delivery is an affirmed state.
-    if occupation == "occupied" and delivery == "vacant_on_completion":
+    if occupation == "occupied" and delivery != "vacant_on_completion":
         return Requirement(
-            key="possession", outcome=PASS,
-            code="PHYS_POSSESSION_OK",
-            message="Occupied now but vacant possession confirmed on completion.",
+            key="possession", outcome=FAIL,
+            code="PHYS_OCCUPIED_NO_DELIVERY",
+            message="Property is classified as occupied without resolved vacant delivery on completion.",
+            dangerous=True,
         )
-    # Any other occupation values that aren't explicitly affirmed → unknown.
-    if occupation is None and delivery == "vacant_on_completion":
+    if delivery is not None and delivery != "vacant_on_completion":
         return Requirement(
-            key="possession", outcome=PASS,
-            code="PHYS_POSSESSION_OK",
-            message="Vacant possession on completion confirmed by the sale terms.",
+            key="possession", outcome=UNKNOWN,
+            code="DATA_DELIVERY_UNRECOGNISED",
+            message="Delivery input is not a recognised resolved possession condition.",
+            dangerous=True,
+            next_evidence_needed=(
+                "Resolve delivery conditions for this specific lot from the sale "
+                "terms and appropriate supporting evidence."
+            ),
         )
-    if occupation not in ("vacant",):
+    if occupation is not None and occupation not in ("vacant", "occupied"):
         return Requirement(
             key="possession", outcome=UNKNOWN,
             code="DATA_POSSESSION_UNRECOGNISED",
-            message=f"Occupation value {occupation!r} is not a recognised affirmed state.",
+            message="Occupancy input is not a recognised resolved state.",
             dangerous=True,
-            next_evidence_needed="Confirm occupation as 'vacant' or resolve delivery terms.",
+            next_evidence_needed=(
+                "Resolve current occupancy for this specific lot; a delivery "
+                "claim does not resolve malformed occupancy evidence."
+            ),
+        )
+    if delivery == "vacant_on_completion":
+        if occupation == "occupied":
+            message = (
+                "Occupied now; resolved delivery input states vacant possession "
+                "on completion. This evaluator does not independently verify the promise."
+            )
+        elif occupation == "vacant":
+            message = (
+                "Resolved inputs state current vacancy and vacant delivery on completion. "
+                "This evaluator does not independently verify either assertion."
+            )
+        else:
+            message = (
+                "Current occupancy is unknown; resolved delivery input states vacant "
+                "possession on completion. The promise requires supporting verification."
+            )
+        return Requirement(
+            key="possession", outcome=PASS,
+            code="PHYS_POSSESSION_OK", message=message,
+        )
+    if occupation == "vacant":
+        return Requirement(
+            key="possession", outcome=PASS,
+            code="PHYS_POSSESSION_OK",
+            message=(
+                "Current occupancy is classified as vacant; delivery terms remain unresolved. "
+                "This satisfies the existing vacancy-only policy, not verified vacant delivery."
+            ),
         )
     return Requirement(
-        key="possession", outcome=PASS,
-        code="PHYS_POSSESSION_OK",
-        message="Possession or delivery terms confirmed.",
+        key="possession", outcome=UNKNOWN,
+        code="DATA_POSSESSION_MISSING",
+        message="Current occupancy and delivery conditions are unresolved.",
+        dangerous=True,
+        next_evidence_needed=(
+            "Confirm current occupancy and completion/delivery conditions "
+            "for this specific lot from appropriate evidence."
+        ),
     )
 
 
