@@ -368,11 +368,16 @@ def test_stop_asks_the_running_scan_to_finish_its_source(client, db):
     assert state["running"] is True and state["stop"] is True
 
 
+def _kept(items, tag):
+    """A complete kept list built under the current settings (dashboard._Kept)."""
+    import time
+    return dashboard._Kept(time.monotonic(), items, tag, dashboard._policy_fingerprint(dashboard._config()), [], [])
+
+
 def test_an_open_list_waits_until_the_scan_finishes(db, monkeypatch):
     import os
-    import time
     from pipeline import LOCK_PATH
-    dashboard._LISTS["home"] = (time.monotonic(), [{"id": "kept"}], "2026-10-07T12:00:00+00:00")
+    dashboard._LISTS["home"] = _kept([{"id": "kept"}], "2026-10-07T12:00:00+00:00")
     with open(LOCK_PATH, "w") as f:
         f.write(f"{os.getpid()} now")
     dashboard.app.config["TESTING"] = False
@@ -392,11 +397,11 @@ def test_an_open_list_waits_until_the_scan_finishes(db, monkeypatch):
     monkeypatch.setattr(dashboard, "_build_list", fake)
     db.execute("UPDATE scan_state SET finished_at='2026-10-07T12:00:00+00:00', running=0 WHERE id=1")
     db.commit()
-    dashboard._LISTS["home"] = (time.monotonic(), [{"id": "current"}], "2026-10-07T12:00:00+00:00")
+    dashboard._LISTS["home"] = _kept([{"id": "current"}], "2026-10-07T12:00:00+00:00")
     dashboard.app.config["TESTING"] = False
     try:
         assert dashboard.all_listings("home") == [{"id": "current"}] and built == []
-        dashboard._LISTS["home"] = (time.monotonic(), [{"id": "old"}], "yesterday")
+        dashboard._LISTS["home"] = _kept([{"id": "old"}], "yesterday")
         assert dashboard.all_listings("home") == [{"id": "new"}]
         assert built == ["2026-10-07T12:00:00+00:00"]
     finally:

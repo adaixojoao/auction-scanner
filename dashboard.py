@@ -11,6 +11,8 @@ in (common.safe_url) and everything is escaped on the way out.
 """
 from __future__ import annotations
 
+import bisect
+import hashlib
 import itertools
 import json
 import logging
@@ -22,6 +24,7 @@ import sys
 import tempfile
 import threading
 import time
+import collections
 from collections import Counter
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
@@ -273,7 +276,12 @@ def _climate_matches(item: dict, grade: str, exact_only: bool) -> bool:
 # an old one (older than LIST_FRESH_S, or after a status change) is rebuilt in
 # the background while the old one is still shown.
 LIST_FRESH_S = 600
-_LISTS: dict = {}            # mode -> (built at, items)
+# One complete kept list of a goal. `policy` is the fingerprint of the settings
+# it was built under (_policy_fingerprint); `ends`/`at` index the rows whose
+# deadline was still ahead when it was built (deadline order), so a read can
+# hide the ones that have ended since without rebuilding (_with_current_expiry).
+_Kept = collections.namedtuple("_Kept", "built items tag policy ends at")
+_LISTS: dict = {}            # mode -> _Kept, replaced whole, never edited in place
 _LISTS_BUILDING: set = set()
 _LISTS_LOCK = threading.Lock()
 _BUILD_LOCKS: dict = {}      # mode -> lock: one build at a time, every window waits for the same one
@@ -312,26 +320,99 @@ def _scan_finished_at() -> str:
     return (row["finished_at"] or "") if row else ""
 
 
+# Settings a kept list does not depend on: delivery, accounts, schedules, the
+# display cap (applied per request) and secrets. Everything else (filters,
+# keywords, weights, budgets, cash, work limits, climate, location, checklist,
+# bid cap, stewardship, availability window, photo checks) is in the
+# fingerprint, so an unknown new setting rebuilds rather than serving old rows.
+_POLICY_UNRELATED = frozenset({"notifications", "telegram", "auto_requests", "maps", "backup", "schedule",
+                               "report", "apify_token", "proponente", "updates", "dashboard", "proxies",
+                               "accounts", "max_listings"})
+_POLICY_AI_KEYS = ("photo_check", "photos_per_scan")      # the rest of "ai" is providers and keys
+
+
+def _policy_fingerprint(cfg: dict) -> str:
+    """A short digest of the settings the kept lists are built from. Never
+    logged or returned; secrets are left out before hashing."""
+    relevant = {k: v for k, v in cfg.items() if k not in _POLICY_UNRELATED and k != "ai"}
+    relevant["ai"] = {k: (cfg.get("ai") or {}).get(k) for k in _POLICY_AI_KEYS}
+    return hashlib.sha256(json.dumps(relevant, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _expiry_index(items: list, built_at: datetime) -> tuple[list, list]:
+    """(deadlines, positions) of the rows whose effective end was after
+    `built_at`, in deadline order. Rows already ended were judged by the build."""
+    from common import effective_end
+    pairs = []
+    for i, it in enumerate(items):
+        end = effective_end(it.get("date_end"))
+        if end is not None and end > built_at:
+            pairs.append((end, i))
+    pairs.sort(key=lambda p: p[0])
+    return [e for e, _ in pairs], [i for _, i in pairs]
+
+
+def _now() -> datetime:
+    """The clock kept lists are read against (tests move it)."""
+    return datetime.now(timezone.utc)
+
+
+def _with_current_expiry(kept: _Kept, now: datetime | None = None) -> list:
+    """The kept rows as they stand at `now`: a row whose deadline (common.effective_end,
+    the loader's rule) has passed since the build reads "expired", unless it is
+    dismissed (dismissal comes first, as in db.load_listings). Changed rows are
+    copies; the kept list is shared and never edited. Only visibility is
+    updated: scores and reasons stay as built until the next rebuild."""
+    now = now or _now()
+    ends, positions = kept.ends, kept.at
+    passed = bisect.bisect_right(ends, now)
+    if not passed:
+        return kept.items
+    items = list(kept.items)
+    for i in positions[:passed]:
+        it = items[i]
+        reason = it.get("hidden_reason") or ""
+        if reason == "expired" or reason.startswith("dismissed"):
+            continue
+        items[i] = {**it, "hidden_reason": "expired"}
+    return items
+
+
 def _build_list(mode: str, tag: str | None = None) -> list:
     with _LISTS_LOCK:
         lock = _BUILD_LOCKS.setdefault(mode, threading.Lock())
         started = time.monotonic()
     with lock:
         kept = _LISTS.get(mode)
-        if kept and kept[0] >= started:     # built by someone else while we waited
-            return kept[1]
+        if kept and kept.built >= started and kept.policy == _policy_fingerprint(_config()):
+            return _with_current_expiry(kept)     # built by someone else while we waited
         with _LISTS_LOCK:
             _LISTS_ACTIVE.add(mode)
         try:
-            keep_scores_for(())
-            db = get_db()
-            try:
-                items = load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode,
-                                      slim_hidden=True)
-            finally:
-                db.close()
+            for _attempt in range(3):
+                cfg = _config()                    # one snapshot for this build
+                policy = _policy_fingerprint(cfg)
+                built_at = datetime.now(timezone.utc)
+                keep_scores_for(())
+                db = get_db()
+                try:
+                    items = load_listings(db, filters=cfg.get("filters"), include_hidden=True, mode=mode,
+                                          slim_hidden=True, now=built_at)
+                finally:
+                    db.close()
+                if _policy_fingerprint(_config()) == policy:
+                    break
+                # Settings changed while it was built (here or in another window
+                # or process): this list is out of date and is not published.
+                logging.getLogger("auction-scanner").info("Settings changed during a list build; building again")
+            else:
+                with _LISTS_LOCK:
+                    _LISTS_BUILDING.discard(mode)
+                return items                       # still changing: shown once, never kept as current
+            ends, at = _expiry_index(items, built_at)
             with _LISTS_LOCK:
-                _LISTS[mode] = (time.monotonic(), items, tag if tag is not None else _scan_finished_at())
+                _LISTS[mode] = _Kept(time.monotonic(), items, tag if tag is not None else _scan_finished_at(),
+                                     policy, ends, at)
                 _LISTS_USED.setdefault(mode, next(_USE_ORDER))
                 _LISTS_BUILDING.discard(mode)
         finally:
@@ -399,16 +480,18 @@ def all_listings(mode: str) -> list:
             db.close()
     _LISTS_USED[mode] = next(_USE_ORDER)
     kept = _LISTS.get(mode)
+    if kept is not None and kept.policy != _policy_fingerprint(_config()):
+        return _build_list(mode)               # settings changed (here or elsewhere): not the old rows
     if _scan_busy() and kept is not None:
-        return kept[1]
+        return _with_current_expiry(kept)
     if kept is None:
         return _build_list(mode)
     finish = _scan_finished_at()
-    if finish and (len(kept) < 3 or kept[2] != finish):
+    if finish and kept.tag != finish:
         return _build_list(mode, tag=finish)   # the scan has finished: rebuild once, then serve it
-    if time.monotonic() - kept[0] > LIST_FRESH_S:
+    if time.monotonic() - kept.built > LIST_FRESH_S:
         _rebuild_soon(mode)
-    return kept[1]
+    return _with_current_expiry(kept)
 
 
 def _matches(it: dict, country, source, tipo, max_price, search) -> bool:
@@ -493,6 +576,7 @@ def _research_candidates(items: list, cash: float, full=None) -> dict:
             "id": it.get("id"), "title": it.get("title") or "", "source": it.get("source") or "",
             "url": safe_url(it.get("url")), "status": it.get("status") or "",
             "lookup": it.get("external_id") or it.get("id"),
+            **{k: it.get(k) for k in _DETAIL_FIELDS if k not in ("status",)},
             "live_score": it.get("live_score"), "invest_score": it.get("invest_score"),
             "planning": plan,
             "valuation": ("Investment value not established" if group == "unvalued"
@@ -505,6 +589,26 @@ def _research_candidates(items: list, cash: float, full=None) -> dict:
         "unvalued": [card(it, "unvalued") for it in unvalued],
         "duplicates": "Duplicate matching is unchanged: two cards can still be the same property.",
     }
+
+
+# What an open details panel was built from. The page keeps a panel's details
+# only while this token is unchanged: a scan (new price, bid, deadline or
+# sighting), a status change, a new score, or an evidence revision (location,
+# hazard, checklist, identity: db.evidence_revisions) changes it.
+_DETAIL_FIELDS = ("last_seen", "price", "current_bid", "min_price", "date_end", "status", "hidden_reason",
+                  "score", "rank", "offer_outcome")
+
+
+def _add_detail_tokens(db, rows: list) -> None:
+    ids = sorted({r["id"] for r in rows if r.get("id")})
+    revs = {}
+    if ids:
+        revs = dict(db.execute(f"SELECT listing_id, SUM(rev) FROM evidence_revisions WHERE listing_id IN "
+                               f"({','.join('?' * len(ids))}) GROUP BY listing_id", ids).fetchall())
+    for r in rows:
+        basis = [r.get(k) if r.get(k) not in ("", None) else None for k in _DETAIL_FIELDS]
+        basis += [revs.get(r.get("id"), 0), _mode(request.args)]
+        r["detail_token"] = hashlib.sha1(json.dumps(basis, default=str).encode()).hexdigest()[:12]
 
 
 @app.route("/api/listings")
@@ -591,6 +695,7 @@ def api_listings():
         total = len(items)
         page = min(page, max(1, math.ceil(total / per_page)))    # past the last page: the last one
         page_items = [_with_fees(it) for it in _full_rows(db, items[(page - 1) * per_page:page * per_page], mode)]
+        _add_detail_tokens(db, page_items + (research["valued"] + research["unvalued"] if research else []))
         visible = [it for it in loaded if not it["hidden_reason"]]
         health = source_health(db, _registry())
         last_scrape = db.execute("SELECT MAX(timestamp) FROM scrape_log").fetchone()[0]
@@ -695,21 +800,40 @@ def api_listing_detail():
         "research": research,
     })
 
+NOTE_MAX = 2000       # characters, as the browser counts them (UTF-16 units: the field's maxlength)
+
+
+def _utf16_length(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
 @app.route("/api/listing/note", methods=["POST"])
 def api_listing_note():
-    """Save a free-text note on a listing."""
-    data = request.get_json(silent=True) or {}
-    listing_id = data.get("id", "")
-    note = str(data.get("note") or "")[:2000]
-    if not listing_id:
+    """Save a free-text note on a listing, exactly as sent (whitespace kept;
+    empty removes it). The answer names the listing and the accepted length,
+    never the text, so the page shows Saved only for what was stored. A
+    missing listing is 404 and an over-long note 400: nothing is cut short.
+    Two windows editing one note: the last save wins."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    listing_id, note = data.get("id"), data.get("note")
+    if not isinstance(listing_id, str) or not listing_id:
         return jsonify({"error": "id required"}), 400
+    if not isinstance(note, str):
+        return jsonify({"error": "note must be text"}), 400
+    length = _utf16_length(note)
+    if length > NOTE_MAX:
+        return jsonify({"error": f"A note holds at most {NOTE_MAX:,} characters."}), 400
     db = get_db()
     try:
-        db.execute("UPDATE listings SET user_note=? WHERE id=?", (note or None, listing_id))
+        cur = db.execute("UPDATE listings SET user_note=? WHERE id=?", (note or None, listing_id))
         db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"error": "no such listing"}), 404
     finally:
         db.close()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "id": listing_id, "length": length})
 
 
 @app.route("/api/kept-photo")
@@ -827,14 +951,23 @@ def api_listing_status():
             return jsonify({"error": str(e)}), 400
     finally:
         db.close()
-    for mode, kept in list(_LISTS.items()):   # the kept lists show it now, and are rebuilt
-        for it in kept[1]:
-            if it["id"] == data["id"]:
-                it["status"] = data.get("status") or None
-                if it["status"] == "dismissed":
-                    it["hidden_reason"] = "dismissed"
-                elif it.get("hidden_reason") == "dismissed":
-                    it["hidden_reason"] = None
+    from common import effective_end
+    now = datetime.now(timezone.utc)
+    with _LISTS_LOCK:                          # the kept lists show it now, and are rebuilt
+        for mode, kept in list(_LISTS.items()):
+            items = list(kept.items)
+            for i, it in enumerate(items):
+                if it["id"] != data["id"]:
+                    continue
+                row = {**it, "status": data.get("status") or None}
+                if row["status"] == "dismissed":
+                    row["hidden_reason"] = "dismissed"
+                elif (it.get("hidden_reason") or "").startswith("dismissed"):
+                    end = effective_end(it.get("date_end"))
+                    row["hidden_reason"] = "expired" if end is not None and end <= now else None
+                items[i] = row
+            _LISTS[mode] = kept._replace(items=items)
+    for mode in list(_LISTS):
         _rebuild_soon(mode)
     return jsonify({"ok": True})
 
@@ -1498,6 +1631,32 @@ def _checklist_gate(item: dict, is_offer: bool, data: dict):
     return None, ck, reason
 
 
+def _offer_gates(item: dict, is_offer: bool, data: dict, bid: str):
+    """The operational safeguards every recorded offer passes, in one order:
+    location, checklist, cash. Returns (error response or None, what to record:
+    {"location_override", "checklist", "checklist_override", "cash_override"}).
+    Information requests pass every gate (each gate exempts them)."""
+    blocked, location_reason = _location_gate(item, is_offer, data)
+    if blocked:
+        return blocked, None
+    blocked, ck, ck_reason = _checklist_gate(item, is_offer, data)
+    if blocked:
+        return blocked, None
+    blocked, cash_reason = _cash_gate(item, is_offer, data, bid)
+    if blocked:
+        return blocked, None
+    return None, {"location_override": location_reason, "checklist": ck,
+                  "checklist_override": ck_reason, "cash_override": cash_reason}
+
+
+def _record_offer_evidence(item: dict, log_id: int, is_offer: bool, gates: dict, bid: str) -> None:
+    """After the offer row is written: the checklist as it was (and any reason)
+    and the bid-cap figures, for an offer only."""
+    if is_offer:
+        _record_checklist(item, log_id, gates["checklist"], gates["checklist_override"])
+        _record_bid_cap(item, log_id, bid)
+
+
 def _record_checklist(item: dict, log_id: int, ck: dict, reason: str | None) -> None:
     import checklist
     db = get_db()
@@ -1630,22 +1789,14 @@ def api_offer_sent():
         if not letter:
             return jsonify({"error": f"no letter of type {ltype!r} for this listing"}), 400
     is_offer = letter.is_offer if letter else True
-    blocked, reason = _location_gate(item, is_offer, data)
-    if blocked:
-        return blocked
-    blocked, ck, ck_reason = _checklist_gate(item, is_offer, data)
-    if blocked:
-        return blocked
-    blocked, cash_reason = _cash_gate(item, is_offer, data, bid)
+    blocked, gates = _offer_gates(item, is_offer, data, bid)
     if blocked:
         return blocked
     method = data.get("method") or ("online" if item.get("source") == "eleiloes" else "email")
     log_id = _log_sent(item, letter=letter, bid=bid, method=method,
-                       sent_to=data.get("to", ""), notes=data.get("notes", ""), location_override=reason,
-                       cash_override=cash_reason)
-    if is_offer:
-        _record_checklist(item, log_id, ck, ck_reason)
-        _record_bid_cap(item, log_id, bid)
+                       sent_to=data.get("to", ""), notes=data.get("notes", ""),
+                       location_override=gates["location_override"], cash_override=gates["cash_override"])
+    _record_offer_evidence(item, log_id, is_offer, gates, bid)
     return jsonify({"ok": True, "log_id": log_id})
 
 
@@ -1659,27 +1810,20 @@ def api_offer_email():
         return jsonify({"error": "no such listing"}), 404
     if not letter:
         return jsonify({"error": "no such letter for this listing"}), 400
-    blocked, reason = _location_gate(item, letter.is_offer, data)
-    if blocked:
-        return blocked
-    blocked, ck, ck_reason = _checklist_gate(item, letter.is_offer, data)
-    if blocked:
-        return blocked
-    blocked, cash_reason = _cash_gate(item, letter.is_offer, data, data.get("bid", ""))
+    blocked, gates = _offer_gates(item, letter.is_offer, data, data.get("bid", ""))
     if blocked:
         return blocked
     to = (data.get("to") or letter.to_email or "").strip()
     db = get_db()
     try:
         error, log_id = email_letter(db, _config(), item, letter, to=to, bid=data.get("bid", ""),
-                                     location_override=reason, cash_override=cash_reason)
+                                     location_override=gates["location_override"],
+                                     cash_override=gates["cash_override"])
     finally:
         db.close()
     if error:
         return jsonify({"error": error}), 400
-    if letter.is_offer:
-        _record_checklist(item, log_id, ck, ck_reason)
-        _record_bid_cap(item, log_id, data.get("bid", ""))
+    _record_offer_evidence(item, log_id, letter.is_offer, gates, data.get("bid", ""))
     return jsonify({"ok": True, "log_id": log_id, "to": to})
 
 
@@ -1832,35 +1976,72 @@ def get_carta_log():
     return jsonify(rows)
 
 
+# The legacy log route records two different things, and says which:
+#   purpose "historical" (the default, for imports and offers made before
+#   this app): written as told, never checked against today's safeguards, and
+#   marked so in checklist_summary — it is not a validated offer;
+#   purpose "operational": an offer recorded now, through the same gates as
+#   /api/offers/sent (location, checklist, cash) on a listing that must exist.
+HISTORICAL_SUMMARY = "Historical record: logged as told, not checked against the offer safeguards"
+CARTA_LOG_PURPOSES = ("historical", "operational")
+
+
 @app.route("/api/carta-log", methods=["POST"])
 def add_carta_log():
     data = request.get_json(silent=True)
-    if not isinstance(data, dict) or not (data.get("listing_id") or data.get("processo")):
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    purpose = data.get("purpose", "historical")
+    if purpose not in CARTA_LOG_PURPOSES:
+        return jsonify({"error": "purpose must be historical or operational"}), 400
+    listing_id, processo = data.get("listing_id"), data.get("processo")
+    if any(v is not None and not isinstance(v, str) for v in (listing_id, processo)):
+        return jsonify({"error": "listing_id and processo must be text"}), 400
+    if not (listing_id or processo):
         return jsonify({"error": "listing_id or processo required"}), 400
-    if data.get("listing_id") and data.get("bid_amount") not in (None, ""):
-        item = _listing(data["listing_id"])
-        if item:
-            blocked, _reason = _cash_gate(item, True, data, str(data.get("bid_amount")))
-            if blocked:
-                return blocked
+    raw_bid = data.get("bid_amount")
+    bid = None
+    if raw_bid not in (None, ""):
+        bid = _num(raw_bid, None) if not isinstance(raw_bid, bool) else None
+        if bid is None or not math.isfinite(bid) or bid < 0:
+            return jsonify({"error": "bid_amount must be a number ≥ 0"}), 400
+    is_offer = data.get("is_offer", True)
+    if not isinstance(is_offer, bool):
+        return jsonify({"error": "is_offer must be true or false"}), 400
+    if not is_offer:
+        bid = None                      # a request for information carries no bid
+    item = gates = None
+    if purpose == "operational":
+        item = _listing(listing_id) if listing_id else None
+        if not item:
+            return jsonify({"error": "no such listing"}), 404
+        blocked, gates = _offer_gates(item, is_offer, data, str(raw_bid) if bid is not None else "")
+        if blocked:
+            return blocked
     db = get_db()
     try:
         cur = db.execute("""
             INSERT INTO carta_log
-            (listing_id, processo, tribunal, country, sent_date, bid_amount, method, outcome, notes, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+            (listing_id, processo, tribunal, country, sent_date, bid_amount, method, outcome, notes, created_at,
+             location_level, location_override, cash_override, checklist_summary, is_offer)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            data.get("listing_id"), data.get("processo"), data.get("tribunal"),
+            listing_id, processo, data.get("tribunal"),
             data.get("country") or "PT",
-            data.get("sent_date"), _num(data.get("bid_amount"), None), data.get("method", "email"),
+            data.get("sent_date"), bid, data.get("method", "email"),
             data.get("outcome", "pending"), data.get("notes", ""),
             datetime.now(timezone.utc).isoformat(),
+            geo.location_confidence(item)["level"] if item else None,
+            (gates or {}).get("location_override"), (gates or {}).get("cash_override"),
+            None if item else HISTORICAL_SUMMARY, int(is_offer),
         ))
         db.commit()
         new_id = cur.lastrowid
     finally:
         db.close()
-    return jsonify({"ok": True, "id": new_id})
+    if item:
+        _record_offer_evidence(item, new_id, is_offer, gates, str(raw_bid) if bid is not None else "")
+    return jsonify({"ok": True, "id": new_id, "purpose": purpose})
 
 
 OUTCOMES = ("pending", "won", "lost", "cancelled", "expired", "answered")
@@ -2093,8 +2274,6 @@ def api_settings_save():
     for key in ("check_max_price", "light_checks_from"):
         if key in changes and (not isinstance(changes[key], (int, float)) or changes[key] < 0):
             return jsonify({"error": f"{key} must be a number ≥ 0 (0 turns it off)"}), 400
-    if {"cash_on_hand", "check_max_price"} & set(changes):
-        _LISTS.clear()
     countries = (changes.get("filters") or {}).get("countries")
     if countries is not None and any(c not in COUNTRY_NAMES for c in countries):
         return jsonify({"error": "unknown country code"}), 400

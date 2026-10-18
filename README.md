@@ -68,7 +68,9 @@ another window.
 **Scan now** (top right) scans Portugal or every country; progress shows
 next to it. On Windows the scan runs at a lower priority, so the programs
 you are using stay ahead of it. While the app is open it also scans on the
-timetable in Settings (Portugal every 2 h, other countries every 6 h). Tick
+timetable in Settings (by default Portugal once a week, every other country
+once a fortnight, fotocasa in full weekly, and a source whose last scan failed
+again after 2 h; a timetable you already saved is kept as it is). Tick
 *Keep scanning when the app is closed* to install a quiet Windows background
 task that does the same when the app is closed. When the app starts it scores
 Live and invest and My home, and writes to its log how much memory that used
@@ -95,8 +97,11 @@ the listed or base figure as stored, not the current bid or the all-in
 estimate; each tab's budget is the most it shows (an empty field means the
 budget), and *Live and invest* does not use it (the all-in estimate against
 your cash is its ceiling). **Sale method** is the method the sale states
-(e.g. *carta fechada*, *leilão eletrónico*); *Unknown* means none is stated or
-it is not recognised, never guessed from the site. The count under the filters
+(e.g. *carta fechada*, *leilão eletrónico*). Only Portuguese labels
+(*modalidade*) and Dutch ones (*veilingwijze*: online or in the room) are read;
+other countries' listings, and Spain's legal sale type, show as *Unknown*,
+which means none is stated or it is not recognised, never guessed from the
+site. The count under the filters
 says how many match, how many are shown after *Show at most*, and which ones
 are on this page.
 
@@ -190,8 +195,11 @@ the score. These parsers were written from
 the sites' public layout and could not be tested against the live sites; the
 Sources page shows if they stop finding anything.
 
-**AI check** (on Offers) asks Claude for a verdict, risks and a suggested bid.
-It needs the `ANTHROPIC_API_KEY` environment variable.
+**AI check** (on Offers) asks Claude for a verdict and risks. It is research
+advice only: a "buy" verdict is shown as "review", and AI bid suggestions are
+withheld because acquisition readiness is not established. The maximum bid
+on Offers is a separate, deterministic planning estimate (bidcap.py) from your
+settings, not an AI figure. It needs the `ANTHROPIC_API_KEY` environment variable.
 
 ## What gets shown
 
@@ -586,8 +594,9 @@ pin moves, the next scan reads the climate again for the new spot. From a town
 or parish position it says "approximate" and never grades poor on local risks.
 It is a planning risk indicator, not a survey, an insurance assessment, or
 legal or environmental due diligence. The optional bid guardrail
-(Settings → Climate) lowers an AI-suggested bid for a caution or poor grade at
-an exact position; it never changes an amount you type.
+(Settings → Climate) is meant to lower an AI-suggested bid for a caution or poor
+grade at an exact position; while AI bid suggestions are withheld it has
+nothing to lower, and it never changes an amount you type.
 
 Every listing's ⓘ panel says how exact its **location** is: exact (the sale's
 coordinates, the cadastre, or a position you verified), street, village or
@@ -639,9 +648,17 @@ pip install -r requirements-dev.txt
 python -m pytest -q          # offline: the suite refuses network access
                              # includes a start on 20,000 listings under a memory limit
 python -m pyflakes *.py sources/ tests/ scripts/
+
+# Optional, dev-only: the Listings page in headless Chromium
+pip install -r requirements-browser.txt
+python -m playwright install chromium     # downloads the browser once
+python -m pytest -q tests/test_browser_listings.py
 ```
 
-CI runs both on every push. Rules for AI agents working here: [AGENTS.md](AGENTS.md).
+The browser tests answer every request in-process from a temporary database
+(no site is contacted) and are skipped where Playwright is not installed. CI
+runs the suite on Windows and Ubuntu on every push, and the browser tests in a
+separate Ubuntu job. Rules for AI agents working here: [AGENTS.md](AGENTS.md).
 
 ## License
 

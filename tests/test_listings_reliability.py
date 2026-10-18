@@ -6,6 +6,7 @@ import re
 import pytest
 
 import dashboard
+from tests.listings_page import listings_source
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ def client(db):
 
 @pytest.fixture
 def listings(client):
-    return client.get("/").get_data(as_text=True)
+    return listings_source(client)
 
 
 def _static(client, name):
@@ -75,10 +76,14 @@ def test_note_endpoint_acknowledges_the_exact_text(client, db, add):
     add(external_id="n1", title="Moradia", price=9000)
     text = "  two spaces kept\n"
     r = client.post("/api/listing/note", json={"id": "eleiloes:n1", "note": text})
-    assert r.get_json() == {"ok": True}                                  # no copy of the text comes back
+    # The listing and the accepted length, never a copy of the text.
+    assert r.get_json() == {"ok": True, "id": "eleiloes:n1", "length": len(text)}
     assert db.execute("SELECT user_note FROM listings WHERE id='eleiloes:n1'").fetchone()[0] == text
-    client.post("/api/listing/note", json={"id": "eleiloes:n1", "note": "x" * 2100})
-    assert len(db.execute("SELECT user_note FROM listings WHERE id='eleiloes:n1'").fetchone()[0]) == 2000
+    # Too long is refused (Batch 3.1: it used to be cut to 2,000 silently); the old note stays.
+    r = client.post("/api/listing/note", json={"id": "eleiloes:n1", "note": "x" * 2001})
+    assert r.status_code == 400
+    assert db.execute("SELECT user_note FROM listings WHERE id='eleiloes:n1'").fetchone()[0] == text
+    assert client.post("/api/listing/note", json={"id": "eleiloes:n1", "note": "x" * 2000}).get_json()["length"] == 2000
     client.post("/api/listing/note", json={"id": "eleiloes:n1", "note": ""})
     assert db.execute("SELECT user_note FROM listings WHERE id='eleiloes:n1'").fetchone()[0] is None
 
