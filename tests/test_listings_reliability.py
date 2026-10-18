@@ -83,7 +83,7 @@ def test_note_endpoint_acknowledges_the_exact_text(client, db, add):
     assert db.execute("SELECT user_note FROM listings WHERE id='eleiloes:n1'").fetchone()[0] is None
 
 
-def test_undo_puts_back_the_previous_status_and_says_the_reason_goes(client, db, add, listings):
+def test_undo_puts_back_the_previous_status_and_keeps_the_dismissal_in_history(client, db, add, listings):
     add(external_id="u1", title="Moradia", price=9000)
     post = lambda **body: client.post("/api/listings/status", json={"id": "eleiloes:u1", **body})
     post(status="shortlisted")
@@ -91,8 +91,22 @@ def test_undo_puts_back_the_previous_status_and_says_the_reason_goes(client, db,
     post(status="shortlisted")                                           # what Undo sends back
     row = db.execute("SELECT status, reason FROM listing_status WHERE listing_id='eleiloes:u1'").fetchone()
     assert tuple(row) == ("shortlisted", None)
-    assert "the dismissal reason is not kept" in listings
+    detail = client.get("/api/listing?id=eleiloes:u1").get_json()
+    assert [(h["status"], h["reason"]) for h in detail["status_history"]] == [
+        ("shortlisted", None), ("dismissed", "other"), ("shortlisted", None)]
+    assert "the dismissal and its reason stay in its history" in listings
+    assert "the dismissal reason is not kept" not in listings
+    assert "function statusHistoryHtml(d)" in listings
 
 
 def test_listings_say_when_nothing_was_ever_scanned(client, add):
     assert client.get("/api/listings").get_json()["last_scrape"] is None
+
+
+def test_the_results_table_scrolls_on_its_own_when_narrow(client, listings):
+    # At 200% zoom (a 640px-wide view) the page must not scroll sideways.
+    assert re.search(r'<div class="table-scroll">\s*<table class="list">', listings)
+    css = _static(client, "app.css")
+    narrow = css.split("@media (max-width: 900px) {", 1)[1].split("}\n}", 1)[0]
+    assert ".table-scroll { overflow-x: auto; position: relative; }" in narrow
+    assert ".table-scroll table.list thead th { position: static; }" in narrow

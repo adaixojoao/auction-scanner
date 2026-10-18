@@ -290,6 +290,10 @@ table.list tr.dim { background: rgba(148, 163, 184, .04); }
 #map { height: calc(100vh - var(--topbar-height)); }
 
 @media (max-width: 900px) {
+  /* At 200% zoom or on a narrow window the table scrolls on its own, not the page. */
+  .table-scroll { overflow-x: auto; position: relative; }
+  .table-scroll table.list thead th { position: static; }   /* sticky would sit inside the scroll box */
+  .table-scroll tr.details-row .details { position: sticky; left: 0; max-width: calc(100vw - 64px); align-items: stretch; }
   .split { grid-template-columns: 1fr; }
   .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px; }
   .t-why { display: none; }

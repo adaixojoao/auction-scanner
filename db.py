@@ -14,13 +14,14 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from common import (
     LOG, effective_end, find_terms, has_term, normalize, parse_dt, safe_url, utcnow, utcnow_iso,
@@ -42,7 +43,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -672,6 +673,20 @@ def _migrate_v30(db: sqlite3.Connection):
     _add_column(db, "checklist_items", "evidence_binding", "TEXT")
     _add_column(db, "checklist_log", "evidence_binding", "TEXT")
 
+def _migrate_v31(db: sqlite3.Connection):
+    """An append-only history of shortlist/dismiss changes, so a dismissal and
+    its reason stay on record after Undo or a later change clears it."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS listing_status_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id TEXT NOT NULL,
+            status TEXT,
+            reason TEXT,
+            changed_at TEXT NOT NULL
+        )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_status_history_listing"
+               " ON listing_status_history(listing_id, id)")
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
@@ -679,7 +694,7 @@ _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
                27: _migrate_v27, 28: _migrate_v28, 29: _migrate_v29,
-               30: _migrate_v30}
+               30: _migrate_v30, 31: _migrate_v31}
 
 
 def init_db(db: sqlite3.Connection):
@@ -1321,6 +1336,7 @@ def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | No
 
     A dismissal can carry a reason from DISMISS_REASONS. Omitting it is allowed
     for older callers (the Telegram buttons); the dashboard always sends one.
+    Every change is also appended to listing_status_history (never rewritten).
     """
     if status is None:
         db.execute("DELETE FROM listing_status WHERE listing_id = ?", (listing_id,))
@@ -1335,7 +1351,16 @@ def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | No
             (listing_id, status, utcnow_iso(), reason))
     else:
         raise ValueError(f"unknown status {status!r}")
+    db.execute("INSERT INTO listing_status_history (listing_id, status, reason, changed_at)"
+               " VALUES (?,?,?,?)", (listing_id, status, reason, utcnow_iso()))
     db.commit()
+
+
+def listing_status_history(db: sqlite3.Connection, listing_id: str) -> list[dict]:
+    """Every shortlist/dismiss change of one listing, oldest first."""
+    return [dict(r) for r in db.execute(
+        "SELECT status, reason, changed_at FROM listing_status_history"
+        " WHERE listing_id = ? ORDER BY id", (listing_id,))]
 
 
 def dismiss_reasons(db: sqlite3.Connection) -> dict[str, str]:
@@ -1992,7 +2017,40 @@ def _stored_photo_check(item: dict) -> dict | None:
     return None
 
 
-def _shadow_evidence(item: dict) -> dict:
+def _availability_evidence(item: dict, valid_hours=0) -> dict:
+    """Sale availability for the evaluator. Explicit item fields win; else the
+    scan's stored link check (confirm.py) gives the state and the check time.
+    An expiry is set only from the owner's availability_valid_hours (> 0):
+    without it an open page stays unresolved, never assumed current."""
+    out = {"sale_availability": item.get("sale_availability"),
+           "sale_availability_checked_at": item.get("sale_availability_checked_at"),
+           "sale_availability_expires_at": item.get("sale_availability_expires_at")}
+    if out["sale_availability"] is not None:
+        return out
+    import confirm
+    check = confirm._raw(item).get("link_check")
+    if not isinstance(check, dict):
+        return out
+    out["sale_availability"] = confirm.availability_state(item)
+    at = check.get("at")
+    try:
+        checked = datetime.fromisoformat(str(at).replace("Z", "+00:00")) if at else None
+    except ValueError:
+        checked = None
+    if checked is None or checked.tzinfo is None:
+        return out
+    out["sale_availability_checked_at"] = checked.isoformat()
+    if (isinstance(valid_hours, (int, float)) and not isinstance(valid_hours, bool)
+            and math.isfinite(valid_hours) and valid_hours > 0):
+        out["sale_availability_expires_at"] = (checked + timedelta(hours=valid_hours)).isoformat()
+    return out
+
+
+def _availability_valid_hours() -> float:
+    return _load_config_safe().get("availability_valid_hours") or 0
+
+
+def _shadow_evidence(item: dict, valid_hours=0) -> dict:
     """The evaluator evidence dict _shadow_evaluate builds for `item`."""
     return {
         "property_identity": item.get("identity") or {},
@@ -2007,9 +2065,7 @@ def _shadow_evidence(item: dict) -> dict:
         "floor_m2": item.get("area_m2"),
         "floor_source": item.get("area_source"),
         "climate": item.get("climate"),
-        "sale_availability": item.get("sale_availability"),
-        "sale_availability_checked_at": item.get("sale_availability_checked_at"),
-        "sale_availability_expires_at": item.get("sale_availability_expires_at"),
+        **_availability_evidence(item, valid_hours),
         "photo_check": _stored_photo_check(item),
         "apparent_discount_pct": item.get("invest_discount_pct"),
         # Only a DB clearance with matching evidence_rev_sum counts (Task 7).
@@ -2022,7 +2078,7 @@ def _shadow_evidence(item: dict) -> dict:
 
 
 def _shadow_evaluate(item: dict, now, db: sqlite3.Connection | None = None,
-                     ev_rev_sum: int | None = None) -> None:
+                     ev_rev_sum: int | None = None, valid_hours=0) -> None:
     """Call evaluator.evaluate() in shadow mode, log and persist the decision (F01/F11).
 
     Never gates the item — the result is observability only until Decision promotion
@@ -2031,7 +2087,7 @@ def _shadow_evaluate(item: dict, now, db: sqlite3.Connection | None = None,
     """
     try:
         import evaluator
-        evidence = _shadow_evidence(item)
+        evidence = _shadow_evidence(item, valid_hours)
         decision = evaluator.evaluate(evidence, now=now)
         LOG.debug(
             "shadow-eval %s → %s (%d reqs, %d blocking)",
@@ -2055,7 +2111,8 @@ def _persist_decision(db: sqlite3.Connection, listing_id: str, decision, ev_rev_
     try:
         reqs_json = json.dumps([
             {"key": r.key, "outcome": r.outcome, "dangerous": r.dangerous,
-             "code": r.code, "message": r.message}
+             "code": r.code, "message": r.message,
+             "expires_at": r.expires_at.isoformat() if r.expires_at else None}
             for r in decision.requirements
         ])
         prov_json = json.dumps(decision.provenance)
@@ -2078,13 +2135,30 @@ def _persist_decision(db: sqlite3.Connection, listing_id: str, decision, ev_rev_
         LOG.debug("persist_decision failed for %s", listing_id, exc_info=True)
 
 
+def _decision_expired(requirements: list, now: datetime) -> bool:
+    """True when a passing requirement's explicit validity window has ended
+    (sale availability). A requirement without expires_at never expires here."""
+    for req in requirements:
+        if not isinstance(req, dict) or req.get("outcome") != "pass" or not req.get("expires_at"):
+            continue
+        try:
+            expiry = datetime.fromisoformat(str(req["expires_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            return True                       # an unreadable expiry cannot vouch for a PASS
+        if expiry.tzinfo is None or expiry <= now:
+            return True
+    return False
+
+
 def load_decision(db: sqlite3.Connection, listing_id: str,
                   ev_rev_sum: int | None = None, *,
-                  allow_stale: bool = False) -> dict | None:
+                  allow_stale: bool = False, now: datetime | None = None) -> dict | None:
     """Return a fresh stored decision, or explicitly labeled audit data.
 
     Omitting ev_rev_sum no longer bypasses freshness. A supplied sum must
     agree with the authoritative DB sum as well as the stored decision.
+    A decision whose passing evidence has expired (a requirement's
+    expires_at at or before `now`, default the current time) is stale too.
     This read does not reevaluate, delete, commit or promote a listing.
     """
     if not isinstance(allow_stale, bool):
@@ -2099,19 +2173,26 @@ def load_decision(db: sqlite3.Connection, listing_id: str,
         "SELECT COALESCE(SUM(rev), 0) FROM evidence_revisions WHERE listing_id = ?",
         (listing_id,),
     ).fetchone()[0]
+    requirements = json.loads(row["requirements_json"])
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    expired = _decision_expired(requirements, now)
     stale = (row["evidence_rev_sum"] is None
              or row["evidence_rev_sum"] != current
-             or (ev_rev_sum is not None and ev_rev_sum != current))
+             or (ev_rev_sum is not None and ev_rev_sum != current)
+             or expired)
     if stale and not allow_stale:
         return None
     return {
         "state": row["state"],
-        "requirements": json.loads(row["requirements_json"]),
+        "requirements": requirements,
         "provenance": json.loads(row["provenance_json"]),
         "evidence_rev_sum": row["evidence_rev_sum"],
         "evaluated_at": row["evaluated_at"],
         "current_evidence_rev_sum": current,
         "stale": stale,
+        "expired": expired,
     }
 
 
@@ -2209,6 +2290,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             "SELECT listing_id, SUM(rev) AS s FROM evidence_revisions GROUP BY listing_id"
         ).fetchall()
     }
+    valid_hours = None                 # availability_valid_hours, read once when needed
     new_scores = []
     climate_writes = []
 
@@ -2281,8 +2363,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
                        climate_on, mode, floor_market)
             if mode in ("both", "invest"):
+                if valid_hours is None:
+                    valid_hours = _availability_valid_hours()
                 _shadow_evaluate(item, now, db=db,
-                                 ev_rev_sum=ev_rev_sums.get(item["id"], 0))
+                                 ev_rev_sum=ev_rev_sums.get(item["id"], 0),
+                                 valid_hours=valid_hours)
             _optional = {"research_only", "extreme_discount", "floor_guess"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:

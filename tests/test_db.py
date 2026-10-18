@@ -1,6 +1,8 @@
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 import db as dbmod
 from db import (connect, load_listings, mark_duplicates, record_scrape, source_health,
                 upsert_listing)
@@ -514,3 +516,15 @@ def test_anomaly_investigated_uses_clearance_not_note(db, add, monkeypatch):
     items = load_listings(db, apply_min_score=False)
     it2 = next(i for i in items if i["id"] == listing_id)
     assert it2.get("investigation_cleared"), "cleared listing must have investigation_cleared=True"
+
+
+def test_status_history_is_append_only_and_survives_clearing(db):
+    from db import listing_status_history, set_listing_status
+    set_listing_status(db, "eleiloes:s1", "dismissed", "occupied")
+    set_listing_status(db, "eleiloes:s1", None)                         # Undo to an open listing
+    assert db.execute("SELECT 1 FROM listing_status WHERE listing_id='eleiloes:s1'").fetchone() is None
+    assert [(h["status"], h["reason"]) for h in listing_status_history(db, "eleiloes:s1")] == [
+        ("dismissed", "occupied"), (None, None)]
+    with pytest.raises(ValueError):
+        set_listing_status(db, "eleiloes:s1", "sold")
+    assert len(listing_status_history(db, "eleiloes:s1")) == 2         # a refused change is not recorded
