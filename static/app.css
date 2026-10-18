@@ -175,6 +175,17 @@ table.list tr.dim { background: rgba(148, 163, 184, .04); }
 .field-error { color: var(--red-text); }
 .filters input[aria-invalid="true"] { border-color: var(--red); }
 .filters input:disabled { opacity: .6; cursor: not-allowed; }
+/* Listings: loading, failure and update states (UI Batch 3). */
+.inline-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 10px; }
+.inline-notice p { margin: 0; }
+.load-status { min-height: 1.45em; margin-bottom: 6px; }
+#listings-results.is-stale #rows { opacity: .7; }
+#listings-results[aria-busy="true"] #rows { transition: opacity .2s; }
+.details-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.details-error p { margin: 0; }
+.note-status { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--muted); min-height: 24px; }
+.note-status[data-phase="error"] { color: var(--red-text); }
+.note-status[data-phase="unsaved"], .note-status[data-phase="saving"] { color: var(--yellow); }
 .active-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -6px 0 14px; }
 .chip {
   display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px;
@@ -335,11 +346,12 @@ tr.details-row td { background: var(--card-2); padding: 14px 16px; }
 .w-no { color: var(--red-text); border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.06); }
 .w-unknown { color: var(--faint); }
 
-#dismiss-dialog {
+#dismiss-dialog, #leave-dialog {
   border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: var(--card, #fff);
   color: var(--text); max-width: min(440px, calc(100vw - 32px));
 }
-#dismiss-dialog::backdrop { background: rgba(0, 0, 0, .55); }
+#dismiss-dialog::backdrop, #leave-dialog::backdrop { background: rgba(0, 0, 0, .55); }
+.dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 #dismiss-dialog select { margin-top: 8px; width: 100%; }
 
 @media (prefers-reduced-motion: reduce) {

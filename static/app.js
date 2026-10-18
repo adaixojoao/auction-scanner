@@ -145,6 +145,43 @@ const AS = (() => {
     return data;
   }
 
+  /* Latest-request-wins JSON reads, for GETs only. A newer run, or cancel(),
+     turns an older answer into {kind: "obsolete"}; an aborted read is never
+     shown as a failure. Not for POSTs: aborting one does not undo it. */
+  function latestRead() {
+    let version = 0;
+    let controller = null;
+    function cancel() {
+      version += 1;
+      if (controller) controller.abort();
+      controller = null;
+    }
+    async function run(url, options = {}) {
+      const requestVersion = ++version;
+      if (controller) controller.abort();
+      const currentController = new AbortController();
+      controller = currentController;
+      const current = () => requestVersion === version;
+      try {
+        const response = await fetch(url, {...options, signal: currentController.signal});
+        const data = await response.json().catch(() => null);
+        if (!current()) return {kind: "obsolete"};
+        if (!response.ok) {
+          return {kind: "error", message: data && typeof data.error === "string"
+            ? data.error : `Request failed (${response.status})`};
+        }
+        if (data == null) return {kind: "error", message: "The server returned an unreadable response."};
+        return {kind: "success", data};
+      } catch (error) {
+        if (!current() || error.name === "AbortError") return {kind: "obsolete"};
+        return {kind: "error", message: "Could not reach the local application server."};
+      } finally {
+        if (current()) controller = null;
+      }
+    }
+    return {run, cancel};
+  }
+
   /* ── Scan button & progress (top bar) ───────────────────── */
   let wasRunning = false, pollTimer;
   // Announced only at lifecycle transitions, never on every polling tick.
@@ -364,5 +401,5 @@ const AS = (() => {
     announceUpdate();
   });
 
-  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, announce, api, startScan, stopScan, pollScan, dismiss, initGoalTabs};
+  return {esc, money, scoreBadge, wishesHtml, climateBadge, climateHtml, bidCapHtml, flag, link, ago, toast, announce, api, latestRead, startScan, stopScan, pollScan, dismiss, initGoalTabs};
 })();
