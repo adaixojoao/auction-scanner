@@ -558,51 +558,57 @@ def _req_hazard_coverage(evidence: dict, policy: dict) -> Requirement:
 
 
 def _req_sale_availability(evidence: dict, policy: dict) -> Requirement:
-    """The specific sale is confirmed available (not withdrawn, ended, or unverified)."""
-    avail = evidence.get("sale_availability")   # "available" | "withdrawn" | "ended" | "unknown" | None
-    avail_checked_at = evidence.get("sale_availability_checked_at")
-    if avail is None or avail == "unknown":
-        return Requirement(
-            key="sale_availability", outcome=UNKNOWN,
-            code="DATA_AVAILABILITY_UNKNOWN",
-            message="Sale availability not confirmed from a source-specific check.",
-            next_evidence_needed="Re-check sale availability from the source's own sale page.",
-        )
-    if avail in ("withdrawn", "ended"):
-        return Requirement(
-            key="sale_availability", outcome=FAIL,
-            code="PROC_SALE_ENDED",
-            message=f"Sale status: {avail}.",
-        )
-    if avail in ("reserved",):
-        # Reserved is an adverse state — not available for a new bid.
-        return Requirement(
-            key="sale_availability", outcome=FAIL,
-            code="PROC_SALE_RESERVED",
-            message="Sale is reserved; not available for a new bid.",
-        )
-    if avail in ("blocked", "error"):
-        # Network error or challenge page — cannot confirm availability; do not retain an old PASS.
-        return Requirement(
-            key="sale_availability", outcome=UNKNOWN,
-            code="DATA_AVAILABILITY_CHECK_FAILED",
-            message=f"Availability check result: {avail}. Source-specific confirmation required.",
-            next_evidence_needed="Re-check sale availability from the source's own sale page.",
-        )
-    if avail != "available":
-        # Unrecognised value — fail closed.
-        return Requirement(
-            key="sale_availability", outcome=UNKNOWN,
-            code="DATA_AVAILABILITY_UNRECOGNISED",
-            message=f"Sale availability value {avail!r} is not recognised.",
-            next_evidence_needed="Re-check sale availability from the source's own sale page.",
-        )
-    return Requirement(
-        key="sale_availability", outcome=PASS,
-        code="PROC_AVAILABILITY_OK",
-        message="Sale confirmed available.",
-        expires_at=avail_checked_at,
-    )
+    """Affirmative availability needs observed and explicit expiry times."""
+    from datetime import timezone
+
+    availability = evidence.get("sale_availability")
+    if availability in ("withdrawn", "ended"):
+        return Requirement(key="sale_availability", outcome=FAIL, code="PROC_SALE_ENDED",
+                           message=f"Sale status: {availability}.")
+    if availability == "reserved":
+        return Requirement(key="sale_availability", outcome=FAIL, code="PROC_SALE_RESERVED",
+                           message="Sale is reserved; not available for a new bid.")
+    if availability in ("blocked", "error"):
+        return Requirement(key="sale_availability", outcome=UNKNOWN,
+                           code="DATA_AVAILABILITY_CHECK_FAILED",
+                           message="Source check failed; availability is unresolved.",
+                           next_evidence_needed="Re-check the source's specific sale page.")
+    if availability is None or availability == "unknown":
+        return Requirement(key="sale_availability", outcome=UNKNOWN,
+                           code="DATA_AVAILABILITY_UNKNOWN", message="Sale availability is unresolved.",
+                           next_evidence_needed="Obtain source-specific availability evidence.")
+    if availability != "available":
+        return Requirement(key="sale_availability", outcome=UNKNOWN,
+                           code="DATA_AVAILABILITY_UNRECOGNISED",
+                           message="Availability input is not a recognised state.",
+                           next_evidence_needed="Resolve source-specific availability.")
+
+    def instant(value):
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            return None
+        return value.astimezone(timezone.utc)
+
+    now = instant(evidence.get("_evaluation_now"))
+    checked = instant(evidence.get("sale_availability_checked_at"))
+    expiry = instant(evidence.get("sale_availability_expires_at"))
+    if now is None or checked is None or expiry is None or checked > now or expiry <= checked:
+        return Requirement(key="sale_availability", outcome=UNKNOWN,
+                           code="DATA_AVAILABILITY_TIMING_INVALID",
+                           message="Availability observation/expiry timing is missing or invalid.",
+                           next_evidence_needed="Record timezone-aware check and explicit expiry times under approved policy.")
+    if expiry <= now:
+        return Requirement(key="sale_availability", outcome=UNKNOWN,
+                           code="DATA_AVAILABILITY_EXPIRED",
+                           message="Affirmative sale availability evidence has expired.",
+                           next_evidence_needed="Re-check this sale and record renewed validity.")
+    return Requirement(key="sale_availability", outcome=PASS, code="PROC_AVAILABILITY_OK",
+                       message="Resolved availability evidence is within its explicit validity window.",
+                       expires_at=expiry)
 
 
 def _req_anomaly_investigation(evidence: dict, policy: dict) -> Requirement:
@@ -913,7 +919,8 @@ def evaluate(
         now = datetime.now(tz=timezone.utc)
     pol = {**DEFAULT_POLICY, **(policy or {})}
 
-    reqs = [check(evidence, pol) for check in _REQUIREMENTS]
+    timed_evidence = {**evidence, "_evaluation_now": now}
+    reqs = [check(timed_evidence, pol) for check in _REQUIREMENTS]
 
     # State machine:
     # - Any FAIL on a dangerous requirement → research (cannot be finalist)
