@@ -73,18 +73,44 @@ def _value(item: dict, kind: str | None, targets: dict, unknowns: list[str]) -> 
     return None
 
 
+def _finite_bid_number(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _largest_bid(item: dict, room: float, fee_factor: float) -> float:
-    """The largest bid b, rounded down, with b + fee_factor × fees(b) ≤ room."""
+    """Solve only with finite nonnegative fees; invalid costs remain errors."""
+    if not _finite_bid_number(room):
+        raise ValueError("bid-cap room must be finite numeric data")
+    if not _finite_bid_number(fee_factor) or fee_factor < 1:
+        raise ValueError("bid-cap fee factor must be finite and at least one")
     if room <= 0:
         return 0.0
+
+    def fits(bid):
+        fees = costs.fees(item, bid)
+        if not _finite_bid_number(fees) or fees < 0:
+            raise ValueError("bid-cap fees must be finite and nonnegative")
+        total = bid + fee_factor * fees
+        if not _finite_bid_number(total):
+            raise ValueError("bid-cap fee total is not finite")
+        return total <= room
+
     lo, hi = 0.0, room
     for _ in range(50):
-        mid = (lo + hi) / 2
-        if mid + fee_factor * costs.fees(item, mid) <= room:
+        mid = lo + (hi - lo) / 2
+        if fits(mid):
             lo = mid
         else:
             hi = mid
-    return float(math.floor(lo / ROUND) * ROUND)
+    candidate = float(math.floor(lo / ROUND) * ROUND)
+    if candidate and not fits(candidate):
+        raise ValueError("rounded bid fails the fee-budget constraint")
+    return candidate
 
 
 def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | None) -> dict:
@@ -227,18 +253,25 @@ def for_item(item: dict, settings: dict | None) -> dict:
 
 
 def compare(cap: dict, bid: float | None) -> dict | None:
-    """How your bid sits against the recommended and absolute figures, or None
-    when there is no bid or no cap to compare."""
-    if not bid or not cap.get("absolute_max_bid"):
+    absolute = cap.get("absolute_max_bid")
+    recommended = cap.get("recommended_bid")
+    if not _finite_bid_number(bid) or bid <= 0:
         return None
-    rec, abs_ = cap.get("recommended_bid") or 0, cap["absolute_max_bid"]
-    if bid > abs_:
-        return {"level": "above_max", "text": f"Your bid is {_eur(bid - abs_)} above the absolute maximum."}
-    if rec and bid > rec:
-        return {"level": "above_rec", "text": f"Your bid is {_eur(bid - rec)} above the recommended bid."}
-    if rec and bid < rec:
-        return {"level": "below_rec", "text": f"Your bid is {_eur(rec - bid)} below the recommended bid."}
-    return {"level": "at_rec", "text": "Your bid matches the recommended bid."}
+    if not _finite_bid_number(absolute) or absolute <= 0:
+        return None
+    if recommended is None:
+        recommended = 0
+    if not _finite_bid_number(recommended) or recommended < 0 or recommended > absolute:
+        return None
+    if bid > absolute:
+        return {"level": "above_max", "text": f"Your bid is {_eur(bid - absolute)} above the absolute maximum."}
+    if recommended and bid > recommended:
+        return {"level": "above_rec", "text": f"Your bid is {_eur(bid - recommended)} above the recommended bid."}
+    if recommended and bid < recommended:
+        return {"level": "below_rec", "text": f"Your bid is {_eur(recommended - bid)} below the recommended bid."}
+    if recommended and bid == recommended:
+        return {"level": "at_rec", "text": "Your bid matches the recommended bid."}
+    return None
 
 
 def record_offer(db, carta_log_id: int, cap: dict, bid: float | None) -> None:
