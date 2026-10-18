@@ -10,6 +10,12 @@ can be undone.
 import copy
 import json
 import os
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
+
+import locks
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
@@ -237,18 +243,61 @@ def load_user_config() -> dict:
     return {}
 
 
+# Every write is one read–merge–write under one lock: a thread lock for this
+# process and the OS file lock (locks.py) next to config.json for the others
+# (the app, the timetable, a scan). The new file is written under a unique
+# name in the same folder and swapped in, so a reader sees the old or the new
+# file, never half of one, and a failed write leaves the last good file.
+_THREAD_LOCK = threading.Lock()
+LOCK_WAIT_S = 10
+
+
+@contextmanager
+def _config_transaction():
+    with _THREAD_LOCK:
+        held = locks.acquire(CONFIG_PATH + ".lock", attempts=int(LOCK_WAIT_S / 0.025), wait=0.025)
+        try:
+            yield
+        finally:
+            locks.release(held)
+
+
+def _write_config_unlocked(cfg: dict) -> None:
+    folder = os.path.dirname(os.path.abspath(CONFIG_PATH))
+    fd, tmp = tempfile.mkstemp(prefix=".config-", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        for attempt in range(20):
+            try:
+                os.replace(tmp, CONFIG_PATH)
+                break
+            except PermissionError:          # Windows: a reader has config.json open this instant
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save_config(cfg: dict):
-    """Write config.json atomically (a crash mid-write must not lose settings)."""
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, CONFIG_PATH)
+    """Replace config.json with `cfg`, atomically and under the config lock."""
+    with _config_transaction():
+        _write_config_unlocked(cfg)
 
 
 def update_config(changes: dict) -> dict:
     """Merge `changes` into config.json (keys it does not mention are kept) and
-    return the full effective config."""
-    save_config(_deep_merge(load_user_config(), changes))
+    return the full effective config. The read, merge and write happen under
+    one lock, so two writers at once both keep their changes."""
+    with _config_transaction():
+        _write_config_unlocked(_deep_merge(load_user_config(), changes))
     return load_config()
 
 
