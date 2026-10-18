@@ -42,7 +42,8 @@
       <option value="other">Other (shops, garages…)</option>
     </select></div>
   <div class="field"><label for="f-source">Source</label><select id="f-source"><option value="">All</option></select></div>
-  <div class="field"><label for="f-sale-method">Sale method</label><select id="f-sale-method"><option value="">All sale methods</option></select></div>
+  <div class="field"><label for="f-sale-method">Sale method</label><select id="f-sale-method" aria-describedby="f-sale-method-help"><option value="">All sale methods</option></select>
+    <p class="small muted" id="f-sale-method-help">From the method a listing states: Portuguese and Dutch labels only. Unknown means not stated or not recognised, not a different method.</p></div>
   <div class="field"><label for="f-status">Status</label>
     <select id="f-status">
       <option value="">Open</option>
@@ -380,12 +381,12 @@ function cancelPending() { searchDebounce.cancel(); numberDebounce.cancel(); }
 
 function sameView(a, b) { return viewParameters(a).toString() === viewParameters(b).toString(); }
 
-function setView(next, historyMode = "push") {
+function setView(next, historyMode = "push", loadOptions = {}) {
   const changed = !sameView(next, view);
   view = next;
   writeViewURL(view, historyMode);
   renderChips();
-  if (changed) load();
+  if (changed) load(loadOptions);
 }
 
 // A filter changed: back to page 1. Invalid numbers wait for a valid value.
@@ -466,8 +467,7 @@ function setLoadState(state, message = "") {
   } else status.textContent = message;
 }
 
-async function load({after = ""} = {}) {
-  const context = captureContext();
+async function load({after = "", navigation = false} = {}) {
   setLoadState("loading");
   let result = await resultsRead.run("/api/listings?" + listingParams(view).toString());
   if (result.kind === "obsolete") return result;      // a newer request owns the page now
@@ -502,6 +502,9 @@ async function load({after = ""} = {}) {
     view = {...view, page: shown};
     writeViewURL(view, "replace");
   }
+  // Where you are now, not when the request left: scrolling or moving focus
+  // while it was on its way is not undone.
+  const context = captureContext();
   shownItems.clear();
   renderStats(data.stats);
   renderResearch(data.research);
@@ -510,31 +513,55 @@ async function load({after = ""} = {}) {
   renderPages(data.display_total ?? data.total);
   renderedOnce = true;
   lastCountText = $("result-count").textContent;
-  const left = restoreContext(context);
+  // A status change still on its way keeps its redrawn buttons waiting.
+  statusPending.forEach(id => statusButtons(id).forEach(b => { b.disabled = true; }));
+  let left = "";
+  if (navigation) $("result-count").focus({preventScroll: true});      // a new page: start at its top
+  else left = restoreContext(context);
   setLoadState("done", left);
   return result;
 }
 
 // ── Keeping your place across a refresh (by listing ID, never by DOM ID) ──
+// One registry for both surfaces: the results table and the research cards.
 function rowFor(id) { return [...document.querySelectorAll("#rows tr[data-id]")].find(tr => tr.dataset.id === id); }
+function cardFor(id) {
+  return [...document.querySelectorAll("#research-candidates article.research-card")].find(a => a.dataset.id === id);
+}
+function anchorFor(surface, id) { return surface === "research" ? cardFor(id) : rowFor(id); }
+function surfaceItems(surface) {
+  return surface === "research" ? [...document.querySelectorAll("#research-candidates article.research-card")]
+                                : [...document.querySelectorAll("#rows tr[data-id]")];
+}
+// The details panel of a row, only when it is that listing's own panel.
+function rowPanel(row) {
+  const next = row && row.nextElementSibling;
+  return next && next.classList.contains("details-row") && next.dataset.for === row.dataset.id ? next : null;
+}
 
 function captureContext() {
-  const open = [...document.querySelectorAll("#rows tr.details-row")].map(tr => tr.dataset.for);
-  const titles = new Map(open.map(id => [id, (shownItems.get(id) || {}).title || "A listing"]));
+  const open = [
+    ...[...document.querySelectorAll("#rows tr.details-row")].map(tr => ({surface: "table", id: tr.dataset.for})),
+    ...[...document.querySelectorAll("#research-candidates .candidate-details")]
+      .map(panel => ({surface: "research", id: panel.dataset.for})),
+  ];
+  const titles = new Map(open.map(o => [o.id, (shownItems.get(o.id) || {}).title || "A listing"]));
   let focus = null;
   const active = document.activeElement;
   const row = active && active.closest ? active.closest("#rows tr") : null;
-  if (row) {
-    const id = row.dataset.for || row.dataset.id;
-    const rows = [...document.querySelectorAll("#rows tr[data-id]")];
-    focus = {id, role: active.dataset.role || "", index: rows.findIndex(tr => tr.dataset.id === id),
+  const card = active && active.closest ? active.closest("#research-candidates article.research-card") : null;
+  if (row || card) {
+    const surface = row ? "table" : "research";
+    const id = row ? (row.dataset.for || row.dataset.id) : card.dataset.id;
+    focus = {surface, id, role: active.dataset.role || "",
+             index: surfaceItems(surface).findIndex(el => el.dataset.id === id),
              selection: typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null};
   }
   let scroll = null;
   const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-height")) || 0;
-  for (const tr of document.querySelectorAll("#rows tr[data-id]")) {
-    const box = tr.getBoundingClientRect();
-    if (box.bottom > top) { scroll = {id: tr.dataset.id, top: box.top}; break; }
+  for (const el of document.querySelectorAll("#research-candidates article.research-card, #rows tr[data-id]")) {
+    const box = el.getBoundingClientRect();
+    if (box.bottom > top) { scroll = {surface: el.matches("article") ? "research" : "table", id: el.dataset.id, top: box.top}; break; }
   }
   return {open, titles, focus, scroll};
 }
@@ -542,28 +569,34 @@ function captureContext() {
 // Reopens details still in view, puts focus and scroll back; says what left.
 function restoreContext(ctx) {
   const gone = [];
-  ctx.open.forEach(id => {
+  ctx.open.forEach(({surface, id}) => {
+    if (surface === "research") {
+      const card = cardFor(id);
+      if (card && !card.querySelector(".candidate-details")) openCandidate(id, card.querySelector('[data-role="details"]'));
+      else if (!card) gone.push(id);
+      return;
+    }
     const row = rowFor(id);
     if (row) openRowDetails(row, id);
     else gone.push(id);
   });
   if (ctx.scroll) {
-    const anchor = rowFor(ctx.scroll.id);
+    const anchor = anchorFor(ctx.scroll.surface, ctx.scroll.id);
     if (anchor) window.scrollBy(0, anchor.getBoundingClientRect().top - ctx.scroll.top);
   }
   // Focus only comes back when it was in the results and nobody moved it since.
   const active = document.activeElement;
-  if (ctx.focus && (!active || active === document.body || $("rows").contains(active))) {
-    const row = rowFor(ctx.focus.id);
-    const scope = row ? [row, row.nextElementSibling].filter(Boolean) : [];
+  const inResults = el => $("rows").contains(el) || $("research-candidates").contains(el);
+  if (ctx.focus && (!active || active === document.body || inResults(active))) {
+    const {surface, id, role, index} = ctx.focus;
+    const anchor = anchorFor(surface, id);
+    const scope = !anchor ? [] : surface === "research" ? [anchor] : [anchor, rowPanel(anchor)].filter(Boolean);
     let target = null;
-    for (const el of scope) {
-      target = target || [...el.querySelectorAll("[data-role]")].find(x => x.dataset.role === ctx.focus.role);
-    }
+    for (const el of scope) target = target || [...el.querySelectorAll("[data-role]")].find(x => x.dataset.role === role);
     if (!target) {
-      // The listing left: its neighbour, else the count line.
-      const rows = [...document.querySelectorAll("#rows tr[data-id]")];
-      const near = row || rows[Math.min(Math.max(ctx.focus.index, 0), rows.length - 1)];
+      // The listing left: its neighbour on the same surface, else the count line.
+      const items = surfaceItems(surface);
+      const near = anchor || items[Math.min(Math.max(index, 0), items.length - 1)];
       target = near ? near.querySelector('[data-role="details"]') : $("result-count");
     }
     if (target) {
@@ -572,8 +605,9 @@ function restoreContext(ctx) {
     }
   }
   if (!gone.length) return "";
-  const kept = gone.filter(id => notes.isPending(id)).length;
-  return `${gone.length === 1 ? `“${ctx.titles.get(gone[0])}” is` : `${gone.length} listings you had open are`} no longer in this view.`
+  const unique = [...new Set(gone)];
+  const kept = unique.filter(id => notes.isPending(id)).length;
+  return `${unique.length === 1 ? `“${ctx.titles.get(unique[0])}” is` : `${unique.length} listings you had open are`} no longer in this view.`
     + (kept ? " Unsaved notes are kept and still saved." : "");
 }
 
@@ -623,7 +657,7 @@ function candidateCard(it) {
     <p class="small">${acq.kind === "unusable"
       ? `${AS.esc(acq.label || "Not a purchase price")}${acq.reference_amount ? ` Listed figure ${AS.money(acq.reference_amount)}.` : ""}`
       : `${AS.esc(acq.label || "Price not selected")}: ${AS.money(acq.amount)}`}</p>
-    <p class="small">Planning all-in ${range}. Affordability uses the ${AS.esc(point)}${work ? ` (${work.low ? AS.money(work.low) : "€0"}–${AS.money(work.high)})` : ""}.</p>
+    <p class="small">Planning all-in ${range}. Affordability uses the ${AS.esc(point)}${work ? ` (${work.low == null ? "low end not priced" : work.low ? AS.money(work.low) : "€0"}–${work.high == null ? "high end not priced" : AS.money(work.high)})` : ""}.</p>
     ${plan.total_required != null ? `<p class="small">Required total ${AS.money(plan.total_required)}: planning ${AS.money(plan.planning_amount)} + reserve ${AS.money(plan.reserve || 0)}.</p>` : ""}
     <p class="small">${AS.esc(plan.note || "")}</p>
     <p class="small">${AS.esc(it.valuation || "")}</p>
@@ -652,33 +686,72 @@ function renderResearch(research) {
 let detailsSeq = 0;
 function nextDetailsId() { detailsSeq += 1; return `details-panel-${detailsSeq}`; }
 
-const detailCache = new Map();     // goal + listing ID → the details last loaded
+// Details last loaded, per goal and listing: {data, token, at}. They are shown
+// as current only while the listing's detail_token from the latest results is
+// unchanged (a scan, status, score or evidence revision changes it) and they
+// are younger than DETAIL_TTL_MS; otherwise they show as earlier details while
+// fresh ones load. Note drafts live in the note queue, not in these objects.
+const DETAIL_TTL_MS = 10 * 60 * 1000;
+const detailCache = new Map();
 const panelReads = new WeakMap();   // one latest-wins read per open panel
+function detailToken(id) { return (shownItems.get(id) || {}).detail_token || ""; }
+
+function freshnessHtml(id, state, message = "") {
+  const title = AS.esc((shownItems.get(id) || {}).title || "this listing");
+  const text = state === "refreshing" ? "Showing details loaded earlier while they update…"
+    : state === "failed" ? `These details may be out of date: they could not be refreshed (${AS.esc(message)}).` : "";
+  return `<p class="small muted details-freshness" data-state="${state}">${text}
+    <button type="button" class="btn btn-sm" data-role="refresh-details" aria-label="Refresh details: ${title}">Refresh details</button></p>`;
+}
+
+// Redraws a panel without taking the caret out of a note you are typing in.
+function renderDetailsBody(body, id, data, state, message = "") {
+  const active = document.activeElement;
+  const typing = active && body.contains(active) && active.matches("textarea.d-note")
+    ? {start: active.selectionStart, end: active.selectionEnd, scroll: active.scrollTop} : null;
+  body.innerHTML = freshnessHtml(id, state, message) + detailsHtml(data);
+  if (typing) {
+    const field = body.querySelector("textarea.d-note");
+    if (field) { field.focus({preventScroll: true}); field.setSelectionRange(typing.start, typing.end); field.scrollTop = typing.scroll; }
+  }
+}
 
 // Fills a details panel. A closed or replaced panel, or another goal, ignores
 // a late answer; a failure says so with a Retry for this listing.
 async function fillPanel(panel, id, {fresh = false} = {}) {
-  const mode = view.mode, key = `${mode}\n${id}`;
+  const mode = view.mode, key = `${mode}\n${id}`, token = detailToken(id);
   const body = panel.querySelector(".details-body");
-  if (!fresh && detailCache.has(key)) { body.innerHTML = detailsHtml(detailCache.get(key)); return; }
-  body.innerHTML = `<p class="small muted details-loading">Loading details…</p>`;
+  const entry = detailCache.get(key);
+  const current = entry && entry.token === token && Date.now() - entry.at < DETAIL_TTL_MS;
+  if (entry && current && !fresh) { renderDetailsBody(body, id, entry.data, "current"); return; }
+  if (entry) renderDetailsBody(body, id, entry.data, "refreshing");
+  else body.innerHTML = `<p class="small muted details-loading">Loading details…</p>`;
   let read = panelReads.get(panel);
   if (!read) { read = AS.latestRead(); panelReads.set(panel, read); }
+  const asked = Date.now();
   let result = await read.run("/api/listing?id=" + encodeURIComponent(id) + "&mode=" + encodeURIComponent(mode));
   if (result.kind === "obsolete" || !panel.isConnected || mode !== view.mode) return;
   if (result.kind === "success" && !(result.data && result.data.id === id && Array.isArray(result.data.facts))) {
     result = {kind: "error", message: "The server returned an unreadable response."};
   }
   if (result.kind === "error") {
+    if (entry) { renderDetailsBody(body, id, entry.data, "failed", result.message); return; }
     const title = (shownItems.get(id) || {}).title || "this listing";
     body.innerHTML = `<div class="notice warn details-error"><p>Could not load details: ${AS.esc(result.message)}</p>
       <button type="button" class="btn btn-sm" data-role="retry-details" aria-label="Retry details: ${AS.esc(title)}">Retry details</button></div>`;
     body.querySelector("button").addEventListener("click", () => fillPanel(panel, id, {fresh: true}));
     return;
   }
-  detailCache.set(key, result.data);
-  body.innerHTML = detailsHtml(result.data);
+  const newest = detailCache.get(key);
+  if (!newest || newest.asked <= asked) detailCache.set(key, {data: result.data, token, at: Date.now(), asked});
+  renderDetailsBody(body, id, result.data, "current");
 }
+document.addEventListener("click", e => {
+  const button = e.target.closest && e.target.closest('[data-role="refresh-details"]');
+  if (!button) return;
+  const panel = button.closest(".details-row, .candidate-details");
+  if (panel) fillPanel(panel, panel.dataset.for, {fresh: true});
+});
 
 function closePanel(panel) {
   const read = panelReads.get(panel);
@@ -1078,10 +1151,11 @@ function statusHistoryHtml(d) {
 }
 
 // ── Notes: a draft per listing in memory, saved one at a time ──
-// The server keeps what it is sent (up to 2,000 characters, the field's
-// maxlength; an empty note is removed) and answers {ok: true} with no copy of
-// the text, so "Saved" means that exact text was acknowledged. Drafts never go
-// into the URL or browser storage.
+// The server keeps exactly what it is sent (up to 2,000 characters, the
+// field's maxlength; an empty note is removed; a longer one or a missing
+// listing is refused) and answers {ok, id, length} with no copy of the text.
+// "Saved" shows only when that answer matches the text sent. Drafts never go
+// into the URL or browser storage. Two windows on one note: the last save wins.
 function createNoteQueue({persist, notify, delay = 700}) {
   const records = new Map();
   function get(id, initialText = "") {
@@ -1152,6 +1226,11 @@ async function persistNote(id, note) {
   const response = await fetch("/api/listing/note", {method: "POST", headers: {"Content-Type": "application/json"},
                                                       body: JSON.stringify({id, note})});
   if (!response.ok) throw new Error(`Request failed (${response.status})`);
+  const ack = await response.json().catch(() => null);
+  // String length is in UTF-16 units, as the server counts it.
+  if (!ack || ack.ok !== true || ack.id !== id || ack.length !== note.length) {
+    throw new Error("The save was not acknowledged");
+  }
 }
 
 const NOTE_PHASE = {saved: "Saved", unsaved: "Unsaved changes", saving: "Saving…", error: "Could not save"};
@@ -1257,7 +1336,7 @@ function countText() {
   return lastFound > lastCap ? `${lastCap} shown of ${lastFound.toLocaleString("de-DE")} matching listings`
                              : `${lastFound} listings`;
 }
-function go(p) { cancelPending(); setView({...view, page: p}); window.scrollTo(0, 0); }
+function go(p) { cancelPending(); setView({...view, page: p}, "push", {navigation: true}); window.scrollTo(0, 0); }
 
 // One request per listing at a time; only that listing's buttons wait.
 const statusPending = new Set();
@@ -1399,6 +1478,7 @@ function showViewNote(lines) {
 async function start() {
   [...$("f-country").options].forEach(o => allowed.countries.add(o.value));
   const notes = [];
+  let metaFailed = false;
   try {
     const response = await fetch("/api/meta");
     if (!response.ok) throw new Error(`metadata ${response.status}`);
@@ -1414,10 +1494,27 @@ async function start() {
       SALE_METHOD_LABEL[m.value] = m.label;
     });
   } catch (e) {
-    notes.push("Sources and sale methods could not be loaded, so those two filters show all.");
+    metaFailed = true;
   }
   const fromURL = rawViewFromURL();
   const raw = Object.keys(fromURL).length ? fromURL : (readStoredView() || {});
+  if (metaFailed) {
+    // The lists of sources and sale methods are missing, not the request: a
+    // source or method you asked for is kept (the server checks it) instead
+    // of quietly widening to all.
+    const kept = [];
+    [["source", "f-source", allowed.sources, "Source"], ["sale_method", "f-sale-method", allowed.saleMethods, "Sale method"]]
+      .forEach(([key, control, set, label]) => {
+        const value = typeof raw[key] === "string" ? raw[key].trim() : "";
+        if (!value) return;
+        set.add(value);
+        const o = document.createElement("option"); o.value = value; o.textContent = `${value} (not confirmed)`;
+        $(control).appendChild(o);
+        kept.push(`${label} “${value}”`);
+      });
+    notes.push("Sources and sale methods could not be loaded. "
+      + (kept.length ? `Kept as asked: ${kept.join(", ")}. Reload the page to check them.` : "Those two lists show all for now."));
+  }
   const dropped = [];
   view = normalizeView(raw, storedMode, dropped);
   if (dropped.length) notes.push(`Not available now, so not applied: ${dropped.join(", ")}.`);

@@ -376,7 +376,6 @@ def _kept(items, tag):
 
 def test_an_open_list_waits_until_the_scan_finishes(db, monkeypatch):
     import os
-    import time
     from pipeline import LOCK_PATH
     dashboard._LISTS["home"] = _kept([{"id": "kept"}], "2026-10-07T12:00:00+00:00")
     with open(LOCK_PATH, "w") as f:

@@ -28,3 +28,24 @@ jobs:
         run: python -m pyflakes *.py sources/ tests/ scripts/
       - name: Tests (offline — the suite refuses network access)
         run: python -m pytest -q
+
+  browser:
+    # The Listings page in headless Chromium (tests/test_browser_listings.py):
+    # late and aborted reads, note saves, refreshes, history, keyboard. Every
+    # request is answered in-process by the Flask app on a temporary database;
+    # no auction or registry site is contacted. Playwright is dev-only
+    # (requirements-browser.txt); the jobs above skip these tests.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements-dev.txt -r requirements-browser.txt
+      - name: Install Chromium for Playwright (a download from Playwright's CDN)
+        run: python -m playwright install --with-deps chromium
+      - name: Browser tests
+        env:
+          REQUIRE_BROWSER: "1"
+        run: python -m pytest -q tests/test_browser_listings.py

@@ -50,6 +50,20 @@ def production_cache(client, db, monkeypatch):
     dashboard._LISTS.clear()
 
 
+def _a_research_lead(monkeypatch):
+    """Score eleiloes:lead as a priced research lead on Live and invest
+    (the way tests/test_live_invest_shortlist.py does)."""
+    import scoring
+    real = scoring.score_detail
+
+    def fake(item, now=None, targets=None, mode="home"):
+        if mode == "both" and item["id"].endswith(":lead"):
+            item["live_score"], item["invest_score"], item["research_only"] = 70.0, 30.0, False
+            return 60.0, ["fixture lead"]
+        return real(item, now=now, targets=targets, mode=mode)
+    monkeypatch.setattr(scoring, "score_detail", fake)
+
+
 def ids(data):
     return [it["id"] for it in data["items"]]
 
@@ -92,16 +106,18 @@ def test_a_kept_list_hides_a_sale_once_its_exact_deadline_passes(client, add, db
 
 def test_research_candidates_drop_an_expired_sale_without_a_rebuild(client, add, production_cache, monkeypatch):
     import db as store
-    add("citius", "r1", title="Moradia T3", price=20000, date_end=END.isoformat(), area_m2=120,
-        concelho="Guarda", district="Guarda")
+    _a_research_lead(monkeypatch)
+    add("eleiloes", "lead", title="Moradia T3", price=22000, area_m2=90, description="moradia em bom estado",
+        url="https://example.test/lead", date_end=END.isoformat(),
+        raw_json=json.dumps({"lat": 41.18, "lon": -8.69, "precision": "sale"}))
     dashboard._LISTS.clear()
-    first = client.get("/api/listings?per_page=100&mode=both").get_json()
-    before = {c["id"] for g in ("valued", "unvalued") for c in (first["research"] or {}).get(g, [])}
+    research = lambda data: {c["id"] for g in ("valued", "unvalued") for c in (data["research"] or {}).get(g, [])}
+    first = client.get("/api/listings?per_page=100&mode=both&min_score=0").get_json()
+    assert "eleiloes:lead" in research(first)
     monkeypatch.setattr(dashboard, "_now", lambda: END + timedelta(seconds=1))
-    later = client.get("/api/listings?per_page=100&mode=both").get_json()
-    after = {c["id"] for g in ("valued", "unvalued") for c in (later["research"] or {}).get(g, [])}
-    assert "citius:r1" not in after and "citius:r1" not in ids(later)
-    assert after <= before and production_cache == ["both"]
+    later = client.get("/api/listings?per_page=100&mode=both&min_score=0").get_json()
+    assert "eleiloes:lead" not in research(later) and "eleiloes:lead" not in ids(later)
+    assert production_cache == ["both"]
     assert store.research_eligible({"hidden_reason": "expired"}) is False
 
 

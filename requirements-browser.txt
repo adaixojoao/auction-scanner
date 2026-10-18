@@ -1,0 +1,4 @@
+# Dev-only: the browser tests (tests/test_browser_listings.py) drive the
+# Listings page in headless Chromium. Not needed to run the app; the CI
+# "browser" job installs it, then `python -m playwright install chromium`.
+playwright==1.56.0
