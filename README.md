@@ -100,6 +100,28 @@ it is not recognised, never guessed from the site. The count under the filters
 says how many match, how many are shown after *Show at most*, and which ones
 are on this page.
 
+**Loading, saving and refreshing.** Listings says *Loading listings…* the
+first time and *Updating results…* after that, keeping the rows on screen. If
+an update fails, the rows stay but are marked as your previous view, with
+*Retry listings*; a failure is never shown as "no listings". A details panel
+opens at once with *Loading details…* and, if it fails, a *Retry details*
+button; closing it or switching goal discards a late answer. Notes save
+themselves a moment after you stop typing (and when you leave the field), one
+save at a time per listing; beside each note it says *Unsaved changes*,
+*Saving…*, *Saved* or *Could not save* with *Retry saving note*, which sends
+the latest text. A draft is kept in memory while you change filters or the
+row leaves the view, never in the address or the browser's storage; leaving
+for another page while a note is unsaved asks *Save and leave*, *Stay* or
+*Leave without saving* (the browser may also warn on closing; the desktop
+window's close button may not). Starring, dismissing and restoring keep your
+place, open panels and focus; after a dismissal, *Undo dismissal* puts the
+listing back as it was (on Offers or open), and the dismissal reason is not
+kept. When a scan finishes, a quiet page refreshes in place; while you are
+typing or a note is unsaved it shows *New results are available* with
+*Refresh results* instead. With no results, the scan button matches what is
+selected (*Scan Spain*, *Scan citius*, *Scan all countries*) and says what it
+covers; nothing scans until you click it.
+
 ### Offers, step by step
 
 1. A listing you ☆ on Listings, or a strong sale where the offer is a letter,

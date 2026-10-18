@@ -76,7 +76,21 @@
 
 <section id="research-candidates" hidden></section>
 
-<p class="small" id="result-count"></p>
+<div id="listings-update-notice" class="notice info inline-notice" hidden>
+  <span>New results are available.</span>
+  <button type="button" class="btn btn-sm" id="listings-refresh">Refresh results</button>
+</div>
+<div id="status-undo" class="notice inline-notice" hidden>
+  <span id="status-undo-text"></span>
+  <button type="button" class="btn btn-sm" id="status-undo-button">Undo dismissal</button>
+</div>
+<div id="listings-load-status" class="small muted load-status" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="listings-load-error" class="notice warn inline-notice" hidden>
+  <p id="listings-load-error-text"></p>
+  <button type="button" class="btn btn-sm" id="listings-retry">Retry listings</button>
+</div>
+<div id="listings-results" aria-busy="true">
+<p class="small" id="result-count" tabindex="-1"></p>
 <table class="list">
   <thead><tr>
     <th scope="col" class="sortable" data-sort="score" aria-sort="descending"><button type="button" class="sort-button" data-sort="score" data-label="Score">Score <span class="sort-indicator" aria-hidden="true">↓</span></button></th>
@@ -89,10 +103,20 @@
     <th scope="col">Why</th>
     <th scope="col"><span class="sr-only">Actions</span></th>
   </tr></thead>
-  <tbody id="rows"></tbody>
+  <tbody id="rows"><tr><td colspan="9"><div class="empty"><p>Loading listings…</p></div></td></tr></tbody>
 </table>
+</div>
 <div class="pagination" id="pagination"></div>
 </section>
+<dialog id="leave-dialog" aria-labelledby="leave-title">
+  <p id="leave-title"><b>A note is not saved yet</b></p>
+  <p class="small muted" id="leave-text">Save it before leaving, stay on this page, or leave without saving it.</p>
+  <div class="dialog-actions">
+    <button type="button" class="btn btn-primary" data-leave="save">Save and leave</button>
+    <button type="button" class="btn" data-leave="stay">Stay on this page</button>
+    <button type="button" class="btn" data-leave="leave">Leave without saving</button>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
@@ -400,35 +424,67 @@ function removeFilter(key) {
   restoreControls();
 }
 
-// ── Loading ──
-let listingRequestSequence = 0;
-async function fetchLatestListings(params) {
-  const sequence = ++listingRequestSequence;
-  const response = await fetch("/api/listings?" + params.toString());
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-  return sequence === listingRequestSequence ? data : null;
+// ── Loading: one latest-wins read for the results (AS.latestRead) ──
+const resultsRead = AS.latestRead();
+let renderedOnce = false;      // a successful answer is on screen
+let lastCountText = "";
+const shownItems = new Map();  // id → item on screen, rows and research cards
+
+function listingParams(state) {
+  return new URLSearchParams({
+    country: state.country, source: state.source, kind: state.kind,
+    max_price: state.max_price, min_score: state.min_score,
+    search: state.search, properties: state.properties ? 1 : 0,
+    // The view's "hidden" is the API's show_hidden, here only.
+    show_hidden: state.status === "hidden" ? 1 : 0, status: state.status === "shortlisted" ? "shortlisted" : "",
+    climate: state.climate, climate_exact: state.climate_exact ? 1 : 0, sale_method: state.sale_method,
+    sort: state.sort, dir: state.dir, page: state.page, per_page: PER_PAGE, mode: state.mode,
+  });
 }
 
-async function load() {
-  const status = view.status;
-  const params = new URLSearchParams({
-    country: view.country, source: view.source, kind: view.kind,
-    max_price: view.max_price, min_score: view.min_score,
-    search: view.search, properties: view.properties ? 1 : 0,
-    // The view's "hidden" is the API's show_hidden, here only.
-    show_hidden: status === "hidden" ? 1 : 0, status: status === "shortlisted" ? "shortlisted" : "",
-    climate: view.climate, climate_exact: view.climate_exact ? 1 : 0, sale_method: view.sale_method,
-    sort: view.sort, dir: view.dir, page: view.page, per_page: PER_PAGE, mode: view.mode,
-  });
-  let data;
-  try {
-    data = await fetchLatestListings(params);
-  } catch (e) {
-    AS.toast(`Listings could not be loaded: ${e.message}`, "bad");
-    return;
+function validListings(data) {
+  return !!data && Array.isArray(data.items) && !!data.stats && typeof data.stats === "object"
+    && Number.isFinite(Number(data.display_total ?? data.total));
+}
+
+// loading → done | error; only the request that is still current gets here.
+function setLoadState(state, message = "") {
+  const results = $("listings-results");
+  results.setAttribute("aria-busy", String(state === "loading"));
+  results.classList.toggle("is-stale", state === "error" && renderedOnce);
+  $("listings-load-error").hidden = state !== "error";
+  const status = $("listings-load-status");
+  if (state === "loading") status.textContent = renderedOnce ? "Updating results…" : "Loading listings…";
+  else if (state === "error") {
+    status.textContent = renderedOnce ? "Could not update listings. Previous results are still shown."
+                                      : "Could not load listings.";
+    $("listings-load-error-text").textContent = renderedOnce
+      ? `${message} The rows below belong to your previous view, not to the filters now selected.`
+      : message;
+  } else status.textContent = message;
+}
+
+async function load({after = ""} = {}) {
+  const context = captureContext();
+  setLoadState("loading");
+  let result = await resultsRead.run("/api/listings?" + listingParams(view).toString());
+  if (result.kind === "obsolete") return result;      // a newer request owns the page now
+  if (result.kind === "success" && !validListings(result.data)) {
+    result = {kind: "error", message: "The server returned an unreadable response."};
   }
-  if (!data) return;       // a newer request was sent: this answer is out of date
+  if (result.kind === "error") {
+    setLoadState("error", after === "saved"
+      ? `Saved, but results could not be refreshed: ${result.message}` : result.message);
+    if (!renderedOnce) {
+      $("rows").innerHTML = `<tr><td colspan="9"><div class="empty"><h3>Listings could not be loaded</h3>
+        <p>This is not an empty result. Use Retry listings above.</p></div></td></tr>`;
+      $("result-count").textContent = "";
+    } else {
+      $("result-count").textContent = `Previous results: ${lastCountText}`;
+    }
+    return result;
+  }
+  const data = result.data;
   const cash = data.cash || {};
   const note = $("cash-note");
   if (cash.set) {
@@ -444,16 +500,87 @@ async function load() {
     view = {...view, page: shown};
     writeViewURL(view, "replace");
   }
+  shownItems.clear();
   renderStats(data.stats);
   renderResearch(data.research);
-  renderRows(data.items, status === "hidden");
-  renderCount(data.display_total ?? data.total, lastFound, lastCap);
+  renderRows(data.items, view.status === "hidden", !data.last_scrape);
+  renderCount(data.display_total ?? data.total, lastFound, lastCap, !data.last_scrape);
   renderPages(data.display_total ?? data.total);
+  renderedOnce = true;
+  lastCountText = $("result-count").textContent;
+  const left = restoreContext(context);
+  setLoadState("done", left);
+  return result;
 }
 
-function renderCount(displayed, matched, cap) {
+// ── Keeping your place across a refresh (by listing ID, never by DOM ID) ──
+function rowFor(id) { return [...document.querySelectorAll("#rows tr[data-id]")].find(tr => tr.dataset.id === id); }
+
+function captureContext() {
+  const open = [...document.querySelectorAll("#rows tr.details-row")].map(tr => tr.dataset.for);
+  const titles = new Map(open.map(id => [id, (shownItems.get(id) || {}).title || "A listing"]));
+  let focus = null;
+  const active = document.activeElement;
+  const row = active && active.closest ? active.closest("#rows tr") : null;
+  if (row) {
+    const id = row.dataset.for || row.dataset.id;
+    const rows = [...document.querySelectorAll("#rows tr[data-id]")];
+    focus = {id, role: active.dataset.role || "", index: rows.findIndex(tr => tr.dataset.id === id),
+             selection: typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null};
+  }
+  let scroll = null;
+  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-height")) || 0;
+  for (const tr of document.querySelectorAll("#rows tr[data-id]")) {
+    const box = tr.getBoundingClientRect();
+    if (box.bottom > top) { scroll = {id: tr.dataset.id, top: box.top}; break; }
+  }
+  return {open, titles, focus, scroll};
+}
+
+// Reopens details still in view, puts focus and scroll back; says what left.
+function restoreContext(ctx) {
+  const gone = [];
+  ctx.open.forEach(id => {
+    const row = rowFor(id);
+    if (row) openRowDetails(row, id);
+    else gone.push(id);
+  });
+  if (ctx.scroll) {
+    const anchor = rowFor(ctx.scroll.id);
+    if (anchor) window.scrollBy(0, anchor.getBoundingClientRect().top - ctx.scroll.top);
+  }
+  // Focus only comes back when it was in the results and nobody moved it since.
+  const active = document.activeElement;
+  if (ctx.focus && (!active || active === document.body || $("rows").contains(active))) {
+    const row = rowFor(ctx.focus.id);
+    const scope = row ? [row, row.nextElementSibling].filter(Boolean) : [];
+    let target = null;
+    for (const el of scope) {
+      target = target || [...el.querySelectorAll("[data-role]")].find(x => x.dataset.role === ctx.focus.role);
+    }
+    if (!target) {
+      // The listing left: its neighbour, else the count line.
+      const rows = [...document.querySelectorAll("#rows tr[data-id]")];
+      const near = row || rows[Math.min(Math.max(ctx.focus.index, 0), rows.length - 1)];
+      target = near ? near.querySelector('[data-role="details"]') : $("result-count");
+    }
+    if (target) {
+      target.focus({preventScroll: true});
+      if (ctx.focus.selection && typeof target.setSelectionRange === "function") target.setSelectionRange(...ctx.focus.selection);
+    }
+  }
+  if (!gone.length) return "";
+  const kept = gone.filter(id => notes.isPending(id)).length;
+  return `${gone.length === 1 ? `“${ctx.titles.get(gone[0])}” is` : `${gone.length} listings you had open are`} no longer in this view.`
+    + (kept ? " Unsaved notes are kept and still saved." : "");
+}
+
+function renderCount(displayed, matched, cap, neverScanned = false) {
   const el = $("result-count");
-  if (!displayed) { el.textContent = "No eligible listings match these filters."; return; }
+  if (!displayed) {
+    el.textContent = neverScanned ? "No scan data is available yet." : "No eligible listings match these filters.";
+    return;
+  }
   const first = (view.page - 1) * PER_PAGE + 1, last = Math.min(view.page * PER_PAGE, displayed);
   const n = v => v.toLocaleString("en-GB");
   el.textContent = matched > cap
@@ -500,8 +627,8 @@ function candidateCard(it) {
     <p class="small">${AS.esc(it.valuation || "")}</p>
     <ul class="small">${(it.gaps || []).map(g => `<li>${AS.esc(g)}</li>`).join("")}</ul>
     <p>
-      <button class="btn btn-sm" aria-label="Details: ${AS.esc(it.title || "this listing")}" aria-expanded="false" data-id="${id}" onclick="openCandidate(this.dataset.id, this)">Details</button>
-      <button class="btn btn-sm" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${AS.esc(it.title || "this listing")}" aria-pressed="${starred}" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "On Offers" : "Shortlist"}</button>
+      <button class="btn btn-sm" aria-label="Details: ${AS.esc(it.title || "this listing")}" aria-expanded="false" data-id="${id}" data-role="details" onclick="openCandidate(this.dataset.id, this)">Details</button>
+      <button class="btn btn-sm" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${AS.esc(it.title || "this listing")}" aria-pressed="${starred}" data-id="${id}" data-role="star" data-status-action onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "On Offers" : "Shortlist"}</button>
     </p>
   </article>`;
 }
@@ -509,6 +636,7 @@ function candidateCard(it) {
 function renderResearch(research) {
   const box = $("research-candidates");
   if (view.mode !== "both" || !research) { box.hidden = true; box.innerHTML = ""; return; }
+  [...(research.valued || []), ...(research.unvalued || [])].forEach(it => shownItems.set(it.id, it));
   const valued = (research.valued || []).map(candidateCard).join("");
   const unvalued = (research.unvalued || []).map(candidateCard).join("");
   box.hidden = false;
@@ -522,31 +650,84 @@ function renderResearch(research) {
 let detailsSeq = 0;
 function nextDetailsId() { detailsSeq += 1; return `details-panel-${detailsSeq}`; }
 
-async function openCandidate(id, button) {
+const detailCache = new Map();     // goal + listing ID → the details last loaded
+const panelReads = new WeakMap();   // one latest-wins read per open panel
+
+// Fills a details panel. A closed or replaced panel, or another goal, ignores
+// a late answer; a failure says so with a Retry for this listing.
+async function fillPanel(panel, id, {fresh = false} = {}) {
+  const mode = view.mode, key = `${mode}\n${id}`;
+  const body = panel.querySelector(".details-body");
+  if (!fresh && detailCache.has(key)) { body.innerHTML = detailsHtml(detailCache.get(key)); return; }
+  body.innerHTML = `<p class="small muted details-loading">Loading details…</p>`;
+  let read = panelReads.get(panel);
+  if (!read) { read = AS.latestRead(); panelReads.set(panel, read); }
+  let result = await read.run("/api/listing?id=" + encodeURIComponent(id) + "&mode=" + encodeURIComponent(mode));
+  if (result.kind === "obsolete" || !panel.isConnected || mode !== view.mode) return;
+  if (result.kind === "success" && !(result.data && result.data.id === id && Array.isArray(result.data.facts))) {
+    result = {kind: "error", message: "The server returned an unreadable response."};
+  }
+  if (result.kind === "error") {
+    const title = (shownItems.get(id) || {}).title || "this listing";
+    body.innerHTML = `<div class="notice warn details-error"><p>Could not load details: ${AS.esc(result.message)}</p>
+      <button type="button" class="btn btn-sm" data-role="retry-details" aria-label="Retry details: ${AS.esc(title)}">Retry details</button></div>`;
+    body.querySelector("button").addEventListener("click", () => fillPanel(panel, id, {fresh: true}));
+    return;
+  }
+  detailCache.set(key, result.data);
+  body.innerHTML = detailsHtml(result.data);
+}
+
+function closePanel(panel) {
+  const read = panelReads.get(panel);
+  if (read) read.cancel();
+  panel.remove();
+}
+
+function openCandidate(id, button) {
   const card = [...document.querySelectorAll("#research-candidates article")].find(el => el.dataset.id === id);
   if (!card) return;
   const existing = card.querySelector(".candidate-details");
   if (existing) {
-    existing.remove();
+    closePanel(existing);
     if (button) { button.setAttribute("aria-expanded", "false"); button.removeAttribute("aria-controls"); }
     return;
   }
-  const d = await AS.api("/api/listing?id=" + encodeURIComponent(id) + "&mode=" + view.mode);
   const panel = document.createElement("div");
   panel.className = "candidate-details";
   panel.id = nextDetailsId();
-  panel.innerHTML = detailsHtml(d);
+  panel.dataset.for = id;
+  panel.innerHTML = `<div class="details-body"></div>`;
   card.appendChild(panel);
   if (button) { button.setAttribute("aria-expanded", "true"); button.setAttribute("aria-controls", panel.id); }
+  fillPanel(panel, id);
 }
 
-function renderRows(items, hiddenView) {
+function scanSuggestion() {
+  // What a scan would cover, from what is selected; nothing runs until you click.
+  if (view.source) {
+    return {label: `Scan ${view.source}`, scope: `Scans only the source ${view.source}.`, body: {source: view.source}};
+  }
+  if (view.country) {
+    const name = optionText("f-country", view.country);
+    return {label: `Scan ${name}`, scope: `Scans every ${name} source.`, body: {countries: [view.country]}};
+  }
+  return {label: "Scan all countries", scope: "Scans every source in every country; this takes a while.", body: {countries: null}};
+}
+
+function renderRows(items, hiddenView, neverScanned = false) {
+  items.forEach(it => shownItems.set(it.id, it));
   if (!items.length) {
+    const scan = hiddenView ? null : scanSuggestion();
     $("rows").innerHTML = `<tr><td colspan="9"><div class="empty">
-      <h3>No listings here</h3>
-      <p>${hiddenView ? "Nothing is hidden with these filters." : "Change the filters, or run a scan."}</p>
-      ${hiddenView ? "" : `<p style="margin-top:14px"><button class="btn btn-primary" onclick="AS.startScan({countries:['PT']})">Scan Portugal now</button></p>`}
+      <h3>${neverScanned ? "No scan data yet" : "No listings here"}</h3>
+      <p>${hiddenView ? "Nothing is hidden with these filters."
+        : neverScanned ? "No scan has run yet, so there is nothing to show."
+        : "No eligible listings match these filters. Change the filters, or scan for new listings."}</p>
+      ${scan ? `<p class="small muted" id="scan-scope">${AS.esc(scan.scope)}</p>
+        <p style="margin-top:10px"><button class="btn btn-primary" type="button" id="empty-scan" aria-describedby="scan-scope">${AS.esc(scan.label)}</button></p>` : ""}
     </div></td></tr>`;
+    if (scan) $("empty-scan").addEventListener("click", () => AS.startScan(scan.body).catch(() => {}));
     return;
   }
   $("rows").innerHTML = items.map(it => {
@@ -562,14 +743,14 @@ function renderRows(items, hiddenView) {
     const id = AS.esc(it.id);
     const propertyLabel = AS.esc(it.title || "this listing");
     const actions = it.status === "dismissed"
-      ? `<button class="btn btn-sm" aria-label="Restore ${propertyLabel}" data-id="${id}" onclick="setStatus(this.dataset.id, null)">Restore</button>`
-      : `<button class="icon-btn ${starred ? "on" : ""}" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${propertyLabel}" aria-pressed="${starred}" title="${starred ? "Remove from Offers" : "Add to Offers"}" data-id="${id}" onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "★" : "☆"}</button>
-         <button class="icon-btn" aria-label="Dismiss ${propertyLabel}" title="Dismiss" data-id="${id}" onclick="setStatus(this.dataset.id, 'dismissed')">✕</button>`;
+      ? `<button class="btn btn-sm" aria-label="Restore ${propertyLabel}" data-id="${id}" data-role="restore" data-status-action onclick="setStatus(this.dataset.id, null)">Restore</button>`
+      : `<button class="icon-btn ${starred ? "on" : ""}" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${propertyLabel}" aria-pressed="${starred}" title="${starred ? "Remove from Offers" : "Add to Offers"}" data-id="${id}" data-role="star" data-status-action onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "★" : "☆"}</button>
+         <button class="icon-btn" aria-label="Dismiss ${propertyLabel}" title="Dismiss" data-id="${id}" data-role="dismiss" data-status-action onclick="setStatus(this.dataset.id, 'dismissed')">✕</button>`;
     // Citius has no page per sale: its title opens the details, with the way to find it.
     const titleLink = it.source === "citius"
-      ? `<a href="#" aria-expanded="false" data-id="${id}" onclick="toggleDetails(this); return false">${AS.esc(it.title || "?")}</a>`
+      ? `<a href="#" aria-expanded="false" data-id="${id}" data-role="title" onclick="toggleDetails(this); return false">${AS.esc(it.title || "?")}</a>`
       : AS.link(it.url, it.title || "?");
-    return `<tr class="${it.hidden_reason ? "dim" : ""}">
+    return `<tr class="${it.hidden_reason ? "dim" : ""}" data-id="${id}">
       <td>${AS.scoreBadge(it.score, it.rank, it.excellent)}</td>
       <td>${AS.flag(it.country)}</td>
       <td class="t-title">${titleLink}${badges}${view.mode === "home" ? AS.wishesHtml(it.wishes, true) : ""}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
@@ -578,7 +759,7 @@ function renderRows(items, hiddenView) {
       <td class="small muted">${AS.esc(loc)}</td>
       <td class="nowrap small">${AS.esc(it.date_end ? it.date_end.slice(0, 10) : "–")}</td>
       <td class="t-why">${AS.esc((it.reasons || []).join(", "))}</td>
-      <td class="nowrap"><button class="icon-btn" aria-label="Details: ${propertyLabel}" aria-expanded="false" title="Details" data-id="${id}" onclick="toggleDetails(this)">ⓘ</button>${actions}</td>
+      <td class="nowrap"><button class="icon-btn" aria-label="Details: ${propertyLabel}" aria-expanded="false" title="Details" data-id="${id}" data-role="details" onclick="toggleDetails(this)">ⓘ</button>${actions}</td>
     </tr>`;
   }).join("");
 }
@@ -592,17 +773,24 @@ function setDetailsTriggers(row, panelId) {
   });
 }
 
-async function toggleDetails(el) {
+function toggleDetails(el) {
   const row = el.closest("tr"), next = row.nextElementSibling;
-  if (next && next.classList.contains("details-row")) { next.remove(); setDetailsTriggers(row, null); return; }
-  // On an API failure AS.api throws: nothing is marked expanded.
-  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id) + "&mode=" + view.mode);
+  if (next && next.classList.contains("details-row")) { closePanel(next); setDetailsTriggers(row, null); return; }
+  openRowDetails(row, row.dataset.id);
+}
+
+// Opens at once with "Loading details…"; one panel per row, never two.
+function openRowDetails(row, id) {
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains("details-row")) return;
   const tr = document.createElement("tr");
   tr.className = "details-row";
   tr.id = nextDetailsId();
-  tr.innerHTML = `<td colspan="9">${detailsHtml(d)}</td>`;
+  tr.dataset.for = id;
+  tr.innerHTML = `<td colspan="9"><div class="details-body"></div></td>`;
   row.after(tr);
   setDetailsTriggers(row, tr.id);
+  fillPanel(tr, id);
 }
 
 function factValue(f) {
@@ -699,10 +887,10 @@ function locationHtml(d) {
   </div>`;
 }
 
-async function refreshDetails(el) {
-  const tr = el.closest("tr.details-row");
-  const d = await AS.api("/api/listing?id=" + encodeURIComponent(el.dataset.id) + "&mode=" + view.mode);
-  tr.innerHTML = `<td colspan="9">${detailsHtml(d)}</td>`;
+// After a change made in the panel: reload that panel (row or research card).
+function refreshDetails(el) {
+  const panel = el.closest(".details-row, .candidate-details");
+  if (panel) return fillPanel(panel, panel.dataset.for, {fresh: true});
 }
 
 async function verifyLocation(btn) {
@@ -849,12 +1037,7 @@ function detailsHtml(d) {
       ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
       <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>
       ${contactLogHtml(d)}
-      <div class="d-note-wrap">
-        <label class="small muted" for="note-${AS.esc(d.id)}">Notes</label>
-        <textarea id="note-${AS.esc(d.id)}" class="d-note" rows="3" placeholder="Personal notes about this listing…"
-          data-id="${AS.esc(d.id)}"
-          onblur="saveNote(this)">${AS.esc(d.user_note || "")}</textarea>
-      </div>
+      ${noteHtml(d)}
     </div></div>`;
 }
 
@@ -874,10 +1057,167 @@ function contactLogHtml(d) {
   </div>`;
 }
 
-async function saveNote(el) {
-  const id = el.dataset.id, note = el.value.trim();
-  await AS.api("/api/listing/note", {method: "POST", body: {id, note}});
+// ── Notes: a draft per listing in memory, saved one at a time ──
+// The server keeps what it is sent (up to 2,000 characters, the field's
+// maxlength; an empty note is removed) and answers {ok: true} with no copy of
+// the text, so "Saved" means that exact text was acknowledged. Drafts never go
+// into the URL or browser storage.
+function createNoteQueue({persist, notify, delay = 700}) {
+  const records = new Map();
+  function get(id, initialText = "") {
+    if (!records.has(id)) {
+      records.set(id, {draft: initialText, saved: initialText, version: 0, running: false, timer: null, phase: "saved"});
+    }
+    return records.get(id);
+  }
+  function publish(id, record, message = "") {
+    notify(id, {draft: record.draft, phase: record.phase, dirty: record.draft !== record.saved, message});
+  }
+  function edit(id, text) {
+    const record = get(id);
+    record.draft = text;
+    record.version += 1;
+    clearTimeout(record.timer);
+    record.phase = record.running ? "saving" : (record.draft === record.saved ? "saved" : "unsaved");
+    publish(id, record);
+    record.timer = setTimeout(() => flush(id), delay);
+  }
+  async function flush(id) {
+    const record = get(id);
+    clearTimeout(record.timer);
+    record.timer = null;
+    if (record.running) return record.pending;
+    if (record.draft === record.saved) {
+      record.phase = "saved";
+      publish(id, record);
+      return true;
+    }
+    record.running = true;
+    record.pending = (async () => {
+      try {
+        while (record.draft !== record.saved) {
+          const snapshot = record.draft;
+          const snapshotVersion = record.version;
+          record.phase = "saving";
+          publish(id, record);
+          await persist(id, snapshot);
+          record.saved = snapshot;      // acknowledged exactly as sent
+          if (record.version === snapshotVersion) break;
+        }
+        record.phase = record.draft === record.saved ? "saved" : "unsaved";
+        publish(id, record);
+        if (record.phase === "unsaved") record.timer = setTimeout(() => flush(id), delay);
+        return record.phase === "saved";
+      } catch (error) {
+        record.phase = "error";
+        publish(id, record, "Could not save this note. Retry saves the latest text.");
+        return false;
+      } finally {
+        record.running = false;
+      }
+    })();
+    return record.pending;
+  }
+  function seed(id, text) { return get(id, text); }
+  function isPending(id) {
+    const record = records.get(id);
+    return !!record && (record.running || record.draft !== record.saved);
+  }
+  function hasUnsaved() { return [...records.keys()].some(isPending); }
+  function flushAll() { return Promise.all([...records.keys()].filter(isPending).map(flush)); }
+  return {seed, edit, flush, retry: flush, isPending, hasUnsaved, flushAll};
 }
+
+async function persistNote(id, note) {
+  const response = await fetch("/api/listing/note", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                      body: JSON.stringify({id, note})});
+  if (!response.ok) throw new Error(`Request failed (${response.status})`);
+}
+
+const NOTE_PHASE = {saved: "Saved", unsaved: "Unsaved changes", saving: "Saving…", error: "Could not save"};
+function noteFields(id) { return [...document.querySelectorAll("textarea.d-note")].filter(t => t.dataset.id === id); }
+function noteStatuses(id) { return [...document.querySelectorAll(".note-status")].filter(s => s.dataset.id === id); }
+
+// Every place the listing's note shows follows the same draft; the field you
+// are typing in is never rewritten, so the caret stays put.
+const notes = createNoteQueue({
+  persist: persistNote,
+  notify(id, state) {
+    noteFields(id).forEach(field => {
+      if (field !== document.activeElement && field.value !== state.draft) field.value = state.draft;
+    });
+    noteStatuses(id).forEach(el => {
+      el.dataset.phase = state.phase;
+      el.querySelector(".note-phase").textContent = NOTE_PHASE[state.phase] || "";
+      el.querySelector(".note-retry").hidden = state.phase !== "error";
+    });
+  },
+});
+
+let noteSeq = 0;
+function noteHtml(d) {
+  const record = notes.seed(d.id, d.user_note || "");      // the server's text only the first time
+  const fieldId = `note-field-${++noteSeq}`, id = AS.esc(d.id);
+  return `<div class="d-note-wrap">
+    <label class="small muted" for="${fieldId}">Notes</label>
+    <textarea id="${fieldId}" class="d-note" rows="3" maxlength="2000" placeholder="Personal notes about this listing…"
+      data-id="${id}" data-role="note">${AS.esc(record.draft)}</textarea>
+    <p class="small note-status" data-id="${id}" data-phase="${AS.esc(record.phase)}" role="status">
+      <span class="note-phase">${NOTE_PHASE[record.phase] || ""}</span>
+      <button type="button" class="btn btn-sm note-retry" data-id="${id}" ${record.phase === "error" ? "" : "hidden"}>Retry saving note</button>
+    </p>
+  </div>`;
+}
+
+document.addEventListener("input", e => {
+  if (e.target.matches && e.target.matches("textarea.d-note")) notes.edit(e.target.dataset.id, e.target.value);
+});
+document.addEventListener("focusout", e => {
+  if (e.target.matches && e.target.matches("textarea.d-note")) notes.flush(e.target.dataset.id);
+});
+document.addEventListener("click", e => {
+  const retry = e.target.closest && e.target.closest(".note-retry");
+  if (retry) notes.retry(retry.dataset.id);
+});
+
+// The browser's own warning while a note is unsaved or being saved. Not every
+// window shows it (the desktop app's close button may not), so it is a
+// warning, not a guarantee.
+window.addEventListener("beforeunload", e => {
+  if (!notes.hasUnsaved()) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+// Links to the app's other pages ask first while a note is unsaved.
+document.addEventListener("click", e => {
+  const link = e.target.closest && e.target.closest("a[href]");
+  if (!link || !notes.hasUnsaved() || e.defaultPrevented || link.target === "_blank" || e.button !== 0
+      || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  let url;
+  try { url = new URL(link.href, location.href); } catch (err) { return; }
+  if (url.host !== location.host || url.pathname === location.pathname || /^\/(api|export)\//.test(url.pathname)) return;
+  e.preventDefault();
+  const dlg = $("leave-dialog");
+  const choose = async choice => {
+    dlg.querySelectorAll("[data-leave]").forEach(b => { b.onclick = null; });
+    if (choice === "stay") { dlg.close(); return; }
+    if (choice === "save") {
+      $("leave-text").textContent = "Saving…";
+      const results = await notes.flushAll();
+      if (results.some(ok => !ok) || notes.hasUnsaved()) {
+        $("leave-text").textContent = "The note could not be saved. Stay to retry, or leave without saving it.";
+        dlg.querySelectorAll("[data-leave]").forEach(b => { b.onclick = () => choose(b.dataset.leave); });
+        return;
+      }
+    }
+    dlg.close();
+    location.href = url.href;
+  };
+  $("leave-text").textContent = "Save it before leaving, stay on this page, or leave without saving it.";
+  dlg.querySelectorAll("[data-leave]").forEach(b => { b.onclick = () => choose(b.dataset.leave); });
+  dlg.showModal();
+});
 
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); AS.toast("Copied: " + text); }
@@ -899,17 +1239,56 @@ function countText() {
 }
 function go(p) { cancelPending(); setView({...view, page: p}); window.scrollTo(0, 0); }
 
+// One request per listing at a time; only that listing's buttons wait.
+const statusPending = new Set();
+function statusButtons(id) { return [...document.querySelectorAll("[data-status-action]")].filter(b => b.dataset.id === id); }
+
 async function setStatus(id, status) {
-  if (status === "dismissed") {
-    const ok = await AS.dismiss(id);
-    if (!ok) return;
-    AS.toast("Dismissed");
-    load();
-    return;
+  if (statusPending.has(id)) return;
+  const item = shownItems.get(id) || {};
+  const previous = item.status || null;
+  statusPending.add(id);
+  statusButtons(id).forEach(b => { b.disabled = true; });
+  let ok = false;
+  try {
+    if (status === "dismissed") {
+      ok = await AS.dismiss(id);                  // the reason dialog; Cancel changes nothing
+      if (ok) {
+        AS.toast("Dismissed");
+        offerUndo(id, item.title || "this listing", previous);
+      }
+    } else {
+      await AS.api("/api/listings/status", {method: "POST", body: {id, status}});
+      ok = true;
+      AS.toast(status === "shortlisted" ? "Added to Offers" : "Restored");
+    }
+  } catch (e) {
+    ok = false;                                   // AS.api said why; nothing on screen changed
+  } finally {
+    statusPending.delete(id);
+    statusButtons(id).forEach(b => { b.disabled = false; });
   }
-  await AS.api("/api/listings/status", {method: "POST", body: {id, status}});
-  AS.toast(status === "shortlisted" ? "Added to Offers" : "Restored");
-  load();
+  if (ok) load({after: "saved"});                 // the server decides where it now belongs
+}
+
+// Undo puts back the status it had (On Offers, or none) through the same API.
+// The dismissal reason is not kept: the status record holds only the latest.
+let undoTimer = null;
+function offerUndo(id, title, previous) {
+  const box = $("status-undo"), button = $("status-undo-button");
+  $("status-undo-text").textContent = `Dismissed “${title}”. Undo puts it back ${previous === "shortlisted" ? "on Offers" : "as an open listing"}; the dismissal reason is not kept.`;
+  box.hidden = false;
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => { box.hidden = true; }, 15000);
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await AS.api("/api/listings/status", {method: "POST", body: {id, status: previous}});
+      box.hidden = true;
+      AS.toast(previous === "shortlisted" ? "Back on Offers" : "Restored");
+      load({after: "saved"});
+    } catch (e) { /* AS.api said why */ } finally { button.disabled = false; }
+  };
 }
 
 // Native buttons in the headers: Enter and Space already work, one handler sorts once.
@@ -966,7 +1345,28 @@ window.addEventListener("popstate", () => {
   restoreControls();
   load();
 });
-document.addEventListener("scan-finished", () => load());
+// A finished scan refreshes a quiet page in place. While you type, edit a
+// note or a save is running it waits, and says so once.
+let updatePending = false;
+function busyEditing() {
+  const active = document.activeElement;
+  const typing = active && active.matches && active.matches("input, textarea, select") && !active.matches("[type=checkbox]");
+  return typing || notes.hasUnsaved() || statusPending.size > 0;
+}
+document.addEventListener("scan-finished", () => {
+  if (updatePending) return;                      // one notice for any number of scans
+  if (!busyEditing()) { load(); return; }
+  updatePending = true;
+  $("listings-update-notice").hidden = false;
+  AS.announce("New results are available.");
+});
+$("listings-refresh").addEventListener("click", async () => {
+  updatePending = false;
+  $("listings-update-notice").hidden = true;
+  notes.flushAll();                               // drafts stay in memory whatever happens
+  load();
+});
+$("listings-retry").addEventListener("click", () => load());
 
 function showViewNote(lines) {
   const note = $("view-note");
