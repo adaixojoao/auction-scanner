@@ -216,6 +216,53 @@ listing when it is:
 A shortlisted listing ignores 5 and 6: you picked it on purpose. *Listings →
 Show → Hidden* shows what is hidden and why.
 
+## Reading a Listings row
+
+Each row answers six questions. None of them says a listing is verified or ready to buy.
+
+- **Property:** one small photo (a copy kept on this PC, else the sale's own
+  cover picture; *No image* when there is none or it does not load), the title,
+  place, source and kind. A photo is not evidence of condition.
+- **Price basis:** which figure it is, said in words: *Current bid* (bidding can
+  go higher), *Minimum offer* (the lowest accepted), *Base value* (a court or
+  bank reference, not a price you can buy at), *Asking price* (a portal advert),
+  *Not a purchase price* (an advert's deposit or opening bid) or *Price not
+  published*. The other figures the sale gives are listed under it. *Max listed
+  price* and the *Listed price* sort use the stored listed figure, which can
+  differ from the basis shown.
+- **Estimated all-in:** the planning estimate from *What it really costs*
+  (below), always labelled *Estimated* and with the figure it starts from. A
+  home whose floor area is not established shows a **known subtotal** (price,
+  taxes and fees) marked *Incomplete cost estimate*, never a range with the
+  repairs left at €0. What it lacks (repairs not priced, a guessed floor, a
+  condition not stated) is listed; fire insurance, and in Portugal IMT on a
+  taxable value above the price, are never included. The required reserve is a
+  separate total on Live and invest, not part of this range.
+- **Opportunity:** the score and the first two reasons, in the scorer's order;
+  *N more reasons* opens the rest. A high score means interesting for this
+  goal, not checked.
+- **Unresolved checks:** title and charges, possession, legal access (rural
+  plots) and condition, from your checklist: *Verified by you*, *Not applicable*,
+  *Concern recorded* (always shown first), *Needs rechecking* (a check you
+  completed before the listing changed), *Source reports…* (the notice says so;
+  not verified) or *No verification recorded*. Nothing recorded is never shown
+  as clean title, vacant or good condition.
+- **Deadline:** how long is left and the exact date. A date without a time
+  stays a date (*Today — closing time not published*); a time is shown in the
+  sale country's time zone; a missing or unreadable deadline says so. Whether
+  a sale has ended is still decided by the server, not by this label.
+
+**Display: Comfortable / Compact** changes only spacing and photo size, and is
+remembered in this browser; filters, ranking and warnings are the same.
+Every sort is in **Sort by**; Property, Opportunity and Deadline also sort
+from their column headings. Each goal opens with one line; **How this ranking
+works** has the full description. The three counts say what they count, and
+**Source health** (failing sources, sources with no good read) folds away,
+linked to Sources. On Live and invest, **Research candidates — diligence
+incomplete** can be collapsed; its count and *Not verified as ready to buy*
+stay visible, and collapsing it keeps open details and unsaved notes. Those
+cards can also be in the table and are not added to its count.
+
 ## What it really costs
 
 A €20 000 house is not a €20 000 house. Under **ⓘ → What it really costs**

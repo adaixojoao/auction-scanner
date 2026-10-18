@@ -7,7 +7,10 @@ import pytest
 
 pytest.importorskip("playwright.sync_api")
 
-from test_browser_listings import App, _a_research_lead, app, browser, row  # noqa: E402,F401
+import test_browser_listings as harness  # noqa: E402
+
+# The same browser and page harness as tests/test_browser_listings.py.
+browser, app, _a_research_lead = harness.browser, harness.app, harness._a_research_lead
 
 
 def _listing(**fields):
