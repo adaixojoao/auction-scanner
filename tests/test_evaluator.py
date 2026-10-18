@@ -56,6 +56,8 @@ FULL_EVIDENCE = {
     "photo_check": {"shows_house": True, "condition": "good", "confidence": "high", "notes": ""},
     # Sale availability
     "sale_availability": "available",
+    "sale_availability_checked_at": "2026-10-15T07:00:00+00:00",
+    "sale_availability_expires_at": "2026-10-16T07:00:00+00:00",
     # Financial
     "apparent_discount_pct": 30.0,
     "anomaly_investigated": False,        # not needed at 30%

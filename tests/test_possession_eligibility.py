@@ -8,10 +8,16 @@ from tests.test_evaluator import FULL_EVIDENCE
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
+# The shared fixture's availability window is for its own NOW; give this NOW one.
+AVAILABILITY_TIMES = {
+    "sale_availability_checked_at": "2029-12-31T23:00:00+00:00",
+    "sale_availability_expires_at": "2030-01-01T23:00:00+00:00",
+}
 
 
 def decision(occupation=None, delivery=None):
     evidence = copy.deepcopy(FULL_EVIDENCE)
+    evidence.update(AVAILABILITY_TIMES)
     evidence.update(
         occupation=occupation,
         delivery_terms=delivery,
@@ -128,6 +134,7 @@ def test_tenant_exclusion_is_not_weakened_by_vacant_delivery_claim():
 
 def test_missing_keys_are_unknown_not_vacant():
     evidence = copy.deepcopy(FULL_EVIDENCE)
+    evidence.update(AVAILABILITY_TIMES)
     evidence.pop("occupation")
     evidence.pop("delivery_terms")
     requirement = possession(evaluate(evidence, now=NOW))
@@ -138,6 +145,7 @@ def test_missing_keys_are_unknown_not_vacant():
 
 def test_no_mutation_and_repeatable_result():
     evidence = copy.deepcopy(FULL_EVIDENCE)
+    evidence.update(AVAILABILITY_TIMES)
     evidence["delivery_terms"] = {"terms": "unverified"}
     before = copy.deepcopy(evidence)
     first = evaluate(evidence, now=NOW)
