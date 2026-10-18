@@ -35,8 +35,8 @@ def _static(client, name):
 
 def test_filter_labels_are_associated_with_their_controls(listings):
     for label, control in (("Country", "f-country"), ("Property type", "f-kind"), ("Source", "f-source"),
-                           ("Status", "f-status"), ("Max price", "f-maxprice"), ("Search", "f-search"),
-                           ("Climate", "f-climate"), ("Min score", "f-minscore")):
+                           ("Status", "f-status"), ("Max listed price", "f-maxprice"), ("Search", "f-search"),
+                           ("Climate", "f-climate"), ("Min score", "f-minscore"), ("Sale method", "f-sale-method")):
         assert f'<label for="{control}">{label}</label>' in listings
         assert f'id="{control}"' in listings
     assert 'class="loc-method" aria-label=' in listings and 'class="loc-value" type="text" aria-label=' in listings

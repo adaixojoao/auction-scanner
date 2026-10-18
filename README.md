@@ -59,7 +59,7 @@ another window.
 
 | Page | What it is for |
 |---|---|
-| **Listings** | Everything found, scored; it shows at most the **best 100** (Settings → *Show at most*), and sorting and filters work within those. **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale; for France, the parcel named in the notice (its plot area and a map link) and, when the listing scores 85 or more and that parcel has a single building, the year and the use from the national building database. A listing at **85 or more** in any goal keeps its photos on this PC after the sale site takes them down, and the panel shows that gallery and the full description. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
+| **Listings** | Everything found, scored; it shows at most **100** (Settings → *Show at most*), chosen after the filters and the selected sort: a filter or *cheapest first* looks through every eligible match, not only the best 100 by score (see *Filters* below). **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale; for France, the parcel named in the notice (its plot area and a map link) and, when the listing scores 85 or more and that parcel has a single building, the year and the use from the national building database. A listing at **85 or more** in any goal keeps its photos on this PC after the sale site takes them down, and the panel shows that gallery and the full description. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
@@ -82,6 +82,23 @@ and the confirmations, are announced to screen readers. Dismissing asks for a
 reason; Cancel or Esc never dismisses, and a dismissed listing can be restored
 from *Status → Hidden*. The wide Listings table still scrolls sideways on a
 narrow window.
+
+**Filters.** Lists and boxes apply at once; *Search* and the numbers apply
+after a short pause or on Enter (an invalid number is pointed out and waits).
+The goal, filters, sort and page are in the address, so a link or a reload
+shows the same view, and Back/Forward step through your changes. Opening
+Listings without them in the address brings back the last view on this PC
+(only these browsing choices are remembered, never notes or buyer details).
+*Reset filters* goes back to the defaults of the tab you are on; each active
+filter shows as a chip whose × removes just that one. **Max listed price** is
+the listed or base figure as stored, not the current bid or the all-in
+estimate; each tab's budget is the most it shows (an empty field means the
+budget), and *Live and invest* does not use it (the all-in estimate against
+your cash is its ceiling). **Sale method** is the method the sale states
+(e.g. *carta fechada*, *leilão eletrónico*); *Unknown* means none is stated or
+it is not recognised, never guessed from the site. The count under the filters
+says how many match, how many are shown after *Show at most*, and which ones
+are on this page.
 
 ### Offers, step by step
 

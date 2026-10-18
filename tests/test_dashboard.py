@@ -545,7 +545,7 @@ def test_listings_show_at_most_the_best_100(client, add):
     ids = {it["id"] for it in d["items"]}
     assert "eleiloes:m0" in ids and "eleiloes:m129" not in ids          # the best 100, not any 100
     by_price = client.get("/api/listings?per_page=1000&sort=price&dir=desc").get_json()["items"]
-    assert by_price[0]["id"] == "eleiloes:m99"                           # sorting stays within them
+    assert by_price[0]["id"] == "eleiloes:m129"     # sorted over every match, then the cap (UI Batch 2)
     client.post("/api/settings", json={"max_listings": 20})
     assert client.get("/api/listings?per_page=1000").get_json()["total"] == 20
 
