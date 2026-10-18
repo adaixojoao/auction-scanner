@@ -298,6 +298,21 @@ def stored_all(db) -> dict[str, dict[str, dict]]:
     return out
 
 
+def stored_for(db, listing_ids) -> dict[str, dict[str, dict]]:
+    """stored() for several listings in two queries (one page of Listings)."""
+    ids = sorted({i for i in listing_ids if i})
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    contexts = {r["id"]: dict(r) for r in db.execute(f"SELECT * FROM listings WHERE id IN ({marks}) AND EXISTS"
+                                                      " (SELECT 1 FROM checklist_items c WHERE c.listing_id = listings.id)", ids)}
+    out: dict[str, dict[str, dict]] = {}
+    for row in db.execute(f"SELECT * FROM checklist_items WHERE listing_id IN ({marks})", ids):
+        r = dict(row)
+        out.setdefault(r["listing_id"], {})[r["item_key"]] = _effective_row(r, contexts.get(r["listing_id"]))
+    return out
+
+
 def build(item: dict, rows: dict[str, dict], cfg: dict | None) -> dict:
     """The checklist of one listing with your statuses, and its summary."""
     route, items = items_for(item)

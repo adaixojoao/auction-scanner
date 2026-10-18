@@ -23,10 +23,12 @@
   <button type="button" id="goal-forest" data-mode="forest" role="tab" aria-controls="goal-results" aria-selected="false" tabindex="-1">Forestry</button>
 </div>
 <section id="goal-results" role="tabpanel" aria-labelledby="goal-both" tabindex="0">
-<p class="small muted" id="mode-note"></p>
+<p class="small" id="mode-intro"></p>
+<details class="small mode-details"><summary>How this ranking works</summary><p class="muted" id="mode-note"></p></details>
 <p class="small" id="cash-note"></p>
 
 <div class="stats" id="stats"></div>
+<div class="stats-more" id="stats-more"></div>
 
 <div class="card filters">
   <div class="field"><label for="f-country">Country</label>
@@ -91,21 +93,40 @@
   <button type="button" class="btn btn-sm" id="listings-retry">Retry listings</button>
 </div>
 <div id="listings-results" aria-busy="true">
-<p class="small" id="result-count" tabindex="-1"></p>
-<div class="table-scroll">
+<div class="results-toolbar">
+  <p class="small" id="result-count" tabindex="-1"></p>
+  <div class="results-controls">
+    <div class="field inline-field"><label for="sort-by">Sort by</label>
+      <select id="sort-by" aria-describedby="sort-hint">
+        <option value="score">Score</option>
+        <option value="title">Title</option>
+        <option value="country">Country</option>
+        <option value="price">Listed price</option>
+        <option value="current_bid">Current bid</option>
+        <option value="date_end">Deadline</option>
+      </select></div>
+    <div class="field inline-field"><label for="sort-dir">Order</label>
+      <select id="sort-dir"><option value="desc">Descending</option><option value="asc">Ascending</option></select></div>
+    <div class="density" role="group" aria-labelledby="density-label">
+      <span class="small muted" id="density-label">Display</span>
+      <button type="button" class="btn btn-sm" data-density="comfortable" aria-pressed="true">Comfortable</button>
+      <button type="button" class="btn btn-sm" data-density="compact" aria-pressed="false">Compact</button>
+    </div>
+  </div>
+  <p class="small faint" id="sort-hint">Listed price sorts by the stored listed price. The price basis shown can be a current bid or minimum offer instead.</p>
+</div>
+<div class="table-scroll" role="region" aria-label="Listings results" tabindex="0">
 <table class="list">
   <thead><tr>
-    <th scope="col" class="sortable" data-sort="score" aria-sort="descending"><button type="button" class="sort-button" data-sort="score" data-label="Score">Score <span class="sort-indicator" aria-hidden="true">↓</span></button></th>
-    <th scope="col" class="sortable" data-sort="country" aria-sort="none"><button type="button" class="sort-button" data-sort="country" data-label="Country">Country <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-    <th scope="col" class="sortable" data-sort="title" aria-sort="none"><button type="button" class="sort-button" data-sort="title" data-label="Title">Title <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-    <th scope="col" class="sortable" data-sort="price" aria-sort="none"><button type="button" class="sort-button" data-sort="price" data-label="Asking price">Asking <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-    <th scope="col" class="sortable" data-sort="current_bid" aria-sort="none"><button type="button" class="sort-button" data-sort="current_bid" data-label="Current bid">Current bid <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-    <th scope="col">Location</th>
-    <th scope="col" class="sortable" data-sort="date_end" aria-sort="none"><button type="button" class="sort-button" data-sort="date_end" data-label="End date">Ends <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-    <th scope="col">Why</th>
+    <th scope="col" class="sortable" data-sort="title" aria-sort="none"><button type="button" class="sort-button" data-sort="title" data-label="Title">Property <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+    <th scope="col">Price basis</th>
+    <th scope="col">Estimated all-in</th>
+    <th scope="col" class="sortable" data-sort="score" aria-sort="descending"><button type="button" class="sort-button" data-sort="score" data-label="Score">Opportunity <span class="sort-indicator" aria-hidden="true">↓</span></button><span class="sr-only"> (interest for this goal, not verification)</span></th>
+    <th scope="col">Unresolved checks</th>
+    <th scope="col" class="sortable" data-sort="date_end" aria-sort="none"><button type="button" class="sort-button" data-sort="date_end" data-label="Deadline">Deadline <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
     <th scope="col"><span class="sr-only">Actions</span></th>
   </tr></thead>
-  <tbody id="rows"><tr><td colspan="9"><div class="empty"><p>Loading listings…</p></div></td></tr></tbody>
+  <tbody id="rows"><tr><td colspan="7"><div class="empty"><p>Loading listings…</p></div></td></tr></tbody>
 </table>
 </div>
 </div>
@@ -129,6 +150,7 @@
 const GOAL_BUDGETS = {{ goal_budgets | tojson }};
 </script>
 <script src="{{ url_for('static', filename='listings-view.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-summary.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-details.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-notes.js') }}"></script>
 <script src="{{ url_for('static', filename='listings.js') }}"></script>

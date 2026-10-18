@@ -212,11 +212,16 @@ def _mode(args) -> str:
     return mode if mode in MODES else "home"
 
 
+# Not row data: the raw source record, and the shared lookups db._score_one
+# hangs on every row for the scorer (tuple-keyed, so not JSON either).
+_NOT_PUBLIC = frozenset({"raw_json", "land_market", "floor_market"})
+
+
 def _public(item: dict) -> dict:
     """What the browser gets: no raw_json, a short description, the five wishes
     (worked out here, for the rows on screen only: db._DERIVED does not keep them)."""
     from scoring import wishes
-    out = {k: v for k, v in item.items() if k != "raw_json"}
+    out = {k: v for k, v in item.items() if k not in _NOT_PUBLIC}
     if out.get("description"):
         out["description"] = out["description"][:300]
     out["hidden_category"] = hidden_category(item.get("hidden_reason"))
@@ -538,11 +543,12 @@ def _filter_amount(value) -> float | None:
     return number if math.isfinite(number) and number >= 0 else None
 
 
-def _research_candidates(items: list, cash: float, full=None) -> dict:
+def _research_candidates(items: list, cash: float, full=None, present=None) -> dict:
     """Up to three priced leads, and unvalued ones kept in a separate group.
 
     Built from the listings this view already scored (db.research_selection).
-    Not a second ranker. `full` turns slim rows into full ones for the cards.
+    Not a second ranker. `full` turns slim rows into full ones for the cards;
+    `present` gives each card the same short summaries as a row (_presentations).
     """
     import costs
     import geo
@@ -555,6 +561,7 @@ def _research_candidates(items: list, cash: float, full=None) -> dict:
     valued, unvalued = research_selection(items)
     if full is not None:
         valued, unvalued = full(valued), full(unvalued)
+    presented = present(valued + unvalued) if present is not None else {}
     def card(it, group):
         plan = costs.planning_view(it, cash, settings=settings)
         level = (geo.location_confidence(it) or {}).get("level")
@@ -578,7 +585,7 @@ def _research_candidates(items: list, cash: float, full=None) -> dict:
             "lookup": it.get("external_id") or it.get("id"),
             **{k: it.get(k) for k in _DETAIL_FIELDS if k not in ("status",)},
             "live_score": it.get("live_score"), "invest_score": it.get("invest_score"),
-            "planning": plan,
+            "planning": plan, "presentation": presented.get(it.get("id")),
             "valuation": ("Investment value not established" if group == "unvalued"
                           else "Local median used as a planning figure, not a valuation of this property"),
             "gaps": gaps,
@@ -609,6 +616,25 @@ def _add_detail_tokens(db, rows: list) -> None:
         basis = [r.get(k) if r.get(k) not in ("", None) else None for k in _DETAIL_FIELDS]
         basis += [revs.get(r.get("id"), 0), _mode(request.args)]
         r["detail_token"] = hashlib.sha1(json.dumps(basis, default=str).encode()).hexdigest()[:12]
+
+
+def _presentations(db, rows: list) -> dict:
+    """Each full row's short summaries (presentation.py), by id. One batched
+    checklist read for all of them, never one query per row."""
+    import checklist
+    import presentation
+    cfg = _config()
+    stored = checklist.stored_for(db, [it.get("id") for it in rows])
+    now = datetime.now(timezone.utc)
+    # A copy each: the cost and score helpers cache on the dict they read, and
+    # these rows can be the kept list's own.
+    return {it.get("id"): presentation.summary(dict(it), stored.get(it.get("id")), cfg, now) for it in rows}
+
+
+def _presented(db, rows: list) -> list:
+    """The rows on one page as the browser gets them, with their summaries."""
+    summaries = _presentations(db, rows)
+    return [{**_with_fees(it), "presentation": summaries.get(it.get("id"))} for it in rows]
 
 
 @app.route("/api/listings")
@@ -667,7 +693,8 @@ def api_listings():
         research_pool = [it for it in matched
                          if it.get("extreme_discount") or minimum_bar(it, mode) >= min_score]
         research = (_research_candidates(research_pool, float(_cash_public().get("amount") or 0),
-                                         full=lambda rows: _full_rows(db, rows, mode))
+                                         full=lambda rows: _full_rows(db, rows, mode),
+                                         present=lambda rows: _presentations(db, rows))
                     if mode == "both" else None)
         loaded = [it for it in matched if minimum_bar(it, mode) >= min_score]
         hidden_counts = Counter(hidden_category(it["hidden_reason"]) for it in loaded
@@ -694,7 +721,8 @@ def api_listings():
             items = sorted(ranked, key=SORT_KEYS[sort], reverse=(direction == "desc"))[:cap]
         total = len(items)
         page = min(page, max(1, math.ceil(total / per_page)))    # past the last page: the last one
-        page_items = [_with_fees(it) for it in _full_rows(db, items[(page - 1) * per_page:page * per_page], mode)]
+        full_page = _full_rows(db, items[(page - 1) * per_page:page * per_page], mode)
+        page_items = _presented(db, full_page)
         _add_detail_tokens(db, page_items + (research["valued"] + research["unvalued"] if research else []))
         visible = [it for it in loaded if not it["hidden_reason"]]
         health = source_health(db, _registry())

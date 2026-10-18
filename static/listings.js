@@ -1,6 +1,6 @@
 // listings.js — the Listings page: loading the results, status changes and Undo, sorting and goal tabs, refreshes after a scan, and start-up.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-details.js, listings-notes.js, listings.js).
+// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings.js).
 
 // ── Loading: one latest-wins read for the results (AS.latestRead) ──
 const resultsRead = AS.latestRead();
@@ -53,7 +53,7 @@ async function load({after = "", navigation = false} = {}) {
     setLoadState("error", after === "saved"
       ? `Saved, but results could not be refreshed: ${result.message}` : result.message);
     if (!renderedOnce) {
-      $("rows").innerHTML = `<tr><td colspan="9"><div class="empty"><h3>Listings could not be loaded</h3>
+      $("rows").innerHTML = `<tr><td colspan="${TABLE_COLUMNS}"><div class="empty"><h3>Listings could not be loaded</h3>
         <p>This is not an empty result. Use Retry listings above.</p></div></td></tr>`;
       $("result-count").textContent = "";
     } else {
@@ -176,6 +176,8 @@ function nextSortDirection(column) {
   return column === "date_end" || column === "price" ? "asc" : "desc";
 }
 function updateSortHeaders() {
+  $("sort-by").value = view.sort;
+  $("sort-dir").value = view.dir;
   document.querySelectorAll("table.list th[data-sort]").forEach(header => {
     const column = header.dataset.sort;
     const active = column === view.sort;
@@ -196,6 +198,26 @@ document.querySelectorAll("table.list .sort-button").forEach(button => {
     updateSortHeaders();
   });
 });
+
+// The labelled Sort by control reaches every sort, including the ones without a column header.
+["sort-by", "sort-dir"].forEach(id => $(id).addEventListener("change", () => {
+  cancelPending();
+  setView({...(readControls() || view), sort: $("sort-by").value, dir: $("sort-dir").value, page: 1});
+  updateSortHeaders();
+}));
+
+// Comfortable or Compact: presentation only, remembered in this browser.
+const DENSITY_KEY = "auction-scanner:listings-density:v1";
+function applyDensity(density) {
+  $("listings-results").classList.toggle("results-density-compact", density === "compact");
+  document.querySelectorAll("[data-density]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.density === density)));
+}
+document.querySelectorAll("[data-density]").forEach(button => button.addEventListener("click", () => {
+  applyDensity(button.dataset.density);
+  try { localStorage.setItem(DENSITY_KEY, button.dataset.density); } catch (e) { /* not kept */ }
+}));
+try { applyDensity(localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "comfortable"); }
+catch (e) { applyDensity("comfortable"); }
 
 document.querySelectorAll("#modes button").forEach(button => {
   button.addEventListener("click", () => activateGoal(button));
