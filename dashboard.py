@@ -14,6 +14,7 @@ from __future__ import annotations
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -128,7 +129,10 @@ def _page(template: str, key: str, title: str, **extra):
 
 @app.route("/")
 def listings_page():
-    return _page("listings.html", "listings", "Listings")
+    from scoring import MODES
+    cfg = _config()
+    budgets = {mode: mode_max_price(cfg, mode, cfg.get("max_price") or 0) for mode in MODES}
+    return _page("listings.html", "listings", "Listings", goal_budgets=budgets)
 
 
 @app.route("/offers")
@@ -243,7 +247,8 @@ def api_meta():
             "SELECT DISTINCT tipo FROM listings WHERE tipo IS NOT NULL ORDER BY tipo")]
     finally:
         db.close()
-    return jsonify({"sources": sources, "types": types})
+    return jsonify({"sources": sources, "types": types,
+                    "sale_methods": [{"value": v, "label": label} for v, label in SALE_METHODS]})
 
 
 def _climate_of(item: dict) -> dict:
@@ -417,6 +422,36 @@ def _matches(it: dict, country, source, tipo, max_price, search) -> bool:
     return True
 
 
+# The sale methods Listings filters by: letters.pt_sale_kind's classes of an
+# explicit raw_json.modalidade. "unknown" is a missing or unclassified label,
+# not a method known to be different. Never inferred from the source.
+SALE_METHODS = (("carta_fechada", "Sealed bids"), ("negociacao", "Private negotiation"),
+                ("leilao_eletronico", "Online auction"), ("leilao_presencial", "In-person auction"),
+                ("unknown", "Unknown"))
+_LIST_KINDS = ("", "home", "urban_plot", "rural_plot", "other")
+_LIST_STATUSES = ("", "shortlisted", "dismissed")
+_LIST_CLIMATES = ("", "excellent", "good", "caution", "poor", "unknown")
+
+
+def _sale_method(it: dict) -> str:
+    """The stated sale method of a listing, worked out once per kept row."""
+    if "sale_method" not in it:
+        from letters import _raw, pt_sale_kind
+        it["sale_method"] = pt_sale_kind(_raw(it).get("modalidade"))
+    return it["sale_method"]
+
+
+def _filter_amount(value) -> float | None:
+    """A browsing amount: 0 when empty, None when it is not a finite number ≥ 0."""
+    if value is None or not str(value).strip():
+        return 0.0
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) and number >= 0 else None
+
+
 def _research_candidates(items: list, cash: float, full=None) -> dict:
     """Up to three priced leads, and unvalued ones kept in a separate group.
 
@@ -474,8 +509,10 @@ def api_listings():
     args = request.args
     country = args.get("country", "")
     source = args.get("source", "")
-    max_price = _num(args.get("max_price"), 0)
-    min_score = _num(args.get("min_score"), 0)
+    max_price = _filter_amount(args.get("max_price"))
+    min_score = _filter_amount(args.get("min_score"))
+    if max_price is None or min_score is None:
+        return jsonify({"error": "max_price and min_score must be numbers ≥ 0"}), 400
     search = args.get("search", "").strip()
     tipo = args.get("type", "")
     status = args.get("status", "")
@@ -484,15 +521,23 @@ def api_listings():
     show_hidden = args.get("show_hidden", "0") == "1"
     climate_grade = args.get("climate", "")   # excellent / good / caution: at least; poor / unknown: exactly
     climate_exact = args.get("climate_exact", "0") == "1"
+    sale_method = args.get("sale_method", "")
     sort = args.get("sort", "score")
+    direction = args.get("dir", "desc")
+    page = _num(args.get("page", "1"), 0, int)
+    if (sort not in SORT_KEYS or direction not in ("asc", "desc") or kind not in _LIST_KINDS
+            or status not in _LIST_STATUSES or climate_grade not in _LIST_CLIMATES
+            or sale_method not in ("", *(v for v, _ in SALE_METHODS)) or page < 1):
+        return jsonify({"error": "unknown sort, direction, type, status, climate, sale method or page"}), 400
     mode = _mode(args)
+    budget = mode_max_price(_config(), mode, _config().get("max_price") or 0)
     if mode == "both":
         # The all-in estimate against the cash is the ceiling, not the asking price.
         max_price = 0
-    elif max_price:      # each goal has its own budget: land and lets cost more
-        max_price = max(max_price, mode_max_price(_config(), mode, _config().get("max_price") or max_price))
-    direction = args.get("dir", "desc")
-    page = max(1, _num(args.get("page"), 1, int))
+    elif budget:
+        # Each goal has its own budget (land and lets cost more): what this tab
+        # may show. A browsing maximum narrows it; empty or larger, the budget holds.
+        max_price = min(max_price, budget) if max_price else budget
     per_page = min(1000, max(1, _num(args.get("per_page"), 50, int)))
 
     from datetime import timedelta
@@ -507,6 +552,8 @@ def api_listings():
                    and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
         if climate_grade or climate_exact:
             matched = [it for it in matched if _climate_matches(it, climate_grade, climate_exact)]
+        if sale_method:
+            matched = [it for it in matched if _sale_method(it) == sale_method]
         # Research selection runs before the request's score cutoff: an
         # extreme-discount lead under min_score still reaches investigation.
         # Other rows keep the cutoff the page asked for.
@@ -523,16 +570,23 @@ def api_listings():
         else:
             items = [it for it in loaded if not it["hidden_reason"]]
 
-        # Only the best N (Settings → Show at most). On the two home goals an
-        # unseen home does not take a place ahead of one whose photos were read.
+        # Only N (Settings → Show at most), after every filter. By score: the
+        # best N, and on the two home goals an unseen home does not take a place
+        # ahead of one whose photos were read. By another column: that order
+        # over every match, then the cap, so "cheapest" is the cheapest match.
+        # Ties keep the score order (a stable sort): pages do not overlap.
         found = len(items)
         cap = max(1, _num(_config().get("max_listings"), 100, int))
         from tops import place_unseen_homes_after
         ranked = sorted(items, key=SORT_KEYS["score"], reverse=True)
         ranked = place_unseen_homes_after(ranked, mode)
-        items = ranked[:cap]
-        items.sort(key=SORT_KEYS.get(sort, SORT_KEYS["score"]), reverse=(direction == "desc"))
+        if sort == "score":
+            items = ranked[:cap]
+            items.sort(key=SORT_KEYS["score"], reverse=(direction == "desc"))
+        else:
+            items = sorted(ranked, key=SORT_KEYS[sort], reverse=(direction == "desc"))[:cap]
         total = len(items)
+        page = min(page, max(1, math.ceil(total / per_page)))    # past the last page: the last one
         page_items = [_with_fees(it) for it in _full_rows(db, items[(page - 1) * per_page:page * per_page], mode)]
         visible = [it for it in loaded if not it["hidden_reason"]]
         health = source_health(db, _registry())
@@ -548,6 +602,11 @@ def api_listings():
         "cap": cap,
         "page": page,
         "per_page": per_page,
+        # The same counts by name: matched every filter, left after the cap,
+        # and the page actually shown (a page past the end shows the last).
+        "matched_total": found,
+        "display_total": total,
+        "effective_page": page,
         "stats": {
             "total": total,
             "properties": sum(1 for it in visible if it["category"] == "imoveis"),

@@ -171,6 +171,20 @@ table.list tr.dim { background: rgba(148, 163, 184, .04); }
 .filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; }
 .filters .field { min-width: 120px; }
 .filters .field.wide { min-width: 220px; }
+.filters .filter-hint, .filters .field-error { flex-basis: 100%; margin: 0; }
+.field-error { color: var(--red-text); }
+.filters input[aria-invalid="true"] { border-color: var(--red); }
+.filters input:disabled { opacity: .6; cursor: not-allowed; }
+.active-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -6px 0 14px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--text);
+}
+.chip-remove {
+  min-width: 24px; min-height: 24px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.chip-remove:hover { background: var(--card-2); color: var(--text); }
 .more-filters {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
   border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; min-width: 0;
