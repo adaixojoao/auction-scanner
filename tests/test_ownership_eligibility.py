@@ -8,10 +8,16 @@ from tests.test_evaluator import FULL_EVIDENCE
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
+# The shared fixture's availability window is for its own NOW; give this NOW one.
+AVAILABILITY_TIMES = {
+    "sale_availability_checked_at": "2029-12-31T23:00:00+00:00",
+    "sale_availability_expires_at": "2030-01-01T23:00:00+00:00",
+}
 
 
 def decision(value="full", *, omit=False, title_status="clear"):
     evidence = copy.deepcopy(FULL_EVIDENCE)
+    evidence.update(AVAILABILITY_TIMES)
     evidence.update(
         ownership_type=value,
         title_status=title_status,
@@ -101,6 +107,7 @@ def test_full_ownership_does_not_clear_unresolved_or_defective_title(title_statu
 
 def test_evaluation_does_not_mutate_ownership_input():
     evidence = copy.deepcopy(FULL_EVIDENCE)
+    evidence.update(AVAILABILITY_TIMES)
     evidence["ownership_type"] = {"type": "full"}
     before = copy.deepcopy(evidence)
     first = evaluate(evidence, now=NOW)

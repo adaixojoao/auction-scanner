@@ -2008,6 +2008,8 @@ def _shadow_evidence(item: dict) -> dict:
         "floor_source": item.get("area_source"),
         "climate": item.get("climate"),
         "sale_availability": item.get("sale_availability"),
+        "sale_availability_checked_at": item.get("sale_availability_checked_at"),
+        "sale_availability_expires_at": item.get("sale_availability_expires_at"),
         "photo_check": _stored_photo_check(item),
         "apparent_discount_pct": item.get("invest_discount_pct"),
         # Only a DB clearance with matching evidence_rev_sum counts (Task 7).
