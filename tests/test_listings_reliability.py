@@ -34,7 +34,7 @@ def test_loading_failure_and_update_regions(listings):
     assert 'id="listings-refresh">Refresh results</button>' in listings
     # The results, not the whole page, are busy; the first paint says it is loading.
     assert '<div id="listings-results" aria-busy="true">' in listings
-    assert '<tbody id="rows"><tr><td colspan="9"><div class="empty"><p>Loading listings…</p>' in listings
+    assert '<tbody id="rows"><tr><td colspan="7"><div class="empty"><p>Loading listings…</p>' in listings
     assert "Could not update listings. Previous results are still shown." in listings
     assert "This is not an empty result." in listings
 
@@ -110,7 +110,8 @@ def test_listings_say_when_nothing_was_ever_scanned(client, add):
 
 def test_the_results_table_scrolls_on_its_own_when_narrow(client, listings):
     # At 200% zoom (a 640px-wide view) the page must not scroll sideways.
-    assert re.search(r'<div class="table-scroll">\s*<table class="list">', listings)
+    assert re.search(r'<div class="table-scroll" role="region" aria-label="Listings results" tabindex="0">\s*'
+                     r'<table class="list">', listings)
     css = _static(client, "app.css")
     narrow = css.split("@media (max-width: 900px) {", 1)[1].split("}\n}", 1)[0]
     assert ".table-scroll { overflow-x: auto; position: relative; }" in narrow

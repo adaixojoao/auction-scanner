@@ -350,10 +350,11 @@ def test_url_history_reset_tabs_and_sorting(app):
     app.page.select_option("#f-kind", "home")
     app.idle()
     assert "kind=home" in app.page.url
-    app.page.click('th[data-sort="price"] .sort-button')
+    # Listed price has no column header any more (Batch 4): the Sort by control reaches it.
+    app.page.select_option("#sort-by", "price")
     app.idle()
     assert "sort=price" in app.page.url
-    assert app.page.get_attribute('th[data-sort="price"]', "aria-sort") in ("ascending", "descending")
+    assert app.page.get_attribute('th[data-sort="score"]', "aria-sort") == "none"
     app.page.go_back()
     app.idle()
     assert "sort=price" not in app.page.url and app.page.input_value("#f-kind") == "home"

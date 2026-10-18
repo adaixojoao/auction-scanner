@@ -94,6 +94,11 @@ def test_a_home_with_a_stated_floor_gets_an_estimated_range_at_its_basis():
     assert not any(m.startswith("Repairs not priced") for m in a["missing"])
 
 
+def test_the_estimate_basis_uses_the_price_cells_words():
+    s = presentation.summary(row(price=40_000, area_m2=90, tipo="moradia"), {}, {})
+    assert s["price"]["label"] == "Base value" and s["all_in"]["basis_label"] == "Estimate at the base value"
+
+
 def test_the_estimate_is_the_one_costs_already_computes():
     import costs
     it = row(price=40_000, area_m2=90, tipo="moradia")

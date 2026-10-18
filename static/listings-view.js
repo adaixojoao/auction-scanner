@@ -1,6 +1,6 @@
 // listings-view.js — the Listings page: the view (goal, filters, sort, page) in the URL and remembered, and the controls.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-details.js, listings-notes.js, listings.js).
+// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings.js).
 
 const KIND_LABEL = {home: "home", urban_plot: "urban plot", rural_plot: "rural plot", other: "other"};
 const PER_PAGE = 50;
@@ -13,6 +13,15 @@ const MODE_NOTE = {
   invest: "Homes to make money on: far below the local price all-in (taxes, fees and the work), a net rental yield, by the beach, forced or bank sales.",
   land: "Plots as an investment: cheap per hectare against what land goes for there, big enough, reachable, water on it — with the forestry upside on top.",
   forest: "Land for a forestry project: the cheaper the hectare, the better, and the sooner the sale can close. 10 ha is the project, 5 ha can be a first plot. Portugal first — you can visit it. No deadline of this year.",
+};
+
+// One short line per goal: the opening words of its note above, which stays in full under "How this ranking works".
+const MODE_INTRO = {
+  both: "Homes that can be lived in and priced as an investment.",
+  home: "A home to live in — not a plot.",
+  invest: "Homes to make money on.",
+  land: "Plots as an investment.",
+  forest: "Land for a forestry project.",
 };
 
 // ── The view: goal, filters, sort and page, in the URL and remembered ──
@@ -150,6 +159,7 @@ function showMode() {
     button.tabIndex = selected ? 0 : -1;
     if (selected) $("goal-results").setAttribute("aria-labelledby", button.id);
   });
+  $("mode-intro").textContent = MODE_INTRO[view.mode];
   $("mode-note").textContent = MODE_NOTE[view.mode];
 }
 

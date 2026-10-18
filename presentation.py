@@ -98,7 +98,12 @@ def price(item: dict) -> dict:
     return {"amount": pay, "kind": kind, "label": label, "note": note, "secondary": secondary}
 
 
-def all_in(item: dict) -> dict:
+# The estimate's basis in the price cell's words (a predicted close keeps costs' own label).
+_BASIS = {"current_bid": "the current bid", "minimum": "the minimum offer", "base": "the base value",
+          "asking": "the asking price"}
+
+
+def all_in(item: dict, price_kind: str | None = None) -> dict:
     """What the estimate cell says: costs.selected_planning, labelled as an estimate.
 
     {"low", "high", "known_subtotal", "repairs_priced", "basis_label", "missing", "excludes",
@@ -137,7 +142,8 @@ def all_in(item: dict) -> dict:
     priced = low is not None and high is not None and high >= low
     return {"low": round(low) if priced else None, "high": round(high) if priced else None,
             "known_subtotal": round(est["total"]) if _amount(est.get("total")) is not None else None,
-            "repairs_priced": priced, "basis_label": f"Estimate at {est.get('basis') or acq['label']}",
+            "repairs_priced": priced,
+            "basis_label": f"Estimate at {(acq['kind'] != 'predicted' and _BASIS.get(price_kind)) or est.get('basis') or acq['label']}",
             "missing": missing, "excludes": excludes, "headline": ""}
 
 
@@ -235,5 +241,6 @@ def thumbnail(item: dict) -> str | None:
 
 
 def summary(item: dict, check_rows: dict | None, cfg: dict | None, now: datetime | None = None) -> dict:
-    return {"price": price(item), "all_in": all_in(item), "checks": checks(item, check_rows, cfg),
+    basis = price(item)
+    return {"price": basis, "all_in": all_in(item, basis["kind"]), "checks": checks(item, check_rows, cfg),
             "deadline": deadline(item, now), "thumbnail": thumbnail(item)}

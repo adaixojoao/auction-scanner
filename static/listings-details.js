@@ -1,6 +1,6 @@
 // listings-details.js — the Listings page: rendering rows and research cards, details panels and their freshness, and keeping your place across a refresh.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-details.js, listings-notes.js, listings.js).
+// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings.js).
 
 // ── Keeping your place across a refresh (by listing ID, never by DOM ID) ──
 // One registry for both surfaces: the results table and the research cards.
@@ -105,24 +105,31 @@ function renderCount(displayed, matched, cap, neverScanned = false) {
 }
 
 function renderStats(s) {
+  // Three counts, each saying what it counts; source problems and the rest fold away.
+  const n = v => Number(v || 0).toLocaleString("en-GB");
+  const capped = lastFound > lastCap;
   const hidden = Object.entries(s.hidden || {}).map(([k, v]) => `${v} ${k}`).join(", ");
+  const failing = Number(s.sources_failing || 0), quiet = Number(s.sources_quiet || 0);
   $("stats").innerHTML = `
-    <div class="stat"><div class="label">${lastFound > lastCap ? "Showing the best" : "Matching"}</div><div class="value" title="${AS.esc(countText())}">${s.total}${lastFound > lastCap ? `<span class="small muted"> of ${lastFound}</span>` : ""}</div></div>
-    <div class="stat"><div class="label">New (24 h)</div><div class="value ok">${s.new_today}</div></div>
-    <div class="stat"><div class="label">On Offers</div><div class="value">${s.shortlisted}</div></div>
-    <div class="stat"><div class="label">Sources failing</div><div class="value ${s.sources_failing ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_failing}</a></div></div>
-    <div class="stat"><div class="label">No good read</div><div class="value ${s.sources_quiet ? "bad" : "ok"}"><a href="/sources" style="color:inherit">${s.sources_quiet || 0}</a></div></div>
-    ${hidden ? `<div class="stat"><div class="label">Hidden</div><div class="small muted" style="margin-top:6px">${AS.esc(hidden)}</div></div>` : ""}
-    ${s.unchecked ? `<div class="stat"><div class="label">Not checked</div><div class="value">${s.unchecked.toLocaleString("en-GB")}</div><div class="small muted">over €${Math.round(s.check_max_price).toLocaleString("en-GB")}</div></div>` : ""}`;
+    <div class="stat"><div class="label">Matching</div><div class="value">${n(lastFound)}</div>
+      <div class="small muted">${capped ? `Display limit: the best ${n(lastCap)} are shown` : "All of them are shown"}</div></div>
+    <div class="stat"><div class="label">New (24 h)</div><div class="value ok">${n(s.new_today)}</div>
+      <div class="small muted">Among open matching listings</div></div>
+    <div class="stat"><div class="label">On Offers</div><div class="value">${n(s.shortlisted)}</div>
+      <div class="small muted">Among open matching listings, not your whole shortlist</div></div>`;
+  $("stats-more").innerHTML = `
+    <details class="source-health">
+      <summary><span class="${failing || quiet ? "bad" : "ok"}">Source health: ${failing ? `${n(failing)} failing` : "none failing"}${quiet ? `, ${n(quiet)} with no good read` : ""}</span></summary>
+      <p class="small">${n(failing)} source${failing === 1 ? "" : "s"} failing and ${n(quiet)} with no good read lately, across all sources (not only these filters). <a href="/sources">See Sources</a>.</p>
+    </details>
+    ${hidden ? `<p class="small muted">Hidden among these matches: ${AS.esc(hidden)}.</p>` : ""}
+    ${s.unchecked ? `<p class="small muted">Not checked: ${n(s.unchecked)} listings over €${Math.round(s.check_max_price).toLocaleString("en-GB")} are not looked at in detail.</p>` : ""}`;
 }
 
 function candidateCard(it) {
   const plan = it.planning || {};
-  const acq = plan.acquisition || {};
+  const p = it.presentation || {};
   const work = plan.renovation;
-  const range = plan.all_in
-    ? `${AS.money(plan.all_in.low)}–${AS.money(plan.all_in.high)}`
-    : "all-in range not established";
   const point = plan.renovation_point === "middle" ? "middle of the repair range"
     : plan.renovation_point === "low" ? "low end of the repair range" : "repairs not priced";
   const link = it.url
@@ -134,14 +141,18 @@ function candidateCard(it) {
     <h3>${link}</h3>
     <p class="small">Living ${it.live_score == null ? "—" : AS.esc(String(it.live_score))}
       · Investment ${it.invest_score == null ? "—" : AS.esc(String(it.invest_score))}</p>
-    <p class="small">${acq.kind === "unusable"
-      ? `${AS.esc(acq.label || "Not a purchase price")}${acq.reference_amount ? ` Listed figure ${AS.money(acq.reference_amount)}.` : ""}`
-      : `${AS.esc(acq.label || "Price not selected")}: ${AS.money(acq.amount)}`}</p>
-    <p class="small">Planning all-in ${range}. Affordability uses the ${AS.esc(point)}${work ? ` (${work.low == null ? "low end not priced" : work.low ? AS.money(work.low) : "€0"}–${work.high == null ? "high end not priced" : AS.money(work.high)})` : ""}.</p>
-    ${plan.total_required != null ? `<p class="small">Required total ${AS.money(plan.total_required)}: planning ${AS.money(plan.planning_amount)} + reserve ${AS.money(plan.reserve || 0)}.</p>` : ""}
+    <div class="research-figures">
+      <div><div class="small muted">Price basis</div>${priceSummaryHtml(p.price)}</div>
+      <div><div class="small muted">Estimated all-in</div>${allInSummaryHtml(p.all_in)}</div>
+    </div>
+    <p class="small">Affordability uses the ${AS.esc(point)}${work ? ` (${work.low == null ? "low end not priced" : work.low ? AS.money(work.low) : "€0"}–${work.high == null ? "high end not priced" : AS.money(work.high)})` : ""}.</p>
+    ${plan.total_required != null ? `<p class="small">Required total with the reserve ${AS.money(plan.total_required)}: planning ${AS.money(plan.planning_amount)} + reserve ${AS.money(plan.reserve || 0)}. A policy total, not the estimated range.</p>` : ""}
     <p class="small">${AS.esc(plan.note || "")}</p>
     <p class="small">${AS.esc(it.valuation || "")}</p>
-    <ul class="small">${(it.gaps || []).map(g => `<li>${AS.esc(g)}</li>`).join("")}</ul>
+    <div class="small muted">Checks</div>${checksSummaryHtml(p.checks)}
+    <div class="small muted">Deadline</div>${deadlineSummaryHtml(p.deadline)}
+    <details class="small result-more"><summary>Evidence gaps (${(it.gaps || []).length})</summary>
+      <ul class="small">${(it.gaps || []).map(g => `<li>${AS.esc(g)}</li>`).join("")}</ul></details>
     <p>
       <button class="btn btn-sm" aria-label="Details: ${AS.esc(it.title || "this listing")}" aria-expanded="false" data-id="${id}" data-role="details" onclick="openCandidate(this.dataset.id, this)">Details</button>
       <button class="btn btn-sm" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${AS.esc(it.title || "this listing")}" aria-pressed="${starred}" data-id="${id}" data-role="star" data-status-action onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "On Offers" : "Shortlist"}</button>
@@ -149,17 +160,33 @@ function candidateCard(it) {
   </article>`;
 }
 
+// Open unless you closed it; remembered like the view (a browsing preference only).
+const RESEARCH_OPEN_KEY = "auction-scanner:listings-research-open:v1";
+let researchOpen = true;
+try { researchOpen = localStorage.getItem(RESEARCH_OPEN_KEY) !== "0"; } catch (e) { /* private window */ }
+
 function renderResearch(research) {
   const box = $("research-candidates");
   if (view.mode !== "both" || !research) { box.hidden = true; box.innerHTML = ""; return; }
-  [...(research.valued || []), ...(research.unvalued || [])].forEach(it => shownItems.set(it.id, it));
+  const all = [...(research.valued || []), ...(research.unvalued || [])];
+  all.forEach(it => shownItems.set(it.id, it));
+  const distinct = new Set(all.map(it => it.id)).size;
   const valued = (research.valued || []).map(candidateCard).join("");
   const unvalued = (research.unvalued || []).map(candidateCard).join("");
   box.hidden = false;
-  box.innerHTML = `<h2>${AS.esc(research.heading)}</h2>
-    <p class="small muted">Not verified as ready to buy. ${AS.esc(research.duplicates || "")}</p>
+  // Collapsing only hides the cards: open panels and unsaved notes stay in the page.
+  box.innerHTML = `<details id="research-details" ${researchOpen ? "open" : ""}>
+    <summary><h2>${AS.esc(research.heading)} <span class="small muted">(${distinct} candidate${distinct === 1 ? "" : "s"})</span></h2>
+      <span class="small warn research-warning">Not verified as ready to buy.</span></summary>
+    <p class="small muted">These can also appear in the table below; they are not added to its count. ${AS.esc(research.duplicates || "")}</p>
+    <h3 class="small">Valued — a local median is used as a planning figure</h3>
     ${valued ? `<div class="research-grid">${valued}</div>` : `<p class="small muted">No priced research candidate in this view.</p>`}
-    ${unvalued ? `<h3 class="small">Unvalued — investment value not established</h3><div class="research-grid">${unvalued}</div>` : ""}`;
+    ${unvalued ? `<h3 class="small">Unvalued — investment value not established</h3><div class="research-grid">${unvalued}</div>` : ""}
+  </details>`;
+  $("research-details").addEventListener("toggle", e => {
+    researchOpen = e.target.open;
+    try { localStorage.setItem(RESEARCH_OPEN_KEY, researchOpen ? "1" : "0"); } catch (err) { /* not kept */ }
+  });
 }
 
 // Detail panels get DOM IDs from a counter, never from scraped listing IDs.
@@ -274,7 +301,7 @@ function renderRows(items, hiddenView, neverScanned = false) {
   items.forEach(it => shownItems.set(it.id, it));
   if (!items.length) {
     const scan = hiddenView ? null : scanSuggestion();
-    $("rows").innerHTML = `<tr><td colspan="9"><div class="empty">
+    $("rows").innerHTML = `<tr><td colspan="${TABLE_COLUMNS}"><div class="empty">
       <h3>${neverScanned ? "No scan data yet" : "No listings here"}</h3>
       <p>${hiddenView ? "Nothing is hidden with these filters."
         : neverScanned ? "No scan has run yet, so there is nothing to show."
@@ -287,12 +314,13 @@ function renderRows(items, hiddenView, neverScanned = false) {
   }
   $("rows").innerHTML = items.map(it => {
     const loc = [it.concelho, it.district].filter(Boolean).join(", ");
+    const p = it.presentation || {};
     const badges = (it.kind ? `<span class="badge b-muted">${AS.esc(KIND_LABEL[it.kind])}</span>` : "")
       + (it.is_recent ? '<span class="badge b-new">NEW</span>' : "")
-      + AS.climateBadge(it.climate_grade)
-      + (it.price_drop_pct ? `<span class="badge b-drop">↓${Math.round(it.price_drop_pct)}%</span>` : "")
       + (it.offer_outcome ? `<span class="badge b-offer">offer ${AS.esc(it.offer_outcome)}</span>` : "")
       + (it.hidden_reason ? `<span class="badge b-hidden" title="${AS.esc(it.hidden_reason)}">${AS.esc(it.hidden_category)}</span>` : "");
+    const signals = AS.climateBadge(it.climate_grade)
+      + (it.price_drop_pct ? `<span class="badge b-drop">↓${Math.round(it.price_drop_pct)}%</span>` : "");
     const starred = it.status === "shortlisted";
     // IDs go through data-id, never into the onclick source.
     const id = AS.esc(it.id);
@@ -306,14 +334,16 @@ function renderRows(items, hiddenView, neverScanned = false) {
       ? `<a href="#" aria-expanded="false" data-id="${id}" data-role="title" onclick="toggleDetails(this); return false">${AS.esc(it.title || "?")}</a>`
       : AS.link(it.url, it.title || "?");
     return `<tr class="${it.hidden_reason ? "dim" : ""}" data-id="${id}">
-      <td>${AS.scoreBadge(it.score, it.rank, it.excellent)}</td>
-      <td>${AS.flag(it.country)}</td>
-      <td class="t-title">${titleLink}${badges}${view.mode === "home" ? AS.wishesHtml(it.wishes, true) : ""}<div class="small faint"><span class="src">${AS.esc(it.source)}</span></div></td>
-      <td class="nowrap"><b class="money">${AS.money(it.price)}</b>${it.price_unusable ? `<div class="small faint">Not a purchase price</div>` : ""}${it.with_tax ? `<div class="small faint" title="${AS.esc(it.tax_note || "")}">~${AS.money(it.with_tax)} with tax</div>` : ""}</td>
-      <td class="nowrap muted money">${it.current_bid ? AS.money(it.current_bid) : "–"}</td>
-      <td class="small muted">${AS.esc(loc)}</td>
-      <td class="nowrap small">${AS.esc(it.date_end ? it.date_end.slice(0, 10) : "–")}</td>
-      <td class="t-why">${AS.esc((it.reasons || []).join(", "))}</td>
+      <td class="t-property"><div class="result-property">${thumbnailHtml(p.thumbnail, it.title)}
+        <div><div class="result-title">${titleLink}</div>
+          <div class="small muted">${AS.flag(it.country)} ${AS.esc(loc)}</div>
+          <div class="small"><span class="src">${AS.esc(it.source)}</span>${badges}</div>
+          ${view.mode === "home" ? AS.wishesHtml(it.wishes, true) : ""}</div></div></td>
+      <td class="t-price">${priceSummaryHtml(p.price)}</td>
+      <td class="t-allin">${allInSummaryHtml(p.all_in)}</td>
+      <td class="t-why">${AS.scoreBadge(it.score, it.rank, it.excellent)}${signals}${reasonsSummaryHtml(it.reasons)}</td>
+      <td class="t-checks">${checksSummaryHtml(p.checks)}</td>
+      <td class="t-deadline">${deadlineSummaryHtml(p.deadline)}</td>
       <td class="nowrap"><button class="icon-btn" aria-label="Details: ${propertyLabel}" aria-expanded="false" title="Details" data-id="${id}" data-role="details" onclick="toggleDetails(this)">ⓘ</button>${actions}</td>
     </tr>`;
   }).join("");
@@ -342,7 +372,7 @@ function openRowDetails(row, id) {
   tr.className = "details-row";
   tr.id = nextDetailsId();
   tr.dataset.for = id;
-  tr.innerHTML = `<td colspan="9"><div class="details-body"></div></td>`;
+  tr.innerHTML = `<td colspan="${TABLE_COLUMNS}"><div class="details-body"></div></td>`;
   row.after(tr);
   setDetailsTriggers(row, tr.id);
   fillPanel(tr, id);

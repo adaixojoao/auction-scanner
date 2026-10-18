@@ -64,12 +64,16 @@ def test_goal_tabs_control_one_labelled_panel(listings):
 
 
 def test_sorting_uses_native_header_buttons_and_updates_state(listings):
-    for key, label in (("score", "Score"), ("country", "Country"), ("title", "Title"), ("price", "Asking price"),
-                       ("current_bid", "Current bid"), ("date_end", "End date")):
+    # Batch 4: three columns sort from their headers; every sort, those three
+    # included, is in the labelled Sort by control.
+    for key, label in (("title", "Title"), ("score", "Score"), ("date_end", "Deadline")):
         header = re.search(rf'<th scope="col" class="sortable" data-sort="{key}" aria-sort="(\w+)">'
                            rf'<button type="button" class="sort-button" data-sort="{key}" data-label="{label}">',
                            listings)
         assert header, key
+    sort_by = listings.split('<select id="sort-by"', 1)[1].split("</select>", 1)[0]
+    for key in ("score", "country", "title", "price", "current_bid", "date_end"):
+        assert f'<option value="{key}">' in sort_by, key
     assert listings.count('aria-sort="descending"') == 1           # score, the default
     assert '<span class="sr-only">Actions</span>' in listings
     assert 'th.sortable").forEach' not in listings                 # no second, header-level handler
