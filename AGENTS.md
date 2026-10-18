@@ -136,7 +136,10 @@ congruent — one way to do each thing:
   "check with…"): do not state rules the code cannot confirm.
 - **One layout:** every page extends `templates/base.html` and uses
   `static/app.css` / `static/app.js`. No inline page-specific design systems,
-  no second nav. UI text is English; letters are in the sale's language.
+  no second nav. Listings' own scripts are plain files loaded in order
+  (`static/listings-view.js`, `-details.js`, `-notes.js`, `listings.js`; no
+  bundler, no second namespace beside `AS`); the template passes only public
+  data through a small `tojson` bootstrap. UI text is English; letters are in the sale's language.
 - **One place for user choices:** shortlist/dismiss in `listing_status`,
   offers in `carta_log`, settings in `config.json` via the Settings page.
 

@@ -108,5 +108,6 @@ def test_a_research_failure_does_not_break_the_panel(client, add, monkeypatch):
 
 
 def test_listing_page_renders_the_research_section(client):
-    html = client.get("/").get_data(as_text=True)
+    from tests.listings_page import listings_source
+    html = listings_source(client)
     assert "function researchHtml" in html and "not a score or a bid" in html

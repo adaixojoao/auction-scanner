@@ -70,6 +70,7 @@ def test_research_candidates_keep_unvalued_separate():
 
 
 def test_listings_page_names_the_research_group(db, add, monkeypatch):
+    from tests.listings_page import listings_source
     monkeypatch.setattr(scoring, "local_price", lambda item: (1200.0, "a city series"))
     add("eleiloes", "lead", title="Moradia T3", price=22000, area_m2=90,
         description="moradia em bom estado", url="https://example.test/lead",
@@ -79,7 +80,7 @@ def test_listings_page_names_the_research_group(db, add, monkeypatch):
     body = dashboard.app.test_client().get("/api/listings?mode=both&min_score=0").get_json()
     assert body["research"]["heading"] == "Research candidates — diligence incomplete"
     assert len(body["research"]["valued"]) <= 3
-    page = dashboard.app.test_client().get("/").get_data(as_text=True)
+    page = listings_source(dashboard.app.test_client())
     assert "research-candidates" in page
     assert "Safe to buy" not in page
     assert "Not safe to buy" not in page

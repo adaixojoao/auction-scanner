@@ -6,6 +6,7 @@ import re
 import pytest
 
 import dashboard
+from tests.listings_page import listings_source
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ def client(db):
 
 @pytest.fixture
 def listings(client):
-    return client.get("/").get_data(as_text=True)
+    return listings_source(client)
 
 
 def _static(client, name):
