@@ -663,6 +663,8 @@ def api_listing_detail():
         contact_log = [dict(r) for r in db.execute(
             "SELECT method, sent_date, outcome, notes FROM carta_log WHERE listing_id=? ORDER BY created_at DESC",
             (listing_id,)).fetchall()]
+        from db import listing_status_history
+        status_history = listing_status_history(db, listing_id)
     finally:
         db.close()
     return jsonify({
@@ -689,6 +691,7 @@ def api_listing_detail():
         "outline": listing_info.outline_panel(it),
         "user_note": user_note,
         "contact_log": contact_log,
+        "status_history": status_history,
         "research": research,
     })
 
@@ -1951,6 +1954,7 @@ EDITABLE = {
     "check_max_price": None,      # the work spent on a listing (common.py)
     "light_checks_from": None,
     "max_listings": None,
+    "availability_valid_hours": None,   # how long an open-page link check counts (confirm.py)
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
                 "rural_max_eur_m2", "weights"),
     "proponente": PROPONENTE_KEYS,
@@ -2049,6 +2053,11 @@ def api_settings_save():
             pass
         else:
             return jsonify({"error": "weights: one dial per goal, each 0 to 2"}), 400
+    if "availability_valid_hours" in changes:
+        hours = changes["availability_valid_hours"]
+        if (not isinstance(hours, (int, float)) or isinstance(hours, bool)
+                or not math.isfinite(hours) or hours < 0):
+            return jsonify({"error": "availability_valid_hours must be a number of hours ≥ 0"}), 400
     if not isinstance((changes.get("climate") or {}).get("bid_guardrail", False), bool):
         return jsonify({"error": "climate.bid_guardrail must be true or false"}), 400
     blocking = (changes.get("checklist") or {}).get("blocking")

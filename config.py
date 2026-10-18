@@ -33,6 +33,10 @@ DEFAULTS = {
     "cash_on_hand": 0,
     "max_bid": 100000,
     "max_listings": 100,          # Listings shows at most this many: the best first
+    # How long a link check that found the sale open counts as current
+    # availability evidence for the evaluator (confirm.py). 0 means not set:
+    # an open page is then recorded but availability stays unresolved.
+    "availability_valid_hours": 0,
 
     "filters": {
         "countries": ["PT"],      # Portugal focus; [] for all EU

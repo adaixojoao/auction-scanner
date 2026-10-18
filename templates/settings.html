@@ -58,6 +58,8 @@
       <p class="help">Above this, a listing is kept only so the scanner knows it: never scored, checked or shown, and no budget goes higher. A ☆ one, or one you made an offer on, stays. 0 means no limit.</p></div>
     <div class="field"><label>Light checks first from (EUR)</label><input type="number" id="light_checks_from" min="0" step="5000">
       <p class="help">From this price, the climate maps and the photos are read for Live and invest only when the price, taxes and fees fit the cash you can lose. 0 means every listing gets every check.</p></div>
+    <div class="field"><label for="availability_valid_hours">A link check counts for (hours)</label><input type="number" id="availability_valid_hours" min="0" step="1">
+      <p class="help">Each scan opens the links at the top of each goal. When a page still shows the sale open, that counts as current availability for this many hours. 0 means not set: the check is recorded, but availability stays unknown.</p></div>
     <div class="field"><label>Show at most (listings, best first)</label><input type="number" id="max_listings" min="10" max="1000" step="10"></div>
     <div class="field"><label>Hide listings scoring below</label><input type="number" id="min_score" min="0" max="100" step="5">
       <p class="help">0 is an ordinary listing and 100 is the best, so the ones worth a look use the whole scale.</p></div>
@@ -308,7 +310,7 @@ async function load() {
   setv("cash_on_hand", c.cash_on_hand ?? 0);
   setv("max_price", c.max_price); setv("invest_max_price", c.invest_max_price ?? 100000);
   setv("land_max_price", c.land_max_price ?? 100000);
-  setv("check_max_price", c.check_max_price ?? 100000); setv("light_checks_from", c.light_checks_from ?? 50000); setv("max_listings", c.max_listings ?? 100); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
+  setv("check_max_price", c.check_max_price ?? 100000); setv("light_checks_from", c.light_checks_from ?? 50000); setv("max_listings", c.max_listings ?? 100); setv("availability_valid_hours", c.availability_valid_hours ?? 0); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
   setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
   WEIGHT_KEYS.forEach(([mode, name]) => { const v = Math.round(100 * weightNow(f.weights, mode, name)); $("w_" + mode + "_" + name).value = v; $("wv_" + mode + "_" + name).textContent = v + "%"; });
   document.querySelectorAll("input[name=country]").forEach(cb => cb.checked = (f.countries || []).includes(cb.value));
@@ -435,6 +437,7 @@ async function save() {
     check_max_price: num("check_max_price") || 0,
     light_checks_from: num("light_checks_from") || 0,
     max_listings: num("max_listings"),
+    availability_valid_hours: num("availability_valid_hours") || 0,
     filters: {
       min_score: num("min_score") || 0, min_area_m2: num("min_area_m2") || 0,
       rural_min_m2: num("rural_min_m2"), rural_max_eur_m2: num("rural_max_eur_m2"),

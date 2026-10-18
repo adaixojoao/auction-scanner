@@ -91,6 +91,7 @@
 </div>
 <div id="listings-results" aria-busy="true">
 <p class="small" id="result-count" tabindex="-1"></p>
+<div class="table-scroll">
 <table class="list">
   <thead><tr>
     <th scope="col" class="sortable" data-sort="score" aria-sort="descending"><button type="button" class="sort-button" data-sort="score" data-label="Score">Score <span class="sort-indicator" aria-hidden="true">↓</span></button></th>
@@ -105,6 +106,7 @@
   </tr></thead>
   <tbody id="rows"><tr><td colspan="9"><div class="empty"><p>Loading listings…</p></div></td></tr></tbody>
 </table>
+</div>
 </div>
 <div class="pagination" id="pagination"></div>
 </section>
@@ -1037,6 +1039,7 @@ function detailsHtml(d) {
       ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
       <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>
       ${contactLogHtml(d)}
+      ${statusHistoryHtml(d)}
       ${noteHtml(d)}
     </div></div>`;
 }
@@ -1053,6 +1056,23 @@ function contactLogHtml(d) {
   return `<div class="d-contact">
     <b class="small">Contact history</b>
     <table class="contact-table small"><thead><tr><th>Date</th><th>How</th><th>Outcome</th><th>Notes</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+  </div>`;
+}
+
+// Every shortlist/dismiss change, oldest first; a dismissal stays here after Undo.
+function statusHistoryHtml(d) {
+  const log = d.status_history || [];
+  if (!log.length) return "";
+  const label = s => s === "shortlisted" ? "On Offers" : s === "dismissed" ? "Dismissed" : "Open again";
+  const rows = log.map(h => `<tr>
+    <td>${AS.esc((h.changed_at || "").slice(0, 16).replace("T", " "))}</td>
+    <td>${label(h.status)}</td>
+    <td class="small">${AS.esc(h.reason || "")}</td>
+  </tr>`).join("");
+  return `<div class="d-contact">
+    <b class="small">Status history</b>
+    <table class="contact-table small"><thead><tr><th>When (UTC)</th><th>Status</th><th>Reason</th></tr></thead>
     <tbody>${rows}</tbody></table>
   </div>`;
 }
@@ -1272,11 +1292,11 @@ async function setStatus(id, status) {
 }
 
 // Undo puts back the status it had (On Offers, or none) through the same API.
-// The dismissal reason is not kept: the status record holds only the latest.
+// The dismissal and its reason stay in the listing's status history.
 let undoTimer = null;
 function offerUndo(id, title, previous) {
   const box = $("status-undo"), button = $("status-undo-button");
-  $("status-undo-text").textContent = `Dismissed “${title}”. Undo puts it back ${previous === "shortlisted" ? "on Offers" : "as an open listing"}; the dismissal reason is not kept.`;
+  $("status-undo-text").textContent = `Dismissed “${title}”. Undo puts it back ${previous === "shortlisted" ? "on Offers" : "as an open listing"}; the dismissal and its reason stay in its history.`;
   box.hidden = false;
   clearTimeout(undoTimer);
   undoTimer = setTimeout(() => { box.hidden = true; }, 15000);

@@ -112,11 +112,11 @@ save at a time per listing; beside each note it says *Unsaved changes*,
 the latest text. A draft is kept in memory while you change filters or the
 row leaves the view, never in the address or the browser's storage; leaving
 for another page while a note is unsaved asks *Save and leave*, *Stay* or
-*Leave without saving* (the browser may also warn on closing; the desktop
-window's close button may not). Starring, dismissing and restoring keep your
+*Leave without saving*; closing the tab or the desktop window (a Chrome or
+Edge app window) while a note is unsaved asks first too. Starring, dismissing and restoring keep your
 place, open panels and focus; after a dismissal, *Undo dismissal* puts the
-listing back as it was (on Offers or open), and the dismissal reason is not
-kept. When a scan finishes, a quiet page refreshes in place; while you are
+listing back as it was (on Offers or open); the dismissal and its reason stay
+in the listing's *Status history* in the details panel. When a scan finishes, a quiet page refreshes in place; while you are
 typing or a note is unsaved it shows *New results are available* with
 *Refresh results* instead. With no results, the scan button matches what is
 selected (*Scan Spain*, *Scan citius*, *Scan all countries*) and says what it
@@ -267,6 +267,14 @@ were left that way, for example *1,234 over €100,000, not checked*, so the
 cutoff can be raised in Settings if it removes too much. From *Light checks
 first from* (€50,000) the climate maps and the photos are read for Live and
 invest only when the price, taxes and fees fit the cash you can lose.
+
+**Is it still for sale?** Each scan opens the links of the top 20 of each goal.
+A page that is gone, sold or reserved takes the listing off the list; one that
+still shows the sale open is recorded with the time it was checked. *A link
+check counts for (hours)* (Settings → Budget) says how long such a check is
+current availability for Live and invest; 0, the default, means not set, and
+availability then stays unknown. A stored decision whose availability has
+expired is treated as out of date until the listing is evaluated again.
 
 On **My home** the order of preference is:
 
