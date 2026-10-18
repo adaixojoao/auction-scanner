@@ -128,3 +128,34 @@ def test_the_listings_page_carries_the_filter_controls(client):
     assert 'onclick="page=1; load()"' not in html                       # no Apply button
     assert "const GOAL_BUDGETS = {" in html and '"both": 0' in html
     assert 'id="result-count"' in html
+
+
+def test_a_figure_that_is_not_a_purchase_price_is_not_filtered_on(client, add):
+    add(external_id="ok", title="Moradia", price=20000)
+    add(external_id="dear", title="Moradia", price=50000)
+    add("imovirtual", "dep", title="Moradia em leilao", price=50000)          # a deposit, not a price
+    data = client.get("/api/listings?per_page=100&max_price=30000").get_json()
+    rows = {it["id"]: it for it in data["items"]}
+    assert "eleiloes:dear" not in rows and "eleiloes:ok" in rows
+    assert rows["imovirtual:dep"]["price_unusable"]                          # kept, like an unknown price
+
+
+@pytest.mark.parametrize("label,method", [
+    ("online", "leilao_eletronico"), ("Internet-only Live", "leilao_eletronico"),
+    ("Zaal", "leilao_presencial"), ("online en zaal", "unknown"), (None, "unknown"),
+])
+def test_dutch_sale_method_labels_are_read(client, add, label, method):
+    import config
+    config.save_config({"filters": {"countries": ["NL"]}, "cash_on_hand": 10_000_000})
+    add("netherlands", "nl1", country="NL", title="Woonhuis", price=9000,
+        raw_json=json.dumps({"veilingwijze": label}))
+    got = ids(client.get(f"/api/listings?per_page=100&country=NL&sale_method={method}").get_json())
+    assert got == ["netherlands:nl1"]
+
+
+def test_a_spanish_legal_type_is_not_a_sale_method(client, add):
+    import config
+    config.save_config({"filters": {"countries": ["ES"]}, "cash_on_hand": 10_000_000})
+    add("spain", "es1", country="ES", title="Vivienda", price=9000,
+        raw_json=json.dumps({"tipo_subasta": "JUDICIAL EN VIA DE APREMIO"}))
+    assert ids(client.get("/api/listings?per_page=100&country=ES&sale_method=unknown").get_json()) == ["spain:es1"]

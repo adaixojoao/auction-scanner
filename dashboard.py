@@ -414,7 +414,10 @@ def all_listings(mode: str) -> list:
 def _matches(it: dict, country, source, tipo, max_price, search) -> bool:
     if (country and it.get("country") != country) or (source and it.get("source") != source)             or (tipo and it.get("tipo") != tipo):
         return False
-    if max_price and it.get("price") is not None and it["price"] > max_price:
+    # A listed figure that is "Not a purchase price" (a deposit or a minimum bid)
+    # says nothing about the price, so it is treated like a missing one.
+    if (max_price and it.get("price") is not None and not it.get("price_unusable")
+            and it["price"] > max_price):
         return False
     if search:
         s = search.lower()
@@ -422,8 +425,8 @@ def _matches(it: dict, country, source, tipo, max_price, search) -> bool:
     return True
 
 
-# The sale methods Listings filters by: letters.pt_sale_kind's classes of an
-# explicit raw_json.modalidade. "unknown" is a missing or unclassified label,
+# The sale methods Listings filters by: letters.stated_sale_kind's classes of
+# an explicit raw_json.modalidade (PT) or veilingwijze (NL). "unknown" is a missing or unclassified label,
 # not a method known to be different. Never inferred from the source.
 SALE_METHODS = (("carta_fechada", "Sealed bids"), ("negociacao", "Private negotiation"),
                 ("leilao_eletronico", "Online auction"), ("leilao_presencial", "In-person auction"),
@@ -436,8 +439,8 @@ _LIST_CLIMATES = ("", "excellent", "good", "caution", "poor", "unknown")
 def _sale_method(it: dict) -> str:
     """The stated sale method of a listing, worked out once per kept row."""
     if "sale_method" not in it:
-        from letters import _raw, pt_sale_kind
-        it["sale_method"] = pt_sale_kind(_raw(it).get("modalidade"))
+        from letters import _raw, stated_sale_kind
+        it["sale_method"] = stated_sale_kind(_raw(it))
     return it["sale_method"]
 
 
@@ -1070,6 +1073,12 @@ def _contact(item: dict, raw: dict) -> dict:
 def _format_amount(value) -> str:
     from letters import format_bid
     return format_bid(value) if value is not None else ""
+
+
+def _finite_amount(value) -> bool:
+    """A JSON number that is finite and not negative (true/false, NaN and Infinity are not)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value >= 0)
 
 
 def _bid_cap(item: dict, cfg: dict | None = None) -> dict:
@@ -2055,14 +2064,15 @@ def api_settings_save():
     if bid_cap is not None:
         nums = ("max_all_in", "margin_pct", "contingency_pct", "rural_reserve_per_ha",
                 "rural_reserve_fixed", "adviser_reserve_eur")
-        if any(k in bid_cap and (not isinstance(bid_cap[k], (int, float)) or bid_cap[k] < 0)
-               for k in nums):
+        if not isinstance(bid_cap, dict):
+            return jsonify({"error": "bid_cap must be an object"}), 400
+        if any(k in bid_cap and not _finite_amount(bid_cap[k]) for k in nums):
             return jsonify({"error": "bid_cap: amounts and percentages must be numbers ≥ 0"}), 400
         if "require_exact" in bid_cap and not isinstance(bid_cap["require_exact"], bool):
             return jsonify({"error": "bid_cap.require_exact must be true or false"}), 400
         by = bid_cap.get("adviser_reserve_by_country")
         if by is not None and (not isinstance(by, dict)
-                               or any(not isinstance(v, (int, float)) or v < 0 for v in by.values())):
+                               or any(not _finite_amount(v) for v in by.values())):
             return jsonify({"error": "bid_cap.adviser_reserve_by_country: country → amount ≥ 0"}), 400
     stewards = changes.get("stewardship")
     if stewards is not None:

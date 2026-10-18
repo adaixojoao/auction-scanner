@@ -105,6 +105,42 @@ def pt_sale_kind(modalidade: str | None) -> str:
     return labels.get(text, "unknown")
 
 
+def _label_text(label) -> str:
+    import unicodedata
+    text = "".join(ch for ch in unicodedata.normalize("NFKD", label.casefold())
+                   if not unicodedata.combining(ch))
+    return re.sub(r"[\s_-]+", " ", text).strip().rstrip(".").strip()
+
+
+def nl_sale_kind(veilingwijze: str | None) -> str:
+    """Classify an explicit Dutch auction-method label (raw_json.veilingwijze).
+    Only labels that say online or in the room; "online en zaal" and anything
+    else stays "unknown"."""
+    if not isinstance(veilingwijze, str):
+        return "unknown"
+    labels = {
+        "online": "leilao_eletronico",
+        "online veiling": "leilao_eletronico",
+        "internetveiling": "leilao_eletronico",
+        "internet only live": "leilao_eletronico",
+        "zaal": "leilao_presencial",
+        "zaalveiling": "leilao_presencial",
+        "in de zaal": "leilao_presencial",
+    }
+    return labels.get(_label_text(veilingwijze), "unknown")
+
+
+def stated_sale_kind(raw: dict) -> str:
+    """The sale method a listing's own label states, in any language this
+    scanner reads; "unknown" when there is none. Spain's "Tipo de subasta"
+    names the legal kind (judicial, notarial, tax), not how bids are made, so
+    it is not read. Never inferred from the source."""
+    kind = pt_sale_kind(raw.get("modalidade"))
+    if kind == "unknown":
+        kind = nl_sale_kind(raw.get("veilingwijze"))
+    return kind
+
+
 def _item_sale_kind(item: dict, raw: dict) -> str:
     if (item.get("country") or "PT") == "PT" and item.get("source") in PT_COURT_SOURCES:
         return pt_sale_kind(raw.get("modalidade"))
