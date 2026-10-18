@@ -167,33 +167,40 @@ def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | Non
         reasons.append("No bid cap: nothing to work from.")
         return out
 
-    adviser = float((p.get("adviser_reserve_by_country") or {}).get(country, p.get("adviser_reserve_eur") or 0))
-    land = 0.0
-    if kind == "rural_plot":
-        ha = (listing.get("area_m2") or 0) / 10000
-        land = ha * float(p.get("rural_reserve_per_ha") or 0) + float(p.get("rural_reserve_fixed") or 0)
-    reserve = base * float(p.get("contingency_pct") or 0) / 100 + adviser + land
-    climate_adj = 0.0
-    m = clim.get("bid_multiplier", 1.0)
-    if value and exact_climate and m < 1:
-        climate_adj = value["amount"] * (1 - m)
-        reasons.append(f"Climate {clim.get('grade')}: {1 - m:.0%} of the value held back.")
-    elif value and not exact_climate and clim.get("grade") in ("caution", "poor"):
-        reasons.append(f"Climate {clim.get('grade')} from an approximate position: not held back until "
-                       "the location is exact.")
-    margin = base * float(p.get("margin_pct") or 0) / 100
+    try:
+        if not math.isfinite(budget):
+            raise ValueError("bid-cap budget must be finite")
+        adviser = float((p.get("adviser_reserve_by_country") or {}).get(country, p.get("adviser_reserve_eur") or 0))
+        land = 0.0
+        if kind == "rural_plot":
+            ha = (listing.get("area_m2") or 0) / 10000
+            land = ha * float(p.get("rural_reserve_per_ha") or 0) + float(p.get("rural_reserve_fixed") or 0)
+        reserve = base * float(p.get("contingency_pct") or 0) / 100 + adviser + land
+        climate_adj = 0.0
+        m = clim.get("bid_multiplier", 1.0)
+        if value and exact_climate and m < 1:
+            climate_adj = value["amount"] * (1 - m)
+            reasons.append(f"Climate {clim.get('grade')}: {1 - m:.0%} of the value held back.")
+        elif value and not exact_climate and clim.get("grade") in ("caution", "poor"):
+            reasons.append(f"Climate {clim.get('grade')} from an approximate position: not held back until "
+                           "the location is exact.")
+        margin = base * float(p.get("margin_pct") or 0) / 100
 
-    room_max = value["amount"] - reno_low - reserve - climate_adj
-    room_rec = value["amount"] - reno_high - reserve - climate_adj - margin
-    budget_binds = False
-    if value and budget:
-        budget_ceiling_max = budget - reno_low - reserve - climate_adj
-        budget_ceiling_rec = budget - reno_high - reserve - climate_adj
-        budget_binds = budget_ceiling_rec < room_rec
-        room_max = min(room_max, budget_ceiling_max)
-        room_rec = min(room_rec, budget_ceiling_rec)
-    absolute = _largest_bid(listing, room_max, 1.0)
-    recommended = _largest_bid(listing, room_rec, costs.FEES_HIGH_FACTOR)
+        room_max = value["amount"] - reno_low - reserve - climate_adj
+        room_rec = value["amount"] - reno_high - reserve - climate_adj - margin
+        budget_binds = False
+        if value and budget:
+            budget_ceiling_max = budget - reno_low - reserve - climate_adj
+            budget_ceiling_rec = budget - reno_high - reserve - climate_adj
+            budget_binds = budget_ceiling_rec < room_rec
+            room_max = min(room_max, budget_ceiling_max)
+            room_rec = min(room_rec, budget_ceiling_rec)
+        absolute = _largest_bid(listing, room_max, 1.0)
+        recommended = _largest_bid(listing, room_rec, costs.FEES_HIGH_FACTOR)
+    except (TypeError, ValueError):
+        # NaN, infinity or text in the settings or the costs: no figure is safer than a wrong one.
+        reasons.append("No bid cap: invalid inputs — the settings or costs are not finite numbers.")
+        return out
     if recommended >= absolute:            # no margin and no range in the work: stay below the maximum
         recommended = max(0.0, absolute - ROUND)
         budget_binds = False
