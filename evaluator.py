@@ -722,35 +722,51 @@ def _req_financial_evidence(evidence: dict, policy: dict) -> Requirement:
     )
 
 
+def _finite_financial_number(value) -> bool:
+    import math
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _req_financial_margin(evidence: dict, policy: dict) -> Requirement:
-    """Conservative margin is positive (or policy minimum not yet set)."""
-    min_margin = policy.get("min_resale_margin_eur", DEFAULT_POLICY["min_resale_margin_eur"])
-    if min_margin is None:
-        # Policy not set yet — cannot evaluate.
+    minimum = policy.get("min_resale_margin_eur", DEFAULT_POLICY["min_resale_margin_eur"])
+    if minimum is None:
         return Requirement(
-            key="financial_margin", outcome=UNKNOWN,
-            code="DATA_MARGIN_POLICY_UNSET",
+            key="financial_margin", outcome=UNKNOWN, code="DATA_MARGIN_POLICY_UNSET",
             message="Minimum resale margin threshold not configured in policy.",
-            next_evidence_needed="Set min_resale_margin_eur in policy after calibration.",
+            next_evidence_needed="Set min_resale_margin_eur after calibration.",
+        )
+    if not _finite_financial_number(minimum) or minimum < 0:
+        return Requirement(
+            key="financial_margin", outcome=UNKNOWN, code="DATA_MARGIN_POLICY_INVALID",
+            message="Minimum margin policy must be a finite nonnegative number.",
+            next_evidence_needed="Resolve the margin policy; invalid values cannot authorize acquisition.",
         )
     margin = evidence.get("conservative_margin_eur")
     if margin is None:
         return Requirement(
-            key="financial_margin", outcome=UNKNOWN,
-            code="DATA_MARGIN_NOT_COMPUTED",
+            key="financial_margin", outcome=UNKNOWN, code="DATA_MARGIN_NOT_COMPUTED",
             message="Conservative margin not computed.",
-            next_evidence_needed="Complete financial scenario with after-work comparables.",
+            next_evidence_needed="Complete a supported financial scenario.",
         )
-    if margin < min_margin:
+    if not _finite_financial_number(margin):
         return Requirement(
-            key="financial_margin", outcome=FAIL,
-            code="FIN_MARGIN_INSUFFICIENT",
-            message=f"Conservative margin €{margin:,.0f} < policy minimum €{min_margin:,.0f}.",
+            key="financial_margin", outcome=UNKNOWN, code="DATA_MARGIN_INVALID",
+            message="Conservative margin is not a finite numeric amount.",
+            next_evidence_needed="Resolve the financial inputs without substituting zero for unknown amounts.",
+        )
+    if margin < minimum:
+        return Requirement(
+            key="financial_margin", outcome=FAIL, code="FIN_MARGIN_INSUFFICIENT",
+            message=f"Conservative margin €{margin:,.0f} < policy minimum €{minimum:,.0f}.",
         )
     return Requirement(
-        key="financial_margin", outcome=PASS,
-        code="FIN_MARGIN_OK",
-        message=f"Conservative margin €{margin:,.0f} meets policy.",
+        key="financial_margin", outcome=PASS, code="FIN_MARGIN_OK",
+        message=f"Resolved margin €{margin:,.0f} meets the configured threshold; assumptions remain to be verified.",
     )
 
 
@@ -793,39 +809,55 @@ def _req_photo_suitability(evidence: dict, policy: dict) -> Requirement:
 
 
 def _req_cash_fit(evidence: dict, policy: dict) -> Requirement:
-    """Total project cost (including required reserve) fits available cash."""
     cash = evidence.get("available_cash_eur")
-    total_project = evidence.get("total_project_cost_eur")   # acquisition + taxes + works + fees + reserve
-    min_reserve = policy.get("min_liquidity_reserve_eur", DEFAULT_POLICY["min_liquidity_reserve_eur"])
+    total = evidence.get("total_project_cost_eur")
+    reserve = policy.get("min_liquidity_reserve_eur", DEFAULT_POLICY["min_liquidity_reserve_eur"])
     if cash is None:
         return Requirement(
-            key="cash_fit", outcome=UNKNOWN,
-            code="DATA_CASH_NOT_SET",
-            message="Available cash not configured.",
-            next_evidence_needed="Set cash_on_hand in configuration.",
+            key="cash_fit", outcome=UNKNOWN, code="DATA_CASH_NOT_SET",
+            message="Available cash not configured.", next_evidence_needed="Set available cash.",
         )
-    if total_project is None:
+    if not _finite_financial_number(cash) or cash <= 0:
         return Requirement(
-            key="cash_fit", outcome=UNKNOWN,
-            code="DATA_TOTAL_COST_UNKNOWN",
-            message="Total project cost (including reserve) not computed.",
-            next_evidence_needed="Complete financial scenario with all cost components.",
+            key="cash_fit", outcome=UNKNOWN, code="DATA_CASH_INVALID",
+            message="Available cash must be a finite positive amount.",
+            next_evidence_needed="Resolve available cash before assessing affordability.",
         )
-    reserve = min_reserve or 0
-    if total_project + reserve > cash:
+    if total is None:
         return Requirement(
-            key="cash_fit", outcome=FAIL,
-            code="FIN_OVER_CASH",
-            message=(
-                f"Total project cost €{total_project:,.0f}"
-                + (f" + reserve €{reserve:,.0f}" if reserve else "")
-                + f" exceeds available cash €{cash:,.0f}."
-            ),
+            key="cash_fit", outcome=UNKNOWN, code="DATA_TOTAL_COST_UNKNOWN",
+            message="Total project cost not computed.",
+            next_evidence_needed="Complete the financial scenario with all required cost components.",
+        )
+    if not _finite_financial_number(total) or total <= 0:
+        return Requirement(
+            key="cash_fit", outcome=UNKNOWN, code="DATA_TOTAL_COST_INVALID",
+            message="Project cost must be a finite positive amount.",
+            next_evidence_needed="Resolve project cost; unknown or invalid costs are not zero.",
+        )
+    # Retain the existing unset-reserve interpretation, not a new calibrated policy.
+    reserve = 0 if reserve is None else reserve
+    if not _finite_financial_number(reserve) or reserve < 0:
+        return Requirement(
+            key="cash_fit", outcome=UNKNOWN, code="DATA_RESERVE_POLICY_INVALID",
+            message="Reserve policy must be a finite nonnegative amount.",
+            next_evidence_needed="Resolve the reserve policy.",
+        )
+    required = total + reserve
+    if not _finite_financial_number(required):
+        return Requirement(
+            key="cash_fit", outcome=UNKNOWN, code="DATA_TOTAL_COST_INVALID",
+            message="Required cash is not a finite amount.",
+            next_evidence_needed="Resolve overflow or inconsistent financial inputs.",
+        )
+    if required > cash:
+        return Requirement(
+            key="cash_fit", outcome=FAIL, code="FIN_OVER_CASH",
+            message=f"Project cost €{total:,.0f} + policy reserve €{reserve:,.0f} exceeds cash €{cash:,.0f}.",
         )
     return Requirement(
-        key="cash_fit", outcome=PASS,
-        code="FIN_CASH_OK",
-        message=f"Project fits within available cash €{cash:,.0f}.",
+        key="cash_fit", outcome=PASS, code="FIN_CASH_OK",
+        message="Resolved project cost and policy reserve fit available cash; completeness is not independently verified.",
     )
 
 
