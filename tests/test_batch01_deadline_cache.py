@@ -166,13 +166,16 @@ def test_build_return_is_overlaid_even_if_build_crosses_deadline(monkeypatch, ch
     monkeypatch.setattr(dashboard, "load_listings", loader)
     monkeypatch.setattr(dashboard, "keep_scores_for", lambda modes: None)
     monkeypatch.setattr(dashboard, "_scan_finished_at", lambda: "test-scan")
-    result = dashboard._build_list("home")
-    assert result[0]["hidden_reason"] == "expired"
-    assert len(calls) == (3 if changing_policy else 1)
     if changing_policy:
+        # Batch 02: a list whose settings never held still is refused, not shown.
+        with pytest.raises(dashboard.ListPolicyChanged):
+            dashboard._build_list("home")
         assert "home" not in dashboard._LISTS
     else:
+        result = dashboard._build_list("home")
+        assert result[0]["hidden_reason"] == "expired"
         assert dashboard._LISTS["home"].items[0]["hidden_reason"] is None
+    assert len(calls) == (3 if changing_policy else 1)
     assert not dashboard._LISTS_ACTIVE
     assert not dashboard._LISTS_BUILDING
 
