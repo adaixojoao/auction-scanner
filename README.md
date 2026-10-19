@@ -236,6 +236,19 @@ than old-settings rows presented as current. Settings updates merge under the
 thread and file locks and report that update's own result; whole-file
 replacements stay last-writer-wins.
 
+**Legacy offer log.** `POST /api/carta-log` defaults to `purpose: historical`
+for compatibility: such a record is an imported event, marked as never checked
+against today's offer safeguards, and may name a case no longer stored.
+`purpose: operational` needs an existing listing and a positive euro
+`bid_amount` with at most two decimals (locale-formatted text such as
+`4.000,00` belongs to the typed Offers API), and goes through the same
+location, checklist and cash gates, log and evidence helpers as
+`/api/offers/sent`. Earlier dates and settled outcomes are history; an
+information request recorded now uses `/api/offers/sent` with its letter type,
+so the exact letter and its non-offer kind are kept. This route sends no email,
+and its evidence writes (like the Offers route's) are separate steps, not one
+transaction.
+
 ## Reading a Listings row
 
 Each row answers six questions. None of them says a listing is verified or ready to buy.

@@ -2043,8 +2043,50 @@ HISTORICAL_SUMMARY = "Historical record: logged as told, not checked against the
 CARTA_LOG_PURPOSES = ("historical", "operational")
 
 
+def _legacy_euro_amount(value):
+    """(euros as a float or None, the canonical bid text) for a legacy bid_amount.
+
+    bid_amount is an amount of euros, not locale-formatted bid text ("4.000,00"
+    belongs to the typed Offers API): finite, ≥ 0, at most two decimals. The
+    text comes from letters.format_bid and must read back as the same amount,
+    so the gates and the stored amount always agree."""
+    from decimal import Decimal, InvalidOperation
+
+    from letters import format_bid, parse_bid
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None, ""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError("bid_amount must be a finite euro amount")
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise ValueError("bid_amount must be a finite euro amount") from None
+    if not amount.is_finite() or amount < 0:
+        raise ValueError("bid_amount must be a finite amount of euros ≥ 0")
+    try:
+        cents = amount.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        raise ValueError("bid_amount is outside the supported range") from None
+    if cents != amount:
+        raise ValueError("bid_amount supports at most two decimal places")
+    number = float(cents)
+    if not math.isfinite(number):
+        raise ValueError("bid_amount is outside the supported range")
+    text = format_bid(number)
+    parsed = parse_bid(text)
+    if parsed is None or Decimal(str(parsed)) != cents:
+        raise ValueError("bid_amount cannot be represented by the current bid formatter")
+    return number, text
+
+
 @app.route("/api/carta-log", methods=["POST"])
 def add_carta_log():
+    """Legacy history import, or an offer recorded now through the canonical path.
+
+    "historical" (the default) records an event as told, marked as never checked
+    against today's safeguards. "operational" needs an existing listing and goes
+    through the same gates, log and evidence helpers as /api/offers/sent. No
+    email is sent here."""
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "JSON object required"}), 400
@@ -2054,51 +2096,74 @@ def add_carta_log():
     listing_id, processo = data.get("listing_id"), data.get("processo")
     if any(v is not None and not isinstance(v, str) for v in (listing_id, processo)):
         return jsonify({"error": "listing_id and processo must be text"}), 400
+    listing_id = listing_id.strip() if listing_id else None
+    processo = processo.strip() if processo else None
     if not (listing_id or processo):
         return jsonify({"error": "listing_id or processo required"}), 400
-    raw_bid = data.get("bid_amount")
-    bid = None
-    if raw_bid not in (None, ""):
-        bid = _num(raw_bid, None) if not isinstance(raw_bid, bool) else None
-        if bid is None or not math.isfinite(bid) or bid < 0:
-            return jsonify({"error": "bid_amount must be a number ≥ 0"}), 400
     is_offer = data.get("is_offer", True)
     if not isinstance(is_offer, bool):
         return jsonify({"error": "is_offer must be true or false"}), 400
+    try:
+        amount, bid_text = _legacy_euro_amount(data.get("bid_amount"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     if not is_offer:
-        bid = None                      # a request for information carries no bid
-    item = gates = None
+        amount, bid_text = None, ""         # a request for information carries no bid
+    outcome = data.get("outcome", "pending")
+    if outcome not in OUTCOMES:
+        return jsonify({"error": "unsupported outcome"}), 400
+    method = data.get("method", "email")
+    if not isinstance(method, str) or not method.strip():
+        return jsonify({"error": "method must be nonempty text"}), 400
+    method = method.strip()
+    notes = data.get("notes", "")
+    if not isinstance(notes, str):
+        return jsonify({"error": "notes must be text"}), 400
+    country = data.get("country") or "PT"
+    if country not in COUNTRY_NAMES:
+        return jsonify({"error": "unknown country code"}), 400
+    for key in ("tribunal", "sent_date"):
+        if data.get(key) is not None and not isinstance(data[key], str):
+            return jsonify({"error": f"{key} must be text"}), 400
+
     if purpose == "operational":
         item = _listing(listing_id) if listing_id else None
         if not item:
             return jsonify({"error": "no such listing"}), 404
-        blocked, gates = _offer_gates(item, is_offer, data, str(raw_bid) if bid is not None else "")
+        # An operational record is an offer made now. Earlier dates and settled
+        # outcomes are history, which today's gates cannot vouch for.
+        if outcome != "pending" or data.get("sent_date"):
+            return jsonify({"error": "Use purpose historical for prior dates or completed outcomes"}), 400
+        if not is_offer:
+            # The exact letter and its kind belong to the typed route.
+            return jsonify({"error": "Record operational information requests through /api/offers/sent "
+                                     "with their letter type"}), 400
+        if amount is None or amount <= 0:
+            return jsonify({"error": "operational offers require a positive bid_amount"}), 400
+        blocked, gates = _offer_gates(item, True, {**data, "id": listing_id, "bid": bid_text}, bid_text)
         if blocked:
             return blocked
+        log_id = _log_sent(item, letter=None, bid=bid_text, method=method, sent_to="", notes=notes,
+                           location_override=gates["location_override"], cash_override=gates["cash_override"])
+        _record_offer_evidence(item, log_id, True, gates, bid_text)
+        return jsonify({"ok": True, "id": log_id, "purpose": purpose})
+
+    # History may name a case no longer stored. It is never evidence that
+    # today's gates were met.
     db = get_db()
     try:
         cur = db.execute("""
             INSERT INTO carta_log
             (listing_id, processo, tribunal, country, sent_date, bid_amount, method, outcome, notes, created_at,
-             location_level, location_override, cash_override, checklist_summary, is_offer)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            listing_id, processo, data.get("tribunal"),
-            data.get("country") or "PT",
-            data.get("sent_date"), bid, data.get("method", "email"),
-            data.get("outcome", "pending"), data.get("notes", ""),
-            datetime.now(timezone.utc).isoformat(),
-            geo.location_confidence(item)["level"] if item else None,
-            (gates or {}).get("location_override"), (gates or {}).get("cash_override"),
-            None if item else HISTORICAL_SUMMARY, int(is_offer),
-        ))
+             checklist_summary, is_offer)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (listing_id, processo, data.get("tribunal"), country, data.get("sent_date"), amount, method,
+              outcome, notes, datetime.now(timezone.utc).isoformat(), HISTORICAL_SUMMARY, int(is_offer)))
         db.commit()
-        new_id = cur.lastrowid
+        log_id = cur.lastrowid
     finally:
         db.close()
-    if item:
-        _record_offer_evidence(item, new_id, is_offer, gates, str(raw_bid) if bid is not None else "")
-    return jsonify({"ok": True, "id": new_id, "purpose": purpose})
+    return jsonify({"ok": True, "id": log_id, "purpose": purpose})
 
 
 OUTCOMES = ("pending", "won", "lost", "cancelled", "expired", "answered")

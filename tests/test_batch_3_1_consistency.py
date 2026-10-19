@@ -250,15 +250,17 @@ def test_operational_records_pass_the_same_gates_as_sent_offers(client, db, add)
     assert override and override[0] == "Checked with my lawyer by phone"
 
 
-def test_an_operational_information_request_is_not_gated(client, db, add):
+def test_an_operational_information_request_goes_through_the_typed_route(client, db, add):
+    # Batch 03: the legacy route cannot keep the exact letter or its kind, so an
+    # information request recorded now uses /api/offers/sent; nothing is written here.
     import config
     config.update_config({"cash_on_hand": 0})
     lid = _offer_listing(add)
+    before = len(_rows(db))
     r = client.post("/api/carta-log", json={"purpose": "operational", "listing_id": lid, "is_offer": False,
                                              "bid_amount": 26000})
-    assert r.status_code == 200
-    row = _rows(db)[-1]
-    assert row["is_offer"] == 0 and row["bid_amount"] is None
+    assert r.status_code == 400 and "/api/offers/sent" in r.get_json()["error"]
+    assert len(_rows(db)) == before
 
 
 def test_sent_offers_still_refuse_without_cash(client, db, add):
