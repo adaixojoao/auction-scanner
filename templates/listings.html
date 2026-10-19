@@ -149,6 +149,8 @@
 // Each goal's budget (common.mode_max_price): the server never shows more.
 const GOAL_BUDGETS = {{ goal_budgets | tojson }};
 </script>
+<script src="{{ url_for('static', filename='listing-notes.js') }}"></script>
+<script src="{{ url_for('static', filename='listing-details-cache.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-view.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-summary.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-details.js') }}"></script>

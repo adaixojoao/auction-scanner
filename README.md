@@ -127,6 +127,20 @@ typing or a note is unsaved it shows *New results are available* with
 selected (*Scan Spain*, *Scan citius*, *Scan all countries*) and says what it
 covers; nothing scans until you click it.
 
+**Drafts and details freshness.** *Saved* means the server acknowledged this
+listing and the exact length of the text sent; a failed save keeps the draft,
+never retries by itself, and *Retry* sends the latest text. A refresh never
+overwrites a newer draft. Details are reused only while the listing's detail
+token is unchanged and for a bounded time, from a bounded cache; a finished
+scan (even while the redraw waits for you) or a location or status change
+marks them out of date at once, and they show as *loaded earlier* until fresh
+ones arrive. Neither a token nor the time limit proves legal or financial
+evidence is current. Where the same property stays in view, open panels,
+focus and scroll come back after a refresh, including focus into a panel that
+loads after the rows, unless you have moved focus since. Drafts are not a
+backup across reloads or crashes, and two windows editing one note: the last
+save wins.
+
 ### Offers, step by step
 
 1. A listing you ☆ on Listings, or a strong sale where the offer is a letter,

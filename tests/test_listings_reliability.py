@@ -49,19 +49,22 @@ def test_reads_are_latest_wins_and_never_toast_on_abort(client, listings):
     assert "fetchLatestListings" not in listings                       # one controller, not two
 
 
-def test_notes_are_queued_in_memory_with_visible_status(listings):
+def test_notes_are_queued_in_memory_with_visible_status(client, listings):
     assert 'onblur="saveNote(this)"' not in listings
     assert 'maxlength="2000"' in listings and 'data-role="note"' in listings
     for phase in ("Unsaved changes", "Saving…", "Saved", "Could not save", "Retry saving note"):
         assert phase in listings, phase
-    assert "function createNoteQueue(" in listings
+    # One store (static/listing-notes.js, Batch 04), never a second queue beside it.
+    assert "function createStore(" in listings and "AuctionNotes.createStore(" in listings
+    assert "function createNoteQueue(" not in listings
     # Field IDs from a counter, never from the scraped listing ID.
     assert 'id="note-${AS.esc(d.id)}"' not in listings and "note-field-${++noteSeq}" in listings
     assert 'window.addEventListener("beforeunload"' in listings
     assert '<dialog id="leave-dialog" aria-labelledby="leave-title">' in listings
     # Drafts stay out of the URL and browser storage.
-    script = listings.split("function createNoteQueue(", 1)[1].split("// One request per listing at a time", 1)[0]
-    assert "localStorage" not in script and "history." not in script
+    for name in ("listing-notes.js", "listings-notes.js"):
+        script = _static(client, name)
+        assert "localStorage" not in script and "sessionStorage" not in script and "history." not in script
 
 
 def test_scan_suggestion_follows_the_selection(listings):

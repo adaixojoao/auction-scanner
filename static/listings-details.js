@@ -19,7 +19,16 @@ function rowPanel(row) {
   return next && next.classList.contains("details-row") && next.dataset.for === row.dataset.id ? next : null;
 }
 
+// Every focus change counts, so a restore never takes focus back from where
+// you moved it since.
+let focusGeneration = 0;
+document.addEventListener("focusin", () => { focusGeneration += 1; });
+// Focus that belongs inside a details panel still loading: given back when the
+// panel is drawn, if focus has not moved since (fillPanel).
+let deferredFocus = null;
+
 function captureContext() {
+  deferredFocus = null;
   const open = [
     ...[...document.querySelectorAll("#rows tr.details-row")].map(tr => ({surface: "table", id: tr.dataset.for})),
     ...[...document.querySelectorAll("#research-candidates .candidate-details")]
@@ -73,8 +82,12 @@ function restoreContext(ctx) {
     const scope = !anchor ? [] : surface === "research" ? [anchor] : [anchor, rowPanel(anchor)].filter(Boolean);
     let target = null;
     for (const el of scope) target = target || [...el.querySelectorAll("[data-role]")].find(x => x.dataset.role === role);
+    let later = false;
     if (!target) {
-      // The listing left: its neighbour on the same surface, else the count line.
+      // Still here but its panel is loading: its Details button for now, the
+      // field itself once the panel is drawn. The listing left: its neighbour
+      // on the same surface, else the count line.
+      later = !!anchor && ctx.open.some(o => o.surface === surface && o.id === id);
       const items = surfaceItems(surface);
       const near = anchor || items[Math.min(Math.max(index, 0), items.length - 1)];
       target = near ? near.querySelector('[data-role="details"]') : $("result-count");
@@ -83,6 +96,7 @@ function restoreContext(ctx) {
       target.focus({preventScroll: true});
       if (ctx.focus.selection && typeof target.setSelectionRange === "function") target.setSelectionRange(...ctx.focus.selection);
     }
+    if (later) deferredFocus = {surface, id, role, selection: ctx.focus.selection, generation: focusGeneration};
   }
   if (!gone.length) return "";
   const unique = [...new Set(gone)];
@@ -193,14 +207,15 @@ function renderResearch(research) {
 let detailsSeq = 0;
 function nextDetailsId() { detailsSeq += 1; return `details-panel-${detailsSeq}`; }
 
-// Details last loaded, per goal and listing: {data, token, at}. They are shown
-// as current only while the listing's detail_token from the latest results is
-// unchanged (a scan, status, score or evidence revision changes it) and they
-// are younger than DETAIL_TTL_MS; otherwise they show as earlier details while
-// fresh ones load. Note drafts live in the note queue, not in these objects.
+// Details last loaded, per goal and listing (listing-details-cache.js). They
+// are shown as current only while the listing's detail_token from the latest
+// results is unchanged (a scan, status, score or evidence revision changes it)
+// and they are younger than DETAIL_TTL_MS; otherwise they show as earlier
+// details while fresh ones load. A finished scan or a change made here
+// invalidates them at once. Note drafts live in the note store, not here.
 const DETAIL_TTL_MS = 10 * 60 * 1000;
-const detailCache = new Map();
-const panelReads = new WeakMap();   // one latest-wins read per open panel
+const detailsCache = AuctionDetailsCache.createCache({read: AuctionDetailsCache.read, ttl: DETAIL_TTL_MS});
+const panelReads = new WeakMap();   // the open panel's read in flight: {controller, generation}
 function detailToken(id) { return (shownItems.get(id) || {}).detail_token || ""; }
 
 function freshnessHtml(id, state, message = "") {
@@ -226,32 +241,44 @@ function renderDetailsBody(body, id, data, state, message = "") {
 // Fills a details panel. A closed or replaced panel, or another goal, ignores
 // a late answer; a failure says so with a Retry for this listing.
 async function fillPanel(panel, id, {fresh = false} = {}) {
-  const mode = view.mode, key = `${mode}\n${id}`, token = detailToken(id);
+  const mode = view.mode, token = detailToken(id);
   const body = panel.querySelector(".details-body");
-  const entry = detailCache.get(key);
-  const current = entry && entry.token === token && Date.now() - entry.at < DETAIL_TTL_MS;
-  if (entry && current && !fresh) { renderDetailsBody(body, id, entry.data, "current"); return; }
-  if (entry) renderDetailsBody(body, id, entry.data, "refreshing");
+  const current = fresh ? null : detailsCache.cached(mode, id, token);
+  if (current) { renderDetailsBody(body, id, current, "current"); giveBackFocus(panel, id); return; }
+  const earlier = detailsCache.earlier(mode, id);
+  if (earlier) renderDetailsBody(body, id, earlier, "refreshing");
   else body.innerHTML = `<p class="small muted details-loading">Loading details…</p>`;
-  let read = panelReads.get(panel);
-  if (!read) { read = AS.latestRead(); panelReads.set(panel, read); }
-  const asked = Date.now();
-  let result = await read.run("/api/listing?id=" + encodeURIComponent(id) + "&mode=" + encodeURIComponent(mode));
-  if (result.kind === "obsolete" || !panel.isConnected || mode !== view.mode) return;
-  if (result.kind === "success" && !(result.data && result.data.id === id && Array.isArray(result.data.facts))) {
-    result = {kind: "error", message: "The server returned an unreadable response."};
-  }
+  // One read per panel: a newer one, or closing the panel, supersedes it.
+  const previous = panelReads.get(panel);
+  if (previous) previous.controller.abort();
+  const read = {controller: new AbortController(), generation: (previous ? previous.generation : 0) + 1};
+  panelReads.set(panel, read);
+  const result = await detailsCache.load(mode, id, token, {fresh: true, signal: read.controller.signal});
+  if (result.kind === "obsolete" || !panel.isConnected || mode !== view.mode
+      || panelReads.get(panel) !== read || panel.dataset.for !== id) return;
   if (result.kind === "error") {
-    if (entry) { renderDetailsBody(body, id, entry.data, "failed", result.message); return; }
+    if (earlier) { renderDetailsBody(body, id, earlier, "failed", result.message); return; }
     const title = (shownItems.get(id) || {}).title || "this listing";
     body.innerHTML = `<div class="notice warn details-error"><p>Could not load details: ${AS.esc(result.message)}</p>
       <button type="button" class="btn btn-sm" data-role="retry-details" aria-label="Retry details: ${AS.esc(title)}">Retry details</button></div>`;
     body.querySelector("button").addEventListener("click", () => fillPanel(panel, id, {fresh: true}));
     return;
   }
-  const newest = detailCache.get(key);
-  if (!newest || newest.asked <= asked) detailCache.set(key, {data: result.data, token, at: Date.now(), asked});
   renderDetailsBody(body, id, result.data, "current");
+  giveBackFocus(panel, id);
+}
+
+// The field you were in when the results were redrawn, once its panel exists,
+// unless focus moved anywhere since.
+function giveBackFocus(panel, id) {
+  const want = deferredFocus;
+  if (!want || want.id !== id || want.surface !== (panel.matches(".candidate-details") ? "research" : "table")) return;
+  deferredFocus = null;
+  if (focusGeneration !== want.generation) return;
+  const target = [...panel.querySelectorAll("[data-role]")].find(x => x.dataset.role === want.role);
+  if (!target) return;
+  target.focus({preventScroll: true});
+  if (want.selection && typeof target.setSelectionRange === "function") target.setSelectionRange(...want.selection);
 }
 document.addEventListener("click", e => {
   const button = e.target.closest && e.target.closest('[data-role="refresh-details"]');
@@ -262,7 +289,8 @@ document.addEventListener("click", e => {
 
 function closePanel(panel) {
   const read = panelReads.get(panel);
-  if (read) read.cancel();
+  if (read) read.controller.abort();          // the details read only; note saves carry on
+  panelReads.delete(panel);
   panel.remove();
 }
 
@@ -475,7 +503,9 @@ function locationHtml(d) {
 // After a change made in the panel: reload that panel (row or research card).
 function refreshDetails(el) {
   const panel = el.closest(".details-row, .candidate-details");
-  if (panel) return fillPanel(panel, panel.dataset.for, {fresh: true});
+  if (!panel) return;
+  detailsCache.invalidate(panel.dataset.for);     // every panel of this listing, not just this one
+  return fillPanel(panel, panel.dataset.for, {fresh: true});
 }
 
 async function verifyLocation(btn) {

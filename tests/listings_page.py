@@ -2,7 +2,8 @@
 own scripts (static/listings-*.js and static/listings.js, Batch 3.1), as one
 text for structural checks. Behaviour is checked in tests/test_browser_listings.py."""
 
-LISTINGS_SCRIPTS = ("listings-view.js", "listings-details.js", "listings-notes.js", "listings.js")
+LISTINGS_SCRIPTS = ("listing-notes.js", "listing-details-cache.js", "listings-view.js", "listings-summary.js",
+                    "listings-details.js", "listings-notes.js", "listings.js")
 
 
 def listings_source(client) -> str:
