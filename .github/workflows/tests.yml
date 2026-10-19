@@ -49,4 +49,4 @@ jobs:
       - name: Browser tests
         env:
           REQUIRE_BROWSER: "1"
-        run: python -m pytest -q tests/test_browser_listings.py tests/test_browser_results.py
+        run: python -m pytest -q tests/test_browser_listings.py tests/test_browser_results.py tests/test_browser_drafts.py

@@ -147,7 +147,10 @@ async function setStatus(id, status) {
     statusPending.delete(id);
     statusButtons(id).forEach(b => { b.disabled = false; });
   }
-  if (ok) load({after: "saved"});                 // the server decides where it now belongs
+  if (ok) {
+    detailsCache.invalidate(id);
+    load({after: "saved"});                       // the server decides where it now belongs
+  }
 }
 
 // Undo puts back the status it had (On Offers, or none) through the same API.
@@ -255,6 +258,7 @@ function busyEditing() {
   return typing || notes.hasUnsaved() || statusPending.size > 0;
 }
 document.addEventListener("scan-finished", () => {
+  detailsCache.invalidate();                      // at once, even when the redraw waits for you
   if (updatePending) return;                      // one notice for any number of scans
   if (!busyEditing()) { load(); return; }
   updatePending = true;
