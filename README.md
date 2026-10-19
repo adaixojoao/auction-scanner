@@ -216,6 +216,16 @@ listing when it is:
 A shortlisted listing ignores 5 and 6: you picked it on purpose. *Listings →
 Show → Hidden* shows what is hidden and why.
 
+**Cached deadlines.** Listings reuses scored records for speed, but checks
+deadline visibility on each results read, including a newly built list. Open
+results, hidden reasons, research eligibility, counts and pages use the same
+UTC request snapshot and the existing deadline interpretation. An expired
+property disappears on the next results read; an unchanged page does not
+update itself. Date-only and legacy naive-midnight deadlines keep the
+whole-day rule, while timestamps with an explicit time zone are exact
+instants. This updates visibility, not cached scoring reasons, valuations or
+evidence freshness.
+
 ## Reading a Listings row
 
 Each row answers six questions. None of them says a listing is verified or ready to buy.

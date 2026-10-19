@@ -29,7 +29,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file
+from flask import (Flask, Response, abort, g, has_request_context, jsonify, redirect, render_template, request,
+                   send_file)
 
 import geo
 from common import COUNTRY_NAMES, FLAGS, make_session, mode_max_price, price_to_pay, safe_url
@@ -358,7 +359,15 @@ def _expiry_index(items: list, built_at: datetime) -> tuple[list, list]:
 
 
 def _now() -> datetime:
-    """The clock kept lists are read against (tests move it)."""
+    """The UTC clock list visibility and presentation are read against.
+
+    /api/listings captures one clock in Flask's request-local g, so visibility,
+    hydration and deadline labels in one response agree. Background builders and
+    callers outside that request use the real current clock (tests move it)."""
+    if has_request_context():
+        captured = getattr(g, "listings_now", None)
+        if captured is not None:
+            return captured
     return datetime.now(timezone.utc)
 
 
@@ -369,18 +378,19 @@ def _with_current_expiry(kept: _Kept, now: datetime | None = None) -> list:
     copies; the kept list is shared and never edited. Only visibility is
     updated: scores and reasons stay as built until the next rebuild."""
     now = now or _now()
-    ends, positions = kept.ends, kept.at
-    passed = bisect.bisect_right(ends, now)
+    passed = bisect.bisect_right(kept.ends, now)
     if not passed:
         return kept.items
-    items = list(kept.items)
-    for i in positions[:passed]:
-        it = items[i]
+    items = None                               # copied only when a row actually changes
+    for i in kept.at[:passed]:
+        it = kept.items[i]
         reason = it.get("hidden_reason") or ""
-        if reason == "expired" or reason.startswith("dismissed"):
+        if it.get("status") == "dismissed" or reason == "expired" or reason.startswith("dismissed"):
             continue
+        if items is None:
+            items = list(kept.items)
         items[i] = {**it, "hidden_reason": "expired"}
-    return items
+    return kept.items if items is None else items
 
 
 def _build_list(mode: str, tag: str | None = None) -> list:
@@ -397,7 +407,7 @@ def _build_list(mode: str, tag: str | None = None) -> list:
             for _attempt in range(3):
                 cfg = _config()                    # one snapshot for this build
                 policy = _policy_fingerprint(cfg)
-                built_at = datetime.now(timezone.utc)
+                built_at = _now()
                 keep_scores_for(())
                 db = get_db()
                 try:
@@ -413,18 +423,22 @@ def _build_list(mode: str, tag: str | None = None) -> list:
             else:
                 with _LISTS_LOCK:
                     _LISTS_BUILDING.discard(mode)
-                return items                       # still changing: shown once, never kept as current
+                # Still changing: shown once, never kept as current, but read at
+                # the current clock like any kept list (a deadline can pass mid-build).
+                ends, at = _expiry_index(items, built_at)
+                return _with_current_expiry(_Kept(time.monotonic(), items, tag or "", policy, ends, at))
             ends, at = _expiry_index(items, built_at)
             with _LISTS_LOCK:
-                _LISTS[mode] = _Kept(time.monotonic(), items, tag if tag is not None else _scan_finished_at(),
-                                     policy, ends, at)
+                entry = _Kept(time.monotonic(), items, tag if tag is not None else _scan_finished_at(),
+                              policy, ends, at)
+                _LISTS[mode] = entry
                 _LISTS_USED.setdefault(mode, next(_USE_ORDER))
                 _LISTS_BUILDING.discard(mode)
         finally:
             with _LISTS_LOCK:
                 _LISTS_ACTIVE.discard(mode)
         _keep_only_recent()
-    return items
+    return _with_current_expiry(entry)     # a deadline that passed while it was built reads expired
 
 
 def score_only(mode: str) -> None:
@@ -445,7 +459,7 @@ def _full_rows(db, items: list, mode: str) -> list:
         return items
     full = {it["id"]: it for it in load_listings(db, filters=_config().get("filters"), include_hidden=True,
                                                  mode=mode, where=f"id IN ({','.join('?' * len(slim))})",
-                                                 params=tuple(slim))}
+                                                 params=tuple(slim), now=_now())}
     return [full.get(it["id"], it) for it in items]
 
 
@@ -480,7 +494,8 @@ def all_listings(mode: str) -> list:
     if app.config.get("TESTING"):      # tests change the database between requests: never keep
         db = get_db()
         try:
-            return load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode)
+            return load_listings(db, filters=_config().get("filters"), include_hidden=True, mode=mode,
+                                 now=_now())
         finally:
             db.close()
     _LISTS_USED[mode] = next(_USE_ORDER)
@@ -625,7 +640,7 @@ def _presentations(db, rows: list) -> dict:
     import presentation
     cfg = _config()
     stored = checklist.stored_for(db, [it.get("id") for it in rows])
-    now = datetime.now(timezone.utc)
+    now = _now()
     # A copy each: the cost and score helpers cache on the dict they read, and
     # these rows can be the kept list's own.
     return {it.get("id"): presentation.summary(dict(it), stored.get(it.get("id")), cfg, now) for it in rows}
@@ -640,6 +655,8 @@ def _presented(db, rows: list) -> list:
 @app.route("/api/listings")
 def api_listings():
     args = request.args
+    # One clock per response: visibility, hydration and deadline labels agree.
+    g.listings_now = _now()
     country = args.get("country", "")
     source = args.get("source", "")
     max_price = _filter_amount(args.get("max_price"))
@@ -674,7 +691,7 @@ def api_listings():
     per_page = min(1000, max(1, _num(args.get("per_page"), 50, int)))
 
     from datetime import timedelta
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+    yesterday = (_now() - timedelta(days=1)).date().isoformat()
     db = get_db()
     try:
         matched = [it for it in all_listings(mode)
