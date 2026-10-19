@@ -226,6 +226,16 @@ whole-day rule, while timestamps with an explicit time zone are exact
 instants. This updates visibility, not cached scoring reasons, valuations or
 evidence freshness.
 
+**Settings consistency.** A kept Listings list is tagged with the settings it
+was built under. A change to filters, budgets or ranking settings builds a new
+list; notification credentials and other unrelated settings do not throw away
+the scores. A build whose settings change before it is kept is discarded and
+built again. If settings keep changing through all three attempts, the page
+gets a retryable error (it keeps the rows it showed and offers Retry) rather
+than old-settings rows presented as current. Settings updates merge under the
+thread and file locks and report that update's own result; whole-file
+replacements stay last-writer-wins.
+
 ## Reading a Listings row
 
 Each row answers six questions. None of them says a listing is verified or ready to buy.

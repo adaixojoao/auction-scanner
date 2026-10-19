@@ -287,18 +287,31 @@ def _write_config_unlocked(cfg: dict) -> None:
 
 
 def save_config(cfg: dict):
-    """Replace config.json with `cfg`, atomically and under the config lock."""
+    """Replace config.json with `cfg`, atomically and under the config lock.
+    A replacement, not a merge: two replacements at once, the last one wins."""
+    if not isinstance(cfg, dict):
+        raise ValueError("configuration must be a JSON object")
+    snapshot = copy.deepcopy(cfg)          # the caller's dict may change while we wait for the lock
     with _config_transaction():
-        _write_config_unlocked(cfg)
+        _write_config_unlocked(snapshot)
 
 
 def update_config(changes: dict) -> dict:
     """Merge `changes` into config.json (keys it does not mention are kept) and
     return the full effective config. The read, merge and write happen under
-    one lock, so two writers at once both keep their changes."""
+    one lock, so two writers at once both keep their changes. The returned
+    config is assembled before the lock is let go: it is this write's result,
+    not that of a writer who came after."""
+    if not isinstance(changes, dict):
+        raise ValueError("configuration changes must be a JSON object")
+    snapshot = copy.deepcopy(changes)
     with _config_transaction():
-        _write_config_unlocked(_deep_merge(load_user_config(), changes))
-    return load_config()
+        current = load_user_config()
+        if not isinstance(current, dict):
+            raise ValueError("stored configuration must be a JSON object")
+        merged = _deep_merge(current, snapshot)
+        _write_config_unlocked(merged)
+        return _deep_merge(DEFAULTS, merged)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

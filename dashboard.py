@@ -393,13 +393,18 @@ def _with_current_expiry(kept: _Kept, now: datetime | None = None) -> list:
     return kept.items if items is None else items
 
 
+class ListPolicyChanged(RuntimeError):
+    """No list could be built under one settings policy within the attempts."""
+
+
 def _build_list(mode: str, tag: str | None = None) -> list:
     with _LISTS_LOCK:
         lock = _BUILD_LOCKS.setdefault(mode, threading.Lock())
         started = time.monotonic()
     with lock:
-        kept = _LISTS.get(mode)
-        if kept and kept.built >= started and kept.policy == _policy_fingerprint(_config()):
+        with _LISTS_LOCK:
+            kept = _LISTS.get(mode)
+        if kept is not None and kept.built >= started and kept.policy == _policy_fingerprint(_config()):
             return _with_current_expiry(kept)     # built by someone else while we waited
         with _LISTS_LOCK:
             _LISTS_ACTIVE.add(mode)
@@ -415,30 +420,29 @@ def _build_list(mode: str, tag: str | None = None) -> list:
                                           slim_hidden=True, now=built_at)
                 finally:
                     db.close()
-                if _policy_fingerprint(_config()) == policy:
-                    break
                 # Settings changed while it was built (here or in another window
                 # or process): this list is out of date and is not published.
-                logging.getLogger("auction-scanner").info("Settings changed during a list build; building again")
-            else:
-                with _LISTS_LOCK:
-                    _LISTS_BUILDING.discard(mode)
-                # Still changing: shown once, never kept as current, but read at
-                # the current clock like any kept list (a deadline can pass mid-build).
+                if _policy_fingerprint(_config()) != policy:
+                    logging.getLogger("auction-scanner").info("Settings changed during a list build; building again")
+                    continue
                 ends, at = _expiry_index(items, built_at)
-                return _with_current_expiry(_Kept(time.monotonic(), items, tag or "", policy, ends, at))
-            ends, at = _expiry_index(items, built_at)
-            with _LISTS_LOCK:
                 entry = _Kept(time.monotonic(), items, tag if tag is not None else _scan_finished_at(),
                               policy, ends, at)
-                _LISTS[mode] = entry
-                _LISTS_USED.setdefault(mode, next(_USE_ORDER))
-                _LISTS_BUILDING.discard(mode)
+                if _policy_fingerprint(_config()) != policy:      # changed while it was indexed
+                    logging.getLogger("auction-scanner").info("Settings changed before a list was kept; building again")
+                    continue
+                with _LISTS_LOCK:
+                    _LISTS[mode] = entry
+                    _LISTS_USED.setdefault(mode, next(_USE_ORDER))
+                _keep_only_recent()
+                return _with_current_expiry(entry)     # a deadline that passed while it was built reads expired
+            # Never shown as current: the page keeps its last good rows and offers Retry.
+            raise ListPolicyChanged("Settings changed repeatedly while preparing listings. "
+                                    "Wait for settings updates to finish, then retry.")
         finally:
             with _LISTS_LOCK:
                 _LISTS_ACTIVE.discard(mode)
-        _keep_only_recent()
-    return _with_current_expiry(entry)     # a deadline that passed while it was built reads expired
+                _LISTS_BUILDING.discard(mode)
 
 
 def score_only(mode: str) -> None:
@@ -498,8 +502,9 @@ def all_listings(mode: str) -> list:
                                  now=_now())
         finally:
             db.close()
-    _LISTS_USED[mode] = next(_USE_ORDER)
-    kept = _LISTS.get(mode)
+    with _LISTS_LOCK:
+        _LISTS_USED[mode] = next(_USE_ORDER)
+        kept = _LISTS.get(mode)
     if kept is not None and kept.policy != _policy_fingerprint(_config()):
         return _build_list(mode)               # settings changed (here or elsewhere): not the old rows
     if _scan_busy() and kept is not None:
@@ -694,7 +699,14 @@ def api_listings():
     yesterday = (_now() - timedelta(days=1)).date().isoformat()
     db = get_db()
     try:
-        matched = [it for it in all_listings(mode)
+        try:
+            candidate_rows = all_listings(mode)
+        except ListPolicyChanged as exc:
+            response = jsonify({"error": str(exc), "code": "list_policy_changed", "retryable": True})
+            response.headers["Retry-After"] = "1"
+            response.headers["Cache-Control"] = "no-store"
+            return response, 503
+        matched = [it for it in candidate_rows
                    if _matches(it, country, source, tipo, max_price, search)
                    # long-ended sales are not counted among the open view's hidden ones
                    and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
