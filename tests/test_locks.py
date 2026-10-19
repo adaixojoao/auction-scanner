@@ -185,3 +185,37 @@ def test_missing_or_empty_lock_has_no_holder(tmp_path):
     assert locks.lock_holder(str(path)) is None
     path.write_text("")
     assert locks.lock_holder(str(path)) is None
+
+
+def _deny_first_opens(monkeypatch, times):
+    """os.open refuses `times` opens with access denied, as Windows does while
+    another owner's release() is still deleting the file."""
+    real, left = os.open, [times]
+
+    def opener(path, *args, **kwargs):
+        if left[0]:
+            left[0] -= 1
+            raise PermissionError(13, "Permission denied", path)
+        return real(path, *args, **kwargs)
+    monkeypatch.setattr(locks.os, "open", opener)
+
+
+def test_a_lock_file_mid_delete_on_windows_is_waited_for(tmp_path, monkeypatch):
+    monkeypatch.setattr(locks, "_DENIED_WHILE_DELETING", True)
+    _deny_first_opens(monkeypatch, 2)
+    lock = locks.acquire(str(tmp_path / "x.lock"), attempts=5, wait=0)
+    locks.release(lock)
+
+
+def test_access_denied_that_never_clears_is_still_reported(tmp_path, monkeypatch):
+    monkeypatch.setattr(locks, "_DENIED_WHILE_DELETING", True)
+    _deny_first_opens(monkeypatch, 99)
+    with pytest.raises(PermissionError):
+        locks.acquire(str(tmp_path / "x.lock"), attempts=3, wait=0)
+
+
+def test_access_denied_is_a_real_error_elsewhere(tmp_path, monkeypatch):
+    monkeypatch.setattr(locks, "_DENIED_WHILE_DELETING", False)
+    _deny_first_opens(monkeypatch, 1)
+    with pytest.raises(PermissionError):
+        locks.acquire(str(tmp_path / "x.lock"), attempts=5, wait=0)
