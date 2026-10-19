@@ -143,14 +143,29 @@ def _open_flags() -> int:
     return os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0)
 
 
+# Windows refuses to open a file another owner's release() is deleting
+# ("delete pending") with access denied. That is the lock changing hands,
+# not a permission problem, so acquire() waits and tries again.
+_DENIED_WHILE_DELETING = sys.platform == "win32"
+
+
 def acquire(path: str, *, legacy_max_age: float | None = None,
             attempts: int = 10, wait: float = 0.05) -> OwnedLock:
     """Hold the lock at `path`, or raise LockBusy.
 
     A few short retries ride over lock_holder() checking the lock in passing.
     """
+    denied = None
     for _ in range(max(1, attempts)):
-        fd = os.open(path, _open_flags(), 0o644)
+        try:
+            fd = os.open(path, _open_flags(), 0o644)
+        except PermissionError as e:
+            if not _DENIED_WHILE_DELETING:
+                raise
+            denied = e
+            time.sleep(wait)
+            continue
+        denied = None
         try:
             if not _os_lock(fd):
                 os.close(fd)
@@ -182,6 +197,8 @@ def acquire(path: str, *, legacy_max_age: float | None = None,
             except OSError:
                 pass
             raise
+    if denied is not None:
+        raise denied                     # still refused: a real permission problem
     raise LockBusy("another live owner holds the lock")
 
 

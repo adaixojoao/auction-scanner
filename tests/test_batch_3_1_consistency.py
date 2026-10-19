@@ -329,21 +329,24 @@ def test_concurrent_process_updates_keep_every_change(db, tmp_path):
     assert user["kept"] is True and all(user[f"proc_{i}"] == 9 for i in range(4))
 
 
-def test_a_failed_write_keeps_the_last_good_file(db, monkeypatch):
+def test_a_failed_write_keeps_the_last_good_file(db, monkeypatch, tmp_path):
     import config
     config.save_config({"cash_on_hand": 123, "notifications": {"smtp_password": "secret-value"}})
     before = open(config.CONFIG_PATH, encoding="utf-8").read()
 
     def broken(*args, **kwargs):
         raise OSError("disk full")
-    monkeypatch.setattr(config.os, "replace", broken)
-    with pytest.raises(OSError) as err:
-        config.update_config({"cash_on_hand": 999})
+    # Only the broken replace is undone afterwards: monkeypatch.undo() would also
+    # undo conftest's isolated CONFIG_PATH and write the repository's config.json.
+    with monkeypatch.context() as m:
+        m.setattr(config.os, "replace", broken)
+        with pytest.raises(OSError) as err:
+            config.update_config({"cash_on_hand": 999})
     assert "secret-value" not in str(err.value)
     assert open(config.CONFIG_PATH, encoding="utf-8").read() == before
     folder = os.path.dirname(config.CONFIG_PATH)
     assert not [n for n in os.listdir(folder) if n.startswith(".config-")]
-    monkeypatch.undo()
+    assert config.CONFIG_PATH == str(tmp_path / "config.json")             # still the test's own file
     assert config.update_config({"cash_on_hand": 5})["cash_on_hand"] == 5    # the lock was let go
 
 
