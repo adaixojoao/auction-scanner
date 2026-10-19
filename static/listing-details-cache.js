@@ -11,6 +11,8 @@
                         maxEntries = 40, ttl = 60000, now = Date.now}) {
     const entries = new Map();        // key → {data, token, at, stale}, oldest first
     const generations = new Map();    // key → revision, so invalidation also beats reads in flight
+    const started = new Map();        // key → number of the latest read started
+    const stored = new Map();         // key → number of the read whose answer the cache holds
     let epoch = 0;
 
     const key = (mode, id) => JSON.stringify([mode, id]);
@@ -55,13 +57,19 @@
       const hit = fresh ? null : cached(mode, id, expected);
       if (hit) return {kind: "success", data: hit, cached: true};
       const startEpoch = epoch, startRevision = revision(k);
+      const number = (started.get(k) || 0) + 1;
+      started.set(k, number);
       const superseded = () => epoch !== startEpoch || revision(k) !== startRevision;
       try {
         const data = await read(mode, id, signal);
         if (superseded()) return {kind: "obsolete"};
         if (!valid(data, id)) return {kind: "error", message: "The server returned an unreadable response."};
+        // Reads of one listing can finish out of order (its row and its
+        // research card): an older answer never replaces a newer one.
+        const kept = entries.get(k);
+        if (kept && (stored.get(k) || 0) > number) return {kind: "success", data: kept.data, cached: true};
         // Without a token nothing is kept as reusable.
-        if (expected) touch(k, {data, token: expected, at: now(), stale: false});
+        if (expected) { touch(k, {data, token: expected, at: now(), stale: false}); stored.set(k, number); }
         return {kind: "success", data, cached: false};
       } catch (error) {
         if ((error && error.name === "AbortError") || superseded()) return {kind: "obsolete"};

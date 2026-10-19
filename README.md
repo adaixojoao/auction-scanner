@@ -746,11 +746,19 @@ python -m pyflakes *.py sources/ tests/ scripts/
 # Optional, dev-only: the Listings page in headless Chromium
 pip install -r requirements-browser.txt
 python -m playwright install chromium     # downloads the browser once
-python -m pytest -q tests/test_browser_listings.py
+REQUIRE_BROWSER=1 python -m pytest -q tests/test_browser_*.py
 ```
 
 The browser tests answer every request in-process from a temporary database
-(no site is contacted) and are skipped where Playwright is not installed. CI
+(no site is contacted) and are skipped where Playwright is not installed;
+`REQUIRE_BROWSER=1` makes a missing browser a failure instead. They cover late
+and aborted reads, note saves and leaving with an unsaved note, refreshes that
+keep open details and drafts, focus when a listing leaves the results,
+Back/Forward, keyboard sorting and menus, and hostile IDs and titles. The note
+store and details cache also run in Node when it is installed
+(`tests/test_batch04_frontend_state.py`, `tests/test_batch05_details_cache_order.py`).
+None of this replaces checking the desktop window, a screen reader, 200% zoom
+or contrast by hand. CI
 runs the suite on Windows and Ubuntu on every push, and the browser tests in a
 separate Ubuntu job. Rules for AI agents working here: [AGENTS.md](AGENTS.md).
 
