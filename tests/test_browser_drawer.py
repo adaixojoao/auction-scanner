@@ -46,7 +46,8 @@ def _details_with(app, change):
 
 
 def _property(app):
-    return parse_qs(urlsplit(app.page.url).query).get("property", [None])[0]
+    # The page's own address: Playwright's page.url can trail a replaceState.
+    return parse_qs(urlsplit(app.page.evaluate("location.href")).query).get("property", [None])[0]
 
 
 # 1. Table and research Details open the same dialog; nothing is inserted inline.
@@ -88,8 +89,9 @@ def test_close_and_escape_return_focus_and_tab_stays_inside(app):
     open_details(app, 3)
     app.page.keyboard.press("Escape")
     _wait_closed(app)
+    # Escape's tidy-up runs on the dialog's close event, a task after it closes.
+    app.page.wait_for_function("() => !new URLSearchParams(location.search).has('property')")
     assert (_active(app)["role"], _active(app)["for"]) == ("details", "eleiloes:h3")
-    assert _property(app) is None
 
 
 # 3. A trigger redrawn while the drawer was open: focus goes to its replacement.
@@ -222,10 +224,12 @@ def test_the_property_in_the_address_survives_filters_reload_and_history(app):
     close_details(app)
     assert _property(app) is None
     reads = len(app.calls("/api/listings"))
-    app.page.go_back()                               # the entry before the filter still names h8
+    # The page's own history.back(): the browser's Back may skip an entry added
+    # without a user gesture (the filter above changed from script, behind the modal).
+    app.page.evaluate("history.back()")              # the entry before the filter still names h8
     app.page.wait_for_selector(f'{DRAWER}[open][data-for="eleiloes:h8"] textarea.d-note')
     app.idle()
-    app.page.go_forward()
+    app.page.evaluate("history.forward()")
     _wait_closed(app)
     app.idle()
     app.page.wait_for_timeout(200)

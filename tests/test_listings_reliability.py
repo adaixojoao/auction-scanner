@@ -113,7 +113,8 @@ def test_listings_say_when_nothing_was_ever_scanned(client, add):
 
 def test_the_results_table_scrolls_on_its_own_when_narrow(client, listings):
     # At 200% zoom (a 640px-wide view) the page must not scroll sideways.
-    assert re.search(r'<div class="table-scroll" role="region" aria-label="Listings results" tabindex="0">\s*'
+    # The wrapper is also the table layout the Table / Cards switch shows or hides (Batch 08).
+    assert re.search(r'<div class="table-scroll" id="listings-table" role="region" aria-label="Listings results" tabindex="0">\s*'
                      r'<table class="list">', listings)
     css = _static(client, "app.css")
     narrow = css.split("@media (max-width: 900px) {", 1)[1].split("}\n}", 1)[0]
