@@ -91,6 +91,25 @@ The goal, filters, sort and page are in the address, so a link or a reload
 shows the same view, and Back/Forward step through your changes. Opening
 Listings without them in the address brings back the last view on this PC
 (only these browsing choices are remembered, never notes or buyer details).
+**Saved searches** keep a named goal, filters and sort to come back to:
+*Save current search* names what the controls show (a number that is not
+valid yet is never saved), *Apply* puts it back once, at page 1, as one step
+in your history, and *Update selected*, *Rename* and *Delete* ask first. A
+search changed after you applied it says so. They live **in this browser
+only**: not on the server, not on your other computers, gone if you clear
+the browser's data, at most 50. Only the goal, filters and sort are saved,
+never notes, buyer details, the page, the listing open in the drawer or the
+layout; the name and the search text are kept as you typed them, so keep
+anything sensitive out of them. Applying never starts a scan. A search that
+names a source or sale method this page does not offer now (or whose lists
+could not be loaded) is not applied and says why, rather than widening to
+all; a maximum above the goal's budget is applied as the budget, and says so.
+If the browser blocks or cannot read its storage, or it is full, the
+toolbar says so, nothing is shown as saved and what is stored is not
+overwritten. A change made in another tab is reported and has to be
+reloaded (*Reload saved searches*) before editing; between two tabs writing
+at the same moment, the last write wins. This is separate from the last view
+remembered above.
 *Reset filters* goes back to the defaults of the tab you are on; each active
 filter shows as a chip whose × removes just that one. **Max listed price** is
 the listed or base figure as stored, not the current bid or the all-in
@@ -321,8 +340,14 @@ Each row answers six questions. None of them says a listing is verified or ready
   sale country's time zone; a missing or unreadable deadline says so. Whether
   a sale has ended is still decided by the server, not by this label.
 
-**Display: Comfortable / Compact** changes only spacing and photo size, and is
-remembered in this browser; filters, ranking and warnings are the same.
+**Layout: Table / Cards** draws the same page of results either as the
+table or as one card per listing: the same listings, count, sort, page and
+cap, with the same price basis, all-in estimate, checks, deadline and
+caveats, and the same Details, Shortlist and Dismiss (a change on its way
+keeps its buttons disabled in both). Switching asks the server for nothing.
+**Display: Comfortable / Compact** changes only spacing and photo size, in
+either layout. Both choices are remembered in this browser; filters, ranking
+and warnings are the same.
 Every sort is in **Sort by**; Property, Opportunity and Deadline also sort
 from their column headings. Each goal opens with one line; **How this ranking
 works** has the full description. The three counts say what they count, and
@@ -776,9 +801,11 @@ The browser tests answer every request in-process from a temporary database
 `REQUIRE_BROWSER=1` makes a missing browser a failure instead. They cover late
 and aborted reads, note saves and leaving with an unsaved note, refreshes that
 keep open details and drafts, focus when a listing leaves the results,
-the property drawer (focus, late answers, `?property=`, dismissal, the photo viewer), Back/Forward, keyboard sorting and menus, and hostile IDs and titles. The note
+the property drawer (focus, late answers, `?property=`, dismissal, the photo viewer), saved
+searches (storage failures, other tabs, what is never saved) and the card layout, Back/Forward, keyboard sorting and menus, and hostile IDs and titles. The note
 store and details cache also run in Node when it is installed
-(`tests/test_batch04_frontend_state.py`, `tests/test_batch05_details_cache_order.py`).
+(`tests/test_batch04_frontend_state.py`, `tests/test_batch05_details_cache_order.py`), and so does the
+saved-search store (`tests/test_batch08_saved_searches.py`).
 None of this replaces checking the desktop window, a screen reader, 200% zoom
 or contrast by hand. CI
 runs the suite on Windows and Ubuntu on every push, and the browser tests in a

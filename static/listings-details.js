@@ -1,34 +1,39 @@
 // listings-details.js — the Listings page: rendering rows and research cards, the details shown in the property drawer and their freshness, and keeping your place across a refresh.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
+// (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
 
 // ── Keeping your place across a refresh (by listing ID, never by DOM ID) ──
-// One registry for both surfaces: the results table and the research cards.
-function rowFor(id) { return [...document.querySelectorAll("#rows tr[data-id]")].find(tr => tr.dataset.id === id); }
-function cardFor(id) {
-  return [...document.querySelectorAll("#research-candidates article.research-card")].find(a => a.dataset.id === id);
-}
-function anchorFor(surface, id) { return surface === "research" ? cardFor(id) : rowFor(id); }
-function surfaceItems(surface) {
-  return surface === "research" ? [...document.querySelectorAll("#research-candidates article.research-card")]
-                                : [...document.querySelectorAll("#rows tr[data-id]")];
-}
+// One registry for every surface: the results table, the results as cards
+// (listings-cards.js) and the research cards.
+const SURFACE_SELECTOR = {
+  table: "#rows tr[data-id]",
+  cards: "#listing-cards article.listing-card",
+  research: "#research-candidates article.research-card",
+};
+function surfaceItems(surface) { return [...document.querySelectorAll(SURFACE_SELECTOR[surface])]; }
+function anchorFor(surface, id) { return surfaceItems(surface).find(el => el.dataset.id === id); }
+function rowFor(id) { return anchorFor("table", id); }
+function cardFor(id) { return anchorFor("research", id); }
+function listingCardFor(id) { return anchorFor("cards", id); }
+// The table and the cards are one surface in two layouts: a place in one is found in the other.
+function shownSurface(surface) { return surface === "research" ? "research" : layout; }
 
 function captureContext() {
   let focus = null;
   const active = document.activeElement;
-  const row = active && active.closest ? active.closest("#rows tr[data-id]") : null;
-  const card = active && active.closest ? active.closest("#research-candidates article.research-card") : null;
-  if (row || card) {
-    const surface = row ? "table" : "research";
-    const id = row ? row.dataset.id : card.dataset.id;
+  const surfaceOf = el => Object.keys(SURFACE_SELECTOR).find(key => el.matches(SURFACE_SELECTOR[key]));
+  const holder = active && active.closest ? active.closest(Object.values(SURFACE_SELECTOR).join(", ")) : null;
+  if (holder) {
+    const surface = surfaceOf(holder);
+    const id = holder.dataset.id;
     focus = {surface, id, role: active.dataset.role || "", index: surfaceItems(surface).findIndex(el => el.dataset.id === id)};
   }
   let scroll = null;
   const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-height")) || 0;
-  for (const el of document.querySelectorAll("#research-candidates article.research-card, #rows tr[data-id]")) {
+  for (const el of document.querySelectorAll(Object.values(SURFACE_SELECTOR).join(", "))) {
     const box = el.getBoundingClientRect();
-    if (box.bottom > top) { scroll = {surface: el.matches("article") ? "research" : "table", id: el.dataset.id, top: box.top}; break; }
+    if (box.bottom > top) { scroll = {surface: surfaceOf(el), id: el.dataset.id, top: box.top}; break; }
   }
   return {focus, scroll};
 }
@@ -38,15 +43,16 @@ function captureContext() {
 // background keeps its scroll and focus stays in the drawer.
 function restoreContext(ctx) {
   if (ctx.scroll) {
-    const anchor = anchorFor(ctx.scroll.surface, ctx.scroll.id);
+    const anchor = anchorFor(shownSurface(ctx.scroll.surface), ctx.scroll.id);
     if (anchor) window.scrollBy(0, anchor.getBoundingClientRect().top - ctx.scroll.top);
   }
   if (propertyDrawer.panel.open) return "";
   // Focus only comes back when it was in the results and nobody moved it since.
   const active = document.activeElement;
-  const inResults = el => $("rows").contains(el) || $("research-candidates").contains(el);
+  const inResults = el => $("rows").contains(el) || $("listing-cards").contains(el) || $("research-candidates").contains(el);
   if (ctx.focus && (!active || active === document.body || inResults(active))) {
-    const {surface, id, role, index} = ctx.focus;
+    const {id, role, index} = ctx.focus;
+    const surface = shownSurface(ctx.focus.surface);
     const anchor = anchorFor(surface, id);
     let target = anchor ? [...anchor.querySelectorAll("[data-role]")].find(x => x.dataset.role === role) : null;
     if (!target) {
@@ -249,30 +255,34 @@ function scanSuggestion() {
   return {label: "Scan all countries", scope: "Scans every source in every country; this takes a while.", body: {countries: null}};
 }
 
-function renderRows(items, hiddenView, neverScanned = false) {
-  items.forEach(it => shownItems.set(it.id, it));
-  if (!items.length) {
-    const scan = hiddenView ? null : scanSuggestion();
-    $("rows").innerHTML = `<tr><td colspan="${TABLE_COLUMNS}"><div class="empty">
+// No results, said the same way in the table and the cards; the scan waits for its button.
+function emptyResultsHtml(hiddenView, neverScanned) {
+  const scan = hiddenView ? null : scanSuggestion();
+  return {scan, html: `<div class="empty">
       <h3>${neverScanned ? "No scan data yet" : "No listings here"}</h3>
       <p>${hiddenView ? "Nothing is hidden with these filters."
         : neverScanned ? "No scan has run yet, so there is nothing to show."
         : "No eligible listings match these filters. Change the filters, or scan for new listings."}</p>
       ${scan ? `<p class="small muted" id="scan-scope">${AS.esc(scan.scope)}</p>
         <p style="margin-top:10px"><button class="btn btn-primary" type="button" id="empty-scan" aria-describedby="scan-scope">${AS.esc(scan.label)}</button></p>` : ""}
-    </div></td></tr>`;
-    if (scan) $("empty-scan").addEventListener("click", () => AS.startScan(scan.body).catch(() => {}));
+    </div>`};
+}
+function wireEmptyScan(scan) {
+  if (scan) $("empty-scan").addEventListener("click", () => AS.startScan(scan.body).catch(() => {}));
+}
+
+function renderRows(items, hiddenView, neverScanned = false) {
+  if (!items.length) {
+    const empty = emptyResultsHtml(hiddenView, neverScanned);
+    $("rows").innerHTML = `<tr><td colspan="${TABLE_COLUMNS}">${empty.html}</td></tr>`;
+    wireEmptyScan(empty.scan);
     return;
   }
   $("rows").innerHTML = items.map(it => {
     const loc = [it.concelho, it.district].filter(Boolean).join(", ");
     const p = it.presentation || {};
-    const badges = (it.kind ? `<span class="badge b-muted">${AS.esc(KIND_LABEL[it.kind])}</span>` : "")
-      + (it.is_recent ? '<span class="badge b-new">NEW</span>' : "")
-      + (it.offer_outcome ? `<span class="badge b-offer">offer ${AS.esc(it.offer_outcome)}</span>` : "")
-      + (it.hidden_reason ? `<span class="badge b-hidden" title="${AS.esc(it.hidden_reason)}">${AS.esc(it.hidden_category)}</span>` : "");
-    const signals = AS.climateBadge(it.climate_grade)
-      + (it.price_drop_pct ? `<span class="badge b-drop">↓${Math.round(it.price_drop_pct)}%</span>` : "");
+    const badges = listingBadgesHtml(it);
+    const signals = listingSignalsHtml(it);
     const starred = it.status === "shortlisted";
     // IDs go through data-id, never into the onclick source.
     const id = AS.esc(it.id);

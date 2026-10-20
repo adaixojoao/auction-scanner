@@ -1,6 +1,7 @@
 // listings.js — the Listings page: loading the results, status changes and Undo, sorting and goal tabs, refreshes after a scan, and start-up.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
+// (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
 
 // ── Loading: one latest-wins read for the results (AS.latestRead) ──
 const resultsRead = AS.latestRead();
@@ -53,8 +54,8 @@ async function load({after = "", navigation = false} = {}) {
     setLoadState("error", after === "saved"
       ? `Saved, but results could not be refreshed: ${result.message}` : result.message);
     if (!renderedOnce) {
-      $("rows").innerHTML = `<tr><td colspan="${TABLE_COLUMNS}"><div class="empty"><h3>Listings could not be loaded</h3>
-        <p>This is not an empty result. Use Retry listings above.</p></div></td></tr>`;
+      showResultsMessage(`<div class="empty"><h3>Listings could not be loaded</h3>
+        <p>This is not an empty result. Use Retry listings above.</p></div>`);
       $("result-count").textContent = "";
     } else {
       $("result-count").textContent = `Previous results: ${lastCountText}`;
@@ -83,7 +84,7 @@ async function load({after = "", navigation = false} = {}) {
   shownItems.clear();
   renderStats(data.stats);
   renderResearch(data.research);
-  renderRows(data.items, view.status === "hidden", !data.last_scrape);
+  renderResults(data.items, view.status === "hidden", !data.last_scrape);   // the table or the cards
   renderCount(data.display_total ?? data.total, lastFound, lastCap, !data.last_scrape);
   renderPages(data.display_total ?? data.total);
   renderedOnce = true;
@@ -280,6 +281,179 @@ $("listings-refresh").addEventListener("click", async () => {
 });
 $("listings-retry").addEventListener("click", () => load());
 
+// ── Saved searches (listings-saved-searches.js): named views kept in this browser only ──
+// Nothing applies by itself: Apply changes the filters and sort once, Save and
+// Update store what the controls show. A change made in another tab is only
+// reported; it has to be reloaded before editing here.
+const savedSearches = AuctionSavedSearches.createStore({
+  // Through functions, so a browser that blocks storage fails inside the store, which says so.
+  storage: {getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value)},
+  validateView: validateSavedView,
+  notify: showSavedSearches,
+});
+let appliedSearch = "";          // the saved search the view came from, until you change it
+let nameAction = null;           // what the name dialog does with the name: returns what to say, or throws why not
+let nameOpener = null;
+
+function savedRecord(id) { return savedSearches.snapshot().records.find(r => r.id === id); }
+function savedMessage(text, bad = false) {
+  const message = $("saved-search-message");
+  message.textContent = text;
+  message.classList.toggle("warn", bad);
+}
+
+function syncSavedButtons(state = savedSearches.snapshot()) {
+  const chosen = $("saved-search-select").value;
+  const editable = state.loaded && !state.conflict;
+  $("saved-search-select").disabled = !state.loaded;
+  $("saved-search-apply").disabled = !state.loaded || !chosen;
+  $("saved-search-create").disabled = !editable;
+  ["saved-search-update", "saved-search-rename", "saved-search-delete"].forEach(id => { $(id).disabled = !editable || !chosen; });
+}
+
+function showSavedSearches(state) {
+  const select = $("saved-search-select");
+  const chosen = select.value || appliedSearch;
+  // Names are text: options are built as nodes, never from markup.
+  select.replaceChildren(new Option("Choose…", ""), ...state.records.map(r => new Option(r.name, r.id)));
+  select.value = state.records.some(r => r.id === chosen) ? chosen : "";
+  if (!state.records.some(r => r.id === appliedSearch)) appliedSearch = "";
+  $("saved-search-warning").hidden = !state.warning;
+  $("saved-search-warning").textContent = state.warning;
+  syncSavedButtons(state);
+  savedSearchViewChanged();
+}
+
+// Filters or sort no longer what the applied search holds: said beside it (the page and the open property do not count).
+function savedSearchViewChanged() {
+  const record = appliedSearch && savedRecord(appliedSearch);
+  const saved = record && budgetedView({...goalDefaults(record.view.mode), ...record.view}).view;
+  const same = saved && AuctionSavedSearches.FIELDS.every(key => saved[key] === view[key]);
+  $("saved-search-modified").hidden = !record || same;
+}
+
+// The controls as a view to save, committed first so the results match what is saved.
+function viewToSave() {
+  cancelPending();
+  const current = readControls();
+  if (!current) {
+    savedMessage("Correct the highlighted filters before saving this search. Nothing was saved.", true);
+    return null;
+  }
+  commitControls("replace");
+  return view;
+}
+
+function askName(title, initial, action, opener) {
+  $("saved-search-name-title").textContent = title;
+  $("saved-search-name").value = initial;
+  $("saved-search-name-error").textContent = "";
+  nameAction = action;
+  nameOpener = opener;
+  $("saved-search-name-dialog").showModal();
+  $("saved-search-name").select();
+}
+function submitName() {
+  if (!nameAction) return;
+  try {
+    const said = nameAction($("saved-search-name").value);
+    nameAction = null;
+    $("saved-search-name-dialog").close();
+    savedMessage(said);
+  } catch (error) {
+    $("saved-search-name-error").textContent = error.message;   // the dialog stays open with what you typed
+  }
+}
+$("saved-search-name-ok").addEventListener("click", submitName);
+$("saved-search-name").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); submitName(); }
+});
+$("saved-search-name-dialog").addEventListener("close", () => {
+  nameAction = null;
+  if (nameOpener && nameOpener.isConnected) nameOpener.focus();
+  nameOpener = null;
+});
+
+$("saved-search-select").addEventListener("change", () => syncSavedButtons());
+$("saved-search-create").addEventListener("click", e => {
+  const current = viewToSave();
+  if (!current) return;
+  askName("Save current search", "", name => {
+    const id = savedSearches.create(name, current);
+    appliedSearch = id;
+    $("saved-search-select").value = id;
+    syncSavedButtons();
+    savedSearchViewChanged();
+    return `Saved “${savedRecord(id).name}” in this browser.`;
+  }, e.currentTarget);
+});
+$("saved-search-update").addEventListener("click", () => {
+  const record = savedRecord($("saved-search-select").value);
+  if (!record) return;
+  if (!confirm(`Replace the filters and sort saved in “${record.name}” with the ones shown now?`)) {
+    savedMessage("Not changed.");
+    return;
+  }
+  const current = viewToSave();
+  if (!current) return;
+  try {
+    savedSearches.update(record.id, current);
+    appliedSearch = record.id;
+    savedSearchViewChanged();
+    savedMessage(`Updated “${record.name}” in this browser.`);
+  } catch (error) { savedMessage(error.message, true); }
+});
+$("saved-search-rename").addEventListener("click", e => {
+  const record = savedRecord($("saved-search-select").value);
+  if (!record) return;
+  askName("Rename saved search", record.name, name => {
+    savedSearches.rename(record.id, name);
+    return `Renamed to “${savedRecord(record.id).name}”.`;
+  }, e.currentTarget);
+});
+$("saved-search-delete").addEventListener("click", () => {
+  const record = savedRecord($("saved-search-select").value);
+  if (!record) return;
+  if (!confirm(`Delete the saved search “${record.name}” from this browser? This cannot be undone.`)) {
+    savedMessage("Not deleted.");
+    return;
+  }
+  try {
+    savedSearches.remove(record.id);
+    savedMessage(`Deleted “${record.name}”. The listings shown did not change.`);
+  } catch (error) { savedMessage(error.message, true); }
+});
+$("saved-search-apply").addEventListener("click", () => {
+  const record = savedRecord($("saved-search-select").value);
+  if (!record) return;
+  cancelPending();
+  let saved;
+  try { saved = savedSearches.apply(record.id); }
+  catch (error) { savedMessage(`Not applied: ${error.message}`, true); return; }
+  // Never quietly widened: a source or method this page does not offer now stops it.
+  const missing = savedViewUnavailable(saved);
+  if (missing.length) {
+    savedMessage(`Not applied: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not available on this page now. Your filters were not changed.`, true);
+    return;
+  }
+  const {view: next, note} = budgetedView({...goalDefaults(saved.mode), ...saved, page: 1});
+  if (next.mode !== view.mode) {
+    try { localStorage.setItem("listings-mode", next.mode); } catch (e) { /* private window */ }
+  }
+  appliedSearch = record.id;
+  setView(next);                                  // one history entry, one read
+  restoreControls();
+  savedMessage(`Applied “${record.name}”.${note ? ` ${note}` : ""}`);
+});
+$("saved-search-reload").addEventListener("click", () => {
+  const state = savedSearches.reload();
+  savedMessage(state.loaded ? `Saved searches reloaded: ${state.records.length}.` : "", !state.loaded);
+});
+window.addEventListener("storage", e => {
+  if (e.key !== AuctionSavedSearches.STORAGE_KEY && e.key !== null) return;
+  savedSearches.externalChange();                 // said, never applied here by itself
+});
+
 function showViewNote(lines) {
   const note = $("view-note");
   note.hidden = !lines.length;
@@ -332,6 +506,8 @@ async function start() {
   view = normalizeView(raw, storedMode, dropped);
   if (dropped.length) notes.push(`Not available now, so not applied: ${dropped.join(", ")}.`);
   showViewNote(notes);
+  savedSearches.reload();                         // after the lists above, which a saved search is checked against
+  if (metaFailed) savedMessage("Sources and sale methods could not be loaded: a saved search that names one is not applied until you reload the page.", true);
   restoreControls();
   writeViewURL(view, "replace");
   await load();

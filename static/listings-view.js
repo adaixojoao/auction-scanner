@@ -1,6 +1,7 @@
 // listings-view.js — the Listings page: the view (goal, filters, sort, page) in the URL and remembered, and the controls.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
+// (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
 
 const KIND_LABEL = {home: "home", urban_plot: "urban plot", rural_plot: "rural plot", other: "other"};
 const PER_PAGE = 50;
@@ -91,6 +92,69 @@ function normalizeView(raw, fallbackMode, dropped = []) {
     dir: raw.dir === "asc" || raw.dir === "desc" ? raw.dir : defaults.dir,
     page: boundedInteger(raw.page, defaults.page, 1, 1000000),
   };
+}
+
+// A saved search (listings-saved-searches.js) checked against the same
+// contract, strictly: a value outside it is an error with the reason, never
+// widened to All. Fields it lacks take the goal's defaults. Country, source and
+// sale method depend on what this page offers now, so they are checked when it
+// is applied (savedViewUnavailable); a maximum above the goal's budget is kept
+// as saved and narrowed, said, when applied (budgetedView).
+function validateSavedView(raw) {
+  if (!VALID_MODES.has(raw.mode)) throw new Error(`Goal “${raw.mode ?? ""}” is not one of this page's goals.`);
+  const defaults = goalDefaults(raw.mode);
+  const out = {};
+  const text = (key, ok, label) => {
+    const value = raw[key] == null ? defaults[key] : raw[key];
+    if (typeof value !== "string" || !ok(value)) throw new Error(`${label} “${value}” is not available on this page.`);
+    out[key] = value;
+  };
+  const flag = (key, label) => {
+    const value = raw[key] == null ? defaults[key] : raw[key];
+    if (typeof value !== "boolean") throw new Error(`${label} must be on or off.`);
+    out[key] = value;
+  };
+  out.mode = raw.mode;
+  [["country", "Country"], ["source", "Source"], ["sale_method", "Sale method"]]
+    .forEach(([key, label]) => text(key, () => true, label));
+  text("kind", v => VALID_KINDS.has(v), "Property type");
+  text("status", v => VALID_STATUSES.has(v), "Status");
+  text("climate", v => VALID_CLIMATES.has(v), "Climate");
+  text("sort", v => VALID_SORTS.has(v), "Sort");
+  text("dir", v => v === "asc" || v === "desc", "Order");
+  text("search", () => true, "Search");
+  out.search = out.search.trim();
+  flag("properties", "Property only");
+  flag("climate_exact", "Exact climate data only");
+  const price = raw.max_price == null ? defaults.max_price : raw.max_price;
+  if (!(price === "" || (typeof price === "number" && Number.isFinite(price) && price >= 0))) {
+    throw new Error("Max listed price must be empty or an amount of €0 or more.");
+  }
+  out.max_price = price;
+  const score = raw.min_score == null ? defaults.min_score : raw.min_score;
+  if (!Number.isInteger(score) || score < 0 || score > 100) throw new Error("Min score must be a whole number from 0 to 100.");
+  out.min_score = score;
+  return out;
+}
+
+// What a saved search asks for that this page cannot offer now (a source
+// no longer scanned, or lists that could not be loaded).
+function savedViewUnavailable(state) {
+  const missing = [];
+  if (!allowed.countries.has(state.country)) missing.push(`Country “${state.country}”`);
+  if (!allowed.sources.has(state.source)) missing.push(`Source “${state.source}”`);
+  if (!allowed.saleMethods.has(state.sale_method)) missing.push(`Sale method “${state.sale_method}”`);
+  return missing;
+}
+
+// The goal's budget holds whatever was saved: {view, note} with what changed.
+function budgetedView(state) {
+  const budget = GOAL_BUDGETS[state.mode] || 0;
+  if (state.max_price !== "" && budget && state.max_price > budget) {
+    return {view: {...state, max_price: budget},
+            note: `Its maximum of ${AS.money(state.max_price)} is above this goal's budget now, so the budget, ${AS.money(budget)}, applies.`};
+  }
+  return {view: state, note: ""};
 }
 
 function rawViewFromURL() {
@@ -250,6 +314,7 @@ function activeFilters() {
 }
 
 function renderChips() {
+  savedSearchViewChanged();                       // listings.js: is this still the saved search applied?
   const chips = activeFilters();
   $("active-filters").innerHTML = chips.length
     ? `<span class="small muted">Active filters:</span> ` + chips.map(c => {

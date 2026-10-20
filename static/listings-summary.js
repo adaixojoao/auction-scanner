@@ -1,6 +1,7 @@
 // listings-summary.js — the Listings page: what one row or research card says about price, all-in cost, checks and deadline.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
+// (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
 // Display only: every figure and state comes from the server's presentation summary
 // (presentation.py). Nothing here prices, verifies or ranks a listing.
 
@@ -106,6 +107,18 @@ function deadlineSummaryHtml(d) {
   return `<div><strong>${AS.esc(relative)}</strong></div>
     <div class="small"><time datetime="${AS.esc(d.instant || d.date)}">${AS.esc(calendarDate(d.date))}, ${AS.esc(d.time || "")}</time></div>
     <div class="small faint">${d.precision === "local" ? `Sale-local time (${zone}); the notice gives no zone` : `Sale-local time (${zone})`}</div>`;
+}
+
+// The badges and signals a row shows, shared with the cards (listings-cards.js).
+function listingBadgesHtml(it) {
+  return (it.kind ? `<span class="badge b-muted">${AS.esc(KIND_LABEL[it.kind])}</span>` : "")
+    + (it.is_recent ? '<span class="badge b-new">NEW</span>' : "")
+    + (it.offer_outcome ? `<span class="badge b-offer">offer ${AS.esc(it.offer_outcome)}</span>` : "")
+    + (it.hidden_reason ? `<span class="badge b-hidden" title="${AS.esc(it.hidden_reason)}">${AS.esc(it.hidden_category)}</span>` : "");
+}
+function listingSignalsHtml(it) {
+  return AS.climateBadge(it.climate_grade)
+    + (it.price_drop_pct ? `<span class="badge b-drop">↓${Math.round(it.price_drop_pct)}%</span>` : "");
 }
 
 function thumbnailHtml(src, title) {

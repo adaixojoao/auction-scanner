@@ -1,6 +1,7 @@
 // listings-drawer.js — the Listings page: one property drawer for the table and the research cards.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
+// (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
 //
 // A native modal <dialog>: the page behind it is inert until it closes. It
 // owns no data: fillPanel and the one details cache (listings-details.js)
@@ -33,7 +34,7 @@ const propertyDrawer = (() => {
 
   // Every Details trigger says whether the drawer shows its listing.
   function syncTriggers() {
-    document.querySelectorAll('#rows [data-role="details"], #rows [data-role="title"], #research-candidates [data-role="details"]')
+    document.querySelectorAll('#rows [data-role="details"], #rows [data-role="title"], #listing-cards [data-role="details"], #research-candidates [data-role="details"]')
       .forEach(trigger => {
         const active = panel.open && trigger.dataset.id === selected;
         trigger.setAttribute("aria-expanded", String(active));
@@ -154,7 +155,8 @@ const propertyDrawer = (() => {
     delete panel.dataset.for;
     syncTriggers();
     if (writeURL) writeSelection(null);
-    const fallback = rowFor(previous) || cardFor(previous);
+    // The trigger was redrawn (or the layout changed): the same listing's Details where it is shown now.
+    const fallback = rowFor(previous) || listingCardFor(previous) || cardFor(previous);
     const target = returnFocus && returnFocus.isConnected ? returnFocus
       : fallback ? fallback.querySelector('[data-role="details"]') : null;
     (target || $("result-count")).focus({preventScroll: true});

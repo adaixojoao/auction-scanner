@@ -77,6 +77,24 @@
 <div class="active-filters" id="active-filters" role="group" aria-label="Active filters"></div>
 <p class="notice warn" id="view-note" hidden></p>
 
+<section class="card saved-searches" aria-labelledby="saved-searches-title">
+  <h2 id="saved-searches-title" class="small">Saved searches</h2>
+  <p class="small muted" id="saved-searches-help">Stored in this browser only, not on the server or your other computers. Names and search text are kept as you type them: avoid anything sensitive. Applying one changes the filters and sort here; it never starts a scan.</p>
+  <div class="saved-search-controls">
+    <label for="saved-search-select">Choose a search</label>
+    <select id="saved-search-select" aria-describedby="saved-searches-help saved-search-modified"><option value="">Choose…</option></select>
+    <span class="small warn" id="saved-search-modified" hidden>Filters changed since this search was applied</span>
+    <button type="button" class="btn" id="saved-search-apply">Apply</button>
+    <button type="button" class="btn" id="saved-search-create">Save current search</button>
+    <button type="button" class="btn" id="saved-search-update">Update selected</button>
+    <button type="button" class="btn" id="saved-search-rename">Rename</button>
+    <button type="button" class="btn" id="saved-search-delete">Delete</button>
+    <button type="button" class="btn" id="saved-search-reload">Reload saved searches</button>
+  </div>
+  <p class="notice warn inline-notice" id="saved-search-warning" hidden></p>
+  <p id="saved-search-message" class="small" role="status" aria-live="polite"></p>
+</section>
+
 <section id="research-candidates" hidden></section>
 
 <div id="listings-update-notice" class="notice info inline-notice" hidden>
@@ -107,6 +125,11 @@
       </select></div>
     <div class="field inline-field"><label for="sort-dir">Order</label>
       <select id="sort-dir"><option value="desc">Descending</option><option value="asc">Ascending</option></select></div>
+    <div class="density" role="group" aria-labelledby="layout-label">
+      <span class="small muted" id="layout-label">Layout</span>
+      <button type="button" class="btn btn-sm" data-layout="table" aria-pressed="true">Table</button>
+      <button type="button" class="btn btn-sm" data-layout="cards" aria-pressed="false">Cards</button>
+    </div>
     <div class="density" role="group" aria-labelledby="density-label">
       <span class="small muted" id="density-label">Display</span>
       <button type="button" class="btn btn-sm" data-density="comfortable" aria-pressed="true">Comfortable</button>
@@ -115,7 +138,7 @@
   </div>
   <p class="small faint" id="sort-hint">Listed price sorts by the stored listed price. The price basis shown can be a current bid or minimum offer instead.</p>
 </div>
-<div class="table-scroll" role="region" aria-label="Listings results" tabindex="0">
+<div class="table-scroll" id="listings-table" role="region" aria-label="Listings results" tabindex="0">
 <table class="list">
   <thead><tr>
     <th scope="col" class="sortable" data-sort="title" aria-sort="none"><button type="button" class="sort-button" data-sort="title" data-label="Title">Property <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
@@ -129,6 +152,7 @@
   <tbody id="rows"><tr><td colspan="7"><div class="empty"><p>Loading listings…</p></div></td></tr></tbody>
 </table>
 </div>
+<div id="listing-cards" class="listing-cards" role="region" aria-label="Listings results as cards" hidden><div class="empty"><p>Loading listings…</p></div></div>
 </div>
 <div class="pagination" id="pagination"></div>
 </section>
@@ -156,6 +180,19 @@
     <a href="/offers" class="btn">Open Offers</a>
   </footer>
 </dialog>
+<dialog id="saved-search-name-dialog" aria-labelledby="saved-search-name-title">
+  <form method="dialog">
+    <h2 id="saved-search-name-title">Saved-search name</h2>
+    <label for="saved-search-name">Name</label>
+    <input id="saved-search-name" type="text" maxlength="80" required aria-describedby="saved-search-name-help saved-search-name-error">
+    <p class="small muted" id="saved-search-name-help">Kept in this browser only. Avoid sensitive information.</p>
+    <p class="small field-error" id="saved-search-name-error" role="status"></p>
+    <div class="dialog-actions">
+      <button type="submit" class="btn" value="cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="saved-search-name-ok">Save</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="leave-dialog" aria-labelledby="leave-title">
   <p id="leave-title"><b>A note is not saved yet</b></p>
   <p class="small muted" id="leave-text">Save it before leaving, stay on this page, or leave without saving it.</p>
@@ -175,9 +212,11 @@ const GOAL_BUDGETS = {{ goal_budgets | tojson }};
 </script>
 <script src="{{ url_for('static', filename='listing-notes.js') }}"></script>
 <script src="{{ url_for('static', filename='listing-details-cache.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-saved-searches.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-view.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-summary.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-details.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-cards.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-notes.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-drawer.js') }}"></script>
 <script src="{{ url_for('static', filename='listings.js') }}"></script>

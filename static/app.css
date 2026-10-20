@@ -321,6 +321,29 @@ table.list tr.dim { background: rgba(148, 163, 184, .04); }
 .results-density-compact .result-thumbnail,
 .results-density-compact .result-thumbnail-fallback { width: 52px; height: 40px; }
 .results-density-compact .result-reasons li, .results-density-compact .result-checks li { margin: 1px 0; }
+/* Saved searches and the results as cards (Batch 08): another layout of the same page of results. */
+.saved-searches { margin: 12px 0; }
+.saved-searches h2 { margin: 0 0 4px; }
+.saved-search-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; }
+.listing-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; margin: 16px 0; }
+.listing-cards > .empty { grid-column: 1 / -1; }
+.listing-card { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); overflow-wrap: anywhere; }
+.listing-card.dim { background: var(--card-2); }
+.listing-card h3 { font-size: 15px; margin: 0; }
+.listing-card section { margin-top: 8px; }
+.listing-card-property { display: flex; gap: 12px; align-items: flex-start; }
+.listing-card-title {
+  color: inherit; font: inherit; font-weight: 600; background: transparent; border: 0;
+  padding: 6px 0; text-align: left; cursor: pointer; min-height: 36px;
+}
+.listing-card-title:hover { color: var(--accent-2); text-decoration: underline; }
+.listing-card-figures { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.listing-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.results-density-compact .listing-card { padding: 10px; }
+.results-density-compact .listing-cards { gap: 10px; }
+@media (max-width: 420px) {
+  .listing-card-figures { grid-template-columns: 1fr; }
+}
 .stats-more { margin: -6px 0 14px; }
 .stats-more p { margin-top: 4px; }
 .source-health summary, .mode-details summary { cursor: pointer; }
