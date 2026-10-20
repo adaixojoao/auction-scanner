@@ -179,8 +179,9 @@ def test_dismiss_cancel_changes_nothing_and_undo_keeps_history(app, db):
     app.page.click("#dismiss-ok")
     _wait_closed(app)
     app.idle()
-    assert app.page.is_visible("#status-undo")
+    app.page.wait_for_selector("#status-undo", state="visible")
     app.page.click("#status-undo-button")
+    row(app, 7).wait_for()                           # Undo posts, then redraws: wait for the row itself
     app.idle()
     assert row(app, 7).count() == 1
     history = app.client.get("/api/listing?id=eleiloes:h7").get_json()["status_history"]
