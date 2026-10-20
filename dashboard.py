@@ -827,11 +827,15 @@ def api_listing_detail():
             (listing_id,)).fetchall()]
         from db import listing_status_history
         status_history = listing_status_history(db, listing_id)
+        # The row's own short summaries (presentation.py, one checklist read), for the comparison.
+        presented = _presentations(db, [it]).get(it["id"])
     finally:
         db.close()
     return jsonify({
         "id": it["id"], "title": it.get("title"), "source": it.get("source"),
         "url": safe_url(it.get("url")),
+        "country": it.get("country"), "concelho": it.get("concelho"), "district": it.get("district"),
+        "kind": it.get("kind"), "area_m2": it.get("area_m2"), "presentation": presented,
         "image": (listing_info.gallery(it) or [None])[0],
         "images": listing_info.gallery(it),
         "description": (it.get("description") or "")[:20000 if (it.get("rank") or 0) >= KEEP_SCORE else 4000],

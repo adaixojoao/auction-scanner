@@ -1,7 +1,8 @@
 // listings-notes.js — the Listings page: note drafts in memory, saved one at a time, and the warnings before leaving with one unsaved.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
 // (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
-//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings-comparison-store.js,
+//  listings-comparison-render.js, listings-comparison.js, listings.js).
 
 // ── Notes: a draft per listing in memory, saved one at a time ──
 // The store is listing-notes.js (AuctionNotes). The server keeps exactly what

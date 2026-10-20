@@ -1,7 +1,8 @@
 // listings-cards.js — the Listings page: the results as a table or as cards, one population, one set of actions.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
 // (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
-//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings-comparison-store.js,
+//  listings-comparison-render.js, listings-comparison.js, listings.js).
 //
 // Cards are another way to draw the page of results the server sent: the same
 // items, count, sort and page as the table, with the same summaries
@@ -44,6 +45,7 @@ function listingCardHtml(item) {
       <button type="button" class="btn btn-sm" data-role="${dismissed ? "restore" : "star"}" data-status-action data-id="${id}"
         ${dismissed ? "" : `aria-pressed="${starred}"`} aria-label="${dismissed ? "Restore" : starred ? "Remove from shortlist" : "Shortlist"}: ${title}">${dismissed ? "Restore" : starred ? "On Offers" : "Shortlist"}</button>
       ${dismissed ? "" : `<button type="button" class="btn btn-sm" data-role="dismiss" data-status-action data-id="${id}" aria-label="Dismiss: ${title}">Dismiss</button>`}
+      ${compareButtonHtml(item.id, item.title)}
     </div>
   </article>`;
 }
@@ -82,6 +84,7 @@ function drawLayout() {
   }
   // A status change still on its way keeps its redrawn buttons waiting.
   statusPending.forEach(id => statusButtons(id).forEach(b => { b.disabled = true; }));
+  if (typeof comparison !== "undefined") comparison.sync();
 }
 
 // Where results that could not be loaded the first time say so: the active layout.
