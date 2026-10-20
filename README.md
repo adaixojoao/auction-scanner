@@ -59,7 +59,7 @@ another window.
 
 | Page | What it is for |
 |---|---|
-| **Listings** | Everything found, scored; it shows at most **100** (Settings → *Show at most*), chosen after the filters and the selected sort: a filter or *cheapest first* looks through every eligible match, not only the best 100 by score (see *Filters* below). **ⓘ** opens everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale; for France, the parcel named in the notice (its plot area and a map link) and, when the listing scores 85 or more and that parcel has a single building, the year and the use from the national building database. A listing at **85 or more** in any goal keeps its photos on this PC after the sale site takes them down, and the panel shows that gallery and the full description. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
+| **Listings** | Everything found, scored; it shows at most **100** (Settings → *Show at most*), chosen after the filters and the selected sort: a filter or *cheapest first* looks through every eligible match, not only the best 100 by score (see *Filters* below). **ⓘ** opens the **property drawer** (the same one from the table and from the research cards) with everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale; for France, the parcel named in the notice (its plot area and a map link) and, when the listing scores 85 or more and that parcel has a single building, the year and the use from the national building database. A listing at **85 or more** in any goal keeps its photos on this PC after the sale site takes them down, and the panel shows that gallery and the full description. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens the drawer at **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
 | **Map** | Portuguese listings by district. |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
@@ -108,7 +108,7 @@ are on this page.
 **Loading, saving and refreshing.** Listings says *Loading listings…* the
 first time and *Updating results…* after that, keeping the rows on screen. If
 an update fails, the rows stay but are marked as your previous view, with
-*Retry listings*; a failure is never shown as "no listings". A details panel
+*Retry listings*; a failure is never shown as "no listings". The property drawer
 opens at once with *Loading details…* and, if it fails, a *Retry details*
 button; closing it or switching goal discards a late answer. Notes save
 themselves a moment after you stop typing (and when you leave the field), one
@@ -140,6 +140,28 @@ focus and scroll come back after a refresh, including focus into a panel that
 loads after the rows, unless you have moved focus since. Drafts are not a
 backup across reloads or crashes, and two windows editing one note: the last
 save wins.
+
+**The property drawer.** One drawer, sliding in from the right, shows a
+listing's details for the table and the research cards alike; it is modal, so
+the page behind it cannot be clicked or tabbed to until it closes (Close or
+Escape), and focus then goes back to the button that opened it. Its sections
+(Overview; Costs and planning; Location and climate; Official records and
+sale procedure; Research and stewardship; Notes and history) are listed at
+the top as buttons that jump to them. The listing shown is in the address as
+`?property=`, replaced rather than added to history, so a reload or Back and
+Forward bring it back and filter changes keep it; a listing outside the
+results now shown still opens, but its Shortlist and Dismiss wait until it is
+back in them. Dismissing from the drawer closes it, so *Undo dismissal* is in
+reach. A photo opens larger inside the drawer (Escape closes the photo
+first); only web addresses without a user name or password are enlarged, and
+one that fails to load says so. When a scan finishes while it is open the
+drawer says its details may be out of date, with *Refresh details*; a
+location you are typing is never redrawn under you. Costs, research and
+records in it are estimates and leads from public data, not legal or
+financial advice, and an amount that is not known shows *Not established*,
+never €0. Note drafts in it are the same page-session drafts as above: kept
+while the drawer closes or switches listing, not a backup across a crash,
+and with no guarantee between two windows.
 
 ### Offers, step by step
 
@@ -312,7 +334,7 @@ cards can also be in the table and are not added to its count.
 
 ## What it really costs
 
-A €20 000 house is not a €20 000 house. Under **ⓘ → What it really costs**
+A €20 000 house is not a €20 000 house. Under **ⓘ → Estimated costs: what it really costs**
 (and in the Telegram alert, and in the AI check) the scanner adds up what you
 pay on top of the price:
 
@@ -754,7 +776,7 @@ The browser tests answer every request in-process from a temporary database
 `REQUIRE_BROWSER=1` makes a missing browser a failure instead. They cover late
 and aborted reads, note saves and leaving with an unsaved note, refreshes that
 keep open details and drafts, focus when a listing leaves the results,
-Back/Forward, keyboard sorting and menus, and hostile IDs and titles. The note
+the property drawer (focus, late answers, `?property=`, dismissal, the photo viewer), Back/Forward, keyboard sorting and menus, and hostile IDs and titles. The note
 store and details cache also run in Node when it is installed
 (`tests/test_batch04_frontend_state.py`, `tests/test_batch05_details_cache_order.py`).
 None of this replaces checking the desktop window, a screen reader, 200% zoom

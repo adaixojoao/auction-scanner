@@ -88,8 +88,9 @@ def test_row_actions_and_pagination_have_accessible_names(listings):
                  'aria-label="Previous page"', 'aria-label="Next page"', "aria-current=\"page\"",
                  'const propertyLabel = AS.esc(it.title || "this listing")'):
         assert part in listings, part
-    # Panel IDs come from a counter, not the scraped listing ID.
-    assert "details-panel-${detailsSeq}" in listings and "tr.id = nextDetailsId()" in listings
+    # Details triggers control the one drawer by its fixed ID, never one made from the scraped listing ID.
+    assert 'trigger.setAttribute("aria-controls", panel.id)' in listings
+    assert "details-panel-" not in listings and "nextDetailsId" not in listings
 
 
 @pytest.mark.parametrize("path", PAGES)

@@ -1,6 +1,6 @@
 // listings-summary.js — the Listings page: what one row or research card says about price, all-in cost, checks and deadline.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings.js).
+// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
 // Display only: every figure and state comes from the server's presentation summary
 // (presentation.py). Nothing here prices, verifies or ranks a listing.
 

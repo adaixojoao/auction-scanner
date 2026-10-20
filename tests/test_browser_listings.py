@@ -136,10 +136,19 @@ def row(app, n):
     return app.page.locator(f'#rows tr[data-id="eleiloes:h{n}"]')
 
 
+DRAWER = "#property-drawer"
+
+
 def open_details(app, n):
+    """Opens listing n's details: the property drawer (Batch 07), once its note is drawn."""
     row(app, n).locator('[data-role="details"]').click()
-    app.page.wait_for_selector(f'#rows tr.details-row[data-for="eleiloes:h{n}"] textarea.d-note')
-    return app.page.locator(f'#rows tr.details-row[data-for="eleiloes:h{n}"]')
+    app.page.wait_for_selector(f'{DRAWER}[open][data-for="eleiloes:h{n}"] textarea.d-note')
+    return app.page.locator(DRAWER)
+
+
+def close_details(app):
+    app.page.click("#property-drawer-close")
+    app.page.wait_for_function("() => !document.getElementById('property-drawer').open")
 
 
 # 1. Reversed and aborted reads; who owns the busy state.
@@ -198,7 +207,7 @@ def test_notes_save_serially_and_only_show_saved_for_what_was_stored(app):
     assert len(app.held) == 1                         # never two saves of one note at once
     app.hold.clear()
     app.release()
-    app.page.wait_for_function("""() => document.querySelector('tr.details-row .note-phase').textContent === 'Saved'""")
+    app.page.wait_for_function("""() => document.querySelector('#property-drawer .note-phase').textContent === 'Saved'""")
     saves = [json.loads(b)["note"] for _m, _p, _q, b in app.calls("/api/listing/note", "POST")]
     assert saves == ["first", "first second"]
     stored = app.client.post("/api/listing/note", json={"id": "eleiloes:h0", "note": "first second"}).get_json()
@@ -209,7 +218,7 @@ def test_a_malformed_acknowledgement_is_not_saved_and_retry_sends_the_latest(app
     app.open()
     panel = open_details(app, 1)
     field = panel.locator("textarea.d-note")
-    phase = """() => document.querySelector('tr.details-row .note-phase').textContent"""
+    phase = """() => document.querySelector('#property-drawer .note-phase').textContent"""
     app.override["/api/listing/note"] = lambda q, b: (200, {"ok": True})      # no id or length
     field.click()
     field.type("draft")
@@ -237,8 +246,8 @@ def test_a_save_for_a_missing_listing_cannot_show_saved(app, db):
     field.click()
     field.type("note")
     field.press("Tab")
-    app.page.wait_for_function("""() => document.querySelector('tr.details-row .note-phase').textContent === 'Could not save'""")
-    assert app.page.is_visible("tr.details-row .note-retry")
+    app.page.wait_for_function("""() => document.querySelector('#property-drawer .note-phase').textContent === 'Could not save'""")
+    assert app.page.is_visible("#property-drawer .note-retry")
 
 
 # 3 and 5. Context and drafts across a refresh; details refresh without losing a draft.
@@ -249,19 +258,19 @@ def test_a_refresh_keeps_open_details_drafts_and_shows_newer_details(app, db):
     app.hold.add("/api/listing/note")
     field.click()
     field.type("unsaved thought")
-    app.page.locator("#reset-filters").focus()          # not typing any more
+    app.page.focus("#property-drawer-close")             # not typing any more
     db.execute("UPDATE listings SET current_bid = 23456 WHERE id = 'eleiloes:h3'")   # a scan changed it
     db.commit()
+    reads = len(app.calls("/api/listing"))
     app.page.evaluate("document.dispatchEvent(new CustomEvent('scan-finished'))")
-    notice_or_reload = app.page.is_visible("#listings-update-notice")
-    if notice_or_reload:                                  # a note is unsaved: it asks first
-        app.page.click("#listings-refresh")
-    app.idle()
-    reopened = app.page.locator('#rows tr.details-row[data-for="eleiloes:h3"]')
-    reopened.locator("textarea.d-note").wait_for()
-    assert reopened.locator("textarea.d-note").input_value() == "unsaved thought"
-    app.page.wait_for_function("""() => document.querySelector('#rows tr.details-row .details-freshness').dataset.state === 'current'""")
+    # A note is unsaved, so the results wait; the drawer says so and refreshes on request.
+    assert "A scan finished" in app.text("#property-drawer-notice")
+    app.page.click("#property-drawer-refresh")
+    app.page.wait_for_function("""() => document.querySelector('#property-drawer .details-freshness').dataset.state === 'current'""")
+    assert len(app.calls("/api/listing")) == reads + 1
     assert app.calls("/api/listing")[-1][2]["id"] == ["eleiloes:h3"]       # fetched again, not the old copy
+    assert panel.locator("textarea.d-note").input_value() == "unsaved thought"
+    assert app.page.is_hidden("#property-drawer-notice")
     app.hold.clear()
     while app.held:
         app.release()
@@ -276,9 +285,9 @@ def test_failed_detail_refresh_keeps_the_earlier_details_labelled(app, db):
     app.page.click("#listings-refresh") if app.page.is_visible("#listings-refresh") else \
         app.page.evaluate("document.dispatchEvent(new CustomEvent('scan-finished'))")
     app.idle()
-    state = app.page.locator('#rows tr.details-row[data-for="eleiloes:h4"] .details-freshness')
+    state = app.page.locator('#property-drawer[data-for="eleiloes:h4"] .details-freshness')
     state.wait_for()
-    app.page.wait_for_function("""() => document.querySelector('#rows tr.details-row .details-freshness').dataset.state === 'failed'""")
+    app.page.wait_for_function("""() => document.querySelector('#property-drawer .details-freshness').dataset.state === 'failed'""")
     assert "may be out of date" in state.text_content()
 
 
@@ -292,20 +301,21 @@ def test_research_card_details_and_drafts_survive_a_refresh(app, add, monkeypatc
     card = app.page.locator("#research-candidates article.research-card").first
     card_id = card.get_attribute("data-id")
     card.locator('[data-role="details"]').click()
-    field = card.locator(".candidate-details textarea.d-note")
+    field = app.page.locator(f'{DRAWER}[data-for="{card_id}"] textarea.d-note')
     field.wait_for()
     app.hold.add("/api/listing/note")
     field.click()
     field.type("card draft")
-    app.page.locator("#reset-filters").focus()
-    app.page.click("#listings-refresh") if app.page.is_visible("#listings-refresh") else \
-        app.page.evaluate("document.dispatchEvent(new CustomEvent('scan-finished'))")
-    if app.page.is_visible("#listings-refresh"):
-        app.page.click("#listings-refresh")
+    close_details(app)                                    # the note is still on its way
+    app.page.evaluate("document.dispatchEvent(new CustomEvent('scan-finished'))")
+    assert app.page.is_visible("#listings-refresh")       # an unsaved note: the redraw waits for you
+    app.page.click("#listings-refresh")
     app.idle()
-    again = app.page.locator(f'#research-candidates article.research-card[data-id="{card_id}"] .candidate-details textarea.d-note')
-    again.wait_for()
-    assert again.input_value() == "card draft"
+    again = app.page.locator(f'#research-candidates article.research-card[data-id="{card_id}"] [data-role="details"]')
+    again.click()
+    field = app.page.locator(f'{DRAWER}[data-for="{card_id}"] textarea.d-note')
+    field.wait_for()
+    assert field.input_value() == "card draft"
     app.hold.clear()
     while app.held:
         app.release()
