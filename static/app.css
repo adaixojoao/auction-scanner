@@ -488,3 +488,15 @@ td.nowrap .compare-toggle { margin-left: 4px; }
 @media (prefers-reduced-motion: reduce) {
   .scan-bar > div { transition: none; }
 }
+/* Listings map (Batch 10): the located properties on this results page. */
+.listings-map-section { margin: 16px 0; }
+.map-toolbar { display: flex; gap: 12px; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.map-toolbar h2 { margin: 0; }
+.listings-map-section > p { margin: 4px 0; }
+.listings-map { min-height: 360px; height: min(55vh, 560px); margin: 8px 0; border-radius: 8px; border: 1px solid var(--border); background: var(--card-2); }
+.map-list { list-style: none; margin: 8px 0; padding: 0; }
+.map-list li { padding: 6px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.map-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.map-popup { max-height: 260px; overflow: auto; color: #172033; }
+.map-popup-item + .map-popup-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid #cbd5e1; }
+.map-popup .btn { background: #ffffff; color: #172033; border-color: #64748b; }

@@ -129,6 +129,7 @@
       <span class="small muted" id="layout-label">Layout</span>
       <button type="button" class="btn btn-sm" data-layout="table" aria-pressed="true">Table</button>
       <button type="button" class="btn btn-sm" data-layout="cards" aria-pressed="false">Cards</button>
+      <button type="button" class="btn btn-sm" id="show-map" aria-pressed="false" aria-controls="listings-map-section">Show map</button>
     </div>
     <div class="density" role="group" aria-labelledby="density-label">
       <span class="small muted" id="density-label">Display</span>
@@ -155,6 +156,24 @@
 <div id="listing-cards" class="listing-cards" role="region" aria-label="Listings results as cards" hidden><div class="empty"><p>Loading listings…</p></div></div>
 </div>
 <div class="pagination" id="pagination"></div>
+</section>
+<section id="listings-map-section" class="card listings-map-section" hidden aria-labelledby="listings-map-title">
+  <header class="map-toolbar">
+    <h2 id="listings-map-title">Map of this results page</h2>
+    <button type="button" class="btn" id="listings-map-fit">Fit this page</button>
+  </header>
+  <p class="small muted">Located properties on this results page only; research candidates and other pages are not on it, and moving the map changes no filter. Unlocated properties remain in the results. Pin precision varies; a pin is not a surveyed boundary or proof of legal access.</p>
+  <p class="small muted">The map library comes from unpkg.com and the tiles from OpenStreetMap, as on the Map page: showing the map sends the area you look at to them, nothing about your notes or searches.</p>
+  <p id="listings-map-status" class="small" role="status"></p>
+  <div id="listings-map" class="listings-map" role="region" aria-label="Property map"></div>
+  <details>
+    <summary id="listings-map-unlocated-summary">Properties without established coordinates</summary>
+    <ul id="listings-map-unlocated" class="map-list"></ul>
+  </details>
+  <details>
+    <summary id="listings-map-located-summary">Located properties and pin precision</summary>
+    <ul id="listings-map-located" class="map-list"></ul>
+  </details>
 </section>
 <section id="comparison-tray" class="comparison-tray" hidden aria-labelledby="comparison-tray-title">
   <h2 id="comparison-tray-title" class="small">Selected for comparison</h2>
@@ -240,5 +259,7 @@ const GOAL_BUDGETS = {{ goal_budgets | tojson }};
 <script src="{{ url_for('static', filename='listings-comparison-store.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-comparison-render.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-comparison.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-map-model.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-map.js') }}"></script>
 <script src="{{ url_for('static', filename='listings.js') }}"></script>
 {% endblock %}
