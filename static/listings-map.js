@@ -206,7 +206,7 @@ const listingsMap = (() => {
   }
 
   async function activate() {
-    describe();
+    draw();                      // the lists do not wait for the map library
     try {
       const lib = await loadLeaflet();
       if (!shown || adapter) { draw(); return; }

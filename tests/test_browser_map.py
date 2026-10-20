@@ -57,7 +57,9 @@ def _with_leaflet(app):
 
 def _show(app):
     app.page.click("#show-map")
-    app.page.wait_for_function("() => /stored position/.test(document.getElementById('listings-map-status').textContent)")
+    # Settled: the library has loaded (or failed), not just the counts drawn while it loads.
+    app.page.wait_for_function("""() => { const t = document.getElementById('listings-map-status').textContent;
+        return /stored position/.test(t) && !t.includes('Loading the map'); }""")
 
 
 def _ids(app, selector):
