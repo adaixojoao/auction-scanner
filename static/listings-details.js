@@ -1,6 +1,6 @@
-// listings-details.js — the Listings page: rendering rows and research cards, details panels and their freshness, and keeping your place across a refresh.
+// listings-details.js — the Listings page: rendering rows and research cards, the details shown in the property drawer and their freshness, and keeping your place across a refresh.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings.js).
+// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
 
 // ── Keeping your place across a refresh (by listing ID, never by DOM ID) ──
 // One registry for both surfaces: the results table and the research cards.
@@ -13,38 +13,16 @@ function surfaceItems(surface) {
   return surface === "research" ? [...document.querySelectorAll("#research-candidates article.research-card")]
                                 : [...document.querySelectorAll("#rows tr[data-id]")];
 }
-// The details panel of a row, only when it is that listing's own panel.
-function rowPanel(row) {
-  const next = row && row.nextElementSibling;
-  return next && next.classList.contains("details-row") && next.dataset.for === row.dataset.id ? next : null;
-}
-
-// Every focus change counts, so a restore never takes focus back from where
-// you moved it since.
-let focusGeneration = 0;
-document.addEventListener("focusin", () => { focusGeneration += 1; });
-// Focus that belongs inside a details panel still loading: given back when the
-// panel is drawn, if focus has not moved since (fillPanel).
-let deferredFocus = null;
 
 function captureContext() {
-  deferredFocus = null;
-  const open = [
-    ...[...document.querySelectorAll("#rows tr.details-row")].map(tr => ({surface: "table", id: tr.dataset.for})),
-    ...[...document.querySelectorAll("#research-candidates .candidate-details")]
-      .map(panel => ({surface: "research", id: panel.dataset.for})),
-  ];
-  const titles = new Map(open.map(o => [o.id, (shownItems.get(o.id) || {}).title || "A listing"]));
   let focus = null;
   const active = document.activeElement;
-  const row = active && active.closest ? active.closest("#rows tr") : null;
+  const row = active && active.closest ? active.closest("#rows tr[data-id]") : null;
   const card = active && active.closest ? active.closest("#research-candidates article.research-card") : null;
   if (row || card) {
     const surface = row ? "table" : "research";
-    const id = row ? (row.dataset.for || row.dataset.id) : card.dataset.id;
-    focus = {surface, id, role: active.dataset.role || "",
-             index: surfaceItems(surface).findIndex(el => el.dataset.id === id),
-             selection: typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null};
+    const id = row ? row.dataset.id : card.dataset.id;
+    focus = {surface, id, role: active.dataset.role || "", index: surfaceItems(surface).findIndex(el => el.dataset.id === id)};
   }
   let scroll = null;
   const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-height")) || 0;
@@ -52,57 +30,34 @@ function captureContext() {
     const box = el.getBoundingClientRect();
     if (box.bottom > top) { scroll = {surface: el.matches("article") ? "research" : "table", id: el.dataset.id, top: box.top}; break; }
   }
-  return {open, titles, focus, scroll};
+  return {focus, scroll};
 }
 
-// Reopens details still in view, puts focus and scroll back; says what left.
+// Puts scroll and focus back after a redraw. Details live in the property
+// drawer (listings-drawer.js), which no redraw replaces: while it is open the
+// background keeps its scroll and focus stays in the drawer.
 function restoreContext(ctx) {
-  const gone = [];
-  ctx.open.forEach(({surface, id}) => {
-    if (surface === "research") {
-      const card = cardFor(id);
-      if (card && !card.querySelector(".candidate-details")) openCandidate(id, card.querySelector('[data-role="details"]'));
-      else if (!card) gone.push(id);
-      return;
-    }
-    const row = rowFor(id);
-    if (row) openRowDetails(row, id);
-    else gone.push(id);
-  });
   if (ctx.scroll) {
     const anchor = anchorFor(ctx.scroll.surface, ctx.scroll.id);
     if (anchor) window.scrollBy(0, anchor.getBoundingClientRect().top - ctx.scroll.top);
   }
+  if (propertyDrawer.panel.open) return "";
   // Focus only comes back when it was in the results and nobody moved it since.
   const active = document.activeElement;
   const inResults = el => $("rows").contains(el) || $("research-candidates").contains(el);
   if (ctx.focus && (!active || active === document.body || inResults(active))) {
     const {surface, id, role, index} = ctx.focus;
     const anchor = anchorFor(surface, id);
-    const scope = !anchor ? [] : surface === "research" ? [anchor] : [anchor, rowPanel(anchor)].filter(Boolean);
-    let target = null;
-    for (const el of scope) target = target || [...el.querySelectorAll("[data-role]")].find(x => x.dataset.role === role);
-    let later = false;
+    let target = anchor ? [...anchor.querySelectorAll("[data-role]")].find(x => x.dataset.role === role) : null;
     if (!target) {
-      // Still here but its panel is loading: its Details button for now, the
-      // field itself once the panel is drawn. The listing left: its neighbour
-      // on the same surface, else the count line.
-      later = !!anchor && ctx.open.some(o => o.surface === surface && o.id === id);
+      // The listing left: its neighbour on the same surface, else the count line.
       const items = surfaceItems(surface);
       const near = anchor || items[Math.min(Math.max(index, 0), items.length - 1)];
       target = near ? near.querySelector('[data-role="details"]') : $("result-count");
     }
-    if (target) {
-      target.focus({preventScroll: true});
-      if (ctx.focus.selection && typeof target.setSelectionRange === "function") target.setSelectionRange(...ctx.focus.selection);
-    }
-    if (later) deferredFocus = {surface, id, role, selection: ctx.focus.selection, generation: focusGeneration};
+    if (target) target.focus({preventScroll: true});
   }
-  if (!gone.length) return "";
-  const unique = [...new Set(gone)];
-  const kept = unique.filter(id => notes.isPending(id)).length;
-  return `${unique.length === 1 ? `“${ctx.titles.get(unique[0])}” is` : `${unique.length} listings you had open are`} no longer in this view.`
-    + (kept ? " Unsaved notes are kept and still saved." : "");
+  return "";
 }
 
 function renderCount(displayed, matched, cap, neverScanned = false) {
@@ -203,10 +158,6 @@ function renderResearch(research) {
   });
 }
 
-// Detail panels get DOM IDs from a counter, never from scraped listing IDs.
-let detailsSeq = 0;
-function nextDetailsId() { detailsSeq += 1; return `details-panel-${detailsSeq}`; }
-
 // Details last loaded, per goal and listing (listing-details-cache.js). They
 // are shown as current only while the listing's detail_token from the latest
 // results is unchanged (a scan, status, score or evidence revision changes it)
@@ -215,7 +166,8 @@ function nextDetailsId() { detailsSeq += 1; return `details-panel-${detailsSeq}`
 // invalidates them at once. Note drafts live in the note store, not here.
 const DETAIL_TTL_MS = 10 * 60 * 1000;
 const detailsCache = AuctionDetailsCache.createCache({read: AuctionDetailsCache.read, ttl: DETAIL_TTL_MS});
-const panelReads = new WeakMap();   // the open panel's read in flight: {controller, generation}
+const panelReads = new WeakMap();   // the drawer's read in flight: {controller, generation}
+const panelShown = new WeakMap();   // what the drawer shows now: {mode, id, data}
 function detailToken(id) { return (shownItems.get(id) || {}).detail_token || ""; }
 
 function freshnessHtml(id, state, message = "") {
@@ -232,86 +184,58 @@ function renderDetailsBody(body, id, data, state, message = "") {
   const typing = active && body.contains(active) && active.matches("textarea.d-note")
     ? {start: active.selectionStart, end: active.selectionEnd, scroll: active.scrollTop} : null;
   body.innerHTML = freshnessHtml(id, state, message) + detailsHtml(data);
+  const panel = body.closest("#property-drawer");
+  if (panel) panelShown.set(panel, {mode: view.mode, id, data});
   if (typing) {
     const field = body.querySelector("textarea.d-note");
     if (field) { field.focus({preventScroll: true}); field.setSelectionRange(typing.start, typing.end); field.scrollTop = typing.scroll; }
   }
 }
 
-// Fills a details panel. A closed or replaced panel, or another goal, ignores
-// a late answer; a failure says so with a Retry for this listing.
+// Fills the drawer's details for one listing. A closed drawer, another listing
+// or another goal ignores a late answer; a failure says so with a Retry.
+// Returns the details shown, or null.
 async function fillPanel(panel, id, {fresh = false} = {}) {
   const mode = view.mode, token = detailToken(id);
   const body = panel.querySelector(".details-body");
   const current = fresh ? null : detailsCache.cached(mode, id, token);
-  if (current) { renderDetailsBody(body, id, current, "current"); giveBackFocus(panel, id); return; }
-  const earlier = detailsCache.earlier(mode, id);
+  if (current) { renderDetailsBody(body, id, current, "current"); return current; }
+  // Details already on screen for this listing count as earlier ones, even
+  // once the bounded cache has dropped them: the note you are typing in stays.
+  const shown = panelShown.get(panel);
+  const earlier = detailsCache.earlier(mode, id) || (shown && shown.mode === mode && shown.id === id ? shown.data : null);
   if (earlier) renderDetailsBody(body, id, earlier, "refreshing");
   else body.innerHTML = `<p class="small muted details-loading">Loading details…</p>`;
-  // One read per panel: a newer one, or closing the panel, supersedes it.
+  // One read at a time: a newer one, or closing the drawer, supersedes it.
   const previous = panelReads.get(panel);
   if (previous) previous.controller.abort();
   const read = {controller: new AbortController(), generation: (previous ? previous.generation : 0) + 1};
   panelReads.set(panel, read);
   const result = await detailsCache.load(mode, id, token, {fresh: true, signal: read.controller.signal});
-  if (result.kind === "obsolete" || !panel.isConnected || mode !== view.mode
-      || panelReads.get(panel) !== read || panel.dataset.for !== id) return;
+  // The drawer stays in the page when closed, so being connected is not enough.
+  if (result.kind === "obsolete" || !panel.isConnected || (panel.matches("dialog") && !panel.open)
+      || mode !== view.mode || panelReads.get(panel) !== read || panel.dataset.for !== id) return null;
   if (result.kind === "error") {
-    if (earlier) { renderDetailsBody(body, id, earlier, "failed", result.message); return; }
+    if (earlier) { renderDetailsBody(body, id, earlier, "failed", result.message); return earlier; }
     const title = (shownItems.get(id) || {}).title || "this listing";
     body.innerHTML = `<div class="notice warn details-error"><p>Could not load details: ${AS.esc(result.message)}</p>
       <button type="button" class="btn btn-sm" data-role="retry-details" aria-label="Retry details: ${AS.esc(title)}">Retry details</button></div>`;
     body.querySelector("button").addEventListener("click", () => fillPanel(panel, id, {fresh: true}));
-    return;
+    return null;
   }
   renderDetailsBody(body, id, result.data, "current");
-  giveBackFocus(panel, id);
+  return result.data;
 }
 
-// The field you were in when the results were redrawn, once its panel exists,
-// unless focus moved anywhere since.
-function giveBackFocus(panel, id) {
-  const want = deferredFocus;
-  if (!want || want.id !== id || want.surface !== (panel.matches(".candidate-details") ? "research" : "table")) return;
-  deferredFocus = null;
-  if (focusGeneration !== want.generation) return;
-  const target = [...panel.querySelectorAll("[data-role]")].find(x => x.dataset.role === want.role);
-  if (!target) return;
-  target.focus({preventScroll: true});
-  if (want.selection && typeof target.setSelectionRange === "function") target.setSelectionRange(...want.selection);
-}
 document.addEventListener("click", e => {
   const button = e.target.closest && e.target.closest('[data-role="refresh-details"]');
   if (!button) return;
-  const panel = button.closest(".details-row, .candidate-details");
+  const panel = button.closest("#property-drawer");
   if (panel) fillPanel(panel, panel.dataset.for, {fresh: true});
 });
 
-function closePanel(panel) {
-  const read = panelReads.get(panel);
-  if (read) read.controller.abort();          // the details read only; note saves carry on
-  panelReads.delete(panel);
-  panel.remove();
-}
-
-function openCandidate(id, button) {
-  const card = [...document.querySelectorAll("#research-candidates article")].find(el => el.dataset.id === id);
-  if (!card) return;
-  const existing = card.querySelector(".candidate-details");
-  if (existing) {
-    closePanel(existing);
-    if (button) { button.setAttribute("aria-expanded", "false"); button.removeAttribute("aria-controls"); }
-    return;
-  }
-  const panel = document.createElement("div");
-  panel.className = "candidate-details";
-  panel.id = nextDetailsId();
-  panel.dataset.for = id;
-  panel.innerHTML = `<div class="details-body"></div>`;
-  card.appendChild(panel);
-  if (button) { button.setAttribute("aria-expanded", "true"); button.setAttribute("aria-controls", panel.id); }
-  fillPanel(panel, id);
-}
+// A research card's Details opens the same drawer as the table's.
+function openCandidate(id, button) { return propertyDrawer.open(id, button); }
 
 function scanSuggestion() {
   // What a scan would cover, from what is selected; nothing runs until you click.
@@ -377,34 +301,9 @@ function renderRows(items, hiddenView, neverScanned = false) {
   }).join("");
 }
 
-// ── Details panel: everything known about one listing (listing_info.py) ──
-function setDetailsTriggers(row, panelId) {
-  // Both the ⓘ button and a Citius title open the same panel.
-  row.querySelectorAll("[aria-expanded][data-id]").forEach(t => {
-    t.setAttribute("aria-expanded", String(!!panelId));
-    if (panelId) t.setAttribute("aria-controls", panelId); else t.removeAttribute("aria-controls");
-  });
-}
-
-function toggleDetails(el) {
-  const row = el.closest("tr"), next = row.nextElementSibling;
-  if (next && next.classList.contains("details-row")) { closePanel(next); setDetailsTriggers(row, null); return; }
-  openRowDetails(row, row.dataset.id);
-}
-
-// Opens at once with "Loading details…"; one panel per row, never two.
-function openRowDetails(row, id) {
-  const next = row.nextElementSibling;
-  if (next && next.classList.contains("details-row")) return;
-  const tr = document.createElement("tr");
-  tr.className = "details-row";
-  tr.id = nextDetailsId();
-  tr.dataset.for = id;
-  tr.innerHTML = `<td colspan="${TABLE_COLUMNS}"><div class="details-body"></div></td>`;
-  row.after(tr);
-  setDetailsTriggers(row, tr.id);
-  fillPanel(tr, id);
-}
+// ── Details: everything known about one listing (listing_info.py), in the property drawer ──
+// The ⓘ button and a Citius title open it; no details are drawn inside the table.
+function toggleDetails(el) { return propertyDrawer.open(el.dataset.id, el); }
 
 function factValue(f) {
   const v = AS.esc(f.value);
@@ -415,7 +314,8 @@ function factValue(f) {
 
 function costsHtml(c) {
   if (!c) return "";
-  const eur = v => v ? AS.money(v) : "\u20ac0";
+  // Missing is not zero: an amount the estimate lacks says so.
+  const eur = v => v == null || v === "" ? "Not established" : v === 0 ? "\u20ac0" : AS.money(v);
   const row = (k, v, note) => `<div class="fact"><span class="k">${AS.esc(k)}</span><span class="v">${v}
       <span class="small muted">${AS.esc(note)}</span></span></div>`;
   const lines = c.lines.map(l => row(l.label, eur(l.amount), l.note)).join("");
@@ -426,7 +326,7 @@ function costsHtml(c) {
       ${c.rent.net_yield_pct}% a year after running costs and empty months \u00b7 paid back in ${c.rent.payback_years} years</div>
       <p class="small muted">${AS.esc(c.rent.note)}</p>` : "";
   return `<div class="guide">
-    <b>What it really costs</b> <span class="small muted">on ${AS.esc(c.basis)}, ${eur(c.base)}</span>
+    <b>Estimated costs: what it really costs</b> <span class="small muted">on ${AS.esc(c.basis)}, ${eur(c.base)}</span>
     <div class="facts">${lines}${work}</div>
     <div class="cost-total">${total}</div>
     <p class="small muted">${AS.esc(c.note)}</p>${rent}</div>`;
@@ -500,9 +400,9 @@ function locationHtml(d) {
   </div>`;
 }
 
-// After a change made in the panel: reload that panel (row or research card).
+// After a change made in the drawer: reload its details.
 function refreshDetails(el) {
-  const panel = el.closest(".details-row, .candidate-details");
+  const panel = el.closest("#property-drawer");
   if (!panel) return;
   detailsCache.invalidate(panel.dataset.for);     // every panel of this listing, not just this one
   return fillPanel(panel, panel.dataset.for, {fresh: true});
@@ -623,38 +523,43 @@ function detailsHtml(d) {
     </div>` : "";
   const imgs = (d.images && d.images.length) ? d.images : (d.image ? [d.image] : []);
   const research = researchHtml(d.research);
-  const gallery = imgs.length ? `<div class="d-gallery">${imgs.map(src =>
-    `<img class="d-img" src="${AS.esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join("")}</div>` : "";
-  return `<div class="details">
-    ${gallery}
-    <div class="d-main">
-      ${AS.wishesHtml(d.wishes)}
-      ${guide}
-      ${locationHtml(d)}
-      ${streetView}
-      ${outlineHtml(d.outline)}
-      ${official}
-      ${research}
-      ${links ? `<p class="d-links">${links}</p>` : ""}
-      ${costsHtml(d.costs)}
-      ${AS.bidCapHtml(d.bid_cap)}
-      ${AS.climateHtml(d.climate)}
-      ${projectHtml(d)}
-      ${stewardshipHtml(d)}
-      ${facts ? `<div class="facts">${facts}</div>` : ""}
-      ${d.past_results ? `<div class="d-lots"><b>What auctions within ${d.past_results.km} km sold for</b>
+  // Each photo is a button that enlarges it in the drawer (listings-drawer.js).
+  const gallery = imgs.length ? `<div class="d-gallery">${imgs.map((src, i) => {
+    const label = `listing photograph ${i + 1} of ${imgs.length}`;
+    return `<button type="button" class="d-photo" data-role="enlarge-photo" aria-label="Enlarge ${label}">
+      <img class="d-img" src="${AS.esc(src)}" alt="Listing photograph ${i + 1} of ${imgs.length}" loading="lazy" referrerpolicy="no-referrer"></button>`;
+  }).join("")}</div>` : "";
+  const pastResults = `${d.past_results ? `<div class="d-lots"><b>What auctions within ${d.past_results.km} km sold for</b>
         <span class="small muted">(last year, final bid: ${d.past_results.count} lots, median ${AS.money(d.past_results.median)},
         ${AS.money(d.past_results.low)}\u2013${AS.money(d.past_results.high)})</span><ul>${
         d.past_results.lots.map(l => `<li>${AS.money(l.price)} · ${AS.esc(l.date)} · ${l.km} km — ${
-          l.url ? AS.link(l.url, l.name) : AS.esc(l.name)}${l.type ? ` <span class="small muted">(${AS.esc(l.type)})</span>` : ""}</li>`).join("")}</ul></div>` : ""}
-      ${(d.same_case || []).length ? `<div class="d-lots"><b>Also sold in this case</b> <span class="small muted">(buying together can make sense: a house and the plot next to it)</span><ul>${
-        d.same_case.map(l => `<li>${AS.money(l.price)}${l.area ? ` · ${Math.round(l.area).toLocaleString("de-DE")} m²` : ""} — ${AS.esc(l.title)}</li>`).join("")}</ul></div>` : ""}
+          l.url ? AS.link(l.url, l.name) : AS.esc(l.name)}${l.type ? ` <span class="small muted">(${AS.esc(l.type)})</span>` : ""}</li>`).join("")}</ul></div>` : ""}`;
+  const sameCase = `${(d.same_case || []).length ? `<div class="d-lots"><b>Also sold in this case</b> <span class="small muted">(buying together can make sense: a house and the plot next to it)</span><ul>${
+        d.same_case.map(l => `<li>${AS.money(l.price)}${l.area ? ` · ${Math.round(l.area).toLocaleString("de-DE")} m²` : ""} — ${AS.esc(l.title)}</li>`).join("")}</ul></div>` : ""}`;
+  // Labelled sections, each from the same helpers as before; an empty one is left out.
+  return `<div class="details">
+    ${detailsSection("overview", "Overview", `
+      ${gallery}
+      ${AS.wishesHtml(d.wishes)}
+      ${links ? `<p class="d-links">${links}</p>` : ""}
+      ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
-      <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>
-      ${contactLogHtml(d)}
-      ${statusHistoryHtml(d)}
-      ${noteHtml(d)}
-    </div></div>`;
+      <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>`)}
+    ${detailsSection("costs", "Costs and planning", `${costsHtml(d.costs)}${AS.bidCapHtml(d.bid_cap)}`)}
+    ${detailsSection("location", "Location and climate",
+      `${locationHtml(d)}${streetView}${outlineHtml(d.outline)}${AS.climateHtml(d.climate)}`)}
+    ${detailsSection("records", "Official records and sale procedure", `${guide}${official}`)}
+    ${detailsSection("research", "Research and stewardship",
+      `${research}${projectHtml(d)}${stewardshipHtml(d)}${pastResults}${sameCase}`)}
+    ${detailsSection("notes", "Notes and history", `${contactLogHtml(d)}${statusHistoryHtml(d)}${noteHtml(d)}`)}
+  </div>`;
+}
+
+// One drawer, so fixed section IDs: never built from a scraped listing ID.
+function detailsSection(key, title, body) {
+  if (!body.trim()) return "";
+  return `<section class="d-section" id="property-section-${key}" aria-labelledby="property-section-${key}-title">
+    <h3 class="d-section-title" id="property-section-${key}-title" tabindex="-1">${AS.esc(title)}</h3>${body}</section>`;
 }
 
 function contactLogHtml(d) {

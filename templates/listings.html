@@ -132,6 +132,30 @@
 </div>
 <div class="pagination" id="pagination"></div>
 </section>
+<dialog id="property-drawer" class="property-drawer" aria-labelledby="property-drawer-title" tabindex="-1">
+  <header class="property-drawer-head">
+    <div>
+      <h2 id="property-drawer-title" tabindex="-1">Property details</h2>
+      <p class="small muted">Research information, not verification that this property is ready to buy.</p>
+    </div>
+    <button type="button" class="btn" id="property-drawer-close" aria-label="Close property details">Close</button>
+  </header>
+  <p id="property-drawer-notice" class="notice warn inline-notice" role="status" hidden></p>
+  <nav class="property-sections" id="property-sections" aria-label="Property detail sections" hidden></nav>
+  <div class="property-drawer-content"><div class="details-body"></div></div>
+  <section id="property-image-viewer" class="property-image-viewer" aria-label="Enlarged listing photograph" hidden>
+    <button type="button" class="btn" id="property-image-close">Close enlarged photograph</button>
+    <p class="small muted">The sale's photograph: not evidence of the property's condition.</p>
+    <p class="notice warn" id="property-image-error" hidden>This photograph could not be loaded.</p>
+    <img id="property-image" alt="" referrerpolicy="no-referrer">
+  </section>
+  <footer class="property-drawer-actions">
+    <button type="button" class="btn" id="property-drawer-star" data-status-action data-role="star">Shortlist</button>
+    <button type="button" class="btn" id="property-drawer-dismiss" data-status-action data-role="dismiss">Dismiss</button>
+    <button type="button" class="btn" id="property-drawer-refresh" data-role="refresh-drawer">Refresh details</button>
+    <a href="/offers" class="btn">Open Offers</a>
+  </footer>
+</dialog>
 <dialog id="leave-dialog" aria-labelledby="leave-title">
   <p id="leave-title"><b>A note is not saved yet</b></p>
   <p class="small muted" id="leave-text">Save it before leaving, stay on this page, or leave without saving it.</p>
@@ -155,5 +179,6 @@ const GOAL_BUDGETS = {{ goal_budgets | tojson }};
 <script src="{{ url_for('static', filename='listings-summary.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-details.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-notes.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-drawer.js') }}"></script>
 <script src="{{ url_for('static', filename='listings.js') }}"></script>
 {% endblock %}

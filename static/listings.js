@@ -1,6 +1,6 @@
 // listings.js — the Listings page: loading the results, status changes and Undo, sorting and goal tabs, refreshes after a scan, and start-up.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings.js).
+// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
 
 // ── Loading: one latest-wins read for the results (AS.latestRead) ──
 const resultsRead = AS.latestRead();
@@ -91,8 +91,10 @@ async function load({after = "", navigation = false} = {}) {
   // A status change still on its way keeps its redrawn buttons waiting.
   statusPending.forEach(id => statusButtons(id).forEach(b => { b.disabled = true; }));
   let left = "";
-  if (navigation) $("result-count").focus({preventScroll: true});      // a new page: start at its top
+  // A new page starts at its top, unless the property drawer holds focus.
+  if (navigation && !propertyDrawer.panel.open) $("result-count").focus({preventScroll: true});
   else left = restoreContext(context);
+  propertyDrawer.reconcile();
   setLoadState("done", left);
   return result;
 }
@@ -122,8 +124,9 @@ function go(p) { cancelPending(); setView({...view, page: p}, "push", {navigatio
 const statusPending = new Set();
 function statusButtons(id) { return [...document.querySelectorAll("[data-status-action]")].filter(b => b.dataset.id === id); }
 
+// Resolves true once the server has the new status.
 async function setStatus(id, status) {
-  if (statusPending.has(id)) return;
+  if (statusPending.has(id)) return false;
   const item = shownItems.get(id) || {};
   const previous = item.status || null;
   statusPending.add(id);
@@ -151,6 +154,7 @@ async function setStatus(id, status) {
     detailsCache.invalidate(id);
     load({after: "saved"});                       // the server decides where it now belongs
   }
+  return ok;
 }
 
 // Undo puts back the status it had (On Offers, or none) through the same API.
@@ -166,6 +170,7 @@ function offerUndo(id, title, previous) {
     button.disabled = true;
     try {
       await AS.api("/api/listings/status", {method: "POST", body: {id, status: previous}});
+      detailsCache.invalidate(id);                // its status history now has the Undo too
       box.hidden = true;
       AS.toast(previous === "shortlisted" ? "Back on Offers" : "Restored");
       load({after: "saved"});
@@ -248,6 +253,7 @@ window.addEventListener("popstate", () => {
   rememberView(view);
   restoreControls();
   load();
+  propertyDrawer.restoreURL();                    // ?property= is not a filter: the drawer follows it
 });
 // A finished scan refreshes a quiet page in place. While you type, edit a
 // note or a save is running it waits, and says so once.
@@ -263,6 +269,7 @@ document.addEventListener("scan-finished", () => {
   if (!busyEditing()) { load(); return; }
   updatePending = true;
   $("listings-update-notice").hidden = false;
+  propertyDrawer.markStale();
   AS.announce("New results are available.");
 });
 $("listings-refresh").addEventListener("click", async () => {
@@ -327,6 +334,7 @@ async function start() {
   showViewNote(notes);
   restoreControls();
   writeViewURL(view, "replace");
-  load();
+  await load();
+  propertyDrawer.restoreURL();                    // a listing named in the address opens once the results are in
 }
 start();

@@ -69,11 +69,13 @@ def test_a_citius_title_opens_its_details_and_leaves_the_shortlist_alone(app, ad
     title = tr.locator('[data-role="title"]')
     assert title.get_attribute("href") == "#"                 # no page per sale: never an outside link
     title.click()
-    app.page.wait_for_selector('#rows tr.details-row[data-for="citius:c1"] textarea.d-note')
+    app.page.wait_for_selector('#property-drawer[open][data-for="citius:c1"] textarea.d-note')
     assert urlsplit(app.page.url).path == "/"
+    assert "How to find this sale on" in app.text("#property-drawer")
     assert title.get_attribute("aria-expanded") == "true"
     assert tr.locator('[data-role="details"]').get_attribute("aria-expanded") == "true"
     assert tr.locator('[data-role="star"]').get_attribute("aria-pressed") == "false"
-    title.click()                                              # the same trigger closes it
-    app.page.wait_for_function("() => !document.querySelector('#rows tr.details-row')")
+    app.page.keyboard.press("Escape")                          # closing gives focus back to the title
+    app.page.wait_for_function("() => !document.getElementById('property-drawer').open")
+    assert app.page.evaluate("document.activeElement.dataset.role") == "title"
     assert tr.locator('[data-role="details"]').get_attribute("aria-expanded") == "false"

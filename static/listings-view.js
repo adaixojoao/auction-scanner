@@ -1,6 +1,6 @@
 // listings-view.js — the Listings page: the view (goal, filters, sort, page) in the URL and remembered, and the controls.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
-// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings.js).
+// (listings-view.js, listings-summary.js, listings-details.js, listings-notes.js, listings-drawer.js, listings.js).
 
 const KIND_LABEL = {home: "home", urban_plot: "urban plot", rural_plot: "rural plot", other: "other"};
 const PER_PAGE = 50;

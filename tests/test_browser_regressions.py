@@ -11,7 +11,8 @@ pytest.importorskip("playwright.sync_api")
 
 import test_browser_listings as harness  # noqa: E402
 
-browser, app, open_details, row = harness.browser, harness.app, harness.open_details, harness.row
+browser, app, open_details, close_details, row = (harness.browser, harness.app, harness.open_details,
+                                                  harness.close_details, harness.row)
 
 
 def _set_description(db, n, text):
@@ -42,7 +43,7 @@ def test_reversed_detail_reads_keep_the_newer_details_shown_and_cached(app, db):
     _set_description(db, 0, "newer description")
     app.hold.clear()
     app.release(1)                                   # the newer read first
-    app.page.wait_for_function("""() => (document.querySelector('#rows tr.details-row .d-desc') || {}).textContent
+    app.page.wait_for_function("""() => (document.querySelector('#property-drawer .d-desc') || {}).textContent
                                        === 'newer description'""")
     try:
         app.release(0)                               # the older one late (the page aborted it)
@@ -52,9 +53,9 @@ def test_reversed_detail_reads_keep_the_newer_details_shown_and_cached(app, db):
     assert panel.locator(".d-desc").text_content() == "newer description"
     assert panel.locator(".details-freshness").get_attribute("data-state") == "current"
     reads = len(app.calls("/api/listing"))
-    row(app, 0).locator('[data-role="details"]').click()          # close
+    close_details(app)
     row(app, 0).locator('[data-role="details"]').click()          # reopen from the cache
-    reopened = app.page.locator('#rows tr.details-row[data-for="eleiloes:h0"]')
+    reopened = app.page.locator('#property-drawer[open][data-for="eleiloes:h0"]')
     reopened.locator(".d-desc").wait_for()
     assert reopened.locator(".d-desc").text_content() == "newer description"
     assert len(app.calls("/api/listing")) == reads
@@ -92,17 +93,17 @@ def test_save_and_leave_saves_the_note_then_leaves(app, db):
     field = panel.locator("textarea.d-note")
     field.click()
     field.type("kept before leaving")
-    app.page.click('a[href="/sources"]')
+    app.page.click('#property-drawer a[href="/offers"]')
     assert app.page.is_visible("#leave-dialog")
     app.page.click('#leave-dialog [data-leave="stay"]')
     assert not app.page.is_visible("#leave-dialog") and field.input_value() == "kept before leaving"
     field.click()
     field.press("End")
     field.type("!")
-    app.page.click('a[href="/sources"]')
+    app.page.click('#property-drawer a[href="/offers"]')
     with app.page.expect_navigation():
         app.page.click('#leave-dialog [data-leave="save"]')
-    assert app.page.url.endswith("/sources")
+    assert app.page.url.endswith("/offers")
     stored = db.execute("SELECT user_note FROM listings WHERE id = 'eleiloes:h1'").fetchone()[0]
     assert stored == "kept before leaving!"
 
@@ -118,6 +119,8 @@ def test_a_finished_scan_waits_for_refresh_while_a_note_is_unsaved(app):
     reads = len(app.calls("/api/listings"))
     app.page.evaluate("document.dispatchEvent(new CustomEvent('scan-finished'))")
     app.page.evaluate("document.dispatchEvent(new CustomEvent('scan-finished'))")
+    assert "A scan finished" in app.text("#property-drawer-notice")
+    close_details(app)
     assert app.page.is_visible("#listings-update-notice")
     app.page.wait_for_timeout(200)
     assert len(app.calls("/api/listings")) == reads                 # nothing redrawn yet
@@ -126,8 +129,7 @@ def test_a_finished_scan_waits_for_refresh_while_a_note_is_unsaved(app):
     app.idle()
     assert len(app.calls("/api/listings")) == reads + 1
     assert app.page.is_hidden("#listings-update-notice")
-    again = app.page.locator('#rows tr.details-row[data-for="eleiloes:h2"] textarea.d-note')
-    again.wait_for()
+    again = open_details(app, 2).locator("textarea.d-note")
     assert again.input_value() == "half a thought"
     _release_all(app)
 

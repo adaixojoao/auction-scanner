@@ -48,8 +48,10 @@ def test_seven_columns_and_every_full_width_row_spans_them(app):
     assert app.page.locator("table.list thead th").count() == 7
     first = app.page.locator("#rows tr[data-id]").first
     assert first.locator("td").count() == 7
-    first.locator('[data-role="details"]').click()
-    assert app.page.get_attribute("#rows tr.details-row td", "colspan") == "7"
+    first.locator('[data-role="details"]').click()                    # details open in the drawer…
+    app.page.wait_for_selector("#property-drawer[open] textarea.d-note")
+    assert app.page.locator("#rows tr:not([data-id])").count() == 0    # …never as a row in the table
+    app.page.click("#property-drawer-close")
     app.page.fill("#f-search", "nothing matches this")
     app.page.press("#f-search", "Enter")
     app.idle()
@@ -172,11 +174,12 @@ def test_research_warning_stays_visible_collapsed_and_drafts_survive(app, add, m
     assert "1 candidate" in summary.text_content()
     card = app.page.locator("#research-candidates article.research-card").first
     card.locator('[data-role="details"]').click()
-    field = card.locator(".candidate-details textarea.d-note")
+    field = app.page.locator("#property-drawer[open] textarea.d-note")
     field.wait_for()
     app.hold.add("/api/listing/note")
     field.click()
     field.type("draft kept")
+    app.page.click("#property-drawer-close")
     summary.click()                                                   # collapse
     assert app.page.locator("#research-details .research-warning").is_visible()
     assert "Not verified as ready to buy" in app.text("#research-details .research-warning")
@@ -186,7 +189,8 @@ def test_research_warning_stays_visible_collapsed_and_drafts_survive(app, add, m
     app.idle()
     assert app.page.get_attribute("#research-details", "open") is None     # stays as you left it
     app.page.locator("#research-details > summary").click()
-    again = app.page.locator("#research-candidates article.research-card .candidate-details textarea.d-note")
+    app.page.locator("#research-candidates article.research-card [data-role='details']").first.click()
+    again = app.page.locator("#property-drawer[open] textarea.d-note")
     again.wait_for()
     assert again.input_value() == "draft kept"
     app.hold.clear()
