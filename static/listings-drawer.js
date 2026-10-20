@@ -120,6 +120,7 @@ const propertyDrawer = (() => {
 
   async function open(id, trigger, {writeURL = true, fresh = false} = {}) {
     if (typeof id !== "string" || !id) return null;
+    if (typeof listingsMap !== "undefined") listingsMap.highlight(id);   // its pin, if this page has one
     if (selected !== id) {
       const read = panelReads.get(panel);
       if (read) read.controller.abort();

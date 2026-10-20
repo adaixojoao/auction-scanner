@@ -5,7 +5,7 @@ text for structural checks. Behaviour is checked in tests/test_browser_listings.
 LISTINGS_SCRIPTS = ("listing-notes.js", "listing-details-cache.js", "listings-saved-searches.js", "listings-view.js",
                     "listings-summary.js", "listings-details.js", "listings-cards.js", "listings-notes.js",
                     "listings-drawer.js", "listings-comparison-store.js", "listings-comparison-render.js",
-                    "listings-comparison.js", "listings.js")
+                    "listings-comparison.js", "listings-map-model.js", "listings-map.js", "listings.js")
 
 
 def listings_source(client) -> str:

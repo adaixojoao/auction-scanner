@@ -2,7 +2,8 @@
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
 // (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
 //  listings-cards.js, listings-notes.js, listings-drawer.js, listings-comparison-store.js,
-//  listings-comparison-render.js, listings-comparison.js, listings.js).
+//  listings-comparison-render.js, listings-comparison.js, listings-map-model.js,
+//  listings-map.js, listings.js).
 
 // ── Loading: one latest-wins read for the results (AS.latestRead) ──
 const resultsRead = AS.latestRead();
@@ -60,6 +61,7 @@ async function load({after = "", navigation = false} = {}) {
       $("result-count").textContent = "";
     } else {
       $("result-count").textContent = `Previous results: ${lastCountText}`;
+      listingsMap.markPrevious();
     }
     return result;
   }
@@ -88,6 +90,7 @@ async function load({after = "", navigation = false} = {}) {
   renderResults(data.items, view.status === "hidden", !data.last_scrape);   // the table or the cards (and comparison.sync)
   renderCount(data.display_total ?? data.total, lastFound, lastCap, !data.last_scrape);
   renderPages(data.display_total ?? data.total);
+  listingsMap.update(data.items, lastFound);                   // the same page of results, nothing more
   renderedOnce = true;
   lastCountText = $("result-count").textContent;
   // A status change still on its way keeps its redrawn buttons waiting.

@@ -891,6 +891,28 @@ def location_confidence(item: dict) -> dict:
     return out
 
 
+def map_summary(item: dict) -> dict | None:
+    """The stored pin for the Listings map, or None (the listing stays in the
+    results, unlocated). Only coordinates already stored are used: nothing is
+    looked up, and a listing known only by its municipality gets no pin at its
+    town centre. Precision is location_confidence's own level."""
+    pos = position(item)
+    if not pos:
+        return None
+    try:
+        lat, lon = float(pos.get("lat")), float(pos.get("lon"))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    conf = location_confidence(item)
+    level = conf["level"]
+    note = ("a pin, not a surveyed boundary" if level == "exact"
+            else "approximate: not where the property is, nor its boundary")
+    return {"lat": lat, "lon": lon, "precision": level, "label": f"{conf['label']}: {note}",
+            "source_label": conf["source"], "verified": conf["verified"]}
+
+
 def parse_coordinates(text: str) -> tuple[float, float] | None:
     """"38.7223, -9.1393", or a Google Maps link with "@38.7223,-9.1393" in it."""
     m = _COORDS.search(text or "")
