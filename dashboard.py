@@ -654,7 +654,9 @@ def _presentations(db, rows: list) -> dict:
 def _presented(db, rows: list) -> list:
     """The rows on one page as the browser gets them, with their summaries."""
     summaries = _presentations(db, rows)
-    return [{**_with_fees(it), "presentation": summaries.get(it.get("id"))} for it in rows]
+    # "map": the stored pin for the Listings map (geo.map_summary), or None.
+    return [{**_with_fees(it), "presentation": summaries.get(it.get("id")), "map": geo.map_summary(it)}
+            for it in rows]
 
 
 @app.route("/api/listings")
