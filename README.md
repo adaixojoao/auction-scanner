@@ -61,9 +61,9 @@ another window.
 |---|---|
 | **Listings** | Everything found, scored; it shows at most **100** (Settings → *Show at most*), chosen after the filters and the selected sort: a filter or *cheapest first* looks through every eligible match, not only the best 100 by score (see *Filters* below). **ⓘ** opens the **property drawer** (the same one from the table and from the research cards) with everything known about a listing: description, case and court, agente / court / lawyer with contacts, deposit, occupancy, visits, rooms, the same sale on another site (a Citius case that is also on e-leilões), Spain's land registry, a map. **Where it is:** Street View and the satellite view at the property — from the sale's coordinates, or its address looked up on OpenStreetMap (always with the municipality; the panel says when the position is approximate). Add a free Google Maps Embed API key in Settings to see Street View inside the panel. **Official records:** for Portugal, the land-register numbers (description number, parish, conservatória, tax article) read from the sale, with Copy buttons and the steps to get the *certidão permanente* on Predial Online (you sign in and pay €15; it shows owners, area, composition and every charge); for Spain, what Catastro says (built area, plot, year, use), read automatically and compared with the sale; for France, the parcel named in the notice (its plot area and a map link) and, when the listing scores 85 or more and that parcel has a single building, the year and the use from the national building database. A listing at **85 or more** in any goal keeps its photos on this PC after the sale site takes them down, and the panel shows that gallery and the full description. **What it really costs:** the taxes, fees and the work it needs, added to the price (below). Citius has no page per sale, so its title opens the drawer at **How to find this sale on Citius** (court and case number to copy, the filters to set). ☆ shortlists a listing for an offer, ✕ dismisses it (restore it from *Show → Hidden*). *Export report* gives Word, PDF or Markdown. |
 | **Offers** | Prepare a letter, check it, send it, and record what happened. Tabs: *To review* (strong candidates + your shortlist), *Sent*, *Closed* (won / lost / cancelled), *Rejected*. |
-| **Map** | Portuguese listings by district. |
+| **Map** | Portuguese listings by district (the older overview; the Listings page's *Show map* places the current results page by their stored positions). |
 | **Sources** | Every site the scanner reads and whether it works. Run one source on demand. |
-| **Settings** | What you are looking for (rural plot size and price), a budget per goal (a home to live in, a home to let or resell, land), what to hide, your details for letters, alerts, automatic scanning. |
+| **Settings** | What you are looking for (rural plot size and price), a budget per goal (a home to live in, a home to let or resell, land), what to hide, your details for letters, alerts, automatic scanning. **Appearance** (System, Light or Dark) applies at once on every page; it is kept in this browser only (not in `config.json`, not on your other computers), System follows the computer's light or dark setting, and if the browser blocks its storage the choice holds for the page you are on and says it was not saved. |
 
 **Scan now** (top right) scans Portugal or every country; progress shows
 next to it. On Windows the scan runs at a lower priority, so the programs
@@ -122,6 +122,27 @@ leave or reload the page; it is never stored, put in the address or turned
 into a status, and notes are never part of it. Only the selected properties
 are read, when you open the comparison; after a scan or a status change it
 says what may be out of date, and *Refresh* reads that one again.
+**Show map** (next to *Table* / *Cards*) adds a map of **this results page**:
+the same properties as the table or cards, after the filters, sort, *Show at
+most* and the page, never the other pages, the research candidates or the
+whole database, so few pins is not few matches. Only positions already stored
+are used (the sale's coordinates, one you verified, or a stored OpenStreetMap
+or cadastre lookup): nothing is looked up when the map is drawn. A property
+without one, or with coordinates out of range, stays in the results and is
+listed under *Properties without established coordinates*; a listing known
+only by its municipality gets no pin at the town centre. A village, parish or
+municipality pin says *approximate* in words and is drawn dashed; no pin is a
+surveyed boundary or proof of legal access. Properties at the same spot share
+one marker whose popup lists each of them; the lists below the map have
+*Details*, *Show on map* and *Compare* for each one (the keyboard way in).
+The map fits the page the first time it is shown and then stays where you put
+it (*Fit this page* fits it again); moving it changes no filter or page. When
+a refresh fails it says it shows the previous results. The map library comes
+from unpkg.com and the tiles from OpenStreetMap, as on the Map page, and only
+once you show the map: that sends the area you look at to them (nothing about
+notes or searches). Without an internet connection the map says it could not
+be loaded and the lists still hold every property on the page. Only whether
+the map is shown is remembered in this browser.
 *Reset filters* goes back to the defaults of the tab you are on; each active
 filter shows as a chip whose × removes just that one. **Max listed price** is
 the listed or base figure as stored, not the current bid or the all-in
