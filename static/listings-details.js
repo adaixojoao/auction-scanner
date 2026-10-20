@@ -1,7 +1,8 @@
 // listings-details.js — the Listings page: rendering rows and research cards, the details shown in the property drawer and their freshness, and keeping your place across a refresh.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
 // (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
-//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings-comparison-store.js,
+//  listings-comparison-render.js, listings-comparison.js, listings.js).
 
 // ── Keeping your place across a refresh (by listing ID, never by DOM ID) ──
 // One registry for every surface: the results table, the results as cards
@@ -131,6 +132,7 @@ function candidateCard(it) {
     <p>
       <button class="btn btn-sm" aria-label="Details: ${AS.esc(it.title || "this listing")}" aria-expanded="false" data-id="${id}" data-role="details" onclick="openCandidate(this.dataset.id, this)">Details</button>
       <button class="btn btn-sm" aria-label="${starred ? "Remove from shortlist" : "Shortlist"}: ${AS.esc(it.title || "this listing")}" aria-pressed="${starred}" data-id="${id}" data-role="star" data-status-action onclick="setStatus(this.dataset.id, ${starred ? "null" : "'shortlisted'"})">${starred ? "On Offers" : "Shortlist"}</button>
+      ${compareButtonHtml(it.id, it.title)}
     </p>
   </article>`;
 }
@@ -306,7 +308,8 @@ function renderRows(items, hiddenView, neverScanned = false) {
       <td class="t-why">${AS.scoreBadge(it.score, it.rank, it.excellent)}${signals}${reasonsSummaryHtml(it.reasons)}</td>
       <td class="t-checks">${checksSummaryHtml(p.checks)}</td>
       <td class="t-deadline">${deadlineSummaryHtml(p.deadline)}</td>
-      <td class="nowrap"><button class="icon-btn" aria-label="Details: ${propertyLabel}" aria-expanded="false" title="Details" data-id="${id}" data-role="details" onclick="toggleDetails(this)">ⓘ</button>${actions}</td>
+      <td class="nowrap"><button class="icon-btn" aria-label="Details: ${propertyLabel}" aria-expanded="false" title="Details" data-id="${id}" data-role="details" onclick="toggleDetails(this)">ⓘ</button>${actions}
+        ${compareButtonHtml(it.id, it.title)}</td>
     </tr>`;
   }).join("");
 }

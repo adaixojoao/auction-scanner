@@ -156,6 +156,14 @@
 </div>
 <div class="pagination" id="pagination"></div>
 </section>
+<section id="comparison-tray" class="comparison-tray" hidden aria-labelledby="comparison-tray-title">
+  <h2 id="comparison-tray-title" class="small">Selected for comparison</h2>
+  <p class="small muted"><span id="comparison-count"></span> Kept on this page only, until you leave or reload it. Selecting changes no status.</p>
+  <ul id="comparison-selections"></ul>
+  <button type="button" class="btn btn-primary" id="comparison-open">Compare selected</button>
+  <button type="button" class="btn" id="comparison-clear">Clear selection</button>
+</section>
+<p id="comparison-message" class="small" role="status" aria-live="polite"></p>
 <dialog id="property-drawer" class="property-drawer" aria-labelledby="property-drawer-title" tabindex="-1">
   <header class="property-drawer-head">
     <div>
@@ -176,9 +184,19 @@
   <footer class="property-drawer-actions">
     <button type="button" class="btn" id="property-drawer-star" data-status-action data-role="star">Shortlist</button>
     <button type="button" class="btn" id="property-drawer-dismiss" data-status-action data-role="dismiss">Dismiss</button>
+    <button type="button" class="btn compare-toggle" id="property-drawer-compare" data-role="compare" aria-pressed="false">Compare</button>
     <button type="button" class="btn" id="property-drawer-refresh" data-role="refresh-drawer">Refresh details</button>
     <a href="/offers" class="btn">Open Offers</a>
   </footer>
+</dialog>
+<dialog id="comparison-dialog" class="comparison-dialog" aria-labelledby="comparison-title">
+  <header class="comparison-head">
+    <h2 id="comparison-title">Property comparison</h2>
+    <button type="button" class="btn" id="comparison-close">Close comparison</button>
+  </header>
+  <p class="notice warn">Research comparison only. Price bases, cost completeness, and evidence may differ. No property is verified ready to buy by this comparison, and none is ranked as the best.</p>
+  <p class="notice warn inline-notice" id="comparison-stale" role="status" hidden></p>
+  <div id="comparison-content"></div>
 </dialog>
 <dialog id="saved-search-name-dialog" aria-labelledby="saved-search-name-title">
   <form method="dialog">
@@ -219,5 +237,8 @@ const GOAL_BUDGETS = {{ goal_budgets | tojson }};
 <script src="{{ url_for('static', filename='listings-cards.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-notes.js') }}"></script>
 <script src="{{ url_for('static', filename='listings-drawer.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-comparison-store.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-comparison-render.js') }}"></script>
+<script src="{{ url_for('static', filename='listings-comparison.js') }}"></script>
 <script src="{{ url_for('static', filename='listings.js') }}"></script>
 {% endblock %}

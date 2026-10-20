@@ -110,6 +110,18 @@ overwritten. A change made in another tab is reported and has to be
 reloaded (*Reload saved searches*) before editing; between two tabs writing
 at the same moment, the last write wins. This is separate from the last view
 remembered above.
+**Compare** (on each row, card, research card and in the drawer) selects up
+to four properties; the tray at the bottom lists them, and *Compare selected*
+shows them side by side. The comparison is for research only: it shows each
+listing's own summaries as text (which price it is based on, what the all-in
+estimate leaves out, each check as it really stands, a deadline given only as
+a date), says *Not established* where nothing is known, and ranks nothing or
+names no best. The selection is kept while you change filters, pages or the
+layout (a property no longer in the results stays and says so) until you
+leave or reload the page; it is never stored, put in the address or turned
+into a status, and notes are never part of it. Only the selected properties
+are read, when you open the comparison; after a scan or a status change it
+says what may be out of date, and *Refresh* reads that one again.
 *Reset filters* goes back to the defaults of the tab you are on; each active
 filter shows as a chip whose × removes just that one. **Max listed price** is
 the listed or base figure as stored, not the current bid or the all-in

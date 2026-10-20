@@ -1,7 +1,8 @@
 // listings.js — the Listings page: loading the results, status changes and Undo, sorting and goal tabs, refreshes after a scan, and start-up.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
 // (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
-//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings-comparison-store.js,
+//  listings-comparison-render.js, listings-comparison.js, listings.js).
 
 // ── Loading: one latest-wins read for the results (AS.latestRead) ──
 const resultsRead = AS.latestRead();
@@ -84,7 +85,7 @@ async function load({after = "", navigation = false} = {}) {
   shownItems.clear();
   renderStats(data.stats);
   renderResearch(data.research);
-  renderResults(data.items, view.status === "hidden", !data.last_scrape);   // the table or the cards
+  renderResults(data.items, view.status === "hidden", !data.last_scrape);   // the table or the cards (and comparison.sync)
   renderCount(data.display_total ?? data.total, lastFound, lastCap, !data.last_scrape);
   renderPages(data.display_total ?? data.total);
   renderedOnce = true;
@@ -153,6 +154,7 @@ async function setStatus(id, status) {
   }
   if (ok) {
     detailsCache.invalidate(id);
+    comparison.markStale(id);
     load({after: "saved"});                       // the server decides where it now belongs
   }
   return ok;
@@ -266,6 +268,7 @@ function busyEditing() {
 }
 document.addEventListener("scan-finished", () => {
   detailsCache.invalidate();                      // at once, even when the redraw waits for you
+  comparison.markStale();
   if (updatePending) return;                      // one notice for any number of scans
   if (!busyEditing()) { load(); return; }
   updatePending = true;

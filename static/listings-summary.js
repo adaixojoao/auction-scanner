@@ -1,7 +1,8 @@
 // listings-summary.js — the Listings page: what one row or research card says about price, all-in cost, checks and deadline.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
 // (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
-//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings-comparison-store.js,
+//  listings-comparison-render.js, listings-comparison.js, listings.js).
 // Display only: every figure and state comes from the server's presentation summary
 // (presentation.py). Nothing here prices, verifies or ranks a listing.
 
@@ -107,6 +108,64 @@ function deadlineSummaryHtml(d) {
   return `<div><strong>${AS.esc(relative)}</strong></div>
     <div class="small"><time datetime="${AS.esc(d.instant || d.date)}">${AS.esc(calendarDate(d.date))}, ${AS.esc(d.time || "")}</time></div>
     <div class="small faint">${d.precision === "local" ? `Sale-local time (${zone}); the notice gives no zone` : `Sale-local time (${zone})`}</div>`;
+}
+
+// The same summaries as plain text, for the comparison (listings-comparison.js):
+// the same wording and the same "not established" cases as the cells above.
+function priceSummaryText(price) {
+  if (!price) return "Price basis not established";
+  const amount = amountOrNull(price.amount);
+  const secondary = Array.isArray(price.secondary) ? price.secondary : [];
+  return [`${price.label || "Basis not established"}: ${amount === null ? "Not published" : displayMoney(amount)}`,
+          price.note || "",
+          ...secondary.map(s => `${s.label}: ${displayMoney(s.amount)}${s.note ? ` (${s.note})` : ""}`)]
+    .filter(Boolean).join(" — ");
+}
+
+function allInSummaryText(estimate) {
+  if (!estimate) return "All-in estimate not established";
+  if (estimate.headline) return estimate.headline;
+  const low = amountOrNull(estimate.low), high = amountOrNull(estimate.high);
+  const subtotal = amountOrNull(estimate.known_subtotal);
+  const ranged = estimate.repairs_priced === true && low !== null && high !== null && high >= low;
+  const headline = ranged ? `Estimated ${displayMoney(low)}–${displayMoney(high)}`
+    : subtotal !== null ? `${displayMoney(subtotal)} known subtotal` : "Range not established";
+  return ranged ? headline : `${headline}; incomplete cost estimate: price, taxes and fees only`;
+}
+
+function costBasisText(estimate) {
+  if (!estimate) return "";
+  const missing = Array.isArray(estimate.missing) ? estimate.missing : [];
+  const excludes = Array.isArray(estimate.excludes) ? estimate.excludes : [];
+  return [`Estimated on ${estimate.basis_label || "a basis not established"}`,
+          missing.length ? `Missing: ${missing.join("; ")}` : "",
+          excludes.length ? `Not included: ${excludes.join("; ")}` : ""].filter(Boolean).join(". ");
+}
+
+const CHECK_WORD = {verified: "verified", not_applicable: "not applicable", concern: "concern",
+                    needs_recheck: "needs a recheck", source_reported: "source-reported", unverified: "unverified"};
+function checksSummaryText(checks) {
+  const items = checks && Array.isArray(checks.items) ? checks.items : [];
+  if (!items.length) return "No checks for this listing";
+  const ordered = [...items.filter(x => x.state === "concern"), ...items.filter(x => x.state !== "concern")];
+  return ordered.map(x => `${x.label} (${CHECK_WORD[x.state] || "unverified"}): ${x.text}`).join("; ");
+}
+
+function deadlineSummaryText(d) {
+  if (!d || d.precision === "unknown") return "Not published";
+  if (d.precision === "invalid" || !d.date) return "Deadline unavailable";
+  const zone = d.timezone || "time zone not known";
+  if (d.precision === "date") return `${calendarDate(d.date)} — closing time not published; date only (${zone})`;
+  const relative = d.instant ? relativeInstantLabel(d.instant) : relativeDayLabel(d.days);
+  return `${calendarDate(d.date)}, ${d.time || ""} — ${relative}; `
+    + (d.precision === "local" ? `sale-local time (${zone}); the notice gives no zone` : `sale-local time (${zone})`);
+}
+
+// Selecting for comparison (listings-comparison.js), on every surface: never a status change.
+function compareButtonHtml(id, title) {
+  const chosen = typeof comparison !== "undefined" && comparison.has(id);
+  return `<button type="button" class="btn btn-sm compare-toggle" data-role="compare" data-id="${AS.esc(id)}"
+    aria-pressed="${chosen}" aria-label="Compare: ${AS.esc(title || "this listing")}">${chosen ? "Selected to compare" : "Compare"}</button>`;
 }
 
 // The badges and signals a row shows, shared with the cards (listings-cards.js).

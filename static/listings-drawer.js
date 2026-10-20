@@ -1,7 +1,8 @@
 // listings-drawer.js — the Listings page: one property drawer for the table and the research cards.
 // Plain scripts sharing one global scope, loaded in order by templates/listings.html
 // (listings-saved-searches.js, listings-view.js, listings-summary.js, listings-details.js,
-//  listings-cards.js, listings-notes.js, listings-drawer.js, listings.js).
+//  listings-cards.js, listings-notes.js, listings-drawer.js, listings-comparison-store.js,
+//  listings-comparison-render.js, listings-comparison.js, listings.js).
 //
 // A native modal <dialog>: the page behind it is inert until it closes. It
 // owns no data: fillPanel and the one details cache (listings-details.js)
@@ -15,6 +16,7 @@ const propertyDrawer = (() => {
   const notice = $("property-drawer-notice");
   const star = $("property-drawer-star");
   const dismiss = $("property-drawer-dismiss");
+  const compare = $("property-drawer-compare");
   const viewer = $("property-image-viewer");
   const largeImage = $("property-image");
   const imageError = $("property-image-error");
@@ -48,6 +50,9 @@ const propertyDrawer = (() => {
     if (!selected) return;
     const item = shownItems.get(selected);
     star.dataset.id = dismiss.dataset.id = selected;
+    compare.dataset.id = selected;
+    compare.setAttribute("aria-label", `Compare: ${heading.textContent}`);
+    if (typeof comparison !== "undefined") comparison.syncButtons();
     const pending = statusPending.has(selected);
     const starred = !!item && item.status === "shortlisted";
     const dismissed = !!item && item.status === "dismissed";
@@ -138,7 +143,7 @@ const propertyDrawer = (() => {
     syncTriggers();
     if (writeURL) writeSelection(id);
     const shown = await fillPanel(panel, id, {fresh});
-    if (shown && selected === id && shown.title && !shownItems.has(id)) heading.textContent = shown.title;
+    if (shown && selected === id && shown.title && !shownItems.has(id)) { heading.textContent = shown.title; syncActions(); }
     return shown;
   }
 
