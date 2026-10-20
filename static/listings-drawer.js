@@ -166,7 +166,8 @@ const propertyDrawer = (() => {
     if (panel.open) panel.close();
     settle(options);
   }
-  panel.addEventListener("close", () => settle());
+  // The close event comes a task later: if the drawer was opened again meanwhile (Back), it stays.
+  panel.addEventListener("close", () => { if (!panel.open) settle(); });
 
   // After the results are redrawn: the footer and triggers follow them, and
   // details no longer current (a scan, a change, another goal) are read again.
