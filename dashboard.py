@@ -45,6 +45,7 @@ app.config["LAST_HEARTBEAT"] = None   # read by app.py to close with the window
 
 NAV = [
     ("listings", "Listings", "/"),
+    ("investigations", "Investigations", "/investigations"),
     ("offers", "Offers", "/offers"),
     ("outcomes", "Outcomes", "/outcomes"),
     ("map", "Map", "/map"),
@@ -152,6 +153,13 @@ def offers_page():
 @app.route("/outcomes")
 def outcomes_page():
     return _page("outcomes.html", "outcomes", "Outcomes")
+
+
+@app.route("/investigations")
+def investigations_page():
+    from scoring import MODES
+    return _page("investigations.html", "investigations", "Investigations", modes=list(MODES.items()),
+                 queue_max=QUEUE_MAX)
 
 
 @app.route("/map")
@@ -831,9 +839,11 @@ def api_listing_detail():
         status_history = listing_status_history(db, listing_id)
         # The row's own short summaries (presentation.py, one checklist read), for the comparison.
         presented = _presentations(db, [it]).get(it["id"])
+        investigation = _drawer_investigation(db, it, presented)
     finally:
         db.close()
     return jsonify({
+        "investigation": investigation,
         "id": it["id"], "title": it.get("title"), "source": it.get("source"),
         "url": safe_url(it.get("url")),
         "country": it.get("country"), "concelho": it.get("concelho"), "district": it.get("district"),
@@ -862,6 +872,131 @@ def api_listing_detail():
         "status_history": status_history,
         "research": research,
     })
+
+# ─── Investigation queue (investigation.py): what is unknown, and what to find out next ───
+QUEUE_DEFAULT, QUEUE_MAX = 20, 50
+
+
+def _investigation_rows(mode: str) -> tuple[list, list]:
+    """The goal's eligible properties in the Listings score order (the same
+    cached, scored rows and ordering as the tab; nothing rescored), and the
+    rows of every listing with checklist work for the history."""
+    from tops import place_unseen_homes_after
+    from datetime import timedelta
+    yesterday = (_now() - timedelta(days=1)).date().isoformat()
+    rows = all_listings(mode)
+    eligible = [it for it in rows if not it["hidden_reason"] and it.get("category") == "imoveis"
+                and (not it.get("date_end") or it["date_end"][:10] >= yesterday)]
+    ranked = place_unseen_homes_after(sorted(eligible, key=SORT_KEYS["score"], reverse=True), mode)
+    return ranked, rows
+
+
+def _queue_entry(assessment: dict, item: dict) -> dict:
+    keep = ("listing_id", "title", "opportunity", "dimensions", "unresolved", "concerns", "contradictions",
+            "next_action", "deadline", "price")
+    return {**{k: assessment[k] for k in keep}, "country": item.get("country"), "source": item.get("source"),
+            "more_actions": len(assessment["more_actions"])}
+
+
+@app.route("/api/investigation-queue")
+def api_investigation_queue():
+    """The first N eligible properties of a goal, each with its unresolved
+    evidence and next action. Bounded: one batched checklist read for the page."""
+    import checklist
+    import investigation
+    mode = _mode(request.args)
+    limit = _num(request.args.get("limit"), QUEUE_DEFAULT, int)
+    offset = _num(request.args.get("offset"), 0, int)
+    if not 1 <= limit <= QUEUE_MAX or offset < 0:
+        return jsonify({"error": f"limit must be 1 to {QUEUE_MAX} and offset ≥ 0"}), 400
+    g.listings_now = _now()
+    try:
+        ranked, rows = _investigation_rows(mode)
+    except ListPolicyChanged as exc:
+        return jsonify({"error": str(exc), "code": "list_policy_changed", "retryable": True}), 503
+    db = get_db()
+    try:
+        page = _full_rows(db, ranked[offset:offset + limit], mode)
+        ids = [it["id"] for it in page]
+        stored = checklist.stored_for(db, ids)
+        presented = _presentations(db, page)
+        worked = {r[0]: r[1] for r in db.execute(
+            "SELECT listing_id, MAX(updated_at) FROM checklist_items GROUP BY listing_id")}
+    finally:
+        db.close()
+    cfg, now = _config(), _now()
+    queue = [_queue_entry(investigation.assess(it, stored.get(it["id"]), cfg, mode, presented.get(it["id"]), now), it)
+             for it in page]
+    shown = {it["id"] for it in ranked}
+    history = [{"listing_id": it["id"], "title": it.get("title") or "Untitled listing",
+                "state": it.get("hidden_reason") or "not in this goal's results",
+                "last_checklist_change": worked[it["id"]]}
+               for it in rows if it["id"] in worked and it["id"] not in shown]
+    history.sort(key=lambda h: h["last_checklist_change"] or "", reverse=True)
+    return jsonify({"mode": mode, "purpose": investigation.PURPOSES.get(mode), "limit": limit, "offset": offset,
+                    "eligible_total": len(ranked), "items": queue, "history": history[:QUEUE_MAX],
+                    "history_total": len(history), "assessed_at": now.isoformat(timespec="seconds"),
+                    "scope": "Eligible properties of this goal, in the Listings score order. The queue shows "
+                             f"{limit} at a time; it is not every opportunity, and nothing here means a "
+                             "property is ready to buy."})
+
+
+def _drawer_investigation(db, it: dict, presented: dict | None):
+    """The drawer's investigation section: the same assessment as the queue, never breaking the panel."""
+    import checklist
+    import investigation
+    try:
+        mode = _mode(request.args)
+        found = investigation.assess(it, checklist.stored_for(db, [it["id"]]).get(it["id"]), _config(), mode,
+                                     presented, _now())
+        return {**found, "eligibility": it.get("hidden_reason") or None}
+    except Exception:  # noqa: BLE001 — the assessment must never break the panel
+        logging.getLogger("auction-scanner").exception("Investigation assessment failed for %s", it.get("id"))
+        return None
+
+
+def _investigation_of(listing_id: str, mode: str):
+    """(assessment, item) for one listing, hidden ones included, or None."""
+    import checklist
+    import investigation
+    db = get_db()
+    try:
+        found = load_listings(db, filters=_config().get("filters"), include_hidden=True,
+                              where="id = ?", params=(listing_id,), mode=mode, now=_now())
+        if not found:
+            return None
+        it = found[0]
+        stored = checklist.stored_for(db, [it["id"]])
+        presented = _presentations(db, [it]).get(it["id"])
+    finally:
+        db.close()
+    assessment = investigation.assess(it, stored.get(it["id"]), _config(), mode, presented, _now())
+    assessment["eligibility"] = it.get("hidden_reason") or None
+    return assessment, it
+
+
+@app.route("/api/investigation")
+def api_investigation():
+    found = _investigation_of(request.args.get("id", ""), _mode(request.args))
+    if found is None:
+        return jsonify({"error": "no such listing"}), 404
+    return jsonify(found[0])
+
+
+@app.route("/api/investigation/brief.md")
+def api_investigation_brief():
+    """The investigation brief as Markdown: no notes, contacts or buyer details."""
+    import investigation
+    found = _investigation_of(request.args.get("id", ""), _mode(request.args))
+    if found is None:
+        abort(404)
+    assessment, item = found
+    body = investigation.as_markdown(assessment, item)
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", item["id"])[:80]
+    return Response(body, mimetype="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="investigation_{safe}.md"',
+                             "Cache-Control": "no-store"})
+
 
 NOTE_MAX = 2000       # characters, as the browser counts them (UTF-16 units: the field's maxlength)
 
