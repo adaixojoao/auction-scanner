@@ -392,6 +392,15 @@ def assess(item: dict, check_rows: dict | None, cfg: dict | None, mode: str, pre
                                       "database change that has not been approved."}}
 
 
+def summary(a: dict) -> dict:
+    """The few words a Listings row or card shows of an assessment: counts, the
+    open questions by name and the next action. No combined score."""
+    n = a["next_action"]
+    return {"unresolved": a["unresolved"], "concerns": a["concerns"], "contradictions": len(a["contradictions"]),
+            "open": [d["label"] for d in a["dimensions"] if d["state"] in ("unresolved", "concern")],
+            "next": {"key": n["key"], "title": n["title"]} if n else None}
+
+
 # ─── The investigation brief (Markdown) ───
 
 def _md(text, limit: int | None = 400) -> str:

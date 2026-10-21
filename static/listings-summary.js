@@ -65,6 +65,17 @@ function checksSummaryHtml(checks) {
   return `<ul class="result-checks">${ordered.map(x => `<li class="check-${AS.esc(x.state)}"><span class="check-mark" aria-hidden="true">${CHECK_MARK[x.state] || "?"}</span> <b>${AS.esc(x.label)}:</b> ${AS.esc(x.text)}</li>`).join("")}</ul>`;
 }
 
+// The row's investigation summary (investigation.summary): what is still unknown and
+// the next thing to find out. Counts and names only; never a readiness verdict.
+function investigationSummaryHtml(inv) {
+  if (!inv) return "";
+  const conflicts = inv.contradictions ? `, ${inv.contradictions} conflicting` : "";
+  const open = (inv.open || []).join(", ");
+  return `<p class="small inv-summary" data-role="investigation-summary"${open ? ` title="${AS.esc("Unresolved: " + open)}"` : ""}>
+    <b>${inv.unresolved} unresolved</b>${inv.concerns ? `, <span class="bad">${inv.concerns} concern${inv.concerns === 1 ? "" : "s"}</span>` : ""}${conflicts}${
+    inv.next ? ` · next: ${AS.esc(inv.next.title)}` : ""}</p>`;
+}
+
 // Only a timezone-resolved instant gets a countdown; it is worked out when the
 // rows are drawn and never announced as it changes.
 function relativeInstantLabel(iso, now = Date.now()) {

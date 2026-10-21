@@ -1,6 +1,7 @@
 """Acquisition pilot: the drawer's Investigation section and the Investigations
 queue page, on the production pages (the harness of tests/test_browser_listings.py:
 in-process Flask on a temporary database, no network, synthetic data)."""
+import json
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -67,3 +68,56 @@ def test_an_earlier_answer_never_overwrites_a_later_goal(app):
     app.page.wait_for_timeout(100)
     assert "plot" in app.text("#inv-status")
     assert parse_qs(urlsplit(app.page.evaluate("location.href")).query)["mode"] == ["land"]
+
+
+def test_rows_and_cards_say_what_is_unknown_and_what_is_next(app):
+    app.open()
+    line = harness.row(app, 0).locator('[data-role="investigation-summary"]').text_content()
+    assert "unresolved" in line and "next:" in line
+    app.page.click('[data-layout="cards"]')
+    card = app.page.locator('#listing-cards article[data-id="eleiloes:h0"] [data-role="investigation-summary"]')
+    assert card.text_content() == line
+
+
+def test_recording_a_finding_in_the_drawer_recalculates_it(app):
+    app.open()
+    panel = open_details(app, 0)
+    title = panel.locator('#property-section-investigation [data-dimension="title"]')
+    title.locator("summary", has_text="Record what you found").click()
+    record = title.locator('.inv-record[data-key="registry"]')
+    record.locator(".inv-status").select_option("concern")
+    record.locator(".inv-notes").fill("penhora registada")
+    record.locator('[data-role="inv-save"]').click()
+    app.page.wait_for_selector('#property-section-investigation [data-dimension="title"][data-state="concern"]')
+    assert app.page.locator('#property-section-investigation [data-action="resolve_concern"]').count() == 1
+    posted = [json.loads(b) for _m, _p, _q, b in app.calls("/api/checklist", "POST")]
+    assert posted == [{"id": "eleiloes:h0", "key": "registry", "status": "concern", "notes": "penhora registada",
+                       "reference": "", "checked_on": "", "verified_by": ""}]
+    app.page.wait_for_function("""() => (document.querySelector('#rows tr[data-id="eleiloes:h0"] [data-role="investigation-summary"]')
+        || {}).textContent.includes('concern')""")
+
+
+def test_investigate_these_carries_the_listings_filters(app):
+    app.open("mode=home&search=fixture%201")
+    href = app.page.get_attribute("#investigate-view", "href")
+    query = parse_qs(urlsplit(href).query)
+    assert urlsplit(href).path == "/investigations" and query["mode"] == ["home"]
+    assert query["search"] == ["fixture 1"]
+    app.page.goto(BASE + href)
+    app.page.wait_for_selector("#inv-queue .inv-entry")
+    assert "Filtered as on Listings:" in app.text("#inv-filters") and "search fixture 1" in app.text("#inv-filters")
+    ids = app.page.locator("#inv-queue .inv-entry").evaluate_all("els => els.map(e => e.dataset.id)")
+    assert set(ids) == {"eleiloes:h1", "eleiloes:h10", "eleiloes:h11"}
+
+
+def test_the_comparison_shows_unresolved_evidence_and_the_next_action(app):
+    app.open()
+    for n in (0, 1):
+        harness.row(app, n).locator('[data-role="compare"]').click()
+    app.page.click("#comparison-open")
+    app.page.wait_for_function("""() => document.querySelectorAll('#comparison-content thead th[scope=col]').length === 3
+        && !document.querySelector('#comparison-content').textContent.includes('Loading…')""")
+    rows = app.page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('#comparison-content tbody tr')]
+        .map(tr => [tr.querySelector('th').textContent, tr.querySelectorAll('td')[0].textContent]))""")
+    assert "unresolved" in rows["Unresolved evidence"] and "ready to buy" in rows["Unresolved evidence"]
+    assert rows["Next investigation action"] not in ("", "Not established")

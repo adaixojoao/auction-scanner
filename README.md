@@ -396,9 +396,18 @@ A high score says a property is worth a look, not that anything about it is
 known. **Investigations** (in the top bar) lists the goal's first 20 eligible
 properties in the Listings score order (10 or 50 on request; not every
 opportunity) and, for each, what is still unknown and the one thing to find
-out next. The same assessment is the **Investigation** section of a property's
-details, with **Download the investigation brief** (Markdown, no notes,
-contacts or buyer details).
+out next. **Investigate these properties** on Listings opens it with the
+filters you have set (country, search, kind, price, score, climate, sale
+method), and the page says which apply. The same assessment is the
+**Investigation** section of a property's details, with **Download the
+investigation brief** (Markdown, no notes, contacts or buyer details). Every
+Listings row, card and research card says how many questions are unresolved
+and the next one; the comparison has the same two lines.
+
+Under each question, **Record what you found** sets the checklist items behind
+it (the same record as Offers → checklist) and the assessment is worked out
+again at once. An information request is drafted on Offers once the property
+is shortlisted.
 
 Eight questions are assessed separately, never added up into a confidence
 score: price interpretation, sale availability, whole ownership, title and

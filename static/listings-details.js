@@ -125,7 +125,7 @@ function candidateCard(it) {
     ${plan.total_required != null ? `<p class="small">Required total with the reserve ${AS.money(plan.total_required)}: planning ${AS.money(plan.planning_amount)} + reserve ${AS.money(plan.reserve || 0)}. A policy total, not the estimated range.</p>` : ""}
     <p class="small">${AS.esc(plan.note || "")}</p>
     <p class="small">${AS.esc(it.valuation || "")}</p>
-    <div class="small muted">Checks</div>${checksSummaryHtml(p.checks)}
+    <div class="small muted">Checks</div>${checksSummaryHtml(p.checks)}${investigationSummaryHtml(it.investigation)}
     <div class="small muted">Deadline</div>${deadlineSummaryHtml(p.deadline)}
     <details class="small result-more"><summary>Evidence gaps (${(it.gaps || []).length})</summary>
       <ul class="small">${(it.gaps || []).map(g => `<li>${AS.esc(g)}</li>`).join("")}</ul></details>
@@ -306,7 +306,7 @@ function renderRows(items, hiddenView, neverScanned = false) {
       <td class="t-price">${priceSummaryHtml(p.price)}</td>
       <td class="t-allin">${allInSummaryHtml(p.all_in)}</td>
       <td class="t-why">${AS.scoreBadge(it.score, it.rank, it.excellent)}${signals}${reasonsSummaryHtml(it.reasons)}</td>
-      <td class="t-checks">${checksSummaryHtml(p.checks)}</td>
+      <td class="t-checks">${checksSummaryHtml(p.checks)}${investigationSummaryHtml(it.investigation)}</td>
       <td class="t-deadline">${deadlineSummaryHtml(p.deadline)}</td>
       <td class="nowrap"><button class="icon-btn" aria-label="Details: ${propertyLabel}" aria-expanded="false" title="Details" data-id="${id}" data-role="details" onclick="toggleDetails(this)">ⓘ</button>${actions}
         ${compareButtonHtml(it.id, it.title)}</td>

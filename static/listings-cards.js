@@ -38,7 +38,7 @@ function listingCardHtml(item) {
     </div>
     <section aria-label="Opportunity"><div class="small muted">Opportunity</div>
       ${AS.scoreBadge(item.score, item.rank, item.excellent)}${listingSignalsHtml(item)}${reasonsSummaryHtml(item.reasons)}</section>
-    <section aria-label="Unresolved checks"><div class="small muted">Unresolved checks</div>${checksSummaryHtml(p.checks)}</section>
+    <section aria-label="Unresolved checks"><div class="small muted">Unresolved checks</div>${checksSummaryHtml(p.checks)}${investigationSummaryHtml(item.investigation)}</section>
     <section aria-label="Deadline"><div class="small muted">Deadline</div>${deadlineSummaryHtml(p.deadline)}</section>
     <p class="small muted">An opportunity score is not independent verification or acquisition readiness.</p>
     <div class="listing-card-actions">

@@ -576,7 +576,8 @@ def _research_candidates(items: list, cash: float, full=None, present=None) -> d
 
     Built from the listings this view already scored (db.research_selection).
     Not a second ranker. `full` turns slim rows into full ones for the cards;
-    `present` gives each card the same short summaries as a row (_presentations).
+    `present` gives each card the same short summaries and investigation
+    summary as a row (_summaries: one checklist read).
     """
     import costs
     import geo
@@ -589,7 +590,7 @@ def _research_candidates(items: list, cash: float, full=None, present=None) -> d
     valued, unvalued = research_selection(items)
     if full is not None:
         valued, unvalued = full(valued), full(unvalued)
-    presented = present(valued + unvalued) if present is not None else {}
+    presented, inquiries = present(valued + unvalued) if present is not None else ({}, {})
     def card(it, group):
         plan = costs.planning_view(it, cash, settings=settings)
         level = (geo.location_confidence(it) or {}).get("level")
@@ -614,6 +615,7 @@ def _research_candidates(items: list, cash: float, full=None, present=None) -> d
             **{k: it.get(k) for k in _DETAIL_FIELDS if k not in ("status",)},
             "live_score": it.get("live_score"), "invest_score": it.get("invest_score"),
             "planning": plan, "presentation": presented.get(it.get("id")),
+            "investigation": inquiries.get(it.get("id")),
             "valuation": ("Investment value not established" if group == "unvalued"
                           else "Local median used as a planning figure, not a valuation of this property"),
             "gaps": gaps,
@@ -646,55 +648,74 @@ def _add_detail_tokens(db, rows: list) -> None:
         r["detail_token"] = hashlib.sha1(json.dumps(basis, default=str).encode()).hexdigest()[:12]
 
 
-def _presentations(db, rows: list) -> dict:
+def _presentations(db, rows: list, stored: dict | None = None) -> dict:
     """Each full row's short summaries (presentation.py), by id. One batched
-    checklist read for all of them, never one query per row."""
+    checklist read for all of them (or the caller's `stored`), never one query per row."""
     import checklist
     import presentation
     cfg = _config()
-    stored = checklist.stored_for(db, [it.get("id") for it in rows])
+    if stored is None:
+        stored = checklist.stored_for(db, [it.get("id") for it in rows])
     now = _now()
     # A copy each: the cost and score helpers cache on the dict they read, and
     # these rows can be the kept list's own.
     return {it.get("id"): presentation.summary(dict(it), stored.get(it.get("id")), cfg, now) for it in rows}
 
 
+def _investigations(rows: list, presented: dict, stored: dict) -> dict:
+    """Each property row's investigation summary (investigation.summary), by id,
+    from the page's one checklist read and the summaries already built. Never breaks the list."""
+    import investigation
+    homes = [it for it in rows if it.get("category") == "imoveis"]
+    cfg, mode, now, out = _config(), _mode(request.args), _now(), {}
+    for it in homes:
+        try:
+            out[it["id"]] = investigation.summary(investigation.assess(
+                dict(it), stored.get(it["id"]), cfg, mode, presented.get(it["id"]), now))
+        except Exception:  # noqa: BLE001 — one malformed listing never breaks the page
+            logging.getLogger("auction-scanner").exception("Investigation summary failed for %s", it.get("id"))
+    return out
+
+
+def _summaries(db, rows: list) -> tuple[dict, dict]:
+    """(presentations, investigation summaries) of rows, by id: one checklist read for both."""
+    import checklist
+    stored = checklist.stored_for(db, [it.get("id") for it in rows])
+    presented = _presentations(db, rows, stored)
+    return presented, _investigations(rows, presented, stored)
+
+
 def _presented(db, rows: list) -> list:
     """The rows on one page as the browser gets them, with their summaries."""
-    summaries = _presentations(db, rows)
+    summaries, inquiries = _summaries(db, rows)
     # "map": the stored pin for the Listings map (geo.map_summary), or None.
-    return [{**_with_fees(it), "presentation": summaries.get(it.get("id")), "map": geo.map_summary(it)}
+    return [{**_with_fees(it), "presentation": summaries.get(it.get("id")), "map": geo.map_summary(it),
+             "investigation": inquiries.get(it.get("id"))}
             for it in rows]
 
 
-@app.route("/api/listings")
-def api_listings():
-    args = request.args
-    # One clock per response: visibility, hydration and deadline labels agree.
-    g.listings_now = _now()
-    country = args.get("country", "")
-    source = args.get("source", "")
-    max_price = _filter_amount(args.get("max_price"))
-    min_score = _filter_amount(args.get("min_score"))
-    if max_price is None or min_score is None:
-        return jsonify({"error": "max_price and min_score must be numbers ≥ 0"}), 400
-    search = args.get("search", "").strip()
-    tipo = args.get("type", "")
-    status = args.get("status", "")
-    kind = args.get("kind", "")          # home / urban_plot / rural_plot / other
-    properties_only = args.get("properties", "0") == "1"
-    show_hidden = args.get("show_hidden", "0") == "1"
-    climate_grade = args.get("climate", "")   # excellent / good / caution: at least; poor / unknown: exactly
-    climate_exact = args.get("climate_exact", "0") == "1"
-    sale_method = args.get("sale_method", "")
-    sort = args.get("sort", "score")
-    direction = args.get("dir", "desc")
-    page = _num(args.get("page", "1"), 0, int)
-    if (sort not in SORT_KEYS or direction not in ("asc", "desc") or kind not in _LIST_KINDS
-            or status not in _LIST_STATUSES or climate_grade not in _LIST_CLIMATES
-            or sale_method not in ("", *(v for v, _ in SALE_METHODS)) or page < 1):
-        return jsonify({"error": "unknown sort, direction, type, status, climate, sale method or page"}), 400
-    mode = _mode(args)
+def _view_filters(args) -> dict | str:
+    """The Listings view's filters from a query string (the page's own names), or why they are refused.
+    Shared by Listings and the investigation queue, so both select the same properties."""
+    f = {"country": args.get("country", ""), "source": args.get("source", ""),
+         "max_price": _filter_amount(args.get("max_price")), "min_score": _filter_amount(args.get("min_score")),
+         "search": args.get("search", "").strip(), "tipo": args.get("type", ""), "status": args.get("status", ""),
+         "kind": args.get("kind", ""),          # home / urban_plot / rural_plot / other
+         "properties_only": args.get("properties", "0") == "1",
+         "climate": args.get("climate", ""),   # excellent / good / caution: at least; poor / unknown: exactly
+         "climate_exact": args.get("climate_exact", "0") == "1", "sale_method": args.get("sale_method", "")}
+    if f["max_price"] is None or f["min_score"] is None:
+        return "max_price and min_score must be numbers ≥ 0"
+    if (f["kind"] not in _LIST_KINDS or f["status"] not in _LIST_STATUSES or f["climate"] not in _LIST_CLIMATES
+            or f["sale_method"] not in ("", *(v for v, _ in SALE_METHODS))):
+        return "unknown sort, direction, type, status, climate, sale method or page"
+    return f
+
+
+def _view_matched(rows: list, f: dict, mode: str, show_hidden: bool) -> list:
+    """The rows a goal's view matches before the score cutoff (hidden ones included; the caller splits them)."""
+    from datetime import timedelta
+    max_price = f["max_price"]
     budget = mode_max_price(_config(), mode, _config().get("max_price") or 0)
     if mode == "both":
         # The all-in estimate against the cash is the ceiling, not the asking price.
@@ -703,10 +724,39 @@ def api_listings():
         # Each goal has its own budget (land and lets cost more): what this tab
         # may show. A browsing maximum narrows it; empty or larger, the budget holds.
         max_price = min(max_price, budget) if max_price else budget
+    yesterday = (_now() - timedelta(days=1)).date().isoformat()
+    status, kind = f["status"], f["kind"]
+    matched = [it for it in rows
+               if _matches(it, f["country"], f["source"], f["tipo"], max_price, f["search"])
+               # long-ended sales are not counted among the open view's hidden ones
+               and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
+               and (not f["properties_only"] or it["category"] == "imoveis")
+               and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
+    if f["climate"] or f["climate_exact"]:
+        matched = [it for it in matched if _climate_matches(it, f["climate"], f["climate_exact"])]
+    if f["sale_method"]:
+        matched = [it for it in matched if _sale_method(it) == f["sale_method"]]
+    return matched
+
+
+@app.route("/api/listings")
+def api_listings():
+    args = request.args
+    # One clock per response: visibility, hydration and deadline labels agree.
+    g.listings_now = _now()
+    f = _view_filters(args)
+    if isinstance(f, str):
+        return jsonify({"error": f}), 400
+    show_hidden = args.get("show_hidden", "0") == "1"
+    min_score = f["min_score"]
+    sort = args.get("sort", "score")
+    direction = args.get("dir", "desc")
+    page = _num(args.get("page", "1"), 0, int)
+    if sort not in SORT_KEYS or direction not in ("asc", "desc") or page < 1:
+        return jsonify({"error": "unknown sort, direction, type, status, climate, sale method or page"}), 400
+    mode = _mode(args)
     per_page = min(1000, max(1, _num(args.get("per_page"), 50, int)))
 
-    from datetime import timedelta
-    yesterday = (_now() - timedelta(days=1)).date().isoformat()
     db = get_db()
     try:
         try:
@@ -716,16 +766,7 @@ def api_listings():
             response.headers["Retry-After"] = "1"
             response.headers["Cache-Control"] = "no-store"
             return response, 503
-        matched = [it for it in candidate_rows
-                   if _matches(it, country, source, tipo, max_price, search)
-                   # long-ended sales are not counted among the open view's hidden ones
-                   and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
-                   and (not properties_only or it["category"] == "imoveis")
-                   and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
-        if climate_grade or climate_exact:
-            matched = [it for it in matched if _climate_matches(it, climate_grade, climate_exact)]
-        if sale_method:
-            matched = [it for it in matched if _sale_method(it) == sale_method]
+        matched = _view_matched(candidate_rows, f, mode, show_hidden)
         # Research selection runs before the request's score cutoff: an
         # extreme-discount lead under min_score still reaches investigation.
         # Other rows keep the cutoff the page asked for.
@@ -733,7 +774,7 @@ def api_listings():
                          if it.get("extreme_discount") or minimum_bar(it, mode) >= min_score]
         research = (_research_candidates(research_pool, float(_cash_public().get("amount") or 0),
                                          full=lambda rows: _full_rows(db, rows, mode),
-                                         present=lambda rows: _presentations(db, rows))
+                                         present=lambda rows: _summaries(db, rows))
                     if mode == "both" else None)
         loaded = [it for it in matched if minimum_bar(it, mode) >= min_score]
         hidden_counts = Counter(hidden_category(it["hidden_reason"]) for it in loaded
@@ -875,18 +916,22 @@ def api_listing_detail():
 
 # ─── Investigation queue (investigation.py): what is unknown, and what to find out next ───
 QUEUE_DEFAULT, QUEUE_MAX = 20, 50
+# The Listings view filters the queue accepts (_view_filters' query names).
+_VIEW_FILTER_KEYS = ("country", "source", "max_price", "min_score", "search", "type", "status", "kind",
+                     "climate", "climate_exact", "sale_method")
 
 
-def _investigation_rows(mode: str) -> tuple[list, list]:
-    """The goal's eligible properties in the Listings score order (the same
-    cached, scored rows and ordering as the tab; nothing rescored), and the
-    rows of every listing with checklist work for the history."""
+def _investigation_rows(mode: str, f: dict | None = None) -> tuple[list, list]:
+    """The goal's eligible properties under the Listings view's filters `f`
+    (_view_filters; none: every property) in the Listings score order (the same
+    cached, scored rows, filters and ordering as the tab; nothing rescored),
+    and the rows of every listing with checklist work for the history."""
     from tops import place_unseen_homes_after
-    from datetime import timedelta
-    yesterday = (_now() - timedelta(days=1)).date().isoformat()
     rows = all_listings(mode)
-    eligible = [it for it in rows if not it["hidden_reason"] and it.get("category") == "imoveis"
-                and (not it.get("date_end") or it["date_end"][:10] >= yesterday)]
+    f = f or _view_filters({})
+    eligible = [it for it in _view_matched(rows, f, mode, show_hidden=False)
+                if not it["hidden_reason"] and it.get("category") == "imoveis"
+                and minimum_bar(it, mode) >= f["min_score"]]
     ranked = place_unseen_homes_after(sorted(eligible, key=SORT_KEYS["score"], reverse=True), mode)
     return ranked, rows
 
@@ -909,9 +954,12 @@ def api_investigation_queue():
     offset = _num(request.args.get("offset"), 0, int)
     if not 1 <= limit <= QUEUE_MAX or offset < 0:
         return jsonify({"error": f"limit must be 1 to {QUEUE_MAX} and offset ≥ 0"}), 400
+    view = _view_filters(request.args)
+    if isinstance(view, str):
+        return jsonify({"error": view}), 400
     g.listings_now = _now()
     try:
-        ranked, rows = _investigation_rows(mode)
+        ranked, rows = _investigation_rows(mode, view)
     except ListPolicyChanged as exc:
         return jsonify({"error": str(exc), "code": "list_policy_changed", "retryable": True}), 503
     db = get_db()
@@ -936,7 +984,9 @@ def api_investigation_queue():
     return jsonify({"mode": mode, "purpose": investigation.PURPOSES.get(mode), "limit": limit, "offset": offset,
                     "eligible_total": len(ranked), "items": queue, "history": history[:QUEUE_MAX],
                     "history_total": len(history), "assessed_at": now.isoformat(timespec="seconds"),
-                    "scope": "Eligible properties of this goal, in the Listings score order. The queue shows "
+                    "filters": {k: request.args[k] for k in _VIEW_FILTER_KEYS
+                                if request.args.get(k) not in (None, "", "0")},
+                    "scope": "Eligible properties of this goal and these filters, in the Listings score order. The queue shows "
                              f"{limit} at a time; it is not every opportunity, and nothing here means a "
                              "property is ready to buy."})
 
@@ -947,9 +997,16 @@ def _drawer_investigation(db, it: dict, presented: dict | None):
     import investigation
     try:
         mode = _mode(request.args)
-        found = investigation.assess(it, checklist.stored_for(db, [it["id"]]).get(it["id"]), _config(), mode,
-                                     presented, _now())
-        return {**found, "eligibility": it.get("hidden_reason") or None}
+        rows = checklist.stored_for(db, [it["id"]]).get(it["id"])
+        found = investigation.assess(it, rows, _config(), mode, presented, _now())
+        # The drawer records findings in place through POST /api/checklist; the brief never sees these.
+        built = checklist.build(it, rows or {}, _config())
+        record = {"items": {x["key"]: {k: x[k] for k in ("key", "label", "status", "notes", "reference",
+                                                         "checked_on", "verified_by", "needs_recheck")}
+                            for x in built["items"]},
+                  "statuses": [[k, checklist.STATUS_LABELS[k]] for k in checklist.STATUSES]}
+        return {**found, "eligibility": it.get("hidden_reason") or None, "status": it.get("status") or None,
+                "record": record}
     except Exception:  # noqa: BLE001 — the assessment must never break the panel
         logging.getLogger("auction-scanner").exception("Investigation assessment failed for %s", it.get("id"))
         return None
