@@ -158,8 +158,10 @@ def outcomes_page():
 @app.route("/investigations")
 def investigations_page():
     from scoring import MODES
+    import investigation_stages
     return _page("investigations.html", "investigations", "Investigations", modes=list(MODES.items()),
-                 queue_max=QUEUE_MAX)
+                 queue_max=QUEUE_MAX,
+                 stages=list({**investigation_stages.STAGES, **investigation_stages.DISPOSITIONS}.items()))
 
 
 @app.route("/map")
@@ -662,16 +664,19 @@ def _presentations(db, rows: list, stored: dict | None = None) -> dict:
     return {it.get("id"): presentation.summary(dict(it), stored.get(it.get("id")), cfg, now) for it in rows}
 
 
-def _investigations(rows: list, presented: dict, stored: dict) -> dict:
+def _investigations(rows: list, presented: dict, stored: dict, stages: dict) -> dict:
     """Each property row's investigation summary (investigation.summary), by id,
-    from the page's one checklist read and the summaries already built. Never breaks the list."""
+    from the page's one checklist read, its one stage read (each row's latest
+    stage) and the summaries already built. Never breaks the list."""
     import investigation
     homes = [it for it in rows if it.get("category") == "imoveis"]
     cfg, mode, now, out = _config(), _mode(request.args), _now(), {}
     for it in homes:
         try:
+            latest = stages.get(it["id"])
             out[it["id"]] = investigation.summary(investigation.assess(
-                dict(it), stored.get(it["id"]), cfg, mode, presented.get(it["id"]), now))
+                dict(it), stored.get(it["id"]), cfg, mode, presented.get(it["id"]), now,
+                stages=[latest] if latest else None))
         except Exception:  # noqa: BLE001 — one malformed listing never breaks the page
             logging.getLogger("auction-scanner").exception("Investigation summary failed for %s", it.get("id"))
     return out
@@ -680,9 +685,11 @@ def _investigations(rows: list, presented: dict, stored: dict) -> dict:
 def _summaries(db, rows: list) -> tuple[dict, dict]:
     """(presentations, investigation summaries) of rows, by id: one checklist read for both."""
     import checklist
-    stored = checklist.stored_for(db, [it.get("id") for it in rows])
+    import investigation_stages
+    ids = [it.get("id") for it in rows]
+    stored = checklist.stored_for(db, ids)
     presented = _presentations(db, rows, stored)
-    return presented, _investigations(rows, presented, stored)
+    return presented, _investigations(rows, presented, stored, investigation_stages.current_for(db, ids))
 
 
 def _presented(db, rows: list) -> list:
@@ -939,8 +946,11 @@ def _investigation_rows(mode: str, f: dict | None = None) -> tuple[list, list]:
 def _queue_entry(assessment: dict, item: dict) -> dict:
     keep = ("listing_id", "title", "opportunity", "dimensions", "unresolved", "concerns", "contradictions",
             "next_action", "deadline", "price")
+    current = assessment["stage_history"]["current"]
     return {**{k: assessment[k] for k in keep}, "country": item.get("country"), "source": item.get("source"),
-            "more_actions": len(assessment["more_actions"])}
+            "more_actions": len(assessment["more_actions"]),
+            # The latest stage only: its reason is your own words and stays in the drawer.
+            "stage": {k: current[k] for k in ("stage", "label", "reason_kind_label", "created_at")} if current else None}
 
 
 @app.route("/api/investigation-queue")
@@ -949,6 +959,7 @@ def api_investigation_queue():
     evidence and next action. Bounded: one batched checklist read for the page."""
     import checklist
     import investigation
+    import investigation_stages
     mode = _mode(request.args)
     limit = _num(request.args.get("limit"), QUEUE_DEFAULT, int)
     offset = _num(request.args.get("offset"), 0, int)
@@ -957,31 +968,49 @@ def api_investigation_queue():
     view = _view_filters(request.args)
     if isinstance(view, str):
         return jsonify({"error": view}), 400
+    # Research stage: "" any, "active" (not paused or rejected), "none" (no stage yet) or one stage.
+    stage_filter = request.args.get("stage", "")
+    if stage_filter not in ("", "active", "none", *investigation_stages.LABELS):
+        return jsonify({"error": "unknown stage"}), 400
     g.listings_now = _now()
     try:
         ranked, rows = _investigation_rows(mode, view)
     except ListPolicyChanged as exc:
         return jsonify({"error": str(exc), "code": "list_policy_changed", "retryable": True}), 503
+    eligible = {it["id"] for it in ranked}       # the history lists the others, whatever the stage filter
     db = get_db()
     try:
+        if stage_filter:
+            latest = investigation_stages.current_for(db, [it["id"] for it in ranked])
+            at = lambda it: (latest.get(it["id"]) or {}).get("stage")  # noqa: E731
+            ranked = [it for it in ranked
+                      if (stage_filter == "none" and at(it) is None)
+                      or (stage_filter == "active" and at(it) not in investigation_stages.DISPOSITIONS)
+                      or at(it) == stage_filter]
         page = _full_rows(db, ranked[offset:offset + limit], mode)
         ids = [it["id"] for it in page]
         stored = checklist.stored_for(db, ids)
-        presented = _presentations(db, page)
+        presented = _presentations(db, page, stored)
+        stages = investigation_stages.current_for(db, ids)
         worked = {r[0]: r[1] for r in db.execute(
             "SELECT listing_id, MAX(updated_at) FROM checklist_items GROUP BY listing_id")}
+        for listing_id, last in db.execute(
+                "SELECT listing_id, MAX(created_at) FROM investigation_stages GROUP BY listing_id"):
+            worked[listing_id] = max(worked.get(listing_id) or "", last or "")
     finally:
         db.close()
     cfg, now = _config(), _now()
-    queue = [_queue_entry(investigation.assess(it, stored.get(it["id"]), cfg, mode, presented.get(it["id"]), now), it)
+    queue = [_queue_entry(investigation.assess(it, stored.get(it["id"]), cfg, mode, presented.get(it["id"]), now,
+                                               stages=[stages[it["id"]]] if it["id"] in stages else None), it)
              for it in page]
-    shown = {it["id"] for it in ranked}
+    shown = eligible
     history = [{"listing_id": it["id"], "title": it.get("title") or "Untitled listing",
                 "state": it.get("hidden_reason") or "not in this goal's results",
                 "last_checklist_change": worked[it["id"]]}
                for it in rows if it["id"] in worked and it["id"] not in shown]
     history.sort(key=lambda h: h["last_checklist_change"] or "", reverse=True)
     return jsonify({"mode": mode, "purpose": investigation.PURPOSES.get(mode), "limit": limit, "offset": offset,
+                    "stage": stage_filter,
                     "eligible_total": len(ranked), "items": queue, "history": history[:QUEUE_MAX],
                     "history_total": len(history), "assessed_at": now.isoformat(timespec="seconds"),
                     "filters": {k: request.args[k] for k in _VIEW_FILTER_KEYS
@@ -995,10 +1024,12 @@ def _drawer_investigation(db, it: dict, presented: dict | None):
     """The drawer's investigation section: the same assessment as the queue, never breaking the panel."""
     import checklist
     import investigation
+    import investigation_stages
     try:
         mode = _mode(request.args)
         rows = checklist.stored_for(db, [it["id"]]).get(it["id"])
-        found = investigation.assess(it, rows, _config(), mode, presented, _now())
+        found = investigation.assess(it, rows, _config(), mode, presented, _now(),
+                                     stages=investigation_stages.history(db, it["id"]))
         # The drawer records findings in place through POST /api/checklist; the brief never sees these.
         built = checklist.build(it, rows or {}, _config())
         record = {"items": {x["key"]: {k: x[k] for k in ("key", "label", "status", "notes", "reference",
@@ -1016,6 +1047,7 @@ def _investigation_of(listing_id: str, mode: str):
     """(assessment, item) for one listing, hidden ones included, or None."""
     import checklist
     import investigation
+    import investigation_stages
     db = get_db()
     try:
         found = load_listings(db, filters=_config().get("filters"), include_hidden=True,
@@ -1024,10 +1056,11 @@ def _investigation_of(listing_id: str, mode: str):
             return None
         it = found[0]
         stored = checklist.stored_for(db, [it["id"]])
-        presented = _presentations(db, [it]).get(it["id"])
+        presented = _presentations(db, [it], stored).get(it["id"])
+        stages = investigation_stages.history(db, it["id"])
     finally:
         db.close()
-    assessment = investigation.assess(it, stored.get(it["id"]), _config(), mode, presented, _now())
+    assessment = investigation.assess(it, stored.get(it["id"]), _config(), mode, presented, _now(), stages=stages)
     assessment["eligibility"] = it.get("hidden_reason") or None
     return assessment, it
 
@@ -1038,6 +1071,35 @@ def api_investigation():
     if found is None:
         return jsonify({"error": "no such listing"}), 404
     return jsonify(found[0])
+
+
+@app.route("/api/investigation/stage", methods=["POST"])
+def api_investigation_stage():
+    """Append one research stage or disposition (investigation_stages.py). It changes
+    nothing else: no status, letter or verification. The body is never logged."""
+    import checklist
+    import investigation_stages
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "the body must be a JSON object"}), 400
+    item = _listing(str(data.get("id") or ""))
+    if not item:
+        return jsonify({"error": "no such listing"}), 404
+    keys = [it.key for it in checklist.items_for(item)[1]]
+    db = get_db()
+    try:
+        try:
+            row = investigation_stages.record(db, item, data, keys)
+        except investigation_stages.StageConflict as exc:
+            return jsonify({"error": str(exc), "code": "stage_changed",
+                            "current": (investigation_stages.current_for(db, [item["id"]]).get(item["id"])
+                                        or {}).get("stage")}), 409
+        except investigation_stages.StageError as exc:
+            return jsonify({"error": str(exc)}), 400
+        rows = investigation_stages.history(db, item["id"])
+    finally:
+        db.close()
+    return jsonify({"accepted": row, "stage_history": investigation_stages.summary(rows, item)})
 
 
 @app.route("/api/investigation/brief.md")

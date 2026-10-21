@@ -43,7 +43,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -687,6 +687,30 @@ def _migrate_v31(db: sqlite3.Connection):
     db.execute("CREATE INDEX IF NOT EXISTS idx_status_history_listing"
                " ON listing_status_history(listing_id, id)")
 
+
+def _migrate_v32(db: sqlite3.Connection):
+    """Research stages and decisions (investigation_stages.py), append-only and
+    separate from shortlist/dismiss status: a correction is a new row, never an
+    edit, so earlier stages, reasons and spending stay on record. A new empty
+    table: no existing row is read or rewritten."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS investigation_stages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            previous_stage TEXT,
+            reason TEXT NOT NULL,
+            reason_kind TEXT NOT NULL,
+            evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+            spend_amount REAL,
+            spend_currency TEXT,
+            spend_date TEXT,
+            spend_category TEXT,
+            created_at TEXT NOT NULL
+        )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_investigation_stages_listing"
+               " ON investigation_stages(listing_id, id)")
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
@@ -694,7 +718,7 @@ _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
                27: _migrate_v27, 28: _migrate_v28, 29: _migrate_v29,
-               30: _migrate_v30, 31: _migrate_v31}
+               30: _migrate_v30, 31: _migrate_v31, 32: _migrate_v32}
 
 
 def init_db(db: sqlite3.Connection):
