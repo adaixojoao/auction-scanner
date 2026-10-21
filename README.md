@@ -390,6 +390,37 @@ incomplete** can be collapsed; its count and *Not verified as ready to buy*
 stay visible, and collapsing it keeps open details and unsaved notes. Those
 cards can also be in the table and are not added to its count.
 
+## Investigating a property
+
+A high score says a property is worth a look, not that anything about it is
+known. **Investigations** (in the top bar) lists the goal's first 20 eligible
+properties in the Listings score order (10 or 50 on request; not every
+opportunity) and, for each, what is still unknown and the one thing to find
+out next. The same assessment is the **Investigation** section of a property's
+details, with **Download the investigation brief** (Markdown, no notes,
+contacts or buyer details).
+
+Eight questions are assessed separately, never added up into a confidence
+score: price interpretation, sale availability, whole ownership, title and
+charges, possession, lawful access, intended use (the goal you are looking
+at) and project costs. They come from what the app already stores: the
+checklist, the price cell, the sale-page check and the listing's words. A
+claim in the notice is *source-reported, unverified*; a checklist tick whose
+listing details have since changed needs a recheck and is not verified; a
+verified map position establishes nothing about title, possession, access or
+use; an unknown cost is never zero; conflicting records stay visible.
+
+The next action follows a fixed research order: a recorded concern or
+conflict first, then what is for sale and whether it still is, then title,
+possession and access, then permitted use, then costs. Each names the evidence
+to ask for and, where Offers can draft one, the information-request letter
+(nothing is sent from here). Recording that you asked does not verify the
+answer: record what you found in the checklist. Nothing here rescores, hides,
+rejects or bids, and no property is ever shown as ready to buy. Dismissed or
+ended properties with checklist work move to **Earlier research** on the same
+page. Research stages and decision history are not recorded yet: they need a
+database change that has not been made.
+
 ## What it really costs
 
 A €20 000 house is not a €20 000 house. Under **ⓘ → Estimated costs: what it really costs**

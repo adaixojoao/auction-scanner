@@ -9,7 +9,7 @@ import pytest
 import dashboard
 from tests.listings_page import listings_source
 
-PAGES = ("/", "/offers", "/outcomes", "/map", "/sources", "/settings")
+PAGES = ("/", "/investigations", "/offers", "/outcomes", "/map", "/sources", "/settings")
 
 
 @pytest.fixture
