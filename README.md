@@ -630,6 +630,8 @@ than €20,001 instead of jumping at a step.
   return a year (the Forestry tab's own figures) and scores a little higher for
   it. A 2 ha plot can still be a good buy; it simply has no forestry case.
 - **A project is planned on the land budget.** Open a plot and the panel says what acquiring it costs against the land budget in Settings, what is left, and how many hectares of the crop the climate still allows that leftover plants. Over the budget, it says not to buy. The figures are estimates (transfer tax, the CAOF planting matrix, the crop model).
+- **Today's money, at 3.5% inflation.** Dated prices (SIMeF timber, CAOF planting, CCDR-N produce, UNAC cork) are brought forward to 2026 at 3.5% a year, and the crop model discounts at a real 3% on top. The Forestry return is given in today's money and, beside it, in the money of the day.
+- **Grants are named, never counted.** `data/forest_grants.csv` lists the planting and replanting schemes with their legal text and the day they were checked: PEPAC C.3.2.1 in Portugal, the replanting aid in France. The panel names a grant that may apply and what to ask the forest service. No grant changes a score, a return or a bid, because it depends on an approved application. A grant never pays for the land, an existing stand you keep, eucalyptus or a nut orchard. A row stays "partial", with no euro figure, until its per-hectare amounts have been read in the official text. Spain's grants are regional and not in the table yet. What is still to do is in `docs/forestry_grants_todo.md`.
 - **Habitat is scored, never invented.** Natura 2000 / ZNIEFF from a stored
   site check, and Natura, REN or RAN named in the notice, cost the land and
   forestry scores because planting, felling and building normally need permits.
