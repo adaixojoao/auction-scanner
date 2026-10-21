@@ -601,7 +601,7 @@ def test_standing_timber_worth_more_than_the_price_is_flagged():
     assert forestry.standing_volume("Finca con 1.500 metros cúbicos de madera") == 1500
     assert forestry.standing_volume("casa de 120 m3 de volumen") is None
     timber = forestry.standing_timber("Kopējais mežaudzes krājas apjoms ir 1632 m³.", "LV", 12.35)
-    assert timber and 75000 < timber["eur"] < 80000 and "LVM" in timber["label"]
+    assert timber and 75000 < timber["eur"] < 80000 and "LVM" in timber["label"]     # income: never raised for inflation
     from scoring import score_detail
     plot = {"source": "safer", "country": "FR", "district": "40", "tipo": "terreno", "title": "Forêt 20 ha",
             "description": "Forêt de pins, volume sur pied 2 000 m3.", "area_m2": 200000, "price": 60000}
@@ -757,9 +757,11 @@ def test_the_return_is_on_the_price_plus_buying_costs():
 
 def test_planting_costs_come_from_the_caof_matrix():
     import forestry
-    assert forestry.planting_cost("conifer", 20) == (1464 + 2270) / 2 + 1100 * 0.40
-    assert forestry.planting_cost("conifer", 20, slope_pct=5) == 1464 + 1100 * 0.40      # flat: CAOF's easy cost
-    assert forestry.planting_cost("conifer", 20, slope_pct=40) == 2270 + 1100 * 0.40     # steep: the hard cost
+    import pytest
+    caof = 1.035 ** 2                                                                     # CAOF 2024, in 2026 money
+    assert forestry.planting_cost("conifer", 20) == pytest.approx((1464 + 2270) / 2 * caof + 1100 * 0.40)
+    assert forestry.planting_cost("conifer", 20, slope_pct=5) == pytest.approx(1464 * caof + 1100 * 0.40)  # flat: easy
+    assert forestry.planting_cost("conifer", 20, slope_pct=40) == pytest.approx(2270 * caof + 1100 * 0.40)  # steep: hard
     assert forestry.planting_cost("conifer", 5) > forestry.planting_cost("conifer", 20)   # +3% a hectare under 10
 
 

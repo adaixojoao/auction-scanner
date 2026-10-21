@@ -787,8 +787,9 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
                                        max_eur_ha=f"{t['rural_max_eur_m2'] * 10000:,.0f}") + _OUTLOOK_NOTE
     if mode == "forest":
         # No population note: a project the owner runs is not waiting on a local buyer.
+        import forestry
         return _FOREST_PRIORITIES.format(min_ha=FOREST_MIN_M2 // 10000, roi=f"{FOREST_ROI_TARGET:.0%}",
-                                         years=FOREST_ROI_YEARS)
+                                         years=FOREST_ROI_YEARS, inflation=f"{forestry.INFLATION:.1%}")
     return (
         "A home (a house or a flat) to live in, at a very low price — not a plot, not a shop or a "
         "garage. A MUST: by the beach, the sea within 10 km, with more points the closer it is. "
@@ -895,7 +896,11 @@ _FOREST_PRIORITIES = (
     "where felling and planting need permits; several scattered parcels; felling "
     "rights sold without the land. Say plainly when the ad does not give the volume or the age of "
     "the stand, because then the timber figure is a guess. Do not treat a missing species map as "
-    "proof that native trees would thrive."
+    "proof that native trees would thrive. Inflation of about {inflation} a year works against "
+    "the project: costs rise with it, income may not, and the return goal is after inflation. "
+    "A planting grant (PEPAC in Portugal and Spain, the replanting aid in France) "
+    "pays part of new planting, never the purchase, and only if an application is approved: "
+    "mention one as a possibility to check, never as income."
 )
 
 
@@ -3563,9 +3568,10 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         out["roi"] = roi
     if roi is not None:
         s += curve(roi, FOREST_RETURN_POINTS) * w("price")
-        reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years "
-                       f"(timber now + the {'forest kept' if why in ('stand', 'mix') else 'earning crop'}, "
-                       f"on the price and the buying costs)"
+        reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years after {forestry.INFLATION:.1%} "
+                       f"inflation (costs rise with prices, income is not assumed to; timber now + the "
+                       f"{'forest kept' if why in ('stand', 'mix') else 'earning crop'}, "
+                       f"on the price and the buying costs; planting grants not counted)"
                        + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))
     elif pay and not caps:
         reasons.append("no return can be worked out — not ranked as a forestry project")

@@ -9,8 +9,12 @@ PROVISIONAL: most yields, prices and costs below are rough mid-range figures, no
 yet taken from a published table. Sourced so far: EU-Trees4F for where a species
 can live in 2095; IGN growth; SIMeF, ONF and LVM timber prices; CCDR-N produce
 prices; UNAC cork; CAOF planting work; Silava's average Latvian stand (2019–2023).
-Grants for planting (PEPAC/CAP) are left out. Compare listings with this; do not
-plan with it.
+Inflation (INFLATION, the owner's assumption) is counted against the project:
+costs are brought forward to PRICE_YEAR, income is not assumed to rise with
+prices, so each later year's income is worth INFLATION less, and the yearly
+figure is in today's money. Planting grants are not in these figures:
+`grants.py` says which may apply, if approved, beside them. Compare listings
+with this; do not plan with it.
 """
 from __future__ import annotations
 
@@ -19,8 +23,27 @@ import functools
 import os
 import re
 
-DISCOUNT_RATE = 0.03
+DISCOUNT_RATE = 0.03      # real: what money is worth waiting for, on top of inflation
 FOREST_YEARS = 60
+
+# The owner's assumption (2026-10-21): prices rise 3.5% a year, and that works
+# against the project. A cost dated earlier (planting work) is brought forward to
+# PRICE_YEAR at that rate. Income is not: timber, cork, produce and carbon stay at
+# their published prices, fixed in euros, so each later year's income is worth
+# 3.5% less in today's money. A grant premium is fixed in euros anyway.
+INFLATION = 0.035
+PRICE_YEAR = 2026
+INCOME_DISCOUNT = (1 + DISCOUNT_RATE) * (1 + INFLATION) - 1    # future euros, valued today
+
+
+def to_today(eur: float, year: int) -> float:
+    """A cost from `year`, in PRICE_YEAR money."""
+    return eur * (1 + INFLATION) ** max(0, PRICE_YEAR - year)
+
+
+def in_today_money(year: int) -> str:
+    return "" if year >= PRICE_YEAR else f", +{INFLATION:.1%} a year to {PRICE_YEAR}"
+
 
 CARBON_EUR_T = 30          # ARR removal credits, 2025-26 (€15-45/t CO2)
 CARBON_BUFFER = 0.20       # held back against fire and dieback
@@ -69,7 +92,7 @@ CROPS = {
 }
 
 
-START_YEAR = 2026
+START_YEAR = PRICE_YEAR
 THRIVE_UNTIL = 2100      # the owner plants only what still thrives here in 2100
 DRY_FAIL_YEAR = 2060      # water-hungry trees where water stress turns high or extreme by 2080
 # Yearly chance a stand burns: a base everywhere, more where high fire danger
@@ -163,7 +186,8 @@ CAOF_WORK = {"conifer": (1464, 2270),             # 1,100 container plants a hec
              "broadleaf": (1231, 1880)}           # 500 plants a hectare, guards fitted
 CAOF_EASY_SLOPE, CAOF_HARD_SLOPE = 10, 25         # CAOF's conditions: under 10% easy, over 25% hard
 PLANT_MATERIAL = {"conifer": 1100 * 0.40, "broadleaf": 500 * (1.0 + 1.5)}   # PROVISIONAL
-CAOF_SOURCE = "planting work CAOF 2024"
+CAOF_YEAR = 2024
+CAOF_SOURCE = f"planting work CAOF 2024{in_today_money(CAOF_YEAR)}"
 CAOF_SMALL_PLOT = 0.03    # CAOF: +3% for each hectare under 10
 
 
@@ -176,7 +200,7 @@ def planting_cost(kind: str, hectares: float, slope_pct: float | None = None) ->
         t = min(1.0, max(0.0, (slope_pct - CAOF_EASY_SLOPE) / (CAOF_HARD_SLOPE - CAOF_EASY_SLOPE)))
         work = easy + t * (hard - easy)
     small = max(0.0, 10 - hectares) * CAOF_SMALL_PLOT if hectares else 0.0
-    return work * (1 + small) + PLANT_MATERIAL[kind]
+    return to_today(work, CAOF_YEAR) * (1 + small) + PLANT_MATERIAL[kind]
 
 
 def _annuity(npv: float) -> float:
@@ -185,7 +209,8 @@ def _annuity(npv: float) -> float:
 
 
 def _npv(flows: dict[int, float]) -> float:
-    return sum(v / (1 + DISCOUNT_RATE) ** y for y, v in flows.items())
+    """Today's worth of euros paid in each year: fixed in euros, so inflation erodes them too."""
+    return sum(v / (1 + INCOME_DISCOUNT) ** y for y, v in flows.items())
 
 
 def _carbon_rate(crop: dict, heat_today: float | None) -> float:
@@ -374,7 +399,7 @@ def standing_timber(text: str, country: str | None, hectares: float) -> dict | N
         return None
     eur = m3 * price["eur_m3"]
     if s["young"] and not s["mature"]:
-        eur /= (1 + DISCOUNT_RATE) ** YOUNG_YEARS             # sold only when it has grown
+        eur /= (1 + INCOME_DISCOUNT) ** YOUNG_YEARS           # sold only when it has grown
     return {"m3": m3, "eur": eur, "label": price["label"], "estimated": estimated,
             "young": s["young"] and not s["mature"], "rights_only": s["rights_only"]}
 
@@ -472,7 +497,10 @@ def stand(text: str) -> dict:
 PLAN_NOTE = (
     "Estimate. The land budget is what Settings sets aside for a plot. Buying costs are the "
     "usual transfer tax and notary for that country. Planting is the CAOF 2024 work plus a "
-    "provisional cost for the plants. Crop income is the screening model, not a forecast."
+    "provisional cost for the plants. Crop income is the screening model, not a forecast. "
+    f"Inflation of {INFLATION:.1%} a year is counted against you: planting costs today's prices, "
+    "income is not assumed to rise with them. A grant that may apply is "
+    "named, never counted: it depends on an approved application."
 )
 
 
@@ -525,13 +553,13 @@ def project_plan(item: dict, budget: float) -> dict | None:
     left = budget - acquire if pay and budget else 0
     fundable = bool(pay and budget and acquire <= budget)
     existing = growing(full)
+    wooded = scoring.has_term(full, scoring.FOREST_WORDS, negations=False)
     crops = []
     if item.get("climate"):
         water = scoring.water_nearby(full, item)
         crops = options(item.get("climate"), country, ha,
                         water_on_land=bool(water) and not str(water).endswith("(approx.)"),
-                        existing=existing, trees=trees_for_item(item),
-                        wooded=scoring.has_term(full, scoring.FOREST_WORDS, negations=False),
+                        existing=existing, trees=trees_for_item(item), wooded=wooded,
                         slope_pct=site.get("slope_mean"))
     best, _why = project_choice(crops, existing)
     established = bool(best and best["crop"] in existing)
@@ -542,6 +570,15 @@ def project_plan(item: dict, budget: float) -> dict | None:
         hectares_now = ha
     else:
         hectares_now = 0
+
+    import grants
+    grant = None
+    if best:
+        timber = standing_timber(full, country, ha)
+        grant = grants.for_project(country, best["crop"],
+                                   grants.case_for(best["crop"], established=established, wooded=wooded),
+                                   hectares=ha, plant_eur_ha=_plant_eur_ha(best["crop"], ha, site.get("slope_mean")),
+                                   timber_eur=timber["eur"] if timber else None)
 
     def eur(n):
         return f"€{n:,.0f}"
@@ -582,6 +619,10 @@ def project_plan(item: dict, budget: float) -> dict | None:
         steps.append(f"{best['crop'].capitalize()} is already growing. Plan the management, not a new planting, and check the volume the ad does not state.")
     if scoring.has_term(full, scoring.EUCALYPTUS_WORDS, negations=False) or (site.get("eucalyptus") or 0) >= 0.3:
         steps.append("Do not replant eucalyptus. New planting is normally restricted in Portugal (DL 96/2013); conversion to the crop above is the project.")
+    if grant and grant["grants"]:
+        steps.append(f"Ask the forest service ({'ICNF' if country == 'PT' else 'the regional forest service'}) "
+                     "whether the call is open, which cap per hectare applies and whether this land counts as "
+                     f"farmland: {grant['text']}. Count it only once it is approved.")
     if not steps:
         steps.append("Nothing to schedule until there is a price, a land budget and a crop the climate still supports.")
 
@@ -593,10 +634,15 @@ def project_plan(item: dict, budget: float) -> dict | None:
     if best:
         lines.append({"label": "Crop the climate still allows", "value": best["crop"],
                       "note": f"about €{best['eur_ha_year']:,}/ha a year in the model"})
+    if grant:
+        named = grant["grants"]
+        lines.append({"label": "Grants that may apply",
+                      "value": ", ".join(f"{g['measure']}" for g in named) if named else "none known",
+                      "note": grant["note"] if named else grant["text"]})
     lines.append({"label": "Plant with what's left", "value": f"{hectares_now:.1f} ha" if fundable else "0 ha",
                   "note": f"of {ha:.1f} ha advertised"})
     return {"fundable": fundable, "headline": headline, "lines": lines, "steps": steps,
             "unknowns": unknowns, "budget": budget, "acquire": round(acquire),
             "left": round(max(left, 0)) if fundable else 0,
             "hectares": round(ha, 2), "hectares_now": round(hectares_now, 2),
-            "crop": best["crop"] if best else None, "note": PLAN_NOTE}
+            "crop": best["crop"] if best else None, "grants": grant, "note": PLAN_NOTE}
