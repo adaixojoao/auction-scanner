@@ -88,6 +88,19 @@ const comparison = (() => {
     const tab = $(`goal-${view.mode}`);
     return tab ? tab.textContent.trim() : view.mode;
   }
+  // From the drawer's own assessment (investigation.py): counts and labels, never a combined score.
+  function investigationEvidenceText(a) {
+    if (!a) return "";
+    const open = (a.dimensions || []).filter(x => x.state === "unresolved" || x.state === "concern")
+      .map(x => x.state === "concern" ? `${x.label} (concern)` : x.label);
+    const conflicts = (a.contradictions || []).length;
+    return `${a.unresolved} unresolved, ${a.concerns} concerns${conflicts ? `, ${conflicts} conflicting records` : ""}`
+      + (open.length ? `: ${open.join(", ")}` : "") + "; not a statement that it is ready to buy";
+  }
+  function investigationNextText(a) {
+    if (!a) return "";
+    return a.next_action ? `${a.next_action.title}: ${a.next_action.question}` : "No open question in the stored records";
+  }
   function modelFor(d) {
     const p = d.presentation || {};
     const place = [d.country, d.concelho, d.district].filter(Boolean).join(" · ");
@@ -113,6 +126,8 @@ const comparison = (() => {
       area: areaText,
       valuation: past ? `Auctions within ${past.km} km sold for a median of ${AS.money(past.median)} (${past.count} lots, last year): a benchmark, not a valuation of this property` : "",
       checks: checksSummaryText(p.checks),
+      evidence: investigationEvidenceText(d.investigation),
+      next_action: investigationNextText(d.investigation),
       climate: climateText,
       deadline: deadlineSummaryText(p.deadline),
       reasons: (Array.isArray(d.reasons) ? d.reasons : []).join("; "),

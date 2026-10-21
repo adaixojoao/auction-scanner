@@ -14,6 +14,8 @@
     ["area", "Floor / plot area"],
     ["valuation", "Valuation / benchmark basis"],
     ["checks", "Ownership, possession, and legal access"],
+    ["evidence", "Unresolved evidence"],
+    ["next_action", "Next investigation action"],
     ["climate", "Climate / hazard uncertainty"],
     ["deadline", "Deadline and precision"],
     ["reasons", "Existing opportunity reasons"]

@@ -45,8 +45,18 @@ function setLoadState(state, message = "") {
   } else status.textContent = message;
 }
 
+// The Investigations page for this goal and these filters (the queue reads the same ones).
+function investigateHref(state) {
+  const all = listingParams(state), params = new URLSearchParams({mode: state.mode});
+  ["country", "source", "kind", "max_price", "min_score", "search", "status", "climate", "climate_exact", "sale_method"]
+    .forEach(key => { const v = all.get(key); if (v && v !== "0") params.set(key, v); });
+  return "/investigations?" + params.toString();
+}
+
 async function load({after = "", navigation = false} = {}) {
   setLoadState("loading");
+  const investigate = $("investigate-view");
+  if (investigate) investigate.href = investigateHref(view);
   let result = await resultsRead.run("/api/listings?" + listingParams(view).toString());
   if (result.kind === "obsolete") return result;      // a newer request owns the page now
   if (result.kind === "success" && !validListings(result.data)) {

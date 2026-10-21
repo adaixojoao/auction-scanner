@@ -233,3 +233,55 @@ def test_markdown_escape_neutralises_markup():
     out = investigation._md("[a](http://x) `c` *e* _u_ <b> \\ !")
     for bad in ("[a](", "`c`", "*e*", "_u_", "<b>"):
         assert bad not in out
+
+
+# ─── Integration: rows, cards, filters, recording ──────────────────────────
+
+def test_listings_rows_carry_the_same_summary_as_the_assessment(client, db, add):
+    home(add)
+    item = next(it for it in client.get("/api/listings?mode=home").get_json()["items"] if it["id"] == "eleiloes:h")
+    alone = client.get("/api/investigation?id=eleiloes:h&mode=home").get_json()
+    assert item["investigation"] == investigation.summary(alone)
+    assert item["investigation"]["next"]["key"] == alone["next_action"]["key"]
+    assert "Title and charges" in item["investigation"]["open"]
+
+
+def test_a_non_property_row_has_no_investigation(client, db, add):
+    add(external_id="car", title="Automóvel ligeiro", price=3_000, date_end=soon())
+    items = client.get("/api/listings?mode=home&min_score=0").get_json()["items"]
+    car = [it for it in items if it["id"] == "eleiloes:car"]
+    assert not car or car[0]["investigation"] is None
+
+
+def test_the_queue_reads_the_listings_filters(client, db, add):
+    home(add, eid="guarda", district="Guarda", concelho="Guarda")
+    home(add, eid="faro", district="Faro", concelho="Faro", title="Moradia T3 em Faro")
+    data = client.get("/api/investigation-queue?mode=home&search=faro").get_json()
+    assert [e["listing_id"] for e in data["items"]] == ["eleiloes:faro"]
+    assert data["filters"] == {"search": "faro"}
+    listed = client.get("/api/listings?mode=home&search=faro").get_json()["items"]
+    assert [it["id"] for it in listed] == ["eleiloes:faro"]
+    assert client.get("/api/investigation-queue?mode=home&kind=castle").status_code == 400
+
+
+def test_recording_through_the_checklist_recalculates_the_assessment(client, db, add):
+    home(add)
+    drawer = client.get("/api/listing?id=eleiloes:h&mode=home").get_json()["investigation"]
+    assert drawer["record"]["items"]["registry"]["status"] == "not_started"
+    for key in ("registry", "charges"):
+        r = client.post("/api/checklist", json={"id": "eleiloes:h", "key": key, "status": "verified",
+                                                "notes": "certidão read", "checked_on": "2026-10-01"})
+        assert r.status_code == 200
+    after = client.get("/api/listing?id=eleiloes:h&mode=home").get_json()["investigation"]
+    assert dims(after)["title"]["state"] == "verified"
+    assert after["next_action"]["key"] != "check_title"
+    assert after["record"]["items"]["registry"]["notes"] == "certidão read"
+
+
+def test_record_notes_stay_out_of_the_brief_and_queue(client, db, add):
+    home(add)
+    client.post("/api/checklist", json={"id": "eleiloes:h", "key": "registry", "status": "requested",
+                                        "notes": "PRIVATE-CHECK-NOTE"})
+    brief = client.get("/api/investigation/brief.md?id=eleiloes:h&mode=home").get_data(as_text=True)
+    queue = client.get("/api/investigation-queue?mode=home").get_data(as_text=True)
+    assert "PRIVATE-CHECK-NOTE" not in brief and "PRIVATE-CHECK-NOTE" not in queue
