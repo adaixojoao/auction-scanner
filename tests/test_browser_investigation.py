@@ -121,3 +121,78 @@ def test_the_comparison_shows_unresolved_evidence_and_the_next_action(app):
         .map(tr => [tr.querySelector('th').textContent, tr.querySelectorAll('td')[0].textContent]))""")
     assert "unresolved" in rows["Unresolved evidence"] and "ready to buy" in rows["Unresolved evidence"]
     assert rows["Next investigation action"] not in ("", "Not established")
+
+
+def _stage_form(panel):
+    section = panel.locator("#property-section-investigation")
+    section.locator("summary", has_text="Record a stage or decision").click()
+    return section.locator('[data-role="stage-form"]')
+
+
+def test_recording_a_stage_updates_the_stepper_and_history(app):
+    app.open()
+    panel = open_details(app, 0)
+    form = _stage_form(panel)
+    form.locator(".inv-stage").select_option("documents_requested")
+    form.locator(".inv-reason").fill("Asked the court for the <b>edital</b>")
+    form.locator('[data-role="stage-save"]').click()
+    step = '#property-section-investigation .inv-step[data-step="documents_requested"][aria-current="step"]'
+    app.page.wait_for_selector(step)
+    history = panel.locator("#property-section-investigation .inv-timeline li").first
+    assert "Asked the court for the <b>edital</b>" in history.text_content()      # text, never markup
+    assert panel.locator("#property-section-investigation .inv-timeline b", has_text="edital").count() == 0
+    assert app.page.locator('#property-section-investigation .inv-step[data-state="done"]').count() == 2
+    posted = [json.loads(b) for _m, _p, _q, b in app.calls("/api/investigation/stage", "POST")]
+    assert posted[0]["expected_previous"] == "" and posted[0]["spend"] is None
+    assert not app.calls("/api/listings/status", "POST")                          # no status change
+    app.page.wait_for_function("""() => (document.querySelector('#rows tr[data-id="eleiloes:h0"] [data-role="investigation-summary"]')
+        || {}).textContent.includes('Documents requested')""")
+
+
+def test_a_refused_stage_keeps_the_typed_reason_and_says_why(app):
+    app.open()
+    panel = open_details(app, 0)
+    form = _stage_form(panel)
+    form.locator(".inv-stage").select_option("screening")
+    form.locator(".inv-reason").fill("my draft reason")
+    app.client.post("/api/investigation/stage", json={"id": "eleiloes:h0", "stage": "evidence_reviewed",
+                                                      "reason_kind": "progress", "reason": "other tab"})
+    form.locator('[data-role="stage-save"]').click()
+    app.page.wait_for_selector('#property-section-investigation .inv-step[data-step="evidence_reviewed"][aria-current="step"]')
+    form = panel.locator('#property-section-investigation [data-role="stage-form"]')
+    assert form.locator(".inv-reason").input_value() == "my draft reason"
+    assert "changed since this page read it" in form.locator(".inv-form-error").text_content()
+    assert len(app.calls("/api/investigation/stage", "POST")) == 1
+
+
+def test_a_stage_draft_survives_a_details_refresh(app):
+    app.open()
+    panel = open_details(app, 0)
+    form = _stage_form(panel)
+    form.locator(".inv-reason").fill("half typed")
+    panel.locator('[data-role="refresh-details"]').click()
+    app.page.wait_for_function("""() => { const f = document.querySelector('#property-section-investigation .inv-reason');
+        return f && f.value === 'half typed'; }""")
+
+
+def test_the_queue_filters_by_stage(app):
+    app.client.post("/api/investigation/stage", json={"id": "eleiloes:h3", "stage": "visit_warranted",
+                                                      "reason_kind": "progress", "reason": "worth a visit"})
+    app.page.goto(f"{BASE}/investigations?mode=home&stage=visit_warranted")
+    app.page.wait_for_selector("#inv-queue .inv-entry")
+    entries = app.page.locator("#inv-queue .inv-entry")
+    assert entries.count() == 1 and entries.first.get_attribute("data-id") == "eleiloes:h3"
+    assert "Visit warranted" in entries.first.text_content()
+    app.page.select_option("#inv-stage-filter", "none")
+    app.page.wait_for_function("document.querySelectorAll('#inv-queue .inv-entry').length === 11")
+    assert parse_qs(urlsplit(app.page.evaluate("location.href")).query)["stage"] == ["none"]
+
+
+def test_the_drawer_fits_a_phone_width_with_the_stage_form_open(app):
+    app.page.set_viewport_size({"width": 390, "height": 900})
+    app.open()
+    panel = open_details(app, 0)
+    _stage_form(panel)
+    widths = app.page.evaluate("""() => { const d = document.querySelector('#property-drawer .details-body');
+        return [d.scrollWidth, d.clientWidth]; }""")
+    assert widths[0] <= widths[1]

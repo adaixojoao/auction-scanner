@@ -73,7 +73,7 @@ function investigationSummaryHtml(inv) {
   const open = (inv.open || []).join(", ");
   return `<p class="small inv-summary" data-role="investigation-summary"${open ? ` title="${AS.esc("Unresolved: " + open)}"` : ""}>
     <b>${inv.unresolved} unresolved</b>${inv.concerns ? `, <span class="bad">${inv.concerns} concern${inv.concerns === 1 ? "" : "s"}</span>` : ""}${conflicts}${
-    inv.next ? ` · next: ${AS.esc(inv.next.title)}` : ""}</p>`;
+    inv.next ? ` · next: ${AS.esc(inv.next.title)}` : ""}${inv.stage ? ` · <span class="muted">stage: ${AS.esc(inv.stage.label)}</span>` : ""}</p>`;
 }
 
 // Only a timezone-resolved instant gets a countdown; it is worked out when the

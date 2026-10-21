@@ -339,9 +339,11 @@ def _valid_hours():
 
 
 def assess(item: dict, check_rows: dict | None, cfg: dict | None, mode: str, presented: dict | None = None,
-           now: datetime | None = None) -> dict:
-    """The investigation summary of one scored listing (a load_listings row, full, with raw_json)."""
+           now: datetime | None = None, stages: list | None = None) -> dict:
+    """The investigation summary of one scored listing (a load_listings row, full, with raw_json).
+    `stages`: its investigation_stages.history rows (the research progress); they change nothing else."""
     import checklist
+    import investigation_stages
     import evaluator
     import presentation
     from db import _shadow_evidence
@@ -387,21 +389,21 @@ def assess(item: dict, check_rows: dict | None, cfg: dict | None, mode: str, pre
             "next_action": actions[0] if actions else None, "more_actions": actions[1:],
             "deadline": presented["deadline"], "price": presented["price"], "all_in": presented["all_in"],
             "references": _references(row), "links": _links(row),
-            "stage_history": {"available": False,
-                              "note": "Research stages and decision history are not recorded yet: they need a "
-                                      "database change that has not been approved."}}
+            "stage_history": investigation_stages.summary(list(stages or []), row)}
 
 
 def summary(a: dict) -> dict:
     """The few words a Listings row or card shows of an assessment: counts, the
     open questions by name and the next action. No combined score."""
-    n = a["next_action"]
+    n, stage = a["next_action"], a["stage_history"]["current"]
     return {"unresolved": a["unresolved"], "concerns": a["concerns"], "contradictions": len(a["contradictions"]),
             "open": [d["label"] for d in a["dimensions"] if d["state"] in ("unresolved", "concern")],
-            "next": {"key": n["key"], "title": n["title"]} if n else None}
+            "next": {"key": n["key"], "title": n["title"]} if n else None,
+            "stage": {"stage": stage["stage"], "label": stage["label"]} if stage else None}
 
 
 # ─── The investigation brief (Markdown) ───
+
 
 def _md(text, limit: int | None = 400) -> str:
     """Scraped or typed text made inert in Markdown: no links, HTML, emphasis or headings."""
@@ -504,11 +506,37 @@ def as_markdown(a: dict, item: dict) -> str:
             lines.append(f"- Then: {_md(more['title'])}")
     else:
         lines.append("No open action from the stored records.")
-    lines += ["", "## Research stage", "", _md(a["stage_history"]["note"], 400), "",
+    lines += ["", "## Research stage", ""] + _stage_lines(a["stage_history"]) + ["",
               "## Limitations", "",
               "- Built only from what the scanner has stored and what you recorded in the checklist; nothing was "
               "fetched, looked up or bought to write it.",
               "- Absent evidence is a gap, not a defect, and never counts as passing a requirement.",
               "- Figures are estimates (taxes, fees and works); an unknown amount is not zero.",
-              "- Personal notes, contact history and buyer details are not included.", ""]
+              "- Personal notes, contact history, buyer details and the reasons you gave for each research stage "
+              "are not included.", ""]
     return "\n".join(lines)
+
+
+def _stage_lines(h: dict) -> list[str]:
+    """Research progress for the brief: stages, kinds, dates and spending; your reasons stay out (private)."""
+    from investigation_stages import LABELS as LABELS_STAGE
+    if not h.get("history"):
+        return ["No research stage recorded yet."]
+    out = [f"Current: {_md(h['current']['label'])}, recorded {_md(h['current']['created_at'][:10])}. "
+           + _md(h["note"], 300), ""]
+    for r in h["history"]:
+        spend = r["spend"]
+        money = (f"; spent {spend['amount']:,.2f} {spend['currency']} on {spend['date']} "
+                 f"({_md(spend['category_label'] or spend['category'])})" if spend["amount"] is not None else "")
+        line = (f"- {_md(r['created_at'][:16].replace('T', ' '))} UTC: {_md(r['label'])}"
+                + (f" (from {_md(LABELS_STAGE.get(r['previous_stage'], r['previous_stage']))})" if r["previous_stage"] else "")
+                + f" — {_md(r['reason_kind_label'])}{money}")
+        if r.get("facts_changed"):
+            line += (f". Recorded when the {_md(', '.join(r['facts_changed']))} differed from now: it may concern an "
+                     "earlier sale event or notice")
+        out.append(line)
+    totals = h.get("spend_totals") or {}
+    if totals:
+        out += ["", "Recorded research spending: " + ", ".join(f"{v:,.2f} {k}" for k, v in sorted(totals.items()))
+                + " (only what you recorded; anything else is unknown, not zero)."]
+    return out
