@@ -427,8 +427,23 @@ to ask for and, where Offers can draft one, the information-request letter
 answer: record what you found in the checklist. Nothing here rescores, hides,
 rejects or bids, and no property is ever shown as ready to buy. Dismissed or
 ended properties with checklist work move to **Earlier research** on the same
-page. Research stages and decision history are not recorded yet: they need a
-database change that has not been made.
+page.
+
+**Research progress** records where each property stands: discovered,
+screening, documents requested, evidence reviewed, visit warranted,
+professional review, decision recorded, or set aside as paused or rejected.
+Each entry says why (a confirmed issue, insufficient evidence, a changed
+preference or plain progress) in your own words, can point at the checklist
+items it rests on, and can carry what you actually spent (amount, currency,
+date, what for; nothing recorded is unknown, not zero). Entries are only ever
+added: moving back or correcting one is a new entry, and the history keeps
+them all. An entry recorded before the price or deadline changed says so. A
+stage never shortlists, dismisses, sends a letter or verifies anything, and
+none of them, the last included, means a property is ready to buy. The
+Investigations page can show one stage at a time, and the brief lists the
+stages and spending but not your reasons. (Database v32 adds this table; it is
+empty on upgrade and nothing else changes. Settings → Backup first if you may
+go back to an older version of the app.)
 
 ## What it really costs
 

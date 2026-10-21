@@ -522,10 +522,55 @@ td.nowrap .compare-toggle { margin-left: 4px; }
 .map-popup .btn { background: #ffffff; color: #172033; border-color: #64748b; }
 
 /* Investigation (drawer section and the Investigations page) */
-.inv-head { margin: 12px 0 4px; font-size: 14px; }
-.inv-dims { list-style: none; padding: 0; margin: 0; }
-.inv-dim { padding: 4px 0; border-bottom: 1px solid var(--border); }
-.inv-dim .badge { margin: 0 6px; }
-.inv-contradictions { color: var(--red-text); }
-.inv-list { list-style: none; padding: 0; margin: 0; }
-.inv-title { font-size: 16px; margin: 0 0 4px; }
+.inv-head { margin: 16px 0 6px; font-size: 14px; color: var(--heading); }
+.inv-glance { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.inv-chip { display: inline-flex; gap: 4px; align-items: baseline; padding: 3px 9px; border-radius: 999px;
+  background: var(--card-2); border: 1px solid var(--border); font-size: 12px; }
+.inv-chip.is-bad { color: var(--bad-text); border-color: var(--red); }
+.inv-dims { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.inv-dim { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card-2); }
+.inv-dim[data-state="concern"] { border-left: 4px solid var(--red); }
+.inv-dim[data-state="unresolved"] { border-left: 4px solid var(--yellow); }
+.inv-dim p { margin: 4px 0 0; }
+.inv-dim-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.inv-dim-head .badge { margin: 0; }
+.inv-limits ul { margin: 4px 0 0; }
+.inv-contradictions { color: var(--red-text); padding-left: 18px; }
+.inv-action { padding: 10px 12px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--card-2); }
+.inv-action p { margin: 4px 0; }
+.inv-action-title { font-size: 15px; }
+.inv-question { font-style: italic; }
+.inv-record { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px 10px;
+  align-items: end; padding: 8px 0; border-top: 1px dashed var(--border); }
+.inv-field { display: grid; gap: 2px; font-size: 12px; min-width: 0; }
+.inv-field > span { color: var(--muted); }
+.inv-field input, .inv-field select, .inv-field textarea { width: 100%; max-width: 100%; }
+.inv-stepper { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 0; margin: 4px 0 8px; counter-reset: none; }
+.inv-step { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border-radius: 999px;
+  border: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.inv-step-dot { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+  border: 1px solid var(--control-border); font-size: 11px; font-weight: 700; }
+.inv-step[data-state="done"] { color: var(--text); }
+.inv-step[data-state="done"] .inv-step-dot { background: var(--card-2); color: var(--green-text); border-color: var(--green); }
+.inv-step[data-state="current"] { color: var(--heading); border-color: var(--accent); font-weight: 700; }
+.inv-step[data-state="current"] .inv-step-dot { background: var(--accent-strong); color: var(--on-accent); border-color: var(--accent-strong); }
+.inv-timeline { list-style: none; padding: 0 0 0 12px; margin: 6px 0; border-left: 2px solid var(--border); }
+.inv-timeline li { position: relative; padding: 0 0 10px 10px; }
+.inv-timeline li::before { content: ""; position: absolute; left: -18px; top: 4px; width: 10px; height: 10px;
+  border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+.inv-timeline li[data-stage="rejected"]::before { border-color: var(--red); }
+.inv-timeline p { margin: 2px 0; overflow-wrap: anywhere; }
+.inv-record-stage { margin: 8px 0; }
+.inv-record-stage > summary { font-weight: 700; cursor: pointer; }
+.inv-stage-form { display: grid; gap: 8px; margin-top: 8px; }
+.inv-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.inv-checks { display: grid; gap: 4px; margin-top: 4px; }
+.inv-list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 10px; }
+.inv-list .card { margin: 0; }
+.inv-entry-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; }
+.inv-title { font-size: 16px; margin: 0 0 4px; overflow-wrap: anywhere; }
+.inv-next { margin: 6px 0; }
+.inv-summary { margin: 6px 0 0; }
+.inv-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin: 4px 0 12px; }
+/* Long stored values (research notes, references) wrap instead of widening the drawer on a phone. */
+.details code { overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
