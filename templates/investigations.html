@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Investigations</h1>
+    <p class="lede">The goal's top properties in the Listings score order, each with what is still unknown and the
+      one thing to find out next. A short list, not every opportunity: nothing here means a property is ready to buy,
+      and nothing is sent, checked online or bid from this page.</p>
+  </div>
+  <div class="row" style="gap:8px">
+    <label for="inv-mode" class="small">Goal</label>
+    <select id="inv-mode">
+      {% for key, label in modes %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
+    <label for="inv-limit" class="small">Show</label>
+    <select id="inv-limit">
+      {% for n in (10, 20, queue_max) %}<option value="{{ n }}"{% if n == 20 %} selected{% endif %}>{{ n }}</option>{% endfor %}
+    </select>
+    <button class="btn" id="inv-refresh" type="button">Refresh</button>
+  </div>
+</div>
+
+<p id="inv-status" class="small muted" role="status">Loading…</p>
+<p id="inv-scope" class="small muted"></p>
+<ol id="inv-queue" class="inv-list"></ol>
+<section class="card" id="inv-history-section" hidden>
+  <h2>Earlier research</h2>
+  <p class="small muted">Properties with checklist work that are no longer in this goal's queue (dismissed,
+    ended or filtered out). They stay here and in Listings; nothing was deleted.</p>
+  <ul id="inv-history" class="small"></ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='investigation.js') }}"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const mode = $("inv-mode"), limit = $("inv-limit"), status = $("inv-status");
+  const params = new URLSearchParams(location.search);
+  if ([...mode.options].some(o => o.value === params.get("mode"))) mode.value = params.get("mode");
+  let latest = 0, shown = false;
+
+  // Latest wins: an answer for an earlier choice is dropped; a failure keeps the last list, marked stale.
+  async function load() {
+    const ticket = ++latest, goal = mode.value;
+    status.textContent = "Loading…";
+    try {
+      const response = await fetch("/api/investigation-queue?" + new URLSearchParams({mode: goal, limit: limit.value}));
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data && typeof data.error === "string" ? data.error : `Request failed (${response.status})`);
+      if (ticket !== latest) return;
+      render(data, goal);
+      shown = true;
+      const url = new URL(location.href);
+      url.searchParams.set("mode", goal);
+      history.replaceState(history.state, "", url);
+    } catch (error) {
+      if (ticket !== latest) return;
+      status.textContent = (shown ? "Could not refresh; the list below may be out of date. " : "Could not load the queue. ")
+        + (error && error.message ? error.message : "");
+    }
+  }
+
+  function render(data, goal) {
+    status.textContent = `${data.items.length} of ${data.eligible_total} eligible properties, assessed for ${data.purpose || "this goal"}.`;
+    $("inv-scope").textContent = data.scope;
+    $("inv-queue").innerHTML = data.items.length ? data.items.map(e => Investigation.entryHtml(e, goal)).join("")
+      : `<li class="empty small">No eligible property in this goal right now.</li>`;
+    $("inv-history-section").hidden = !data.history.length;
+    $("inv-history").innerHTML = data.history.map(h => `<li><a href="${AS.esc("/?" + new URLSearchParams({mode: goal, property: h.listing_id}))}">${
+      AS.esc(h.title)}</a> <span class="muted">(${AS.esc(h.state)}; checklist changed ${AS.esc((h.last_checklist_change || "").slice(0, 10))})</span></li>`).join("");
+  }
+
+  mode.addEventListener("change", load);
+  limit.addEventListener("change", load);
+  $("inv-refresh").addEventListener("click", load);
+  load();
+})();
+</script>
+{% endblock %}

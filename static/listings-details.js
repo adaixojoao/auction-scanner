@@ -558,6 +558,8 @@ function detailsHtml(d) {
       ${facts ? `<div class="facts">${facts}</div>` : ""}
       ${d.description ? `<p class="d-desc">${AS.esc(d.description)}</p>` : ""}
       <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>`)}
+    ${detailsSection("investigation", "Investigation",
+      typeof Investigation === "undefined" ? "" : Investigation.sectionHtml(d.investigation))}
     ${detailsSection("costs", "Costs and planning", `${costsHtml(d.costs)}${AS.bidCapHtml(d.bid_cap)}`)}
     ${detailsSection("location", "Location and climate",
       `${locationHtml(d)}${streetView}${outlineHtml(d.outline)}${AS.climateHtml(d.climate)}`)}
