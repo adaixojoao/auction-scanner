@@ -8,7 +8,7 @@ data/forest_grants.csv with its legal text and the day it was checked. A row is
 it is then named as a possibility with what is known, and no euro figure is
 worked out. A "confirmed" row with a rate and a cost cap gives a figure in
 today's money: premiums are fixed in euros, so each later year is worth
-`forestry.INFLATION` less.
+`forestry.INFLATION` less (forestry._npv).
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def _value(row: dict, plant_eur_ha: float | None) -> float | None:
     premium, years = _number(row["premium_eur_ha_year"]), _number(row["premium_years"])
     if premium and years:
         for y in range(1, int(years) + 1):
-            flows[y] = forestry.fixed_today(premium, y)
+            flows[y] = premium
     return forestry._annuity(forestry._npv(flows))
 
 
@@ -87,7 +87,8 @@ def _what(row: dict) -> str:
     if row["premium_years"]:
         amount = _number(row["premium_eur_ha_year"])
         parts.append(f"a maintenance premium for {row['premium_years']} years"
-                     + (f" of €{amount:,.0f}/ha, fixed in euros" if amount else " (the amount not yet checked)"))
+                     + (f" of €{amount:,.0f}/ha, fixed in euros, so inflation erodes it" if amount
+                        else " (the amount not yet checked)"))
     if row["income_loss_years"]:
         parts.append(f"on farmland, an income-loss premium for {row['income_loss_years']} years")
     return ", ".join(parts)

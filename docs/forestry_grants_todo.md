@@ -1,7 +1,9 @@
 # Forestry grants and inflation: still to do
 
-What shipped: `grants.py` and `data/forest_grants.csv` (named, never scored) and
-today's-money pricing at 3.5% inflation in `forestry.py`. These need the
+What shipped: `grants.py` and `data/forest_grants.csv` (named, never scored),
+and inflation at 3.5% a year counted against the project in `forestry.py`:
+planting costs brought to 2026 prices, income fixed in euros and eroded every
+year, the return and the 20% goal after inflation. The items below need the
 official texts, which the cloud session could not open (its network policy
 refused pepacc.pt, diariodarepublica.pt, agroportal.pt and informador.pt), or a
 decision from the owner.
@@ -44,8 +46,9 @@ decision from the owner.
     `scoring._score_forest`.
 11. **Inflation as a setting.** 3.5% is a constant (`forestry.INFLATION`).
     Move it to Settings (`config.DEFAULTS`) if it should be changed there.
-12. **The 20% goal: today's money or money of the day?** The score compares
-    the return in today's money (the stricter reading). The reason shows both.
+12. **Income that does keep pace.** Today no income rises with prices (the
+    cautious case). If a price series shows timber or cork tracking inflation,
+    a crop could be given its own rate instead.
 13. **Which year is "today".** `forestry.PRICE_YEAR` is fixed at 2026 so the
     figures stay stable. Move it forward each year, or use the current year.
 
@@ -53,8 +56,9 @@ decision from the owner.
 
 14. Show a grant that may apply in the Forestry tab's reasons and the
     investigation brief, not only in the details panel.
-15. Bring other dated figures into today's money: the SAFER forest price in
-    `land_prices.py` and the undated crop figures in `forestry.CROPS` once
-    they are sourced.
+15. Bring the other dated costs to today's prices: the plant material in
+    `forestry.PLANT_MATERIAL` and the orchard planting costs in `forestry.CROPS`
+    are undated, and the 10-year land comparison (`land_prices.py`) does not
+    yet count what the money paid loses to inflation.
 16. Ask the AI check to look for grant eligibility in the notice (farm or
     non-farm land, ZIF membership).

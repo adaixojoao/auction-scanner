@@ -896,8 +896,9 @@ _FOREST_PRIORITIES = (
     "where felling and planting need permits; several scattered parcels; felling "
     "rights sold without the land. Say plainly when the ad does not give the volume or the age of "
     "the stand, because then the timber figure is a guess. Do not treat a missing species map as "
-    "proof that native trees would thrive. Money is in today's euros, with prices rising about "
-    "{inflation} a year. A planting grant (PEPAC in Portugal and Spain, the replanting aid in France) "
+    "proof that native trees would thrive. Inflation of about {inflation} a year works against "
+    "the project: costs rise with it, income may not, and the return goal is after inflation. "
+    "A planting grant (PEPAC in Portugal and Spain, the replanting aid in France) "
     "pays part of new planting, never the purchase, and only if an application is approved: "
     "mention one as a possibility to check, never as income."
 )
@@ -3567,9 +3568,9 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         out["roi"] = roi
     if roi is not None:
         s += curve(roi, FOREST_RETURN_POINTS) * w("price")
-        reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years in today's money, "
-                       f"≈ {forestry.nominal(roi):.1%} with {forestry.INFLATION:.1%} inflation "
-                       f"(timber now + the {'forest kept' if why in ('stand', 'mix') else 'earning crop'}, "
+        reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years after {forestry.INFLATION:.1%} "
+                       f"inflation (costs rise with prices, income is not assumed to; timber now + the "
+                       f"{'forest kept' if why in ('stand', 'mix') else 'earning crop'}, "
                        f"on the price and the buying costs; planting grants not counted)"
                        + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))
     elif pay and not caps:

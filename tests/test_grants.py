@@ -90,15 +90,15 @@ def test_a_minimum_area_is_respected(tmp_path):
 
 # ─── a confirmed row is valued in today's money ────────────────────────────
 
-def test_a_confirmed_grant_is_valued_with_fixed_premiums_losing_value(tmp_path):
+def test_a_confirmed_grant_is_valued_with_fixed_premiums_eroded_by_inflation(tmp_path):
     path = write(tmp_path / "g.csv", row(status="confirmed", cost_cap_eur_ha="2000",
                                          premium_eur_ha_year="125", premium_years="20"))
     [g] = grants.for_project("PT", "cork oak", "planting", hectares=20, plant_eur_ha=3000, path=path)["grants"]
-    flows = {0: 0.75 * 2000} | {y: 125 / 1.035 ** y for y in range(1, 21)}     # the cap wins over the cost
-    assert g["eur_ha_year"] == pytest.approx(forestry._annuity(forestry._npv(flows)))
-    unindexed = {0: 0.75 * 2000} | {y: 125 for y in range(1, 21)}
-    assert g["eur_ha_year"] < forestry._annuity(forestry._npv(unindexed))
-    assert "up to €2,000/ha" in g["what"] and "fixed in euros" in g["what"]
+    # the cap wins over the cost; each premium is worth 3% (waiting) and 3.5% (inflation) less a year
+    npv = 0.75 * 2000 + sum(125 / (1.03 * 1.035) ** y for y in range(1, 21))
+    assert g["eur_ha_year"] == pytest.approx(forestry._annuity(npv))
+    assert g["eur_ha_year"] < forestry._annuity(0.75 * 2000 + sum(125 / 1.03 ** y for y in range(1, 21)))
+    assert "up to €2,000/ha" in g["what"] and "inflation erodes it" in g["what"]
 
 
 def test_a_partial_row_never_gets_a_figure_even_with_numbers(tmp_path):
@@ -145,28 +145,37 @@ def test_the_score_does_not_move_with_the_grant_table(monkeypatch, tmp_path):
 
 # ─── inflation ─────────────────────────────────────────────────────────────
 
-def test_dated_prices_are_brought_to_today_at_three_and_a_half_percent():
+def test_inflation_counts_against_the_project():
     assert forestry.INFLATION == 0.035
+    # a cost dated earlier is brought forward; income is not
     assert forestry.to_today(100, forestry.PRICE_YEAR) == 100
     assert forestry.to_today(100, forestry.PRICE_YEAR - 2) == pytest.approx(100 * 1.035 ** 2)
-    assert forestry.fixed_today(100, 10) == pytest.approx(100 / 1.035 ** 10)
-    assert forestry.nominal(0.05) == pytest.approx(1.05 * 1.035 - 1)
-    assert forestry.period_year("2023-2025") == 2024 and forestry.period_year("2024") == 2024
-
-
-def test_timber_and_cork_prices_say_they_were_brought_forward():
+    assert forestry.planting_cost("conifer", 20, slope_pct=5) == pytest.approx(1464 * 1.035 ** 2 + 1100 * 0.40)
+    assert "+3.5% a year to 2026" in forestry.CAOF_SOURCE
     price = forestry.timber_price("PT", "maritime pine")
-    raw = float(re.search(r"€(\d+)/m³", price["label"]).group(1))
-    assert price["eur_m3"] == pytest.approx(raw * 1.035 ** 2, abs=1.1)     # SIMeF 2023-2025 → 2024
-    assert "+3.5% a year to 2026" in price["label"]
-    assert "+3.5% a year to 2026" in forestry.CORK_SOURCE
+    raw = float(re.search(r"€(\d+(?:\.\d)?)/m³", price["label"]).group(1))
+    assert price["eur_m3"] == pytest.approx(raw, abs=0.5) and "+3.5%" not in price["label"]
+    assert "+3.5%" not in forestry.CORK_SOURCE
+    # euros received later are worth less: waiting (3%) and inflation (3.5%)
+    assert forestry._npv({10: 100}) == pytest.approx(100 / (1.03 * 1.035) ** 10)
 
 
-def test_the_forestry_return_is_given_in_today_money_and_with_inflation():
+def test_inflation_lowers_a_crop_and_never_raises_it(monkeypatch):
+    atlantic = {"heat": {"today": 24, "ssp245_2081-2100": 28}}
+    with_inflation = {o["crop"]: o["eur_ha_year"] for o in forestry.options(atlantic, "PT", 20)}
+    monkeypatch.setattr(forestry, "INFLATION", 0.0)
+    monkeypatch.setattr(forestry, "INCOME_DISCOUNT", forestry.DISCOUNT_RATE)
+    without = {o["crop"]: o["eur_ha_year"] for o in forestry.options(atlantic, "PT", 20)}
+    assert with_inflation and all(with_inflation[c] <= without[c] for c in with_inflation)
+    assert any(with_inflation[c] < without[c] for c in with_inflation)
+
+
+def test_the_forestry_return_is_after_inflation():
     import scoring
     item = {"source": "imovirtual", "country": "PT", "title": "Herdade com montado de sobro",
             "description": "Montado de sobro, 40 ha, cortiça", "tipo": "terreno", "area_m2": 400000,
             "price": 60000, "climate": MILD}
     _s, reasons = scoring.score(item, mode="forest")
     line = next(r for r in reasons if r.startswith("return ≈"))
-    assert "today's money" in line and "3.5% inflation" in line and "grants not counted" in line
+    assert "after 3.5% inflation" in line and "grants not counted" in line
+    assert "money of the day" not in line
