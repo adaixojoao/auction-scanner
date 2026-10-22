@@ -485,8 +485,16 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
         return 1
 
     d = cfg.get("dashboard", {})
+    from local_guard import require_local_host
     try:
-        server = make_server(d.get("host", "127.0.0.1"), d.get("port", 8050), dashboard.app, threaded=True)
+        host = require_local_host(d.get("host", "127.0.0.1"))
+    except ValueError as e:
+        import updater
+        updater.start_inconclusive()     # a setting to change, not the new version's fault
+        show_error(str(e))
+        return 1
+    try:
+        server = make_server(host, d.get("port", 8050), dashboard.app, threaded=True)
     except OSError as e:
         import updater
         updater.start_inconclusive()     # the port is taken: not the new version's fault

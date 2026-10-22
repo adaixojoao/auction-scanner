@@ -48,7 +48,7 @@ def test_a_v31_database_gains_the_empty_table_and_keeps_its_rows(tmp_path):
     conn.commit()
     conn.close()
     conn = dbmod.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == dbmod.SCHEMA_VERSION == 32
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == dbmod.SCHEMA_VERSION >= 32
     assert conn.execute("SELECT COUNT(*) FROM investigation_stages").fetchone()[0] == 0
     assert conn.execute("SELECT title FROM listings WHERE id='eleiloes:old'").fetchone()[0] == "Moradia"
     cols = {r[1] for r in conn.execute("PRAGMA table_info(investigation_stages)")}

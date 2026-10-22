@@ -10,6 +10,7 @@ import html
 import logging
 import re
 import smtplib
+import ssl
 from datetime import datetime
 from email.message import EmailMessage
 from email.mime.multipart import MIMEMultipart
@@ -28,6 +29,13 @@ def _esc(v) -> str:
     return html.escape(str(v or ""), quote=True)
 
 
+def begin_verified_tls(server) -> None:
+    """STARTTLS with the server's certificate and host name checked (the
+    default context), so a network in between cannot read the password."""
+    server.starttls(context=ssl.create_default_context())
+    server.ehlo()
+
+
 def _send_email(notify_cfg: dict, subject: str, html_body: str, plain: str) -> bool:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -37,7 +45,7 @@ def _send_email(notify_cfg: dict, subject: str, html_body: str, plain: str) -> b
     msg.attach(MIMEText(html_body, "html", "utf-8"))
     try:
         with smtplib.SMTP(notify_cfg["smtp_host"], notify_cfg["smtp_port"], timeout=30) as server:
-            server.starttls()
+            begin_verified_tls(server)
             server.login(notify_cfg["smtp_user"], notify_cfg["smtp_password"])
             server.sendmail(msg["From"], notify_cfg["to_emails"], msg.as_string())
         LOG.info(f"Email sent to {notify_cfg['to_emails']}: {subject}")
@@ -50,34 +58,74 @@ def _send_email(notify_cfg: dict, subject: str, html_body: str, plain: str) -> b
 _ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
-def send_letter(smtp_cfg: dict, to: str, subject: str, text: str, pdf: bytes, filename: str,
-                *, reply_to: str = "") -> str | None:
-    """E-mail one letter with its PDF attached, through the SMTP account in
-    Settings → E-mail. A copy goes to that account. Returns None when sent,
-    otherwise the reason in plain words."""
+def letter_problem(smtp_cfg: dict, to: str) -> str | None:
+    """Why a letter cannot be e-mailed at all (settings, address), before anything is stored or sent."""
     if not all(smtp_cfg.get(k) for k in ("smtp_host", "smtp_user", "smtp_password")):
         return "E-mail is not set up: fill in the SMTP server, user and password under Settings → E-mail."
     if not _ADDRESS.fullmatch(to or ""):
         return f"Not an e-mail address: {to!r}" if to else "Who should receive it? Fill in the address."
-    sender = smtp_cfg.get("from_email") or smtp_cfg["smtp_user"]
-    try:
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = sender
-        msg["To"] = to
-        if reply_to and reply_to != sender:
-            msg["Reply-To"] = reply_to
-        msg.set_content(text)
-        msg.add_attachment(pdf, maintype="application", subtype="pdf", filename=filename)
-        with smtplib.SMTP(smtp_cfg["smtp_host"], int(smtp_cfg.get("smtp_port") or 587), timeout=30) as server:
-            server.starttls()
-            server.login(smtp_cfg["smtp_user"], smtp_cfg["smtp_password"])
-            server.send_message(msg, to_addrs=[to, sender])
-    except (smtplib.SMTPException, OSError, ValueError) as e:
-        LOG.error(f"Letter e-mail to {to} failed: {e}")
-        return f"The e-mail could not be sent: {e}"
-    LOG.info(f"Letter e-mailed to {to}: {subject}")
     return None
+
+
+def send_letter(smtp_cfg: dict, to: str, subject: str, text: str, pdf: bytes, filename: str,
+                *, reply_to: str = "", message_id: str | None = None) -> tuple[str, str | None]:
+    """E-mail one letter with its PDF attached, through the SMTP account in
+    Settings → E-mail. A copy goes to that account.
+
+    Returns (state, reason): "sent" when the server accepted the intended
+    recipient (not proof of delivery); "failed" when it is positively known
+    not to have been accepted (nothing reached the message data, or the
+    recipient was refused); "delivery_unknown" when it broke while or after
+    the message was handed over — then it may have gone, and must not be
+    resent blindly. A stable `message_id` lets you find it in the mailbox.
+    """
+    problem = letter_problem(smtp_cfg, to)
+    if problem:
+        return "failed", problem
+    sender = smtp_cfg.get("from_email") or smtp_cfg["smtp_user"]
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = to
+    if message_id:
+        msg["Message-ID"] = message_id
+    if reply_to and reply_to != sender:
+        msg["Reply-To"] = reply_to
+    msg.set_content(text)
+    msg.add_attachment(pdf, maintype="application", subtype="pdf", filename=filename)
+    handed_over = False
+    try:
+        server = smtplib.SMTP(smtp_cfg["smtp_host"], int(smtp_cfg.get("smtp_port") or 587), timeout=30)
+    except (smtplib.SMTPException, OSError, ValueError) as e:
+        LOG.error(f"Letter e-mail to {to}: could not connect: {e}")
+        return "failed", f"The e-mail could not be sent (no connection to the server): {e}"
+    try:
+        begin_verified_tls(server)
+        server.login(smtp_cfg["smtp_user"], smtp_cfg["smtp_password"])
+        handed_over = True
+        refused = server.send_message(msg, to_addrs=[to, sender]) or {}
+    except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError) as e:
+        # the server answered no: the message was not accepted
+        LOG.error(f"Letter e-mail to {to} refused: {e}")
+        return "failed", f"The server refused the e-mail: {e}"
+    except (smtplib.SMTPException, OSError, ValueError) as e:
+        if not handed_over:
+            LOG.error(f"Letter e-mail to {to} failed before sending: {e}")
+            return "failed", f"The e-mail could not be sent: {e}"
+        LOG.error(f"Letter e-mail to {to}: outcome unknown: {e}")
+        return "delivery_unknown", (f"The connection broke while the e-mail was being sent ({e}). It may have "
+                                    "gone: look in the Sent folder of the mailbox before doing anything else.")
+    finally:
+        try:
+            server.quit()
+        except (smtplib.SMTPException, OSError):
+            pass
+    if to in refused:
+        LOG.error(f"Letter e-mail to {to}: recipient refused")
+        return "failed", f"The server refused the recipient {to}."
+    note = f" (the copy to {sender} was refused)" if sender in refused else ""
+    LOG.info(f"Letter e-mailed to {to}: {subject}{note}")
+    return "sent", note or None
 
 
 def send_alerts(db, notify_cfg: dict, score_fn=None, max_price: float = 50000,

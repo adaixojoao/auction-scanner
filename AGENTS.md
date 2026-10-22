@@ -142,6 +142,13 @@ congruent — one way to do each thing:
   data through a small `tojson` bootstrap. A row's price, cost, check and deadline
   summaries come from `presentation.py` (display only, over the owning modules); the
   page never prices, verifies or ranks a listing itself. UI text is English; letters are in the sale's language.
+- **One way to e-mail an offer:** `outbox.email_operation()`, through the
+  durable outbox (`durable_outbox.py`, table `operational_outbox`). The exact
+  content is stored before sending under an idempotency key; only a `failed`
+  send may be retried, and `delivery_unknown` is never resent automatically.
+  Typed offer amounts go through `offer_safety.parse_offer_text` (integer
+  cents), never `parse_price`. SMTP uses `notifications.begin_verified_tls`.
+  The dashboard binds to loopback only (`local_guard.require_local_host`).
 - **One place for user choices:** shortlist/dismiss in `listing_status`,
   offers in `carta_log`, settings in `config.json` via the Settings page.
 

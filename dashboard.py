@@ -1856,7 +1856,8 @@ def _log_sent(item: dict, *, letter=None, bid: str = "", method: str, sent_to: s
 
 
 def _cash_public() -> dict:
-    amount = float(_config().get("cash_on_hand") or 0)
+    import offer_safety
+    amount = offer_safety.cash_euros(_config())
     return {"set": amount > 0, "amount": amount if amount > 0 else None}
 
 
@@ -1873,10 +1874,12 @@ def _wants_cheque(item: dict, letter_type: str | None, is_offer: bool) -> bool:
 def _cash_state(item: dict, bid: str = "", letter_type: str | None = None, is_offer: bool = True) -> dict:
     import costs
     from letters import parse_bid
+    import offer_safety
     amount = parse_bid(bid) if bid else None
     cfg = _config()
     # The same required reserve as the listing filter (db.load_listings → over_cash).
-    return costs.cash_view(item, float(cfg.get("cash_on_hand") or 0), bid=amount,
+    # A non-finite or negative hand-edited cash figure counts as unset, which refuses offers.
+    return costs.cash_view(item, offer_safety.cash_euros(cfg), bid=amount,
                            cheque=_wants_cheque(item, letter_type, is_offer), settings=cfg)
 
 
@@ -2106,6 +2109,9 @@ def api_offer_sent():
         if not letter:
             return jsonify({"error": f"no letter of type {ltype!r} for this listing"}), 400
     is_offer = letter.is_offer if letter else True
+    bad = _bad_amount(is_offer, bid)
+    if bad:
+        return bad
     blocked, gates = _offer_gates(item, is_offer, data, bid)
     if blocked:
         return blocked
@@ -2117,31 +2123,83 @@ def api_offer_sent():
     return jsonify({"ok": True, "log_id": log_id})
 
 
+def _bad_amount(is_offer: bool, bid: str):
+    """An offer's typed amount must be exact European text (4000, 4000,50 or
+    4.000,50) before anything is stored or sent. A request has no amount."""
+    import offer_safety
+    if not is_offer or not str(bid or "").strip():
+        return None
+    try:
+        offer_safety.parse_offer_text(str(bid))
+    except offer_safety.SafetyError as e:
+        return jsonify({"error": f"Amount {str(bid)[:40]!r}: {e}.", "amount_invalid": True}), 400
+    return None
+
+
 @app.route("/api/offers/email", methods=["POST"])
 def api_offer_email():
-    """Send the letter from here by e-mail, with its PDF attached, and log it."""
-    from outbox import email_letter
+    """Send the letter from here by e-mail, with its PDF attached, and log it.
+    The exact letter is stored first (durable outbox): `operation_id` from the
+    page names one send, so a second click never sends twice."""
+    import offer_safety
+    from outbox import email_operation
     data = request.get_json(silent=True) or {}
     item, letter = _letter_for(*_letter_args(data))
     if not item:
         return jsonify({"error": "no such listing"}), 404
     if not letter:
         return jsonify({"error": "no such letter for this listing"}), 400
+    bad = _bad_amount(letter.is_offer, data.get("bid", ""))
+    if bad:
+        return bad
     blocked, gates = _offer_gates(item, letter.is_offer, data, data.get("bid", ""))
     if blocked:
         return blocked
+    key = data.get("operation_id")
+    if key is not None and (not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,64}", key)):
+        return jsonify({"error": "operation_id must be 8–64 letters, digits or dashes"}), 400
     to = (data.get("to") or letter.to_email or "").strip()
     db = get_db()
     try:
-        error, log_id = email_letter(db, _config(), item, letter, to=to, bid=data.get("bid", ""),
-                                     location_override=gates["location_override"],
-                                     cash_override=gates["cash_override"])
+        out = email_operation(db, _config(), item, letter, to=to, bid=data.get("bid", ""),
+                              location_override=gates["location_override"],
+                              cash_override=gates["cash_override"],
+                              operation_key=f"page:{key}" if key else None)
+    except offer_safety.SafetyError as e:
+        return jsonify({"error": f"This send was already started with different content ({e}). "
+                                 "Reload the letter and check it before sending.", "state": "needs_review"}), 409
     finally:
         db.close()
-    if error:
-        return jsonify({"error": error}), 400
-    _record_offer_evidence(item, log_id, letter.is_offer, gates, data.get("bid", ""))
-    return jsonify({"ok": True, "log_id": log_id, "to": to})
+    public = {"operation_id": out["operation_id"], "state": out["state"], "scenario": out["scenario"]}
+    if out["state"] == "sent":
+        _record_offer_evidence(item, out["log_id"], letter.is_offer, gates, data.get("bid", ""))
+        return jsonify({"ok": True, "log_id": out["log_id"], "to": to, **public})
+    if out["state"] == "failed":
+        return jsonify({"error": out["error"], **public}), 400
+    return jsonify({"error": out["error"], "uncertain": True, **public}), 409
+
+
+@app.route("/api/offers/operations/<op_id>")
+def api_offer_operation(op_id):
+    """Where one e-mailed offer stands: pending, sending, sent, failed,
+    delivery_unknown or needs_review. No letter text, no secrets."""
+    import durable_outbox
+    db = get_db()
+    try:
+        op = durable_outbox.get(db, op_id)
+        attempts = db.execute("SELECT started_at, finished_at, result FROM operational_attempts "
+                              "WHERE operation_id = ? ORDER BY id", (op_id,)).fetchall() if op else []
+    finally:
+        db.close()
+    if not op:
+        return jsonify({"error": "no such operation"}), 404
+    snap = op["snapshot"]
+    return jsonify({"operation_id": op["id"], "state": op["state"], "listing_id": op["listing_id"],
+                    "to": snap.get("to"), "kind": snap.get("kind"), "message_id": op["message_id"],
+                    "carta_log_id": op["carta_log_id"], "detail": op["detail"],
+                    "created_at": op["created_at"], "updated_at": op["updated_at"],
+                    "scenario": snap.get("scenario"),
+                    "attempts": [{"started_at": a[0], "finished_at": a[1], "result": a[2]} for a in attempts]})
 
 
 def _calendar_event(it: dict):
@@ -2875,7 +2933,8 @@ def export_report(ext):
 def main():
     cfg = _config()
     dash = cfg.get("dashboard", {})
-    host = dash.get("host", "127.0.0.1")
+    from local_guard import require_local_host
+    host = require_local_host(dash.get("host", "127.0.0.1"))
     port = dash.get("port", 8050)
     print(f"\n  Auction Scanner — http://{host}:{port}")
     print("  (the desktop app, app.py, opens this in its own window)\n")
