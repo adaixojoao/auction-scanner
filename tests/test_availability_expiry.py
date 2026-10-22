@@ -62,7 +62,10 @@ def test_public_evaluator_uses_its_actual_now_without_mutating_input():
 # ─── The scan's link check as availability evidence, and stored-decision expiry ───
 
 def _checked(state="available", at="2030-01-01T11:00:00+00:00", **item):
-    return {"id": "x:1", "raw_json": json.dumps({"link_check": {"availability": state, "at": at}}), **item}
+    # basis "source_lot": a source-specific reading of this lot (Beta); a generic
+    # page that merely loads is never "available".
+    return {"id": "x:1", "raw_json": json.dumps({"link_check": {"availability": state, "at": at,
+                                                                "basis": "source_lot"}}), **item}
 
 
 def test_link_check_gives_state_and_check_time_but_no_expiry_without_a_window():

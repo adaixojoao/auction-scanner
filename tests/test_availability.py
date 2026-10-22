@@ -52,11 +52,28 @@ def test_network_failure_is_error():
     assert state == "error"
 
 
-def test_clean_page_is_available():
+def test_a_page_that_loads_is_reachable_not_for_sale():
+    # Beta: a generic 200 page does not say this lot's sale is open.
     html = "<html><head><title>Moradia T3</title></head><body>" + "text " * 100 + "</body></html>"
     state, why = classify_response(200, html)
-    assert state == "available"
-    assert why is None
+    assert state == "unknown" and "not confirmed" in why
+
+
+def test_login_and_captcha_pages_are_blocked_not_bypassed():
+    body = "text " * 100
+    for html in ("<html><head><title>Verify you are human</title></head><body>" + body + "</body></html>",
+                 "<html><body><div class='g-recaptcha'></div>" + body + "</body></html>",
+                 "<html><body><form><input type='password' name='p'></form>" + body + "</body></html>"):
+        assert classify_response(200, html)[0] == "blocked"
+
+
+def test_an_older_generic_available_check_reads_as_unknown():
+    from confirm import availability_state
+    old = {"raw_json": json.dumps({"link_check": {"availability": "available", "at": "2026-01-01T00:00:00"}})}
+    legacy = {"raw_json": json.dumps({"link_check": {"gone": False}})}
+    lot = {"raw_json": json.dumps({"link_check": {"availability": "available", "basis": "source_lot"}})}
+    assert availability_state(old) == availability_state(legacy) == "unknown"
+    assert availability_state(lot) == "available"
 
 
 def test_sold_word_in_title_is_withdrawn():

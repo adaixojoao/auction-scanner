@@ -132,6 +132,25 @@ def _gallery_hash(item: dict) -> str:
     return hashlib.sha1(json.dumps(urls).encode()).hexdigest()
 
 
+def _attribution(found: dict) -> bool | None:
+    """The model's shows_house as True, False or None (it did not say)."""
+    from evidence_bindings import photo_attribution
+    return {"confirmed_by_model": True, "negative": False}.get(photo_attribution(found))
+
+
+def _gallery_fields(item: dict, selected: int) -> dict:
+    """The full gallery's order and the photos the model actually saw, apart
+    from gallery_hash (membership), so a reordered gallery is visible too."""
+    from evidence_bindings import gallery_bindings
+    b = gallery_bindings(list(photo_urls(item)), selected)
+    return {"gallery_order": b["gallery_order"], "selected_inputs": b["selected_inputs"]}
+
+
+# An answer that did not say whether the photos show the house is asked again,
+# but not every scan: at most once in this many days for an unchanged gallery.
+UNKNOWN_RETRY_DAYS = 30
+
+
 def needs_photo_check(item: dict) -> bool:
     """True when this home has photos and either no stored answer or a useless answer.
 
@@ -156,11 +175,25 @@ def needs_photo_check(item: dict) -> bool:
         except (ValueError, TypeError):
             pass
         else:
-            if pc.get("shows_house") is not False:
-                stored = pc.get("gallery_hash")
-                if not stored or stored == _gallery_hash(item):
-                    return False  # already have a useful check, gallery unchanged
+            stored = pc.get("gallery_hash")
+            same = not stored or stored == _gallery_hash(item)
+            if pc.get("shows_house") is True and same:
+                return False  # already have a useful check, gallery unchanged
+            if pc.get("shows_house") is None and same and not _older_than(pc.get("at"), UNKNOWN_RETRY_DAYS):
+                return False  # unknown: asked again later, not every scan
     return bool(photo_urls(item))
+
+
+def _older_than(at, days: int) -> bool:
+    """True when the ISO time is older than this many days, or unreadable."""
+    from datetime import datetime, timedelta, timezone
+    try:
+        when = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - when > timedelta(days=days)
 
 
 def photos_budget(items: list[dict], looker_name: str, configured: int | None = None) -> int:
@@ -291,10 +324,11 @@ def check_photos(looker, item: dict) -> dict | None:
         raise ValueError(f"unexpected answer {found!r:.80}")
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
             "notes": str(found.get("notes") or "")[:200], "photos": len(urls),
-            # Task 10: missing shows_house (None/absent) must remain unknown, not True.
-            # Only an explicit True from the model counts as confirmed.
-            "shows_house": found.get("shows_house") is True,
+            # Beta: strictly True / False / None (unknown). Only an explicit True
+            # from the model counts as confirmed; a missing answer is not "no".
+            "shows_house": _attribution(found),
             "gallery_hash": _gallery_hash(item),
+            **_gallery_fields(item, len(urls)),
             "by": getattr(looker, "model", looker.name), "at": utcnow_iso()}
 
 
@@ -557,8 +591,8 @@ def check_outside(looker, item: dict, session) -> dict | None:
         raise ValueError(f"unexpected answer {found!r:.80}")
     return {"condition": found["condition"], "confidence": found.get("confidence", "low"),
             "notes": str(found.get("notes") or "")[:200], "photos": len(images),
-            # Task 10: missing shows_house must remain unknown (False), not True.
-            "sources": sources, "shows_house": found.get("shows_house") is True,
+            # Beta: strictly True / False / None (unknown), as for the gallery.
+            "sources": sources, "shows_house": _attribution(found),
             "by": getattr(looker, "model", None) or getattr(looker, "name", "outside"),
             "at": utcnow_iso()}
 

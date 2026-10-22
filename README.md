@@ -522,10 +522,14 @@ first from* (€50,000) the climate maps and the photos are read for Live and
 invest only when the price, taxes and fees fit the cash you can lose.
 
 **Is it still for sale?** Each scan opens the links of the top 20 of each goal.
-A page that is gone, sold or reserved takes the listing off the list; one that
-still shows the sale open is recorded with the time it was checked. *A link
-check counts for (hours)* (Settings → Budget) says how long such a check is
-current availability for Live and invest; 0, the default, means not set, and
+A page that is gone, sold or reserved takes the listing off the list. A page
+that simply loads is recorded as *reachable*, not as "still for sale":
+availability stays unknown until a source-specific check of this lot confirms
+its sale is open. A login wall or a bot check is recorded as blocked and never
+bypassed. Each scan also rechecks up to five listings marked reserved or
+withdrawn more than a week ago, so a sale that comes back can return. *A link
+check counts for (hours)* (Settings → Budget) says how long a confirmed check
+is current availability for Live and invest; 0, the default, means not set, and
 availability then stays unknown. A stored decision whose availability has
 expired is treated as out of date until the listing is evaluated again.
 

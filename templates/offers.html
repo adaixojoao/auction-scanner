@@ -362,6 +362,7 @@ function outcomeCard(c) {
     <div class="row" style="margin-top:8px"><button class="btn btn-sm" onclick="saveOutcomeDetail(${o.log_id})">Save details</button>
       <span class="small muted">Used on the Outcomes page. No titles or contacts leave this PC.</span></div>` : "";
   return `<details class="panel" open><summary>Outcome</summary>
+    ${c.historical_only ? `<div class="notice">History only: this sale's listing is no longer stored, so its details are unknown and it was not checked against today's acquisition checks.</div>` : ""}
     <p class="small muted">Sent ${AS.esc(o.sent_date || "")} · ${what}${o.sent_to ? " · to " + AS.esc(o.sent_to) : ""} · currently <b>${AS.esc(o.outcome)}</b></p>
     ${overdue(o) ? `<div class="notice bad">No answer after ${overdue(o)} days. Time to phone${o.sent_to ? " or write again to " + AS.esc(o.sent_to) : ""}${c.contact && c.contact.phone ? " (" + AS.esc(c.contact.phone) + ")" : ""}.</div>` : ""}
     ${o.is_offer ? "" : `<p class="small faint">When they answer, mark it answered: the listing goes back to To review so you can make an offer.</p>`}

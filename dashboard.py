@@ -33,7 +33,7 @@ from flask import (Flask, Response, abort, g, has_request_context, jsonify, redi
                    send_file)
 
 import geo
-from common import COUNTRY_NAMES, FLAGS, make_session, mode_max_price, price_to_pay, safe_url
+from common import COUNTRY_NAMES, FLAGS, LOG, make_session, mode_max_price, price_to_pay, safe_url
 from locks import lock_holder
 from db import (DISMISS_REASONS, attention_reason, connect, hidden_category, keep_scores_for, load_best,
                  load_listings, minimum_bar, set_listing_status, source_health, unchecked_over_cap)
@@ -1641,6 +1641,19 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
     }
 
 
+def _historical_stub(log: dict) -> dict:
+    """A listing-shaped record for a letter whose listing is not stored. Every
+    property fact is absent (unknown), never zero or clean."""
+    processo = log.get("processo") or ""
+    return {"id": log.get("listing_id") or f"case:{log['id']}", "source": None,
+            "country": log.get("country") or "PT",
+            "title": f"Processo {processo}" if processo else "Letter without a stored listing",
+            "description": "", "price": None, "min_price": None, "current_bid": None, "area_m2": None,
+            "date_end": None, "url": "", "category": "imoveis", "kind": None, "mode": None,
+            "score": 0, "rank": 0, "reasons": [], "status": None,
+            "raw_json": json.dumps({"processo": processo, "tribunal": log.get("tribunal") or ""})}
+
+
 @app.route("/api/offers")
 def api_offers():
     import checklist
@@ -1710,9 +1723,18 @@ def api_offers():
             _db.close()
     for log in logs:
         it = by_id.get(log["listing_id"])
-        if not it:
+        historical = not it
+        if historical:
+            # A letter whose listing is not stored (a case-only record, or a
+            # sale no longer in the scan) is still shown, as history only.
+            it = _historical_stub(log)
+        try:
+            view = _offer_view(it, f"log:{log['id']}", log, checks=checks, cfg=cfg)
+        except Exception:  # noqa: BLE001 — one odd old row must not hide the rest
+            LOG.warning(f"Offer history row {log['id']} could not be shown", exc_info=True)
             continue
-        view = _offer_view(it, f"log:{log['id']}", log, checks=checks, cfg=cfg)
+        if historical:
+            view.update(historical_only=True, area_m2=None)   # unknown, not 0 m²
         (sent if log["outcome"] == "pending" else closed).append(view)
 
     rejected = [_offer_view(it, it["id"], checks=checks, cfg=cfg) for it in items

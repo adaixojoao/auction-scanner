@@ -45,7 +45,8 @@ def _sale_events(db, item: dict, today: date) -> list[dict]:
                            "the scanner's price history"))
     check = _raw(item).get("link_check") or {}
     day = _day(check.get("at"))
-    if day and check.get("availability") in ("withdrawn", "reserved", "ended", "available"):
+    if day and check.get("availability") in ("withdrawn", "reserved", "ended") \
+            or day and check.get("availability") == "available" and check.get("basis") == "source_lot":
         out.append(_record("sale_event", len(out) + 1, item, day,
                            {"event_type": check["availability"], "notes": check.get("why")},
                            "the scanner's link check"))
