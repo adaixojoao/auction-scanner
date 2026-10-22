@@ -739,7 +739,11 @@ _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5
 
 
 def init_db(db: sqlite3.Connection):
-    version = db.execute("PRAGMA user_version").fetchone()[0]
+    from release_safety import require_readable_schema
+    version, newer = require_readable_schema(db, SCHEMA_VERSION)
+    if newer:
+        LOG.debug(f"Database schema v{version} is newer than this version's v{SCHEMA_VERSION}; "
+                  "its additions are left as they are")
     for v in range(version + 1, SCHEMA_VERSION + 1):
         _MIGRATIONS[v](db)
         db.execute(f"PRAGMA user_version = {v}")

@@ -494,6 +494,14 @@ def run_app(cfg: dict, url: str, restarting: bool) -> int:
         show_error(str(e))
         return 1
     try:
+        from db import connect
+        connect().close()                # a database a newer version marked unreadable stops here
+    except RuntimeError as e:
+        import updater
+        updater.start_inconclusive()     # the data's version, not this code's fault
+        show_error(f"{e}\n\nUpdate the app, or restore the backup made before the update.")
+        return 1
+    try:
         server = make_server(host, d.get("port", 8050), dashboard.app, threaded=True)
     except OSError as e:
         import updater

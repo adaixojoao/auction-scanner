@@ -2275,37 +2275,26 @@ def api_offers_calendar():
 def _advisory_acquisition_result(result: dict) -> dict:
     """AI advice cannot establish purchase readiness or set a bid.
 
-    Override any model-supplied readiness flags. No positive readiness path
-    is enabled until an operational, evidence-backed gate is implemented.
-    """
-    import copy
-
-    out = copy.deepcopy(result)
-    if "verdict" not in out:
-        return out
-    if out["verdict"] == "BUY":
-        out["verdict"] = "REVIEW"
-    out["recommended_bid"] = None
-    out["max_bid"] = None
-    # A climate adjustment may retain the original AI bid in 'was'. Do not
-    # leak those amounts as an alternative usable suggestion.
-    guard = out.get("climate_guardrail")
-    if isinstance(guard, dict):
-        guard.pop("was", None)
-        guard["applied"] = False
-        guard["text"] = (
-            "AI bid suggestions are withheld: acquisition readiness is not established."
-        )
-    out["acquisition_ready"] = False
-    out["advisory_only"] = True
-    out["bid_suggestions_available"] = False
+    advisory_output.advisory_result keeps only advisory text and a REVIEW/SKIP
+    verdict; any bid, value or readiness field from the model is dropped. An
+    error answer is passed on as it is (the route returns 502)."""
+    from advisory_output import advisory_result
+    if not isinstance(result, dict) or "verdict" not in result:
+        return dict(result) if isinstance(result, dict) else advisory_result(result)
+    out = advisory_result(result)
     out["readiness_notice"] = (
         "Research advice only — acquisition readiness is not established. "
         "Neither the discovery score, an AI opinion nor a shadow-evaluator result "
         "verifies ownership, possession, title, lawful access or complete project costs. "
-        "AI bid suggestions are withheld; complete evidence-backed diligence before a binding offer."
+        "AI bid suggestions are not requested; complete evidence-backed diligence before a binding offer."
     )
     return out
+
+
+# A known listing is described to the model from what is stored, never from
+# what the page sent.
+_STORED_FOR_AI = ("title", "description", "price", "min_price", "current_bid", "area_m2",
+                  "date_end", "country", "source", "url", "kind")
 
 
 @app.route("/api/analyze-property", methods=["POST"])
@@ -2327,40 +2316,9 @@ def api_analyze_property():
     if found:
         # Judge it against the goal it suits, not always against a home to live in.
         data["mode"] = found.get("mode") or "home"
-    result = analyze_property(data)
-    if "verdict" in result and (_config().get("climate") or {}).get("bid_guardrail") and found:
-        apply_climate_guardrail(result, _climate_of(found))
-    result = _advisory_acquisition_result(result)
+        data.update({k: found.get(k) for k in _STORED_FOR_AI})
+    result = _advisory_acquisition_result(analyze_property(data))
     return jsonify(result), (502 if "verdict" not in result else 200)
-
-
-def apply_climate_guardrail(result: dict, climate: dict) -> dict:
-    """Settings → Climate: lower the AI's suggested and maximum bid by the
-    climate grade's multiplier, at an exact position only. Amounts the user
-    types are never touched; the original figures are kept beside."""
-    from letters import parse_bid
-    grade, m = climate.get("grade", "unknown"), climate.get("bid_multiplier", 1.0)
-    confidence = climate.get("confidence", "unknown")
-    # "approximate" or "unknown" → position or data too coarse for a money decision.
-    # "exact" and "hazard_data_incomplete" → the grade is still evidence-based (a
-    # confirmed "poor" from extreme heat or burns applies even if flood/fire layers
-    # are absent), so the guardrail may fire for those.
-    if confidence in ("approximate", "unknown"):
-        note = {"applied": False, "grade": grade,
-                "text": "Climate guardrail not applied: the position or the climate data is not exact."}
-    elif m >= 1:
-        note = {"applied": False, "grade": grade, "text": f"Climate {grade}: no reduction."}
-    else:
-        was = {}
-        for key in ("recommended_bid", "max_bid"):
-            value = parse_bid(str(result.get(key) or ""))
-            if value:
-                was[key] = result[key]
-                result[key] = _format_amount(round(value * m))
-        note = {"applied": bool(was), "grade": grade, "multiplier": m, "was": was,
-                "text": f"Climate {grade}: suggested bid and maximum lowered to {m:.0%} (Settings → Climate)."}
-    result["climate_guardrail"] = note
-    return result
 
 
 @app.route("/api/carta-log", methods=["GET"])
