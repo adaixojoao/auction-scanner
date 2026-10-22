@@ -43,7 +43,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -719,6 +719,14 @@ def _migrate_v33(db: sqlite3.Connection):
     durable_outbox.install_schema(db)
 
 
+def _migrate_v34(db: sqlite3.Connection):
+    """Producer-owned evidence (evidence_store.py): append-only observations
+    and one current row per listing and producer. Two new empty tables and an
+    index; no existing row is read or rewritten."""
+    import evidence_store
+    evidence_store.install_schema(db)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
@@ -727,7 +735,7 @@ _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
                27: _migrate_v27, 28: _migrate_v28, 29: _migrate_v29,
                30: _migrate_v30, 31: _migrate_v31, 32: _migrate_v32,
-               33: _migrate_v33}
+               33: _migrate_v33, 34: _migrate_v34}
 
 
 def init_db(db: sqlite3.Connection):
@@ -1603,6 +1611,20 @@ def still_worth_a_page_sql(table: str = "") -> tuple[str, tuple]:
     return f"AND (({list_price_sql(table)}) <= ? OR {kept})", (cap,)
 
 
+# NOT EXISTS, not NOT IN: one carta_log row with no listing (a case-only
+# historical letter) would make "id NOT IN (...)" NULL for every listing.
+UNCHECKED_EXCLUSIONS = """
+AND NOT EXISTS (
+  SELECT 1 FROM listing_status s
+  WHERE s.listing_id = listings.id AND s.status = 'shortlisted'
+)
+AND NOT EXISTS (
+  SELECT 1 FROM carta_log c
+  WHERE c.listing_id = listings.id AND c.is_offer = 1
+)
+"""
+
+
 def unchecked_over_cap(db: sqlite3.Connection) -> tuple[int, float]:
     """How many stored listings the cap leaves unchecked, and the cap.
 
@@ -1612,9 +1634,7 @@ def unchecked_over_cap(db: sqlite3.Connection) -> tuple[int, float]:
     if not cap:
         return 0, 0.0
     n = db.execute(
-        f"SELECT COUNT(*) FROM listings WHERE ({list_price_sql()}) > ?"
-        " AND id NOT IN (SELECT listing_id FROM listing_status WHERE status = 'shortlisted')"
-        " AND id NOT IN (SELECT listing_id FROM carta_log WHERE is_offer = 1)",
+        f"SELECT COUNT(*) FROM listings WHERE ({list_price_sql()}) > ? {UNCHECKED_EXCLUSIONS}",
         (cap,),
     ).fetchone()[0]
     return int(n), cap

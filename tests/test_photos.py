@@ -61,7 +61,10 @@ def test_an_unsure_answer_is_not_used():
     unsure = {"title": "Moradia", "raw_json": json.dumps(
         {"photo_check": {"condition": "good", "confidence": "low", "notes": "Only a map."}})}
     assert condition(unsure) == "unknown"
-    sure = {**unsure, "raw_json": json.dumps({"photo_check": {"condition": "good", "confidence": "medium"}})}
+    unsaid = {**unsure, "raw_json": json.dumps({"photo_check": {"condition": "good", "confidence": "medium"}})}
+    assert condition(unsaid) == "unknown"     # Beta: the model did not say it saw the house
+    sure = {**unsure, "raw_json": json.dumps({"photo_check": {"condition": "good", "confidence": "medium",
+                                                              "shows_house": True}})}
     assert condition(sure) == "good"
     assert any(r.endswith("(from the photos)") for r in score_detail({**sure, "price": 9000, "area_m2": 90})[1])
 

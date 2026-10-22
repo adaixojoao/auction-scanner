@@ -499,8 +499,6 @@ def _req_floor_area(evidence: dict, policy: dict) -> Requirement:
 
 def _req_hazard_coverage(evidence: dict, policy: dict) -> Requirement:
     """Require usable flood and fire metrics; adverse facts outrank missing data."""
-    import math
-
     climate = _climate(evidence)
     required = policy.get("required_hazard_layers", DEFAULT_POLICY["required_hazard_layers"])
     reject_flood = policy.get("reject_flood_m", DEFAULT_POLICY["reject_flood_m"])
@@ -510,24 +508,8 @@ def _req_hazard_coverage(evidence: dict, policy: dict) -> Requirement:
                            message="No climate data; hazard layers cannot be evaluated.",
                            next_evidence_needed="Run climate assessment for the building's position.")
 
-    def number(value):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return None
-        return float(value) if math.isfinite(value) and value >= 0 else None
-
-    flood = number(climate.get("flood_m"))
-    danger = climate.get("fire_danger")
-    days = None
-    if isinstance(danger, dict):
-        for key in ("high_days_2090", "rcp45_2079-2098"):
-            if key in danger:
-                days = number(danger[key])
-                # A present but invalid canonical metric must not be rescued by
-                # an older contradictory metric. It remains unresolved.
-                break
-    if days is None and not (isinstance(danger, dict)
-                             and any(k in danger for k in ("high_days_2090", "rcp45_2079-2098"))):
-        days = number(climate.get("fire_danger_days"))
+    from collection_contracts import hazard_metrics
+    flood, days = hazard_metrics(climate)   # shared with scoring.climate_score
 
     if flood is not None and flood >= reject_flood:
         return Requirement(key="hazard_coverage", outcome=FAIL, code="PHYS_FLOOD_SEVERE",

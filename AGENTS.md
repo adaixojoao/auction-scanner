@@ -149,6 +149,16 @@ congruent — one way to do each thing:
   Typed offer amounts go through `offer_safety.parse_offer_text` (integer
   cents), never `parse_price`. SMTP uses `notifications.begin_verified_tls`.
   The dashboard binds to loopback only (`local_guard.require_local_host`).
+- **Evidence is never inferred from a page that merely loads (Beta):** a
+  generic HTTP 200 link check is `unknown`, never `available`; only a
+  source-specific reading of the exact lot (`basis: "source_lot"`) may say
+  available. `confirm._store` patches only `link_check`, reloading `raw_json`
+  inside the write. Photo `shows_house` is `True`/`False`/`None` (unknown) and
+  only `True` lets photos describe the house. Flood and fire readings go through
+  `collection_contracts.hazard_metrics` in both scoring and the evaluator. New
+  producer-owned evidence goes through `evidence_store.write_owned` (table
+  `evidence_current`, append-only `evidence_observations`). Exclusions over
+  nullable columns use `NOT EXISTS`, never `NOT IN (SELECT ...)`.
 - **One place for user choices:** shortlist/dismiss in `listing_status`,
   offers in `carta_log`, settings in `config.json` via the Settings page.
 

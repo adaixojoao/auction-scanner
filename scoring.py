@@ -1248,7 +1248,7 @@ def photo_condition(item: dict) -> dict | None:
     if '"photo_check"' not in (item.get("raw_json") or ""):
         return None
     seen = _raw(item).get("photo_check") or {}
-    if seen.get("shows_house") is False:           # a barn's state says nothing about the house
+    if seen.get("shows_house") is not True:        # a barn's state, or an unsaid one, says nothing about the house
         return None
     if seen.get("condition") in ("good", "some", "heavy") and seen.get("confidence") in ("high", "medium"):
         return seen
@@ -1263,7 +1263,7 @@ def outside_view(item: dict) -> str | None:
     if '"outside_check"' not in (item.get("raw_json") or ""):
         return None
     seen = _raw(item).get("outside_check") or {}
-    if seen.get("shows_house") is False or seen.get("confidence") not in ("high", "medium"):
+    if seen.get("shows_house") is not True or seen.get("confidence") not in ("high", "medium"):
         return None
     if seen.get("condition") in ("heavy", "standing"):
         return seen["condition"]
@@ -2382,15 +2382,20 @@ def climate_score(c: dict | None, kind: str | None = None) -> dict:
                        "cannot make the grade poor")
     # F03: missing hazard layers mean we cannot rule out flood or fire risk.
     # Both flood_m and fire_danger must be present for a grade above "caution".
-    hazard_incomplete = c.get("flood_m") is None or c.get("fire_danger") is None
+    # Beta: the same usable-metric check as the evaluator — a measured zero
+    # counts, an empty fire dictionary or a non-number does not.
+    from collection_contracts import hazard_metrics
+    flood_v, fire_v = hazard_metrics(c)
+    flood_ok, fire_ok = flood_v is not None, fire_v is not None
+    hazard_incomplete = not (flood_ok and fire_ok)
     confidence = "exact" if exact else "approximate"
     if hazard_incomplete:
         at_most("caution")
         confidence = "hazard_data_incomplete"
         missing = []
-        if c.get("flood_m") is None:
+        if not flood_ok:
             missing.append("flood")
-        if c.get("fire_danger") is None:
+        if not fire_ok:
             missing.append("fire danger")
         reasons.append(f"hazard data incomplete ({', '.join(missing)} layer missing): "
                        f"grade capped at caution")
