@@ -203,6 +203,20 @@ scheduled task, so keep that guard.
 
 Add a numbered `_migrate_vN` in `db.py` and bump `SCHEMA_VERSION`. Migrations
 must work on a database created by any earlier version (use `_add_column`).
+Keep them additive: the updater rolls back to the previous release when a new
+one fails to start, and that release must still read the newer database. A
+migration that older code cannot read must also write
+`schema_compat(min_reader)` (create the table) with the first `SCHEMA_VERSION`
+that can; `release_safety.require_readable_schema` then makes older releases
+refuse the database instead of using or downgrading it.
+
+## AI output
+
+Everything a model says about a listing goes through
+`advisory_output.advisory_result` (REVIEW or SKIP, advisory text only) before
+it is stored, shown or written to a file. Never ask a model for a bid, a value
+or readiness, and never copy its answer out verbatim. Carbon credits are never
+base-case income (`project_cashflows.carbon_revenue_cents`).
 
 ## Tests
 

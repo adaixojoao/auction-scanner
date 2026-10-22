@@ -1,4 +1,5 @@
-"""What a hectare of forest land could earn: timber, cork, nuts and carbon credits.
+"""What a hectare of forest land could earn: timber, cork and nuts. Carbon credits
+are shown as an optional upside and never counted without an eligible project.
 
 A rough screening model, not a forest plan: for each crop it checks whether the
 place's climate (today and 2081-2100, from climate.py) suits it, then values the
@@ -320,7 +321,10 @@ def options(climate: dict | None, country: str | None, hectares: float, water_on
             yearly = rate * (1 - CARBON_BUFFER) * (1 - CARBON_FEE) * CARBON_EUR_T
             carbon = _annuity(_npv({y: yearly * (1 - p) ** y for y in range(1, last + 1)}) - CARBON_SETUP_EUR_HA)
         crop_value = _annuity(_npv(flows))
-        out.append({"crop": name, "eur_ha_year": round(crop_value + max(carbon, 0)),
+        # Gamma: carbon is an optional upside, never base-case income. It needs
+        # an eligible project (methodology, additionality, approval and a buyer)
+        # that nothing here establishes — project_cashflows.carbon_revenue_cents.
+        out.append({"crop": name, "eur_ha_year": round(crop_value),
                     "carbon_eur_ha_year": round(max(carbon, 0)), "note": crop["note"], "limits": limits, "sources": sorted(sources),
                     "until": ends})
     return sorted(out, key=lambda o: -o["eur_ha_year"])
@@ -351,7 +355,8 @@ def project_choice(crops: list[dict], existing: set[str] | None = None) -> tuple
 
 
 def describe(option: dict, *, kept: bool = False) -> str:
-    extra = f" incl. €{option['carbon_eur_ha_year']} carbon" if option["carbon_eur_ha_year"] else ""
+    extra = (f" (+ up to €{option['carbon_eur_ha_year']} carbon if an eligible project is found — not counted)"
+             if option["carbon_eur_ha_year"] else "")
     limits = f"; {', '.join(option['limits'])}" if option["limits"] else ""
     if option.get("until"):
         extra += f", only until ~{option['until']}"

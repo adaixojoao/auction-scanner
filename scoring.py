@@ -880,8 +880,8 @@ _FOREST_PRIORITIES = (
     "Land for a forestry project the owner will run, not a plot to resell and not a place to live. "
     "In order: first, biodiversity — keep a native European forest that will still stand in 2100 "
     "(an existing cork-oak or chestnut stand, or a native mix EU-Trees4F still says suits the place). "
-    "Second, profit — among plots that do that, the return from keeping the stand (cork, carbon, "
-    "timber the ad states) over {years} years, aiming at about {roi} a year on the price including "
+    "Second, profit — among plots that do that, the return from keeping the stand (cork and "
+    "timber the ad states; carbon credits are not counted without an eligible project) over {years} years, aiming at about {roi} a year on the price including "
     "the buying costs. A plantation chosen because it pays more is the profit case, and it ranks "
     "below a native forest. Climate still decides whether the trees last: summer heat, water "
     "stress, fire danger, flood, and the summer water balance if the Atlantic current collapses. "
@@ -3563,8 +3563,9 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
                                   or site.get("cable_share", 0) >= SITE_CABLE_SHARE)
     kept = chosen if chosen and c else None
     if unreachable and kept:
-        # timber that cannot be brought out cannot be sold: only the carbon counts
-        kept = {**kept, "eur_ha_year": kept["carbon_eur_ha_year"]}
+        # timber that cannot be brought out cannot be sold; carbon is never
+        # base-case income (Gamma), so nothing is counted
+        kept = {**kept, "eur_ha_year": 0}
         reasons.append("no timber income counted: machines cannot reach most of the land")
     roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, kept, timber,
                         # land nobody can work is not worth the regional forest price

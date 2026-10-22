@@ -80,18 +80,6 @@ def test_the_grade_does_not_move_with_the_weight_sliders():
     assert climate_score(c, "rural_plot") == before
 
 
-def test_the_guardrail_lowers_ai_bids_only_at_exact_positions():
-    poor = climate_score({"hot_days": {"rcp45_2071-2100": 30}}, "home")
-    result = dashboard.apply_climate_guardrail({"recommended_bid": "10.000,00", "max_bid": "12.000,00"}, poor)
-    assert result["recommended_bid"] == "6.000,00" and result["max_bid"] == "7.200,00"
-    assert result["climate_guardrail"]["applied"] and result["climate_guardrail"]["was"]["max_bid"] == "12.000,00"
-    town = climate_score({"hot_days": {"rcp45_2071-2100": 30}, "approx": True}, "home")
-    kept = dashboard.apply_climate_guardrail({"recommended_bid": "10.000,00", "max_bid": "12.000,00"}, town)
-    assert kept["recommended_bid"] == "10.000,00" and not kept["climate_guardrail"]["applied"]
-    unknown = dashboard.apply_climate_guardrail({"recommended_bid": "10.000,00"}, climate_score(None))
-    assert unknown["recommended_bid"] == "10.000,00"
-
-
 @pytest.fixture
 def client(db):
     import config
@@ -113,7 +101,9 @@ def test_the_guardrail_is_off_by_default_and_saved_from_settings(client):
     assert config.load_config()["climate"]["bid_guardrail"] is True
 
 
-def test_the_ai_check_applies_the_guardrail_only_when_it_is_on(client, add, monkeypatch):
+def test_the_ai_check_never_returns_bids_with_the_old_guardrail_on_or_off(client, add, monkeypatch):
+    # Gamma: the AI check no longer asks for bids, so the retired guardrail has
+    # nothing to lower; the stored setting is accepted and ignored.
     import analysis
     import config
     add(external_id="hot", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
@@ -121,15 +111,11 @@ def test_the_ai_check_applies_the_guardrail_only_when_it_is_on(client, add, monk
     monkeypatch.setattr(analysis, "analyze_property",
                         lambda data: {"verdict": "BUY", "recommended_bid": "10.000,00", "max_bid": "12.000,00"})
     off = client.post("/api/analyze-property", json={"id": "eleiloes:hot", "bid": "9.000,00"}).get_json()
-    assert "climate_guardrail" not in off
     config.update_config({"climate": {"bid_guardrail": True}})
     on = client.post("/api/analyze-property", json={"id": "eleiloes:hot", "bid": "9.000,00"}).get_json()
-    assert on["climate_guardrail"]["grade"] == "poor"
-    # 9A: AI bid amounts are withheld from the response, reduced or not.
     for res in (off, on):
         assert res["verdict"] == "REVIEW"
-        assert res["recommended_bid"] is None and res["max_bid"] is None
-        assert "was" not in res.get("climate_guardrail", {})
+        assert "recommended_bid" not in res and "max_bid" not in res and "climate_guardrail" not in res
 
 
 def test_listings_filter_by_climate_grade_and_exact_data(client, add):

@@ -300,8 +300,12 @@ the sites' public layout and could not be tested against the live sites; the
 Sources page shows if they stop finding anything.
 
 **AI check** (on Offers) asks Claude for a verdict and risks. It is research
-advice only: a "buy" verdict is shown as "review", and AI bid suggestions are
-withheld because acquisition readiness is not established. The maximum bid
+advice only: the verdict is REVIEW or SKIP, and Claude is no longer asked for a
+bid, a market value, a discount or a confidence score, because acquisition
+readiness is not established. A listing the scanner knows is described to
+Claude from what is stored, not from the page. `scraper.py --analyze` writes
+the same advisory verdicts; an answer it cannot read is reported as unreadable,
+never copied out. The maximum bid
 on Offers is a separate, deterministic planning estimate (bidcap.py) from your
 settings, not an AI figure. It needs the `ANTHROPIC_API_KEY` environment variable.
 
@@ -650,7 +654,8 @@ than €20,001 instead of jumping at a step.
   return a year (the Forestry tab's own figures) and scores a little higher for
   it. A 2 ha plot can still be a good buy; it simply has no forestry case.
 - **A project is planned on the land budget.** Open a plot and the panel says what acquiring it costs against the land budget in Settings, what is left, and how many hectares of the crop the climate still allows that leftover plants. Over the budget, it says not to buy. The figures are estimates (transfer tax, the CAOF planting matrix, the crop model).
-- **Inflation counts against you (3.5% a year).** Planting costs are brought forward to 2026 prices. Income (timber, cork, produce, carbon, grant premiums) stays at its published price, fixed in euros, so each later year is worth 3.5% less on top of the 3% for waiting. The Forestry return and the 20% goal are after inflation.
+- **Carbon credits are not counted.** A crop's carbon is shown as "+ up to €… carbon if an eligible project is found — not counted". Selling credits needs a specific methodology, additionality, approval and a buyer; until a project like that is evidenced, the base case earns nothing from carbon, and land machines cannot reach earns nothing at all.
+- **Inflation counts against you (3.5% a year).** Planting costs are brought forward to 2026 prices. Income (timber, cork, produce, grant premiums) stays at its published price, fixed in euros, so each later year is worth 3.5% less on top of the 3% for waiting. The Forestry return and the 20% goal are after inflation.
 - **Grants are named, never counted.** `data/forest_grants.csv` lists the planting and replanting schemes with their legal text and the day they were checked: PEPAC C.3.2.1 in Portugal, the replanting aid in France. The panel names a grant that may apply and what to ask the forest service. No grant changes a score, a return or a bid, because it depends on an approved application. A grant never pays for the land, an existing stand you keep, eucalyptus or a nut orchard. A row stays "partial", with no euro figure, until its per-hectare amounts have been read in the official text. Spain's grants are regional and not in the table yet. What is still to do is in `docs/forestry_grants_todo.md`.
 - **Habitat is scored, never invented.** Natura 2000 / ZNIEFF from a stored
   site check, and Natura, REN or RAN named in the notice, cost the land and
@@ -844,10 +849,8 @@ fires and fire danger. A reading belongs to the pin it was taken at. When that
 pin moves, the next scan reads the climate again for the new spot. From a town
 or parish position it says "approximate" and never grades poor on local risks.
 It is a planning risk indicator, not a survey, an insurance assessment, or
-legal or environmental due diligence. The optional bid guardrail
-(Settings → Climate) is meant to lower an AI-suggested bid for a caution or poor
-grade at an exact position; while AI bid suggestions are withheld it has
-nothing to lower, and it never changes an amount you type.
+legal or environmental due diligence. The former AI bid guardrail is retired:
+the AI check no longer suggests bids, so there is nothing for it to lower.
 
 Every listing's ⓘ panel says how exact its **location** is: exact (the sale's
 coordinates, the cadastre, or a position you verified), street, village or

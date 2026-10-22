@@ -153,7 +153,7 @@ DEFAULTS = {
     "climate": {
         # data_dir: where the climate layers are. By default, the auction-climate-data
         # folder next to this app.
-        "bid_guardrail": False,   # lower AI-suggested bids for a caution/poor climate grade
+        "bid_guardrail": False,   # retired (Gamma): the AI check no longer suggests bids; kept so old settings load
     },
 
     "location": {
