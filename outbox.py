@@ -1,9 +1,12 @@
 """outbox.py — sending letters and recording them, and information requests
 the app prepares by itself.
 
-One way to send: `email_letter()` e-mails a letter built by
+One way to send: `email_operation()` e-mails a letter built by
 letters.build_letter() with its PDF and records it in carta_log (`log_sent`).
-The Offers page and the request queue both use it.
+The exact letter, recipient, PDF and amount are stored first in the durable
+outbox (durable_outbox.py) under an idempotency key, so a second click never
+sends twice and an uncertain send is never repeated blindly. The Offers page
+and the request queue both use it.
 
 The request queue: after a scan, strong sales that take an information
 request — and whose recipient's e-mail is known (the agente de execução on
@@ -13,6 +16,8 @@ sent until you tap Send. Each sale is offered once.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -38,9 +43,12 @@ def _raw(item: dict) -> dict:
 
 def log_sent(db, item: dict, *, letter=None, bid: str = "", method: str, sent_to: str = "",
              notes: str = "", location_override: str | None = None,
-             cash_override: str | None = None) -> int:
+             cash_override: str | None = None, commit: bool = True) -> int:
     """Record a sent letter (or with letter=None an online bid) in carta_log,
-    with its text exactly as sent, and how exact the listing's location was."""
+    with its text exactly as sent, and how exact the listing's location was.
+    With commit=False the caller's transaction records it (the outbox's
+    accepted send and this row commit together) and the shortlist entry is
+    left for the caller to clear afterwards."""
     import geo
     from letters import parse_bid
     raw = _raw(item)
@@ -59,27 +67,95 @@ def log_sent(db, item: dict, *, letter=None, bid: str = "", method: str, sent_to
         letter.text if letter else None, letter.subject if letter else None,
         letter.filename if letter else None, geo.location_confidence(item)["level"],
         location_override or None, cash_override or None))
+    if not commit:
+        return cur.lastrowid
     db.commit()
     if is_offer and item.get("status") == "shortlisted":
         set_listing_status(db, item["id"], None)   # it is an offer now, not a shortlist entry
     return cur.lastrowid
 
 
+def email_operation(db, cfg: dict, item: dict, letter, *, to: str = "", bid: str = "",
+                    location_override: str | None = None, cash_override: str | None = None,
+                    operation_key: str | None = None, record: dict | None = None) -> dict:
+    """E-mail `letter` with its PDF from Settings → E-mail and record it, once.
+
+    Returns {"state", "error", "log_id", "operation_id", "scenario"}. The same
+    operation_key (the page sends one per draft; otherwise the content's
+    fingerprint) never sends twice: a sent operation returns its record, an
+    uncertain one refuses, and only a failed one is tried again.
+    """
+    import durable_outbox
+    import offer_safety
+    from letters import letter_pdf
+    from notifications import letter_problem, send_letter
+    to = (to or letter.to_email or "").strip()
+    smtp = cfg.get("notifications", {})
+    problem = letter_problem(smtp, to)
+    if problem:
+        return {"state": "failed", "error": problem, "log_id": None, "operation_id": None, "scenario": None}
+    pdf = letter_pdf(letter)
+    bid_cents = offer_safety.parse_offer_text(bid) if (letter.is_offer and str(bid or "").strip()) else None
+    scenario = offer_safety.scenario_for(item, bid_cents, cfg) if letter.is_offer else None
+    snapshot = {"version": 1, "listing_id": item["id"], "kind": "binding_offer" if letter.is_offer
+                else "information_request", "letter_type": letter.type_key, "to": to,
+                "subject": letter.subject, "text": letter.text, "filename": letter.filename,
+                "pdf_sha256": hashlib.sha256(pdf).hexdigest(),
+                "pdf_b64": base64.b64encode(pdf).decode("ascii"),
+                "bid_text": str(bid or ""), "bid_cents": bid_cents, "scenario": scenario,
+                "gates": {"location_override": location_override, "cash_override": cash_override,
+                          **(record or {})}}
+    identity = {k: v for k, v in snapshot.items() if k not in ("pdf_b64", "pdf_sha256")}
+    key = operation_key or ("auto:" + offer_safety.fingerprint(identity))
+    op_id = durable_outbox.enqueue(db, key, snapshot, listing_id=item["id"], identity=identity)
+    op = durable_outbox.get(db, op_id)
+    out = {"operation_id": op_id, "scenario": scenario, "log_id": op["carta_log_id"]}
+    if op["state"] == "sent":
+        return {**out, "state": "sent", "error": None}
+    if op["state"] in ("sending", "delivery_unknown", "needs_review"):
+        return {**out, "state": op["state"], "error": UNCERTAIN.get(op["state"])}
+    if op["state"] == "failed" and not durable_outbox.reopen_failed(db, op_id):
+        return {**out, "state": "failed", "error": op["detail"]}
+    token = durable_outbox.claim(db, op_id, durable_outbox.worker_id())
+    if token is None:
+        return {**out, "state": "sending", "error": UNCERTAIN["sending"]}
+    stored = op["snapshot"]            # exactly what was reviewed and stored, never regenerated
+    try:
+        state, reason = send_letter(smtp, stored["to"], stored["subject"], stored["text"],
+                                    base64.b64decode(stored["pdf_b64"]), stored["filename"],
+                                    reply_to=cfg.get("proponente", {}).get("email", ""),
+                                    message_id=op["message_id"])
+    except Exception as e:    # noqa: BLE001 — whatever broke, the message may have gone
+        state, reason = "delivery_unknown", f"{UNCERTAIN['delivery_unknown']} ({e})"
+
+    def record_it(conn):
+        return log_sent(conn, item, letter=letter, bid=bid, method="email", sent_to=to,
+                        location_override=location_override, cash_override=cash_override, commit=False)
+
+    log_id = durable_outbox.complete(db, op_id, token, state, reason, on_sent=record_it)
+    if state == "sent":
+        if letter.is_offer and item.get("status") == "shortlisted":
+            set_listing_status(db, item["id"], None)   # it is an offer now, not a shortlist entry
+        return {**out, "state": "sent", "error": None, "log_id": log_id}
+    return {**out, "state": state, "error": reason if state == "failed" else UNCERTAIN.get(state, reason)}
+
+
+UNCERTAIN = {
+    "sending": "This e-mail is being sent, or a send stopped half-way. Do not send it again: "
+               "look in the Sent folder of the mailbox first.",
+    "delivery_unknown": "The connection broke while this e-mail was being sent, so it may have gone. "
+                        "Do not send it again: look in the Sent folder of the mailbox first.",
+    "needs_review": "Something this offer depended on changed before it was sent. Review it again.",
+}
+
+
 def email_letter(db, cfg: dict, item: dict, letter, *, to: str = "", bid: str = "",
                  location_override: str | None = None,
                  cash_override: str | None = None) -> tuple[str | None, int | None]:
-    """E-mail `letter` with its PDF from Settings → E-mail and record it.
-    Returns (error in plain words, None) or (None, carta_log id)."""
-    from letters import letter_pdf
-    from notifications import send_letter
-    to = (to or letter.to_email or "").strip()
-    error = send_letter(cfg.get("notifications", {}), to, letter.subject, letter.text,
-                        letter_pdf(letter), letter.filename,
-                        reply_to=cfg.get("proponente", {}).get("email", ""))
-    if error:
-        return error, None
-    return None, log_sent(db, item, letter=letter, bid=bid, method="email", sent_to=to,
-                          location_override=location_override, cash_override=cash_override)
+    """email_operation() for callers that only need (error in plain words, carta_log id)."""
+    out = email_operation(db, cfg, item, letter, to=to, bid=bid, location_override=location_override,
+                          cash_override=cash_override)
+    return (None, out["log_id"]) if out["state"] == "sent" else (out["error"] or out["state"], None)
 
 
 # ─── The request queue ──────────────────────────────────────────────

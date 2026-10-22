@@ -43,7 +43,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 33
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -711,6 +711,14 @@ def _migrate_v32(db: sqlite3.Connection):
     db.execute("CREATE INDEX IF NOT EXISTS idx_investigation_stages_listing"
                " ON investigation_stages(listing_id, id)")
 
+def _migrate_v33(db: sqlite3.Connection):
+    """The durable outbox for offers the app e-mails itself (durable_outbox.py):
+    the exact operation is stored before sending, under an idempotency key, with
+    every attempt. Two new empty tables: no existing row is read or rewritten."""
+    import durable_outbox
+    durable_outbox.install_schema(db)
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
@@ -718,7 +726,8 @@ _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5
                19: _migrate_v19, 20: _migrate_v20, 21: _migrate_v21, 22: _migrate_v22,
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
                27: _migrate_v27, 28: _migrate_v28, 29: _migrate_v29,
-               30: _migrate_v30, 31: _migrate_v31, 32: _migrate_v32}
+               30: _migrate_v30, 31: _migrate_v31, 32: _migrate_v32,
+               33: _migrate_v33}
 
 
 def init_db(db: sqlite3.Connection):

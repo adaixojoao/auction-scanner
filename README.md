@@ -246,6 +246,22 @@ and with no guarantee between two windows.
    (a copy comes back to you), addressed to the court, agente or lawyer when
    the listing names one. Or **Download PDF** / **Open in my e-mail app** and
    then **Mark letter as sent** (e-mailed, posted, by hand, given to my lawyer).
+   - **It never sends twice.** The exact letter, recipient, PDF and amount are
+     saved before anything goes out. A second click on Send names the same
+     send, so it isn't repeated. If the connection breaks while the e-mail is
+     going out, the app says the outcome is **unknown** and won't offer to
+     send it again: look in your mailbox's Sent folder first. Only a send that
+     certainly failed (no connection, wrong password, recipient refused) can
+     be tried again. "Sent" means your mail server accepted it, not that it
+     arrived or counts as a valid submission.
+   - **Amounts must be exact:** 26000, 26000,50 or 26.000,50. Anything else
+     (a currency word, a decimal point, spaces) is refused before anything is
+     saved or sent.
+   - **The cost scenario is saved with the send.** It adds the offer, taxes and
+     fees, the high end of the works estimate, the reserve and any debts that
+     pass with the property. While any of these is unknown the scenario says
+     **incomplete**. That is shown, not hidden, and the app never calls an
+     offer approved.
 5. It moves to **Sent**, which keeps the letter exactly as you sent it (and
    reprints that PDF). Mark an offer **won**, **lost** or **cancelled**; mark
    an information request **answered**, and the listing returns to *To review*

@@ -251,7 +251,8 @@ function renderDetail() {
     <div class="row" style="margin-top:8px">
       <button class="btn btn-primary" id="send-btn" onclick="sendEmail()" ${SMTP_OK ? "" : "disabled"}>Send by e-mail with PDF</button>
       ${SMTP_OK ? "" : `<span class="small faint">Set up e-mail under <a href="/settings#email">Settings</a> to send from here.</span>`}
-    </div>`}
+    </div>
+    <div id="send-status"></div>`}
   </details>` : ""}
 
   ${done ? "" : `
@@ -474,11 +475,24 @@ async function sendEmail() {
   const why = overrideReason(c, (typeOf(c, d.type) || {}).is_offer);
   if (!why) return;
   if (!confirm(`Send this letter with its PDF to ${d.to}?`)) return;
+  // One operation per draft: a second click, or a retry after an error, names the
+  // same send, so the server never sends it twice.
+  d.operation = d.operation || (crypto.randomUUID ? crypto.randomUUID()
+    : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12));
   btn.disabled = true; btn.textContent = "Sending…";
-  try {
-    const r = await AS.api("/api/offers/email", {method: "POST", body: {...letterBody(c), to: d.to, ...why}});
-    showSent(r.log_id, `Sent to ${r.to} — it is now under Sent`);
-  } catch (e) { btn.disabled = false; btn.textContent = "Send by e-mail with PDF"; }
+  const response = await fetch("/api/offers/email", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({...letterBody(c), to: d.to, ...why, operation_id: d.operation})});
+  const r = await response.json().catch(() => ({}));
+  if (response.ok) { showSent(r.log_id, `Sent to ${r.to} — it is now under Sent`); return; }
+  if (r.uncertain) {
+    // It may have gone: never offer a blind retry.
+    btn.textContent = r.state === "delivery_unknown" ? "Outcome unknown — check the mailbox" : "Not sent again";
+    $("send-status").innerHTML = `<div class="notice bad" role="alert">${AS.esc(r.error || "The outcome of this send is unknown.")}</div>`;
+    return;
+  }
+  if (r.state === "needs_review" || r.amount_invalid) delete d.operation;
+  AS.toast(r.error || `Request failed (${response.status})`, "bad");
+  btn.disabled = false; btn.textContent = "Send by e-mail with PDF";
 }
 async function logOnline() {
   const c = current(), d = draft(c);

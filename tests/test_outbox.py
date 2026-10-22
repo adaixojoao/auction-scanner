@@ -41,8 +41,9 @@ def tg(monkeypatch):
 def mail(monkeypatch):
     out = []
     monkeypatch.setattr(notifications, "send_letter",
-                        lambda smtp, to, subject, text, pdf, filename, reply_to="": out.append(
-                            {"to": to, "subject": subject, "text": text, "pdf": pdf}) or None)
+                        lambda smtp, to, subject, text, pdf, filename, reply_to="", message_id=None: out.append(
+                            {"to": to, "subject": subject, "text": text, "pdf": pdf,
+                             "message_id": message_id}) or ("sent", None))
     return out
 
 
@@ -120,7 +121,8 @@ def test_show_skip_and_a_failed_send_stays_waiting(db, add, tg, monkeypatch):
     telegram_bot.poll_once(db, CFG)
     assert "<pre>" in sent[-1][0] and "Nome Exemplo" in sent[-1][0]
 
-    monkeypatch.setattr(notifications, "send_letter", lambda *a, **k: "The e-mail could not be sent: timeout")
+    monkeypatch.setattr(notifications, "send_letter",
+                        lambda *a, **k: ("failed", "The e-mail could not be sent: timeout"))
     queue.append(tap(2, "rs|eleiloes:LO1"))
     telegram_bot.poll_once(db, CFG)
     assert "Not sent: The e-mail could not be sent: timeout" in sent[-1][0]

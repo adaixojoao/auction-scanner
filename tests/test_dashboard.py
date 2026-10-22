@@ -190,6 +190,7 @@ def test_offers_rank_court_and_bank_sales_not_portal_ads_or_a_home_to_live_in(cl
 
 class FakeSMTP:
     sent = []
+    contexts = []
 
     def __init__(self, host, port, timeout=None):
         self.host, self.port = host, port
@@ -200,7 +201,10 @@ class FakeSMTP:
     def __exit__(self, *exc):
         return False
 
-    def starttls(self):
+    def starttls(self, context=None):
+        FakeSMTP.contexts.append(context)
+
+    def ehlo(self):
         pass
 
     def login(self, user, password):
@@ -208,6 +212,10 @@ class FakeSMTP:
 
     def send_message(self, msg, to_addrs=None):
         FakeSMTP.sent.append((msg, to_addrs))
+        return {}
+
+    def quit(self):
+        pass
 
 
 def test_spanish_information_request_by_email(client, add, monkeypatch):
