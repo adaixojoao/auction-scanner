@@ -173,6 +173,9 @@ CERTS_DIR = __import__("pathlib").Path(__file__).resolve().parent / "certs"
 HOST_INTERMEDIATES = {
     "www.citius.mj.pt": ("letsencrypt-yr2.pem",),
     "citius.mj.pt": ("letsencrypt-yr2.pem",),
+    # e-leiloes.pt: sends only its leaf, signed by Sectigo DV R36.
+    "e-leiloes.pt": ("sectigo-dv-r36.pem",),
+    "www.e-leiloes.pt": ("sectigo-dv-r36.pem",),
 }
 
 
