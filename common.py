@@ -159,7 +159,28 @@ class ScraperSession(requests.Session):
         return super().request(method, url, **kwargs)
 
 
-def make_session(*, verify: bool = True, timeout: float = 20,
+CERTS_DIR = __import__("pathlib").Path(__file__).resolve().parent / "certs"
+
+
+@functools.lru_cache(maxsize=None)
+def ca_bundle_with(*pem_names: str) -> str:
+    """Path of a CA bundle: certifi's roots plus the intermediates in certs/.
+
+    For a host that serves the wrong intermediate: verification stays on, and
+    the missing link is supplied instead of turned off.
+    """
+    import certifi
+    import tempfile
+    from pathlib import Path
+    data = Path(certifi.where()).read_bytes()
+    for name in pem_names:
+        data += b"\n" + (CERTS_DIR / name).read_bytes()
+    out = Path(tempfile.gettempdir()) / f"auction-scanner-ca-{'-'.join(pem_names)}.pem"
+    out.write_bytes(data)
+    return str(out)
+
+
+def make_session(*, verify: bool | str = True, timeout: float = 20,
                  headers: dict | None = None) -> ScraperSession:
     """Session used by every scraper.
 

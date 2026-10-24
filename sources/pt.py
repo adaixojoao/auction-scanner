@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
+from common import (LOG, ca_bundle_with, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, uf_parish, utcnow_iso)
 from db import upsert_listing
 from identity_map import (assign_citius_lot_id, assign_leilosoc_lot_id,
@@ -51,6 +51,12 @@ def eleiloes_tipo(item: dict) -> str:
 def _eleiloes_session():
     """Authenticate HTTPS normally; never bypass a certificate-chain failure."""
     return make_session(verify=True, timeout=30)
+
+
+def _citius_session():
+    # citius.mj.pt (2026-10-24) has a leaf signed by Let's Encrypt YR2 but
+    # serves YR1; the YR2 intermediate is supplied so verification stays on.
+    return make_session(verify=ca_bundle_with("letsencrypt-yr2.pem"), timeout=30)
 
 
 @register("eleiloes", "PT")
@@ -872,7 +878,7 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
 @register("citius", "PT")
 def scrape_citius(db, max_price: float = 50000, **_):
     """citius.mj.pt — court forced sales (carta fechada, negociação particular)."""
-    session = make_session(timeout=30)
+    session = _citius_session()
     r = session.get(CITIUS_URL, timeout=15)
     r.raise_for_status()
 

@@ -55,8 +55,8 @@ def check_citius_active(processes: dict[str, str]) -> dict[str, str]:
     Returns:
         {process_number: estado_string} — "Em venda" means active
     """
-    session = requests.Session()
-    session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    from sources.pt import _citius_session
+    session = _citius_session()
 
     r = session.get(CITIUS_URL, timeout=15)
     soup = BeautifulSoup(r.text, "html.parser")
