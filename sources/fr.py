@@ -328,9 +328,11 @@ ENCHERES_PUBLIQUES = CardSite(
 )
 
 
-@register("encheres_publiques", "FR")
+@register("encheres_publiques", "FR", default=False)
 def scrape_encheres_publiques(db, max_price: float = 100000, **_):
-    """encheres-publiques.com — French judicial property auctions."""
+    """encheres-publiques.com — French judicial property auctions.
+    Refuses automated requests (HTTP 403, 15 runs in a row by 2026-10-24);
+    licitor.com ("france") covers the same tribunal sales."""
     return scrape_cards(db, ENCHERES_PUBLIQUES, max_price)
 
 

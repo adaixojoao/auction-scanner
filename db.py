@@ -837,15 +837,17 @@ def _extreme_clearances(db: sqlite3.Connection, listing_ids: set[str],
     """
     if not listing_ids:
         return set()
-    placeholders = ",".join("?" * len(listing_ids))
+    # The clearances are a handful of reviewed rows, while listing_ids can be
+    # every listing (tens of thousands: past SQLite's variable limit), so the
+    # table is read whole and filtered here.
     rows = db.execute(
-        f"SELECT listing_id, evidence_rev_sum FROM investigation_clearances"
-        f" WHERE listing_id IN ({placeholders})",
-        tuple(listing_ids),
+        "SELECT listing_id, evidence_rev_sum FROM investigation_clearances"
     ).fetchall()
     cleared: set[str] = set()
     for r in rows:
         lid = r["listing_id"]
+        if lid not in listing_ids:
+            continue
         stored_rev = r["evidence_rev_sum"]
         if ev_rev_sums is not None:
             current_rev = ev_rev_sums.get(lid, 0)

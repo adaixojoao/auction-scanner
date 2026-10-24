@@ -153,6 +153,10 @@ class ScraperSession(requests.Session):
 
     def request(self, method, url, **kwargs):
         kwargs.setdefault("timeout", self.default_timeout)
+        if self.verify is True and "verify" not in kwargs:
+            extra = HOST_INTERMEDIATES.get(urllib.parse.urlsplit(url).hostname or "")
+            if extra:
+                kwargs["verify"] = ca_bundle_with(*extra)
         if self._rotator is not None:
             self._rotator.tick()
             kwargs.setdefault("proxies", self._rotator.current_proxy)
@@ -160,6 +164,16 @@ class ScraperSession(requests.Session):
 
 
 CERTS_DIR = __import__("pathlib").Path(__file__).resolve().parent / "certs"
+
+
+# Hosts that serve the wrong intermediate certificate, and the one they need.
+# Every ScraperSession verifies these with it, so a link check or a detail
+# page reaches them as the scraper does. citius.mj.pt: leaf signed by Let's
+# Encrypt YR2, served with YR1 (2026-10-24).
+HOST_INTERMEDIATES = {
+    "www.citius.mj.pt": ("letsencrypt-yr2.pem",),
+    "citius.mj.pt": ("letsencrypt-yr2.pem",),
+}
 
 
 @functools.lru_cache(maxsize=None)

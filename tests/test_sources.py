@@ -19,7 +19,8 @@ def test_registry_is_complete():
     # (and, since Sept 2026, the ones behind a bot wall or a broken certificate)
     assert optional == {"idealista", "courtbid", "novobanco", "aeat",
                         "sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece",
-                        "veilingbiljet", "justiz_auktion", "haya", "subastasactivas"}
+                        "veilingbiljet", "justiz_auktion", "haya", "subastasactivas",
+                        "zvg_de", "encheres_publiques"}
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
@@ -1225,3 +1226,19 @@ def test_land_searches_go_up_to_the_land_limit():
     assert land_max_price({}, 30000) == LAND_MAX_PRICE == 100000
     assert land_max_price({"land_max_price": 80000}, 30000) == 80000
     assert land_max_price({"land_max_price": 10000}, 30000) == 30000          # never below the house limit
+
+
+def test_citius_is_verified_with_its_missing_intermediate(monkeypatch):
+    """citius.mj.pt serves the wrong intermediate: any session (a scraper, the
+    link check) verifies it with the bundled YR2, never with verify off."""
+    import requests
+    from common import make_session
+    seen = {}
+    monkeypatch.setattr(requests.Session, "request",
+                        lambda self, method, url, **kw: seen.setdefault(url, kw.get("verify")))
+    s = make_session()
+    s.get("https://www.citius.mj.pt/portal/x")
+    s.get("https://example.org/")
+    citius = seen["https://www.citius.mj.pt/portal/x"]
+    assert isinstance(citius, str) and open(citius, "rb").read().count(b"BEGIN CERTIFICATE") > 100
+    assert seen["https://example.org/"] is None

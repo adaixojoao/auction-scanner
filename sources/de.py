@@ -168,9 +168,11 @@ def scrape_justiz_auktion(db, max_price: float = 50000, **_):
     return total_scraped
 
 
-@register("zvg_de", "DE")
+@register("zvg_de", "DE", default=False)
 def scrape_zvg_de(db, max_price: float = 100000, **_):
-    """zwangsversteigerung.de — private aggregator of German forced auctions."""
+    """zwangsversteigerung.de — private aggregator of German forced auctions.
+    Never matched its pages (paged results, members-only parts); its lots are
+    the court sales zvg already reads from zvg-portal.de (2026-10-24)."""
     session = make_session()
     base = "https://www.zwangsversteigerung.de"
     resp = session.get(f"{base}/immobilien/", params={"verkehrswert_max": int(max_price)})

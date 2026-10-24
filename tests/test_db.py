@@ -454,6 +454,16 @@ def test_clearance_without_rev_sum_is_stale_after_migration(db, add, monkeypatch
     assert listing_id not in ids, "clearance with NULL rev_sum must not grant finalist access"
 
 
+def test_clearances_read_for_more_ids_than_sqlite_variables(db):
+    """A scan asks about every listing at once (2026-10-24: ~80,000), past
+    SQLite's variable limit; the clearance read must not bind one per id."""
+    from db import _extreme_clearances, clear_extreme_discount
+    clear_extreme_discount(db, "eleiloes:kept", note="checked", evidence_rev_sum=0)
+    ids = {f"x:{i}" for i in range(40_000)} | {"eleiloes:kept"}
+    assert _extreme_clearances(db, ids, ev_rev_sums={}) == {"eleiloes:kept"}
+    assert _extreme_clearances(db, {"x:1"}) == set()
+
+
 def test_clearance_with_matching_rev_sum_passes(db, add, monkeypatch):
     """A clearance whose evidence_rev_sum matches the current sum reaches load_best (Task 7)."""
     import scoring
