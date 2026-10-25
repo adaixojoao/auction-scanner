@@ -534,7 +534,12 @@ def title_town_conflict(item: dict, towns: dict[str, dict] | None) -> dict | Non
     if not pos:
         return None
     import prices
-    pattern, names = _town_pattern(towns, (item.get("country") or "PT").upper())
+    country = (item.get("country") or "PT").upper()
+    # Every town of the country is matched against the title: a score that
+    # notes what it read (db._Reads) notes that country's towns, and the regex
+    # stays cached on the plain index.
+    whole = getattr(towns, "country_rows", None)
+    pattern, names = _town_pattern(whole(country) if whole else towns, country)
     own = prices.place_key(municipality(item) or "")
     for m in (pattern.finditer(normalize(item.get("title") or "")) if pattern else ()):
         town = names[m.group(0)]

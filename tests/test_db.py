@@ -351,6 +351,85 @@ def test_a_scan_that_only_sees_a_listing_again_keeps_its_score(db, monkeypatch):
     assert calls == []
 
 
+def _counting_scores(monkeypatch):
+    import db as dbmod
+    rescored = []
+    real = dbmod._score_one
+    monkeypatch.setattr(dbmod, "_score_one", lambda item, *a, **kw: (rescored.append(item["id"]), real(item, *a, **kw))[1])
+    return rescored
+
+
+def _add_town(db, country, name, lat, lon):
+    from geo import town_key
+    db.execute("INSERT OR REPLACE INTO places (key, country, name, lat, lon, checked_at) VALUES (?, ?, ?, ?, ?, ?)",
+               (town_key(country, name), country, name, lat, lon, "2026-10-25T00:00:00+00:00"))
+    db.commit()
+
+
+def test_a_scan_rescores_only_the_listings_whose_shared_entries_changed(db, monkeypatch):
+    """After a scan (refresh=True) a listing is scored again only when an entry
+    of the shared tables its score read changed (2026-10-25: a scan used to
+    score all 135,000 again, an hour, because any new town or price moved the
+    tables' counts)."""
+    from common import make_listing
+    from db import load_listings, upsert_listing
+    for n, place in ((1, "Lamego"), (2, "Penela")):
+        upsert_listing(db, make_listing("eleiloes", str(n), title="Moradia T3", price=20000 + n, area_m2=120,
+                                        concelho=place, district="Viseu" if n == 1 else "Coimbra"))
+    db.commit()
+    _add_town(db, "PT", "Porto", 41.15, -8.61)                 # the town index is not empty
+    first = {it["id"]: it["score"] for it in load_listings(db, apply_min_score=False, include_hidden=True)}
+    rescored = _counting_scores(monkeypatch)
+
+    # The scan finds a listing elsewhere and a town nobody here is in.
+    upsert_listing(db, make_listing("spain", "9", country="ES", title="Casa", price=15000, area_m2=90,
+                                    concelho="Pravia", district="Asturias"))
+    db.commit()
+    _add_town(db, "ES", "Pravia", 43.49, -6.11)
+    again = {it["id"]: it["score"] for it in load_listings(db, apply_min_score=False, include_hidden=True,
+                                                           refresh=True)}
+    assert rescored == ["spain:9"]                             # only the new listing
+    assert {k: again[k] for k in first} == first
+
+    # Lamego is placed on the map: the one listing that reads that town is scored again.
+    rescored.clear()
+    _add_town(db, "PT", "Lamego", 41.10, -7.81)
+    load_listings(db, apply_min_score=False, include_hidden=True, refresh=True)
+    assert rescored == ["eleiloes:1"]
+
+
+def test_kept_scores_from_before_reads_were_noted_are_scored_once_more(db, monkeypatch):
+    """A score kept with the old inputs (a JSON list of counts) has no record
+    of what it read: a refresh scores it again, and after that it is kept."""
+    import db as dbmod
+    from common import make_listing
+    from db import load_listings, upsert_listing
+    upsert_listing(db, make_listing("eleiloes", "1", title="Moradia T3", price=20000, area_m2=120))
+    db.commit()
+    load_listings(db, apply_min_score=False)
+    key, data, _ = dbmod._SCORED["home"]["eleiloes:1"]
+    dbmod._SCORED["home"]["eleiloes:1"] = (key, data, "[3, 0, 0, \"\", 0]")
+    rescored = _counting_scores(monkeypatch)
+    load_listings(db, apply_min_score=False, refresh=True)
+    load_listings(db, apply_min_score=False, refresh=True)
+    assert rescored == ["eleiloes:1"]
+
+
+def test_noted_reads_survive_tuple_keys_and_whole_country_reads():
+    from db import _NONEMPTY, _reads_record, _reads_unchanged
+    tables = {"floor_market": {("PT", "viseu", "house", 3): (110, 7)},
+              "towns": {"PT:lamego": {"name": "Lamego"}, "ES:pravia": {"name": "Pravia"}}}
+    log = {("floor_market", ("PT", "viseu", "house", 3)), ("floor_market", _NONEMPTY),
+           ("towns", ("*", "PT"))}
+    record = _reads_record(log, tables, {})
+    assert _reads_unchanged(record, tables, {})
+    tables["towns"]["ES:gijon"] = {"name": "Gijón"}             # another country's town
+    assert _reads_unchanged(record, tables, {})
+    tables["towns"]["PT:penela"] = {"name": "Penela"}           # one of the country's
+    assert not _reads_unchanged(record, tables, {})
+    assert not _reads_unchanged("[1, 2]", tables, {})
+
+
 def test_a_goal_not_kept_in_memory_is_read_back_from_the_scores_file(db, monkeypatch):
     """The app keeps only the goals it has open (dashboard.MAX_LISTS). Another
     goal's scores are read back from disk, never scored again, and let go after."""

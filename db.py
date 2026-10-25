@@ -1992,6 +1992,131 @@ def _open_home_supply(rows) -> dict[tuple[str, str], int]:
     return counts
 
 
+# ─── What one score read from the shared tables ─────────────────────
+# A scan adds towns, auction results, land and floor prices and rounds, so
+# after it every listing used to be scored again (an hour at 135,000). A
+# listing reads only a few entries of those tables: its town, its district's
+# land median, its case. While it is scored, each table is seen through
+# _Reads, which notes the keys asked for; the score is kept with those keys
+# and a hash of what they held, and a refresh scores it again only when one
+# of them now holds something else.
+
+_NONEMPTY = "__nonempty__"         # `if table:` — whether the table has anything
+
+
+class _Reads:
+    """A shared table as one listing's score sees it: reads pass through and
+    the keys asked for are noted in `log` as (table name, key)."""
+    __slots__ = ("data", "name", "log")
+
+    def __init__(self, data, name: str, log: set):
+        self.data, self.name, self.log = data if data is not None else {}, name, log
+
+    def get(self, key, default=None):
+        self.log.add((self.name, key))
+        return self.data.get(key, default)
+
+    def __getitem__(self, key):
+        self.log.add((self.name, key))
+        return self.data[key]
+
+    def __contains__(self, key):
+        self.log.add((self.name, key))
+        return key in self.data
+
+    def __bool__(self):
+        self.log.add((self.name, _NONEMPTY))
+        return bool(self.data)
+
+    def country_rows(self, country: str) -> dict:
+        """The whole table, for a read that matches against all of a country's
+        entries (geo.title_town_conflict): noted as that country's part."""
+        self.log.add((self.name, ("*", country)))
+        return self.data
+
+    def _whole(self):
+        self.log.add((self.name, ("*", "")))
+        return self.data
+
+    def __len__(self):
+        return len(self._whole())
+
+    def __iter__(self):
+        return iter(self._whole())
+
+    def keys(self):
+        return self._whole().keys()
+
+    def values(self):
+        return self._whole().values()
+
+    def items(self):
+        return self._whole().items()
+
+
+def _unread(table):
+    """The plain table behind a _Reads view (or the table itself)."""
+    return table.data if isinstance(table, _Reads) else table
+
+
+def _part_hash(table: dict, scope: str, memo: dict, name: str) -> str:
+    """A hash of every entry of `table` (scope ""), or of one country's
+    entries (keys "PT:…"), worked out once per load."""
+    memo_key = (name, scope)
+    if memo_key not in memo:
+        prefix = f"{scope}:" if scope else ""
+        h = hashlib.sha1()
+        for k in sorted((k for k in table if not prefix or str(k).startswith(prefix)), key=repr):
+            h.update(repr((k, table[k])).encode())
+        memo[memo_key] = h.hexdigest()
+    return memo[memo_key]
+
+
+def _reads_hash(reads, tables: dict, memo: dict) -> str:
+    """What the noted keys hold now in `tables` ({name: table})."""
+    h = hashlib.sha1()
+    for name, key in reads:
+        table = tables.get(name) or {}
+        if key == _NONEMPTY:
+            value = bool(table)
+        elif isinstance(key, tuple) and len(key) == 2 and key[0] == "*":
+            value = _part_hash(table, key[1], memo, name)
+        else:
+            value = table.get(key)
+        h.update(repr((name, key, value)).encode())
+    return h.hexdigest()
+
+
+def _encode_key(key):
+    if isinstance(key, tuple):
+        return {"t": [_encode_key(k) for k in key]}
+    return key
+
+
+def _decode_key(key):
+    if isinstance(key, dict):
+        return tuple(_decode_key(k) for k in key["t"])
+    return key
+
+
+def _reads_record(log: set, tables: dict, memo: dict) -> str:
+    """The `inputs` kept with a score: the keys it read and what they held."""
+    reads = sorted(log, key=repr)
+    return json.dumps({"r": [[n, _encode_key(k)] for n, k in reads],
+                       "h": _reads_hash(reads, tables, memo)}, default=str)
+
+
+def _reads_unchanged(record: str | None, tables: dict, memo: dict) -> bool:
+    """True when every key a kept score read still holds what it held then.
+    A score kept before reads were noted (a JSON list) has no such record."""
+    try:
+        kept = json.loads(record or "")
+        reads = [(n, _decode_key(k)) for n, k in kept["r"]]
+        return _reads_hash(reads, tables, memo) == kept["h"]
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
 def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land_market,
                climate_on, mode="home", floor_market=None) -> float:
     """Everything load_listings works out for one listing (kept in the score cache)."""
@@ -2332,9 +2457,11 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     # Homes still listed in each district. The investment score mentions the
     # count and does not change its points for it, so a scan's refresh is enough.
     supply: dict[tuple[str, str], int] = _open_home_supply(rows) if mode == "invest" else {}
-    supply_fp = ",".join(f"{a}|{b}:{n}" for (a, b), n in sorted(supply.items()))
-    inputs = json.dumps([len(towns), sum(len(v) for v in closes.values()), len(land_market), supply_fp,
-                         len(floor_market)])
+    # The shared tables a score reads. A refresh scores a listing again only
+    # when an entry its kept score read now holds something else (_Reads).
+    shared = {"first_price": first_price, "cases": cases, "towns": towns, "closes": closes,
+              "land_market": land_market, "floor_market": floor_market or {}, "supply": supply}
+    shared_memo: dict = {}
     if _SCORED_FOR[0] != context:
         _SCORED.clear()
         _LOADED_MODES.clear()
@@ -2404,7 +2531,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                                      ev_rev_sums.get(item["id"], 0))).encode()).hexdigest()
         kept = scored.get(item["id"])
         results = None
-        if kept and kept[0] == row_key and not (refresh and kept[2] != inputs):
+        if kept and kept[0] == row_key and not (refresh and not _reads_unchanged(kept[2], shared, shared_memo)):
             results = kept[1]
             if isinstance(results, bytes):           # as read from the scores file
                 results = _unpack(results)
@@ -2413,20 +2540,26 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         if results is not None:
             item.update(results)
         else:
+            log: set = set()
+            views = {name: _Reads(table, name, log) for name, table in shared.items()}
             if supply:
                 district = (item.get("district") or "").strip()
                 if district:
-                    n = supply.get(((item.get("country") or "PT").upper(), normalize(district)), 0)
+                    n = views["supply"].get(((item.get("country") or "PT").upper(), normalize(district)), 0)
                     if n > 1:
                         item["open_homes_here"] = n - 1
-            _score_one(item, now, filters, first_price, cases, towns, closes, land_market,
-                       climate_on, mode, floor_market)
+            _score_one(item, now, filters, views["first_price"], views["cases"], views["towns"],
+                       views["closes"], views["land_market"], climate_on, mode, views["floor_market"])
             if mode in ("both", "invest"):
                 if valid_hours is None:
                     valid_hours = _availability_valid_hours()
                 _shadow_evaluate(item, now, db=db,
                                  ev_rev_sum=ev_rev_sums.get(item["id"], 0),
                                  valid_hours=valid_hours)
+            # The listing leaves with the plain tables, not the noting views.
+            item["land_market"] = land_market
+            item["floor_market"] = floor_market or {}
+            inputs = _reads_record(log, shared, shared_memo)
             _optional = {"research_only", "extreme_discount", "floor_guess"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
