@@ -64,23 +64,27 @@ def _home_type(item: dict) -> str:
 def observed_floors(rows) -> dict:
     """{(country, district key, "house"/"flat", bedrooms): (lower quartile m², count)}
     from listings that state a floor area, with the whole country under the
-    district key "". Only groups of MIN_FLOORS or more."""
+    district key "". Only groups of MIN_FLOORS or more.
+
+    Bedrooms None holds every floor of that type and place, whatever its
+    bedrooms: what a notice that names no typology is guessed from (an Italian
+    court notice says "due camere", not T2)."""
     groups: dict[tuple, list[float]] = {}
     for r in rows:
         r = dict(r)
         area = float(r.get("area_m2") or 0)
         if not FLOOR_RANGE[0] <= area <= FLOOR_RANGE[1]:
             continue
-        n = typology(r)
-        if n is None:
-            continue
         text = f"{r.get('title') or ''}\n{r.get('description') or ''}"
         if land_figure(text, area) or footprint_figure(text, area):
             continue
+        n = typology(r)
         country = (r.get("country") or "PT").upper()
         kind = _home_type(r)
         for district in (normalize(r.get("district")), ""):
-            groups.setdefault((country, district, kind, n), []).append(area)
+            if n is not None:
+                groups.setdefault((country, district, kind, n), []).append(area)
+            groups.setdefault((country, district, kind, None), []).append(area)
     out = {}
     for key, values in groups.items():
         if len(values) >= MIN_FLOORS:
@@ -99,7 +103,7 @@ def floor_guess(item: dict) -> dict | None:
                 "basis": f"the house's outline on the map, {house['levels']} levels"}
     n = typology(item)
     index = item.get("floor_market") or {}
-    if n is not None and index:
+    if index:
         country = (item.get("country") or "PT").upper()
         kind = _home_type(item)
         district = normalize(item.get("district"))
@@ -108,7 +112,8 @@ def floor_guess(item: dict) -> dict | None:
         for key, where in places:
             found = index.get(key)
             if found:
-                label = f"T{n} {'flats' if kind == 'flat' else 'houses'}"
+                homes = "flats" if kind == "flat" else "houses"
+                label = f"T{n} {homes}" if n is not None else f"{homes} of any size (no bedrooms stated)"
                 return {"m2": float(found[0]),
                         "basis": f"{label} in {where}: the lower quartile of {found[1]} floors the scanner has seen"}
     if house.get("m2"):

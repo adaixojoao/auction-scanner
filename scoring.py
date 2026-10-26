@@ -1665,11 +1665,17 @@ def _investment_unpriced(item: dict) -> bool:
     return "province average" in label and "rest of province" not in label
 
 
+# Live and invest takes a "caution" climate (owner's choice, 2026-10-26) at this
+# share of its rank: a hotter future counts against it, and "poor" stays out.
+CLIMATE_CAUTION_FACTOR = 0.85
+
+
 def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     """A home worth living in and worth the money, or nothing.
 
     The pin has to be the house, the sea within 10 km of that pin (closer scores
-    higher), the climate good or excellent, and the floor area a real floor. It is then the worse of
+    higher), the climate good or excellent (caution at CLIMATE_CAUTION_FACTOR of the rank), and the
+    floor area a real floor (or an educated guess, charged). It is then the worse of
     the living score and the investment score, so a beach flat with no resale
     case and a cheap inland yield both stay off this list.
 
@@ -1706,8 +1712,8 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         else:
             blocked.append(f"not by the beach ({km:.1f} km)")
     grade = climate_score(item["climate"], "home")["grade"] if item.get("climate") else "unknown"
-    if grade not in ("good", "excellent"):
-        blocked.append(f"climate {grade} — living here needs a good or excellent grade")
+    if grade not in ("good", "excellent", "caution"):
+        blocked.append(f"climate {grade} — living here needs a good, excellent or caution grade")
     area, source = building_m2(item)
     if source not in SCORED_FLOORS or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
         blocked.append("floor area unknown, or the figure is the plot rather than the building")
@@ -1745,10 +1751,16 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
                  f"(the {worst['precision']} pin, ±{worst['spread']:g} km)")
         rank = guesses.charge(rank, [place])
         named.append(place)
+    caution = []
+    if grade == "caution" and rank > 0:
+        rank *= CLIMATE_CAUTION_FACTOR
+        caution = [f"climate caution — ranked {round((1 - CLIMATE_CAUTION_FACTOR) * 100)}% lower "
+                   "(hotter by 2071-2100 than a good grade allows)"]
     weaker = [r for r in weaker if not r.startswith("ranked on ")]
     return rank, [
         f"the worse of the two ({display_score(home_raw):.0f} to live in, "
         f"{display_score(inv_raw):.0f} as an investment)",
+        *caution,
         *([guesses.reason(named)] if named else []),
         *weaker[:6],
     ]

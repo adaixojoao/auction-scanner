@@ -61,8 +61,11 @@ def test_which_guess_comes_first():
     elsewhere = guesses.floor_guess(_home(floor_market=index, district="Braga"))
     assert "T3 houses in PT" in elsewhere["basis"]
 
+    # No bedrooms named: every house seen in the district, whatever its size (2026-10-26).
+    any_size = guesses.floor_guess(_home(floor_market=index, description="prédio urbano"))
+    assert "houses of any size (no bedrooms stated) in Viana do Castelo" in any_size["basis"]
+
     # Nothing to go on: no guess.
-    assert guesses.floor_guess(_home(floor_market=index, description="prédio urbano")) is None
     assert guesses.floor_guess(_home(floor_market={})) is None
 
     # The map's outline with its levels beats what was seen elsewhere.

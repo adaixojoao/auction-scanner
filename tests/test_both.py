@@ -29,6 +29,23 @@ def test_a_house_by_the_sea_in_a_good_climate_is_the_worse_of_the_two_scores(mon
     assert why[0].startswith("the worse of the two")
 
 
+def test_a_caution_climate_is_ranked_lower_not_shut_out(monkeypatch):
+    """Owner's choice (2026-10-26): a caution grade is ranked at
+    CLIMATE_CAUTION_FACTOR of what it would score; poor stays out."""
+    import pytest
+    import scoring
+    monkeypatch.setattr("scoring.local_price", lambda item: (1200.0, "a city series"))
+    caution = beach_home(climate={"hot_days": {"rcp45_2071-2100": 10}, "stress": {"stress_2080": 1}})
+    monkeypatch.setattr(scoring, "climate_score", lambda c, mode: {"grade": "caution"})
+    charged, why = score_detail(caution, mode="both")
+    monkeypatch.setattr(scoring, "climate_score", lambda c, mode: {"grade": "good"})
+    plain = score_detail(caution, mode="both")[0]
+    assert charged == pytest.approx(plain * scoring.CLIMATE_CAUTION_FACTOR) and charged > 0
+    assert any(r.startswith("climate caution — ranked") for r in why)
+    monkeypatch.setattr(scoring, "climate_score", lambda c, mode: {"grade": "poor"})
+    assert score_detail(caution, mode="both")[0] == 0
+
+
 def test_one_catastro_dwelling_counts_as_the_floor(monkeypatch):
     monkeypatch.setattr("scoring.local_price", lambda item: (1200.0, "a city series"))
     raw = json.loads(SALE)
@@ -68,9 +85,11 @@ def test_the_gates_keep_off_what_is_not_a_home_to_live_in():
     assert score_detail(unknown, mode="both")[0] == 0
     assert "climate unknown" in score_detail(unknown, mode="both")[1][0]
 
+    # A caution grade is no longer a gate (owner's choice, 2026-10-26): it is
+    # charged on the rank once the listing is priced, and poor stays out.
     caution = beach_home(climate={"hot_days": {"rcp45_2071-2100": 10}, "stress": {"stress_2080": 1}})
-    assert score_detail(caution, mode="both")[0] == 0
-    assert "climate caution" in score_detail(caution, mode="both")[1][0]
+    assert not any(r.startswith("climate caution — living here")
+                   for r in score_detail(caution, mode="both")[1])
 
     dry = beach_home()
     dry.pop("beach")
