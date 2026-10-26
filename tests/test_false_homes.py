@@ -168,3 +168,19 @@ def test_a_share_named_in_words_is_skipped():
         sc, reasons = score_detail(item(country="SK", source="nehnutelnosti", title="Rodinný dom", price=3780,
                                         area_m2=124, description=desc))
         assert sc == 0 and "fractional" in reasons[0], desc
+
+
+def test_a_parking_space_glued_to_its_price_in_a_villa_complex_is_not_a_home():
+    """pvp 4647094 (2026-10-26): "1.500,00Posto auto … complesso immobiliare
+    denominato “Villa Danieli”" reached Live and invest as a home."""
+    text = ("Lotto 12 – prezzo base euro 1.500,00Posto auto in Tortolì (NU) nel complesso "
+            "immobiliare denominato “Villa Danieli” identificato al catasto al foglio 10")
+    assert property_kind(item(source="pvp_giustizia", country="IT", tipo="immobile",
+                              title=text[:90], description=text)) == "other"
+
+
+def test_a_timeshare_week_with_a_typo_is_a_timeshare():
+    """BOE SUB-JA-2026-266502: "semana 22 de cada añño del apartamento 513"."""
+    from scoring import is_timeshare
+    assert is_timeshare("semana 22 de cada añño del apartamento 513 sito avenida del sol")
+    assert is_timeshare("durante la semana 37 de cada año")

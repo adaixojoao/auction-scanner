@@ -1,3 +1,4 @@
+import pytest
 """Live and invest checks.
 
 LI-01, LI-03, LI-04 and LI-07 began as characterisation of unsafe behaviour.
@@ -102,7 +103,7 @@ def test_li03_both_mode_ignores_nested_goal_weights(monkeypatch):
     invest_default = score_detail(house, mode="invest", now=NOW)[0]
     assert home_beach_off < home_default
     assert invest_price_off != invest_default
-    assert both == min(home_beach_off, invest_price_off)
+    assert both == pytest.approx((home_beach_off + invest_price_off) / 2)
     assert scoring.w("beach") == 1.0
 
 

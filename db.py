@@ -1708,6 +1708,64 @@ def minimum_bar(item: dict, mode: str) -> float:
     return float(item.get("score") or 0)
 
 
+def _both_scale(db, found: tuple[float, float] | None) -> tuple[float, float] | None:
+    """The best live and invest raw scores among Live and invest's shown
+    candidates. A full list (`found`) keeps them in the scores file, so a list
+    of a few listings (one listing's panel) is scaled the same way."""
+    sdb = _score_db(db)
+    try:
+        if sdb is not None:
+            with _SCORE_LOCK, sdb:
+                sdb.execute("CREATE TABLE IF NOT EXISTS both_scale (k TEXT PRIMARY KEY, live REAL, invest REAL)")
+                if found:
+                    sdb.execute("INSERT OR REPLACE INTO both_scale VALUES ('best', ?, ?)", found)
+                    return found
+                row = sdb.execute("SELECT live, invest FROM both_scale WHERE k = 'best'").fetchone()
+                if row:
+                    return row[0], row[1]
+    except sqlite3.Error:
+        pass                                 # busy: scaled on this list alone
+    return found
+
+
+def _normalize_both(db, items: list[dict], *, full: bool, min_score: float,
+                    include_hidden: bool, slim_hidden: bool = False) -> list[dict]:
+    """Live and invest's score: the average of the living and the investment
+    raw scores, each divided by the best shown candidate's so that one is 100,
+    times the listing's charges (both_factor: a guessed beach, a hot climate).
+    Owner's choice, 2026-10-26. The minimum score is applied to that."""
+    from scoring import display_score
+    priced = [it for it in items if it.get("both_factor") is not None]
+    shown = [it for it in priced if not it.get("hidden_reason")]
+    found = None
+    if full and shown:
+        found = (max(it["live_rank"] for it in shown), max(it["invest_rank"] for it in shown))
+    scale = _both_scale(db, found) if (full and found) or not full else None
+    if not scale and priced:
+        pool = shown or priced
+        scale = (max(it["live_rank"] for it in pool), max(it["invest_rank"] for it in pool))
+    if scale:
+        best_live, best_invest = scale
+        for it in priced:
+            live = it["live_rank"] / best_live if best_live > 0 else 0.0
+            invest = it["invest_rank"] / best_invest if best_invest > 0 else 0.0
+            rank = 100 * (min(live, 1.0) + min(invest, 1.0)) / 2 * it["both_factor"]
+            it["rank"] = rank
+            it["score"] = display_score(rank)
+    out = []
+    for it in items:
+        if (min_score and not it.get("hidden_reason") and it.get("status") != "shortlisted"):
+            bar = minimum_bar(it, "both")
+            if bar < min_score:
+                if not include_hidden:
+                    continue
+                it["hidden_reason"] = f"score {bar:.0f} < filters.min_score {min_score}"
+                if slim_hidden:
+                    it = {**{k: it[k] for k in _SLIM if k in it}, "_slim": True}
+        out.append(it)
+    return out
+
+
 def hidden_category(reason: str | None) -> str | None:
     """Group a hidden_reason into dismissed / expired / duplicate / stale / filtered / low score."""
     if not reason:
@@ -1793,7 +1851,9 @@ _SLIM = ("id", "source", "country", "tipo", "title", "description", "concelho", 
          "score", "rank", "category", "kind", "climate", "is_recent",
          # what research selection reads (research_selection): a hidden lead
          # must still be selectable for investigation from the slim list.
-         "extreme_discount", "invest_score", "live_score", "research_only", "investigation_cleared")
+         "extreme_discount", "invest_score", "live_score", "research_only", "investigation_cleared",
+         # Live and invest's two raw scores, scaled against the best (_normalize_both).
+         "live_rank", "invest_rank", "both_factor")
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
 
@@ -2581,7 +2641,8 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             item["land_market"] = land_market
             item["floor_market"] = floor_market or {}
             inputs = _reads_record(log, shared, shared_memo)
-            _optional = {"research_only", "extreme_discount", "floor_guess"}
+            _optional = {"research_only", "extreme_discount", "floor_guess",
+                         "live_rank", "invest_rank", "both_factor"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
                 if _k in item:
@@ -2599,7 +2660,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 climate_writes.append((item["raw_json"], item["id"]))
                 item.pop("_climate_write", None)
 
-        if reason is None and min_score and item["status"] != "shortlisted":
+        # Live and invest's score is known only against the best candidate:
+        # its minimum is applied after the list is scaled (_normalize_both).
+        if reason is None and min_score and item["status"] != "shortlisted" and mode != "both":
             # Priced leads clear the minimum on the combined score. An unvalued
             # Live and invest lead has no investment rank, so its living score
             # is the number that has to clear it. The combined score stays 0.
@@ -2636,6 +2699,9 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         if reason and slim_hidden:
             item = {**{k: item[k] for k in _SLIM if k in item}, "_slim": True}
         items.append(item)
+    if mode == "both":
+        items = _normalize_both(db, items, full=not where, min_score=min_score,
+                                include_hidden=include_hidden, slim_hidden=slim_hidden)
     if climate_writes:
         db.executemany("UPDATE listings SET raw_json = ? WHERE id = ?", climate_writes)
         for rj, lid in climate_writes:

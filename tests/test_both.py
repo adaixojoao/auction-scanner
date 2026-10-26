@@ -1,3 +1,4 @@
+import pytest
 """Live and invest: a home that passes as a place to live, ranked by the worse score."""
 import json
 
@@ -25,13 +26,13 @@ def test_a_house_by_the_sea_in_a_good_climate_is_the_worse_of_the_two_scores(mon
     both, why = score_detail(house, mode="both")
     home = score_detail(house, mode="home")[0]
     invest = score_detail(house, mode="invest")[0]
-    assert both == min(home, invest) > 0
-    assert why[0].startswith("the worse of the two")
+    assert both == pytest.approx((home + invest) / 2) and both > 0
+    assert why[0].startswith("the average of the two")
 
 
 def test_a_caution_climate_is_ranked_lower_not_shut_out(monkeypatch):
-    """Owner's choice (2026-10-26): a caution grade is ranked at
-    CLIMATE_CAUTION_FACTOR of what it would score; poor stays out."""
+    """Owner's choice (2026-10-26): caution and poor grades are ranked at
+    their CLIMATE_FACTORS share of what they would score; unknown stays out."""
     import pytest
     import scoring
     monkeypatch.setattr("scoring.local_price", lambda item: (1200.0, "a city series"))
@@ -43,7 +44,11 @@ def test_a_caution_climate_is_ranked_lower_not_shut_out(monkeypatch):
     assert charged == pytest.approx(plain * scoring.CLIMATE_CAUTION_FACTOR) and charged > 0
     assert any(r.startswith("climate caution — ranked") for r in why)
     monkeypatch.setattr(scoring, "climate_score", lambda c, mode: {"grade": "poor"})
-    assert score_detail(caution, mode="both")[0] == 0
+    poor, why = score_detail(caution, mode="both")
+    assert 0 < poor <= plain * scoring.CLIMATE_POOR_FACTOR and poor < charged
+    assert any(r.startswith("climate poor — ranked 40% lower") for r in why)
+    monkeypatch.setattr(scoring, "climate_score", lambda c, mode: {"grade": "unknown"})
+    assert score_detail(caution, mode="both")[0] == 0          # never read: still out
 
 
 def test_one_catastro_dwelling_counts_as_the_floor(monkeypatch):
@@ -77,9 +82,9 @@ def test_the_gates_keep_off_what_is_not_a_home_to_live_in():
     assert score_detail(guessed, mode="both")[0] == 0
     assert "not the house" in score_detail(guessed, mode="both")[1][0]
 
+    # A poor grade is charged on the rank, not a gate (2026-10-26).
     hot = beach_home(climate={"hot_days": {"rcp45_2071-2100": 30}, "stress": {"stress_2080": 1}})
-    assert score_detail(hot, mode="both")[0] == 0
-    assert "climate poor" in score_detail(hot, mode="both")[1][0]
+    assert not any(r.startswith("climate poor — living here") for r in score_detail(hot, mode="both")[1])
 
     unknown = beach_home(climate=None)
     assert score_detail(unknown, mode="both")[0] == 0
@@ -111,7 +116,7 @@ def test_the_floor_has_to_be_a_real_floor(monkeypatch):
     both = score_detail(notice, mode="both")[0]
     home = score_detail(notice, mode="home")[0]
     invest = score_detail(notice, mode="invest")[0]
-    assert both == min(home, invest) > 0
+    assert both == pytest.approx((home + invest) / 2) and both > 0
 
 
 def test_a_stored_area_the_notice_calls_land_is_not_a_floor(monkeypatch):
@@ -121,7 +126,7 @@ def test_a_stored_area_the_notice_calls_land_is_not_a_floor(monkeypatch):
     assert "floor" in score_detail(land, mode="both")[1][0]
     house = beach_home(area_m2=150, description="área total do terreno de 150m2 e habitação de 80 m2")
     both = score_detail(house, mode="both")[0]
-    assert both == min(score_detail(house, mode="home")[0], score_detail(house, mode="invest")[0]) > 0
+    assert both == pytest.approx((score_detail(house, mode="home")[0] + score_detail(house, mode="invest")[0]) / 2) and both > 0
 
 
 def test_a_plot_stays_on_its_own_goals():

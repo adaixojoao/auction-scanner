@@ -152,8 +152,13 @@ def test_each_guess_costs_its_share_of_the_rank(db, add, monkeypatch):
     import db as dbmod
     _seen(add)
     _sale(add, "guessed")
-    charged = _scores(db, "both")["citius:guessed"]["rank"]
+    # Before Live and invest is scaled against its best candidate (here this
+    # one, which would scale its own charges away): the average times charges.
+    def unscaled(it):
+        return (it["live_rank"] + it["invest_rank"]) / 2 * it["both_factor"]
+
+    charged = unscaled(_scores(db, "both")["citius:guessed"])
     monkeypatch.setattr(guesses, "GUESS_FACTOR", 1.0)
     dbmod.forget_scores(db)
-    free = _scores(db, "both")["citius:guessed"]["rank"]
+    free = unscaled(_scores(db, "both")["citius:guessed"])
     assert charged == pytest.approx(free * 0.95 ** 2)        # the floor and the sea

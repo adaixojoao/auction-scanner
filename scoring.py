@@ -161,7 +161,8 @@ TIMESHARE_PATTERNS = [
 ]
 _TIMESHARE_RE = re.compile(
     r"\b(?:semanas?|semaines?|settiman[ae])\b[^.;]{0,60}?\b(?:de cada|cada|por|chaque|ogni|every|each)\s+"
-    r"(?:ano|año|annee|année|anno|year)\b"
+    # "semana 22 de cada añño" (BOE, a typo): any run of n/ñ
+    r"(?:a[nñ]{1,2}o|annee|année|anno|year)\b"
     r"|\bdurante (?:a|la|as|las) semanas?\s+(?:n\.?\s*[ºo°]\s*)?\d+"
     r"|\(\s*semanas?\s+\d+\s*\)",
     re.I)
@@ -980,7 +981,12 @@ def off_western_continental(item: dict) -> str | None:
 
 # "Villa" before a capitalised name after a place marker is a place (Italian
 # cadastral "C.C. Villa Banale", "frazione Villa Rosa"), not a detached house.
-_VILLA_PLACE = re.compile(r"\b(C\.\s?C\.|loc\.|localit[aà]|frazione|fraz\.|comune di|in|a|di)\s+Villa\s+(?=[A-Z])")
+# So is a complex's name: 'nel complesso immobiliare denominato "Villa Danieli"'.
+_VILLA_PLACE = re.compile(r"\b(C\.\s?C\.|loc\.|localit[aà]|frazione|fraz\.|comune di|denominat[oa]|in|a|di)"
+                          r"\s+[\"“”']?Villa\s+(?=[A-Z])")
+# A figure glued to the next word ("prezzo base euro 1.500,00Posto auto"): the
+# word is read on its own.
+_GLUED_FIGURE = re.compile(r"(\d)(?=[A-Za-zÀ-ÿ]{3})")
 
 
 # The description opening on what the thing is ("A. Piena proprietà di ufficio…")
@@ -1045,7 +1051,7 @@ def property_kind(item: dict) -> str | None:
     urban_words = URBAN_PLOT_WORDS + (["solar"] if item.get("country") == "ES" else [])
 
     def kind_of(text: str) -> str | None:
-        text = _VILLA_PLACE.sub(r"\1 ", text)
+        text = _VILLA_PLACE.sub(r"\1 ", _GLUED_FIGURE.sub(r"\1 ", text))
         if _is_household_goods(text):
             return "other"
         norm = normalize(text)
@@ -1665,19 +1671,22 @@ def _investment_unpriced(item: dict) -> bool:
     return "province average" in label and "rest of province" not in label
 
 
-# Live and invest takes a "caution" climate (owner's choice, 2026-10-26) at this
-# share of its rank: a hotter future counts against it, and "poor" stays out.
+# Live and invest takes a "caution" or "poor" climate (owner's choice,
+# 2026-10-26) at this share of its rank: a hotter future counts against it and
+# is named, instead of leaving the tab empty along the Mediterranean.
 CLIMATE_CAUTION_FACTOR = 0.85
+CLIMATE_POOR_FACTOR = 0.60
+CLIMATE_FACTORS = {"caution": CLIMATE_CAUTION_FACTOR, "poor": CLIMATE_POOR_FACTOR}
 
 
 def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple[float, list[str]]:
     """A home worth living in and worth the money, or nothing.
 
     The pin has to be the house, the sea within 10 km of that pin (closer scores
-    higher), the climate good or excellent (caution at CLIMATE_CAUTION_FACTOR of the rank), and the
-    floor area a real floor (or an educated guess, charged). It is then the worse of
-    the living score and the investment score, so a beach flat with no resale
-    case and a cheap inland yield both stay off this list.
+    higher), the climate read (caution and poor charged on the rank, CLIMATE_FACTORS), and the
+    floor area a real floor (or an educated guess, charged). It is then the
+    average of the living score and the investment score, each scaled so the
+    best candidate is 100 (db._normalize_both).
 
     Two gaps may be filled with an educated guess (guesses.py), named in the
     reasons and charged on the rank: a floor the notice does not state, and,
@@ -1712,8 +1721,8 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         else:
             blocked.append(f"not by the beach ({km:.1f} km)")
     grade = climate_score(item["climate"], "home")["grade"] if item.get("climate") else "unknown"
-    if grade not in ("good", "excellent", "caution"):
-        blocked.append(f"climate {grade} — living here needs a good, excellent or caution grade")
+    if grade not in ("good", "excellent", *CLIMATE_FACTORS):
+        blocked.append(f"climate {grade} — living here needs a climate grade that was read")
     area, source = building_m2(item)
     if source not in SCORED_FLOORS or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
         blocked.append("floor area unknown, or the figure is the plot rather than the building")
@@ -1745,21 +1754,31 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
     weaker = home_why if home_raw <= inv_raw else inv_why
     # The floor guess is charged inside each score already; the beach guess here.
     named = [g for g in (_floor_guessed(item),) if g]
-    rank = min(home_raw, inv_raw)
+    # The average of the two, each against the best candidate's (owner's
+    # choice, 2026-10-26): db.load_listings divides live_rank and invest_rank by
+    # the highest of each among the shown candidates, so the best home to live
+    # in and the best investment are each 100, and multiplies by both_factor.
+    # What is returned here is the same average before that scaling.
+    factor = 1.0
     if worst:
         place = (f"the sea within {worst['km']:.1f} km at worst "
                  f"(the {worst['precision']} pin, ±{worst['spread']:g} km)")
-        rank = guesses.charge(rank, [place])
+        factor = guesses.charge(factor, [place])
         named.append(place)
     caution = []
-    if grade == "caution" and rank > 0:
-        rank *= CLIMATE_CAUTION_FACTOR
-        caution = [f"climate caution — ranked {round((1 - CLIMATE_CAUTION_FACTOR) * 100)}% lower "
+    climate_factor = CLIMATE_FACTORS.get(grade)
+    if climate_factor:
+        factor *= climate_factor
+        caution = [f"climate {grade} — ranked {round((1 - climate_factor) * 100)}% lower "
                    "(hotter by 2071-2100 than a good grade allows)"]
+    item["live_rank"] = max(0.0, home_raw)
+    item["invest_rank"] = max(0.0, inv_raw)
+    item["both_factor"] = factor
+    rank = (item["live_rank"] + item["invest_rank"]) / 2 * factor
     weaker = [r for r in weaker if not r.startswith("ranked on ")]
     return rank, [
-        f"the worse of the two ({display_score(home_raw):.0f} to live in, "
-        f"{display_score(inv_raw):.0f} as an investment)",
+        f"the average of the two ({display_score(home_raw):.0f} to live in, "
+        f"{display_score(inv_raw):.0f} as an investment, each against the best candidate)",
         *caution,
         *([guesses.reason(named)] if named else []),
         *weaker[:6],

@@ -351,6 +351,26 @@ def test_a_scan_that_only_sees_a_listing_again_keeps_its_score(db, monkeypatch):
     assert calls == []
 
 
+def test_live_and_invest_is_the_average_of_both_against_the_best(db):
+    """Owner's choice (2026-10-26): each raw score is divided by the best shown
+    candidate's, so the best home to live in and the best investment are each
+    100; the score is their average times the listing's charges. A list of one
+    listing is scaled against the best kept from the full list."""
+    from db import _normalize_both
+    a = {"id": "a", "live_rank": 80.0, "invest_rank": 20.0, "both_factor": 1.0, "hidden_reason": None}
+    b = {"id": "b", "live_rank": 40.0, "invest_rank": 40.0, "both_factor": 0.5, "hidden_reason": None}
+    gone = {"id": "c", "live_rank": 500.0, "invest_rank": 500.0, "both_factor": 1.0, "hidden_reason": "stale"}
+    out = _normalize_both(db, [a, b, gone], full=True, min_score=0, include_hidden=True)
+    assert a["rank"] == 75.0                                   # (80/80 + 20/40) / 2
+    assert b["rank"] == 37.5                                   # (40/80 + 40/40) / 2 × 0.5
+    assert len(out) == 3                                       # a hidden one does not set the scale
+    one = {"id": "a", "live_rank": 80.0, "invest_rank": 20.0, "both_factor": 1.0, "hidden_reason": None}
+    _normalize_both(db, [one], full=False, min_score=0, include_hidden=False)
+    assert one["rank"] == 75.0                                 # the same scale, not its own
+    low = _normalize_both(db, [dict(b)], full=False, min_score=40, include_hidden=False)
+    assert low == []                                           # under the minimum once scaled
+
+
 def _counting_scores(monkeypatch):
     import db as dbmod
     rescored = []
