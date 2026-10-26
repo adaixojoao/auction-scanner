@@ -1708,6 +1708,35 @@ def minimum_bar(item: dict, mode: str) -> float:
     return float(item.get("score") or 0)
 
 
+# A long load says how far it is (owner's choice, 2026-10-26: an hour of
+# rescoring showed nothing, and looked stuck). Every PROGRESS_EVERY listings
+# of a goal of at least PROGRESS_FROM: the goal, the share done and the time
+# left at this pace.
+PROGRESS_FROM = 20_000
+PROGRESS_EVERY = 10_000
+
+
+class _Progress:
+    def __init__(self, mode: str, total: int):
+        import time
+        self.mode, self.total, self.done, self.started = mode, total, 0, time.monotonic()
+
+    def step(self) -> None:
+        import time
+        self.done += 1
+        if self.done % PROGRESS_EVERY:
+            return
+        spent = time.monotonic() - self.started
+        left = spent / self.done * (self.total - self.done)
+        LOG.info(f"Scores {self.mode}: {self.done:,} of {self.total:,} "
+                 f"({self.done / self.total:.0%}), about {left / 60:.0f} min left")
+
+
+# Live and invest keeps a home whose all-in cost is over the cash by up to this
+# share on the tab, flagged as a near miss (owner's choice, 2026-10-26).
+NEAR_MISS = 1.25
+
+
 def _both_scale(db, found: tuple[float, float] | None) -> tuple[float, float] | None:
     """The best live and invest raw scores among Live and invest's shown
     candidates. A full list (`found`) keeps them in the scores file, so a list
@@ -1735,7 +1764,7 @@ def _normalize_both(db, items: list[dict], *, full: bool, min_score: float,
     times the listing's charges (both_factor: a guessed beach, a hot climate).
     Owner's choice, 2026-10-26. The minimum score is applied to that."""
     priced = [it for it in items if it.get("both_factor") is not None]
-    shown = [it for it in priced if not it.get("hidden_reason")]
+    shown = [it for it in priced if not it.get("hidden_reason") and not it.get("near_miss")]
     found = None
     if full and shown:
         found = (max(it["live_rank"] for it in shown), max(it["invest_rank"] for it in shown))
@@ -1854,7 +1883,7 @@ _SLIM = ("id", "source", "country", "tipo", "title", "description", "concelho", 
          # must still be selectable for investigation from the slim list.
          "extreme_discount", "invest_score", "live_score", "research_only", "investigation_cleared",
          # Live and invest's two raw scores, scaled against the best (_normalize_both).
-         "live_rank", "invest_rank", "both_factor")
+         "live_rank", "invest_rank", "both_factor", "near_miss")
 _SCORED_FOR: list = [None]
 _SHARED: dict = {"key": None, "value": None}
 
@@ -2563,7 +2592,10 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     climate_writes = []
 
     items = []
+    progress = _Progress(mode, len(rows)) if len(rows) >= PROGRESS_FROM else None
     for r in rows:
+        if progress:
+            progress.step()
         item = dict(r)
         # Rows written before safe_url() existed may still hold javascript: links.
         item["url"] = safe_url(item.get("url"))
@@ -2591,9 +2623,17 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             seen = parse_dt(item.get("last_seen"))
             ok = last_ok.get(item["source"])
             gone = gone_reason(item)
+            off_list = bool(seen and ok and ok - seen > STALE_AFTER)
+            if off_list:
+                from confirm import reachable_since
+                if reachable_since(item, seen):
+                    # Off the source's list, but its page still opens
+                    # (confirm.check_stale): shown, and said to be unconfirmed.
+                    item["unconfirmed_since"] = f"{seen:%Y-%m-%d}"
+                    off_list = False
             if gone:
                 reason = f"gone: {gone}"
-            elif seen and ok and ok - seen > STALE_AFTER:
+            elif off_list:
                 reason = f"stale: gone from {item['source']} since {seen:%Y-%m-%d}"
             elif item["status"] != "shortlisted":
                 reason = filter_reason(item, filters, mode)
@@ -2687,6 +2727,13 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 over = costs.over_cash(item, cash, bid=chosen["amount"] or None,
                                        typical=typical, basis=chosen["label"],
                                        settings=_cfg)
+                # A near miss (owner's choice, 2026-10-26): within NEAR_MISS of
+                # the cash it stays on the tab, flagged, and does not set the scale.
+                if over and not costs.over_cash(item, cash * NEAR_MISS, bid=chosen["amount"] or None,
+                                                typical=typical, basis=chosen["label"], settings=_cfg):
+                    item["near_miss"] = over
+                    item["reasons"] = [f"near miss — {over}", *(item.get("reasons") or [])]
+                    over = None
             else:
                 over = costs.over_cash(item, cash, typical=typical, settings=_cfg)
             if over:

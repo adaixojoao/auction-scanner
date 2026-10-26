@@ -203,6 +203,62 @@ def _due_for_recovery(db, now=None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# A listing gone from its source's list is "stale" (db.STALE_AFTER). Before
+# that hides Live and invest's candidates, their pages are opened: a deleted
+# page or one that says sold hides them for that reason, and a page that still
+# opens keeps them on the tab as unconfirmed (owner's choice, 2026-10-26: Avilés
+# was hidden as stale while its page was up).
+STALE_CHECK_N = 80
+
+
+def reachable_since(item: dict, seen) -> bool:
+    """The page was opened after the source last listed it, and it did not say
+    sold, reserved or deleted: the sale may still be on."""
+    from common import parse_dt
+    check = _raw(item).get("link_check") or {}
+    at = parse_dt(check.get("at"))
+    return bool(at and seen and at > seen and check.get("availability") == "unknown")
+
+
+def check_stale(db, cfg: dict, session, limit: int = STALE_CHECK_N) -> int:
+    """Open the pages of Live and invest's candidates that are about to be hidden
+    as stale and were not opened since. Returns how many were opened."""
+    import time
+
+    from common import parse_dt
+    from db import load_listings
+    rows = load_listings(db, filters=cfg.get("filters"), include_hidden=True, apply_min_score=False,
+                         mode="both", slim_hidden=True)
+    due = []
+    for it in rows:
+        if not (it.get("hidden_reason") or "").startswith("stale") or it.get("both_factor") is None:
+            continue
+        full = db.execute("SELECT * FROM listings WHERE id = ?", (it["id"],)).fetchone()
+        if not full or not full["url"]:
+            continue
+        full = dict(full)
+        check = parse_dt((_raw(full).get("link_check") or {}).get("at"))
+        if check and check > parse_dt(full.get("last_seen")):
+            continue                                   # opened since it was last listed
+        due.append((it.get("rank") or 0, full))
+    due.sort(key=lambda pair: -pair[0])
+    opened = 0
+    for _, it in due[:limit]:
+        try:
+            resp = session.get(it["url"], timeout=20)
+            status = getattr(resp, "status_code", 0) or 0
+            state, why = classify_response(status, getattr(resp, "text", "") or "")
+        except Exception as e:  # noqa: BLE001 — stays stale, tried again next scan
+            LOG.info(f"Stale check of {it['id']} failed ({type(e).__name__})")
+            continue
+        _store(db, it, state, why, requested=it["url"], final=str(getattr(resp, "url", "") or "") or None)
+        opened += 1
+        time.sleep(PAUSE_S)
+    if opened:
+        LOG.info(f"Stale check: {opened} pages opened")
+    return opened
+
+
 def check_top(db, cfg: dict, session) -> int:
     """Open the top of each goal. Returns how many listings left the list."""
     import time

@@ -51,6 +51,19 @@ def test_a_caution_climate_is_ranked_lower_not_shut_out(monkeypatch):
     assert score_detail(caution, mode="both")[0] == 0          # never read: still out
 
 
+def test_the_living_part_is_not_capped_by_the_climate_twice(monkeypatch):
+    """My home caps a poor or too hot climate; Live and invest charges the
+    climate once on its rank, so its living part is the uncapped score."""
+    import scoring
+    monkeypatch.setattr("scoring.local_price", lambda item: (1200.0, "a city series"))
+    hot = beach_home(climate={"hot_days": {"rcp45_2071-2100": 30}, "stress": {"stress_2080": 1}})
+    capped = score_detail(hot, mode="home")[0]
+    score_detail(hot, mode="both")
+    assert hot["live_rank"] > capped                           # the cap is off inside Live and invest
+    assert score_detail(hot, mode="home")[0] == capped         # and back on for My home
+    assert not scoring._CLIMATE_CAPS_OFF.get()
+
+
 def test_one_catastro_dwelling_counts_as_the_floor(monkeypatch):
     monkeypatch.setattr("scoring.local_price", lambda item: (1200.0, "a city series"))
     raw = json.loads(SALE)

@@ -265,6 +265,11 @@ POP_OUTLOOK_STEEP = -20
 POP_OUTLOOK_MILD = -2
 POP_OUTLOOK_STEEP_POINTS = -4
 _WEIGHTS: contextvars.ContextVar[dict] = contextvars.ContextVar("weights", default={})
+# Live and invest's living score: the climate is charged once, on the combined
+# rank (CLIMATE_FACTORS), so My home's climate caps (too hot, poor climate) do
+# not flatten every southern home to the same ceiling as well (2026-10-26).
+_CLIMATE_CAPS_OFF: contextvars.ContextVar[bool] = contextvars.ContextVar("climate_caps_off", default=False)
+_CLIMATE_REJECTS = ("rejected: poor climate", "rejected: too hot")
 _MODE: contextvars.ContextVar[str] = contextvars.ContextVar("score_mode", default="home")
 
 
@@ -994,6 +999,12 @@ _GLUED_FIGURE = re.compile(r"(\d)(?=[A-Za-zÀ-ÿ]{3})")
 _DESC_OPENS_AS_OTHER = re.compile(
     r"^\W*(?:[a-z]\W+)?(?:(?:diritto di |la )?(?:piena |intera |ed |e )*proprieta (?:di|su|del|della) "
     r"(?:un[oa']? ?)?)?(?:ufficio|uffici|negozio|magazzino|capannone|laboratorio|box auto|garage|posto auto)\b"
+    # "Piena proprietà di locali a piano terra ad uso cantina/deposito" (pvp 4649676)
+    r"|^\W*(?:[a-z]\W+)?(?:(?:diritto di |la )?(?:piena |intera |ed |e )*proprieta (?:di|su|del|della) )?"
+    r"(?:un[oa']? ?)?local[ei]\b[^.]{0,60}?\bad? uso (?:di )?(?:cantina|deposito|magazzino|garage|box|"
+    r"ufficio|negozio|laboratorio|soffitta|sgombero)\b"
+    # "Superficie accessoria legittimata a funzione non residenziale" (pvp 4624677)
+    r"|^\W*(?:[a-z]\W+)?superficie accessoria\b"
     # "Se vende local de 54 m2 … es un almacén", "Local comercial de 76 m2 con posibilidad de vivienda"
     r"|^\W*(?:se vende |vendo |venta de )?(?:un |el )?(?:local|almacen|nave)\b"
     r"|^\W*local commercial\b")
@@ -1735,10 +1746,12 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         item["beach"] = {**beach, "km": worst["km"], "approx": True,
                          "text": f"at worst about {worst['km']:.1f} km from the beach "
                                  f"(a {worst['precision']} pin, ±{worst['spread']:g} km)"}
+    caps_off = _CLIMATE_CAPS_OFF.set(True)
     try:
         home_raw, home_why = score_detail(item, now, targets, mode="home")
         inv_raw, inv_why = score_detail(item, now, targets, mode="invest")
     finally:
+        _CLIMATE_CAPS_OFF.reset(caps_off)
         if worst:
             item["beach"] = beach
     item["live_score"] = display_score(home_raw)
@@ -2184,8 +2197,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if kind == "home" and item.get("climate") and climate_score(item["climate"], "home")["grade"] == "poor":
         reasons.append("rejected: poor climate")
 
+    climate_off = _CLIMATE_CAPS_OFF.get()
     for label, cap in NOT_THE_GOAL_CAP.items():
-        if any(r.startswith(label) for r in reasons):
+        if any(r.startswith(label) and not (climate_off and r.startswith(_CLIMATE_REJECTS)) for r in reasons):
             caps.append(cap)
     s = _soft_ceiling(s, _soft_ceiling_reasons(item, kind), reasons)
     if caps:
@@ -2233,7 +2247,8 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float],
         elif future > REJECT_HOT_DAYS:
             reasons.append(f"rejected: too hot in 50-70 years ({detail})")
         elif future > TOO_MANY_HOT_DAYS:
-            caps.append(TOO_HOT_CAP)
+            if not _CLIMATE_CAPS_OFF.get():
+                caps.append(TOO_HOT_CAP)
             reasons.append(f"too hot in 50-70 years ({detail})")
         else:
             reasons.append(detail)
@@ -2247,7 +2262,8 @@ def _climate_points(c: dict, kind: str, reasons: list[str], caps: list[float],
         elif hot > REJECT_HOT_C:
             reasons.append(f"rejected: too hot in 50-70 years ({detail})")
         elif hot > TOO_HOT_C:
-            caps.append(TOO_HOT_CAP)
+            if not _CLIMATE_CAPS_OFF.get():
+                caps.append(TOO_HOT_CAP)
             reasons.append(f"too hot in 50-70 years ({detail})")
         else:
             reasons.append(detail)

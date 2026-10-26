@@ -206,6 +206,40 @@ def _research_rows(db, cfg: dict) -> list[dict]:
     return [full[i] for i in ids if i in full]
 
 
+# Live and invest's homes by the sea that its gates leave out only because the
+# pin is the town, not the house (2026-10-26: 68 of 222 visible seaside homes).
+# They are looked up every scan, beyond geo.GEOCODE_PER_SCAN, up to this many.
+SEASIDE_LOCATE_MAX = 400
+_TOWN_PIN = "position is the town, not the house"
+
+
+def seaside_unplaced(db, cfg: dict, limit: int = SEASIDE_LOCATE_MAX) -> list[dict]:
+    """Shown homes that Live and invest would judge once their pin is the house."""
+    from db import load_listings
+    rows = load_listings(db, filters=cfg.get("filters"), include_hidden=True, apply_min_score=False,
+                         mode="both", slim_hidden=True)
+    out = [it for it in rows if not it.get("hidden_reason") and it.get("kind") == "home"
+           and (it.get("reasons") or [""])[0].startswith(_TOWN_PIN)]
+    return out[:limit]
+
+
+def locate_seaside(db, cfg: dict, session) -> int:
+    """Look up the house of each seaside home held back by a town pin, then read
+    the climate of those that now have one. Returns how many were tried."""
+    import cadastre
+    import climate
+    import geo
+    seaside = seaside_unplaced(db, cfg)
+    if not seaside:
+        return 0
+    towns = geo.town_index(db)
+    geo.geocode_pending(db, session, seaside, limit=len(seaside), towns=towns)
+    cadastre.locate_pending(db, session, seaside, towns, limit=len(seaside))
+    climate.assess_pending(db, seaside, geo.town_index(db), seaside_first=True)
+    LOG.info(f"Seaside homes held back by a town pin: {len(seaside)} looked up")
+    return len(seaside)
+
+
 def _plots_for_site_check(db, cfg: dict) -> list[dict]:
     """The top forestry plots, then the top other plots. A habitat check of
     every plot is what made a scan slow; the ones you might buy are enough."""
@@ -306,6 +340,10 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     except Exception:  # noqa: BLE001 — a map position must never fail the scan
                         LOG.exception("Locating listings failed")
                     try:
+                        locate_seaside(db, cfg, make_session())
+                    except Exception:  # noqa: BLE001
+                        LOG.exception("Locating seaside homes failed")
+                    try:
                         import site_check                 # slope, forest type, Natura: land and forestry
                         plots = _plots_for_site_check(db, cfg)
                         site_check.check_pending(db, plots)
@@ -323,6 +361,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         confirm.check_top(db, cfg, make_session())
                     except Exception:  # noqa: BLE001 — a dead link must never fail the scan
                         LOG.exception("Link check failed")
+                    try:
+                        import confirm                   # off a source's list: is the page still up?
+                        confirm.check_stale(db, cfg, make_session())
+                    except Exception:  # noqa: BLE001
+                        LOG.exception("Stale check failed")
                     if not rescore(db, cfg):
                         raise RuntimeError("Post-enrichment rescoring failed; reports and alerts not published")
                     publication_rescored = True
@@ -375,3 +418,50 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
     finally:
         if own_db:
             db.close()
+
+
+# ─── A scan in its own process ───────────────────────────────────────
+# The app used to scan on one of its threads. A scan reads every goal's
+# ~135,000 listings, and that memory stayed with the app: on 2026-10-26 the
+# open app held 7 GB on a 5.9 GB PC and stalled everything else. A scan from
+# the app now runs in a child process, whose memory is returned when it ends;
+# the app then reloads its open lists.
+_BUSY_EXIT = 75
+
+
+def run_scan_apart(countries=None, source_names=None, label: str | None = None) -> int:
+    """Run run_scan() in a child process and wait for it. Raises ScanBusy when
+    another scan holds the lock; returns the child's exit code otherwise."""
+    import subprocess
+    args = json.dumps({"countries": countries, "source_names": source_names, "label": label})
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    code = subprocess.run([sys.executable, os.path.join(HERE, "pipeline.py"), "--scan", args],
+                          cwd=HERE, creationflags=flags).returncode
+    if code == _BUSY_EXIT:
+        raise ScanBusy("another scan is running")
+    try:
+        import dashboard
+        dashboard.refresh_cached_lists(utcnow_iso())   # the app's open lists, from the new scores
+    except Exception:  # noqa: BLE001 — the open page keeps the list it has
+        LOG.exception("Refreshing the lists failed")
+    return code
+
+
+def _scan_main(argv: list[str]) -> int:
+    import logging
+    import logging.handlers
+    handler = logging.handlers.RotatingFileHandler(os.path.join(HERE, "scan.log"), maxBytes=2_000_000,
+                                                   backupCount=2, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(logging.INFO)
+    args = json.loads(argv[argv.index("--scan") + 1])
+    try:
+        run_scan(**args)
+    except ScanBusy:
+        return _BUSY_EXIT
+    return 0
+
+
+if __name__ == "__main__" and "--scan" in sys.argv:
+    sys.exit(_scan_main(sys.argv))

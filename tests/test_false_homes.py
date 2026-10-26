@@ -184,3 +184,15 @@ def test_a_timeshare_week_with_a_typo_is_a_timeshare():
     from scoring import is_timeshare
     assert is_timeshare("semana 22 de cada añño del apartamento 513 sito avenida del sol")
     assert is_timeshare("durante la semana 37 de cada año")
+
+
+def test_a_cellar_or_an_accessory_space_at_auction_is_not_a_home():
+    """pvp 4649676 and 4624677 (2026-10-26) reached Live and invest's top as homes."""
+    for desc in ("Piena proprietà di locali a piano terra ad uso cantina/deposito, Carrara",
+                 "Superficie accessoria legittimata a funzione non residenziale, Nettuno"):
+        assert property_kind(item(source="pvp_giustizia", country="IT", tipo="immobile",
+                                  title=desc[:60], description=desc)) == "other", desc
+    # A flat that also has a cellar stays a home.
+    flat = "Piena proprietà di appartamento al piano primo con cantina ad uso deposito"
+    assert property_kind(item(source="pvp_giustizia", country="IT", tipo="immobile",
+                              title=flat[:60], description=flat)) == "home"

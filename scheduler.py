@@ -138,9 +138,9 @@ def due_jobs(now: datetime, last_runs: dict, schedule: dict | None = None) -> li
 # ─── Jobs ────────────────────────────────────────────────────────────
 
 def _scan(countries, label, source_names=None):
-    from pipeline import ScanBusy, run_scan
+    from pipeline import ScanBusy, run_scan_apart
     try:
-        run_scan(countries=countries, source_names=source_names, label=label)
+        run_scan_apart(countries=countries, source_names=source_names, label=label)
     except ScanBusy:
         LOG.info(f"{label}: another scan is running, skipped")
         return False   # still due: the scan that is running will record its own job

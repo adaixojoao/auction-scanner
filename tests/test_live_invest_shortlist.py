@@ -112,10 +112,11 @@ def test_good_condition_planning_uses_the_same_midpoint(db, add, monkeypatch):
         description="moradia em bom estado")
     hidden = [it for it in load_listings(db, filters={"min_score": 0}, mode="both", include_hidden=True)
               if it["id"] == "eleiloes:midpoint"]
-    # The hidden reason includes the midpoint planning text. With reserve from config the
-    # total shown may exceed planned["amount"], so we check for the midpoint label instead.
-    assert hidden and "middle of the repair range" in hidden[0]["hidden_reason"]
-    assert "eleiloes:midpoint" not in {it["id"] for it in load_listings(db, filters={"min_score": 0}, mode="both")}
+    # Over the cash at the midpoint, by less than db.NEAR_MISS: kept on the tab as a near
+    # miss (owner's choice, 2026-10-26) whose reason names the midpoint planning.
+    assert hidden and hidden[0]["hidden_reason"] is None
+    assert "middle of the repair range" in hidden[0]["near_miss"]
+    assert hidden[0]["reasons"][0].startswith("near miss")
     home_ids = {it["id"] for it in load_listings(db, filters={"min_score": 0}, mode="home")}
     assert "eleiloes:midpoint" in home_ids
     # Verify planning_view uses the midpoint. Use a budget just above the low

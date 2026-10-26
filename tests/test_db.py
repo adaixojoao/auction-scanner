@@ -203,6 +203,27 @@ def test_stale_listings_hidden_after_source_moves_on(db, add):
     assert visible == {"fresh"}
 
 
+def test_a_stale_listing_whose_page_still_opens_stays_unconfirmed(db, add):
+    """2026-10-26: off its source's list, but the page opened afterwards did not
+    say sold or deleted, so it stays shown and is said to be unconfirmed. A
+    page that says sold hides it for that."""
+    import json
+    add(external_id="up", title="Moradia", price=10000)
+    add(external_id="sold", title="Moradia", price=10000)
+    old = datetime.now(timezone.utc) - timedelta(days=10)
+    later = (old + timedelta(days=5)).isoformat()
+    db.execute("UPDATE listings SET last_seen=?", (old.isoformat(),))
+    for ext, state in (("up", "unknown"), ("sold", "withdrawn")):
+        db.execute("UPDATE listings SET raw_json=? WHERE external_id=?",
+                   (json.dumps({"link_check": {"availability": state, "at": later,
+                                               "gone": state == "withdrawn", "why": "vendido"}}), ext))
+    db.commit()
+    record_scrape(db, "eleiloes", count=1, status="ok")
+    shown = {it["external_id"]: it for it in load_listings(db, include_hidden=True)}
+    assert shown["up"]["hidden_reason"] is None and shown["up"]["unconfirmed_since"]
+    assert shown["sold"]["hidden_reason"].startswith("gone")
+
+
 def test_duplicates_are_flagged_not_deleted(db, add):
     add("eleiloes", "a", title="Moradia", price=20000, area_m2=100, concelho="Guarda",
         description="rich", district="Guarda")
@@ -370,6 +391,30 @@ def test_live_and_invest_is_the_average_of_both_against_the_best(db):
     assert one["rank"] == 75.0                                 # the same scale, not its own
     low = _normalize_both(db, [dict(b)], full=False, min_score=40, include_hidden=False)
     assert low == []                                           # under the minimum once scaled
+
+
+def test_a_near_miss_stays_flagged_and_does_not_set_the_scale(db):
+    from db import _normalize_both
+    a = {"id": "a", "live_rank": 50.0, "invest_rank": 50.0, "both_factor": 1.0, "hidden_reason": None}
+    near = {"id": "n", "live_rank": 200.0, "invest_rank": 200.0, "both_factor": 1.0, "hidden_reason": None,
+            "near_miss": "cash €70,000 all-in is over the €60,000 you can lose"}
+    _normalize_both(db, [a, near], full=True, min_score=0, include_hidden=False)
+    assert a["rank"] == 100.0                                  # the near miss is not the best
+    assert near["rank"] == 100.0                               # capped at the scale, still shown
+
+
+def test_a_long_load_logs_how_far_it_is(caplog, monkeypatch):
+    import logging
+
+    import db as dbmod
+    monkeypatch.setattr(dbmod, "PROGRESS_EVERY", 2)
+    progress = dbmod._Progress("land", 4)
+    with caplog.at_level(logging.INFO, logger="auction-scanner"):
+        for _ in range(4):
+            progress.step()
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Scores land")]
+    assert lines[0].startswith("Scores land: 2 of 4 (50%)") and "min left" in lines[0]
+    assert len(lines) == 2
 
 
 def _counting_scores(monkeypatch):

@@ -131,3 +131,38 @@ def test_pid_alive():
     import os
     from locks import pid_alive
     assert pid_alive(os.getpid()) and not pid_alive(999999999) and not pid_alive(0)
+
+
+def test_seaside_homes_held_back_only_by_a_town_pin_are_looked_up(monkeypatch):
+    """2026-10-26: 68 of 222 seaside homes missed Live and invest only because
+    the pin was the town; they are looked up beyond the per-scan budget."""
+    import db as dbmod
+    import pipeline
+    rows = [
+        {"id": "a", "kind": "home", "hidden_reason": None,
+         "reasons": ["position is the town, not the house — the beach and the climate are not this building's"]},
+        {"id": "b", "kind": "home", "hidden_reason": None, "reasons": ["climate unknown"]},
+        {"id": "c", "kind": "home", "hidden_reason": "stale", "reasons": ["position is the town, not the house"]},
+        {"id": "d", "kind": "other", "hidden_reason": None, "reasons": ["position is the town, not the house"]},
+    ]
+    monkeypatch.setattr(dbmod, "load_listings", lambda *a, **k: rows)
+    assert [it["id"] for it in pipeline.seaside_unplaced(None, {})] == ["a"]
+
+
+def test_a_scan_from_the_app_runs_in_its_own_process(monkeypatch):
+    """2026-10-26: a scan on the app's thread left the app at 7 GB. It runs in a
+    child process; a busy lock comes back as ScanBusy."""
+    import subprocess
+    import types
+
+    import pytest
+
+    import pipeline
+    ran = []
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: ran.append(cmd) or types.SimpleNamespace(returncode=0))
+    assert pipeline.run_scan_apart(countries=["PT"], label="Portugal") == 0
+    assert ran[0][1].endswith("pipeline.py") and ran[0][2] == "--scan" and '"PT"' in ran[0][3]
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=75))
+    with pytest.raises(pipeline.ScanBusy):
+        pipeline.run_scan_apart(source_names=["bcp"])

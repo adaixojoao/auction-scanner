@@ -801,6 +801,10 @@ def api_listings():
         from tops import place_unseen_homes_after
         ranked = sorted(items, key=SORT_KEYS["score"], reverse=True)
         ranked = place_unseen_homes_after(ranked, mode)
+        # Live and invest's near misses (over the cash by up to db.NEAR_MISS)
+        # come after every home within it, in their own order.
+        ranked = ([it for it in ranked if not it.get("near_miss")]
+                  + [it for it in ranked if it.get("near_miss")])
         if sort == "score":
             items = ranked[:cap]
             items.sort(key=SORT_KEYS["score"], reverse=(direction == "desc"))
@@ -1302,11 +1306,11 @@ def api_scan_status():
 
 
 def _start_scan(countries=None, source_names=None):
-    from pipeline import ScanBusy, run_scan
+    from pipeline import ScanBusy, run_scan_apart
 
     def work():
         try:
-            run_scan(countries=countries, source_names=source_names)
+            run_scan_apart(countries=countries, source_names=source_names)
         except ScanBusy:
             pass
         except Exception:
