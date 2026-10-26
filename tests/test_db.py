@@ -362,6 +362,7 @@ def test_live_and_invest_is_the_average_of_both_against_the_best(db):
     gone = {"id": "c", "live_rank": 500.0, "invest_rank": 500.0, "both_factor": 1.0, "hidden_reason": "stale"}
     out = _normalize_both(db, [a, b, gone], full=True, min_score=0, include_hidden=True)
     assert a["rank"] == 75.0                                   # (80/80 + 20/40) / 2
+    assert a["score"] == 75.0                                  # shown as is, not squeezed again
     assert b["rank"] == 37.5                                   # (40/80 + 40/40) / 2 × 0.5
     assert len(out) == 3                                       # a hidden one does not set the scale
     one = {"id": "a", "live_rank": 80.0, "invest_rank": 20.0, "both_factor": 1.0, "hidden_reason": None}

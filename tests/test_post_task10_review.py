@@ -176,7 +176,9 @@ def test_real_api_research_survives_request_score_cutoff(db, add, monkeypatch):
     lid = _extreme_lead(db, add, monkeypatch)
     dashboard._LISTS.clear()
     dashboard.app.config["TESTING"] = True
-    body = dashboard.app.test_client().get("/api/listings?mode=both&min_score=100").get_json()
+    # Live and invest scales the best candidate to 100 (here the only one), so
+    # a cutoff above every possible score.
+    body = dashboard.app.test_client().get("/api/listings?mode=both&min_score=101").get_json()
     assert all(it["id"] != lid for it in body["items"])
     assert lid in [c["id"] for c in body["research"]["valued"]]
 

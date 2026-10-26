@@ -1734,7 +1734,6 @@ def _normalize_both(db, items: list[dict], *, full: bool, min_score: float,
     raw scores, each divided by the best shown candidate's so that one is 100,
     times the listing's charges (both_factor: a guessed beach, a hot climate).
     Owner's choice, 2026-10-26. The minimum score is applied to that."""
-    from scoring import display_score
     priced = [it for it in items if it.get("both_factor") is not None]
     shown = [it for it in priced if not it.get("hidden_reason")]
     found = None
@@ -1751,7 +1750,9 @@ def _normalize_both(db, items: list[dict], *, full: bool, min_score: float,
             invest = it["invest_rank"] / best_invest if best_invest > 0 else 0.0
             rank = 100 * (min(live, 1.0) + min(invest, 1.0)) / 2 * it["both_factor"]
             it["rank"] = rank
-            it["score"] = display_score(rank)
+            # Already on 0-100 against the best: display_score's curve would
+            # squeeze it again (a 60 showed as 35, under the 40 minimum).
+            it["score"] = round(max(0.0, min(100.0, rank)), 1)
     out = []
     for it in items:
         if (min_score and not it.get("hidden_reason") and it.get("status") != "shortlisted"):
