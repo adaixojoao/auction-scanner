@@ -1992,6 +1992,26 @@ def _open_home_supply(rows) -> dict[tuple[str, str], int]:
     return counts
 
 
+# What makes a score depend on the date (scoring.py, rounds.py): a closing
+# date (days left, a forest sale's timing), a court case (its age, and an
+# earlier round that ends on some day), and a portal's publication date (years
+# on sale, a curve in years). Anything else scores the same tomorrow; at
+# 135,000 listings, scoring all of them again each day took an hour.
+_CASE_MARKS = ('"processo"', '"expediente"', '"caseNumber"')
+
+
+def _time_key(item: dict, now) -> str:
+    """The part of the date a listing's score depends on: the day, the month,
+    or nothing."""
+    raw = item.get("raw_json") or ""
+    raw = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+    if item.get("date_end") or any(mark in raw for mark in _CASE_MARKS):
+        return now.date().isoformat()
+    if '"data_publicacao"' in raw:
+        return now.strftime("%Y-%m")
+    return ""
+
+
 # ─── What one score read from the shared tables ─────────────────────
 # A scan adds towns, auction results, land and floor prices and rounds, so
 # after it every listing used to be scored again (an hour at 135,000). A
@@ -2449,11 +2469,12 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     _cfg = _load_config_safe()
     from common import price_to_pay
     cap = _work_limits()[0]
-    # A new day or new filters (with the weights) score again; new towns, auction
-    # results or land prices (a scan adds some every few minutes) do not throw the
-    # scores away: the kept ones stay on show until refresh=True (after each scan).
-    context = (now.date().isoformat(), json.dumps(filters or {}, sort_keys=True, default=str), climate_on,
-               _code_version())
+    # New filters (with the weights) or new scoring code score again; new towns,
+    # auction results or land prices (a scan adds some every few minutes) do not
+    # throw the scores away: the kept ones stay on show until refresh=True (after
+    # each scan). A new day scores again only the listings the date counts for
+    # (_time_key).
+    context = (json.dumps(filters or {}, sort_keys=True, default=str), climate_on, _code_version())
     # Homes still listed in each district. The investment score mentions the
     # count and does not change its points for it, so a scan's refresh is enough.
     supply: dict[tuple[str, str], int] = _open_home_supply(rows) if mode == "invest" else {}
@@ -2526,7 +2547,7 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             continue
 
         row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],
-                                     item["offer_outcome"], context,
+                                     item["offer_outcome"], context, _time_key(item, now),
                                      item.get("unconfirmed_since"),
                                      ev_rev_sums.get(item["id"], 0))).encode()).hexdigest()
         kept = scored.get(item["id"])

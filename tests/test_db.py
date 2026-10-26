@@ -398,6 +398,26 @@ def test_a_scan_rescores_only_the_listings_whose_shared_entries_changed(db, monk
     assert rescored == ["eleiloes:1"]
 
 
+def test_a_new_day_rescores_only_the_listings_the_date_counts_for(db, monkeypatch):
+    """A closing date or a court case makes a score depend on the day; a portal
+    listing with neither scores the same tomorrow (2026-10-26: every midnight
+    used to score all 135,000 again)."""
+    from datetime import datetime, timedelta, timezone
+    from common import make_listing
+    from db import load_listings, upsert_listing
+    day = datetime(2026, 10, 26, 9, tzinfo=timezone.utc)
+    upsert_listing(db, make_listing("imovirtual", "1", title="Moradia T3", price=20000, area_m2=120))
+    upsert_listing(db, make_listing("eleiloes", "2", title="Moradia T3", price=20000, area_m2=120,
+                                    date_end="2026-11-20T10:00:00"))
+    db.commit()
+    load_listings(db, apply_min_score=False, include_hidden=True, now=day)
+    rescored = _counting_scores(monkeypatch)
+    load_listings(db, apply_min_score=False, include_hidden=True, now=day + timedelta(hours=5))
+    assert rescored == []                                      # the same day: nothing
+    load_listings(db, apply_min_score=False, include_hidden=True, now=day + timedelta(days=1))
+    assert rescored == ["eleiloes:2"]                          # the next day: the sale with a date
+
+
 def test_kept_scores_from_before_reads_were_noted_are_scored_once_more(db, monkeypatch):
     """A score kept with the old inputs (a JSON list of counts) has no record
     of what it read: a refresh scores it again, and after that it is kept."""
