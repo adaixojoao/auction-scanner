@@ -222,8 +222,23 @@ def hot_days(lat: float, lon: float) -> dict:
 
 
 def flood_depth(lat: float, lon: float) -> float | None:
-    v = _sample(os.path.join(data_dir(), "jrc_flood", "Europe_RP100_filled_depth.tif"), lat, lon)
-    return round(v, 2) if v is not None and v > 0 else (0.0 if v is not None else None)
+    """Depth of the 100-year flood, 0.0 where it does not reach, None off the map.
+
+    The JRC map stores only flooded pixels: everything else on it is nodata
+    (it has no zeros), so nodata inside the grid means dry, not unread. Off
+    the grid (the Azores lie west of its -24.5° edge) stays unknown."""
+    path = os.path.join(data_dir(), "jrc_flood", "Europe_RP100_filled_depth.tif")
+    v = _sample(path, lat, lon)
+    if v is None:
+        src = _raster(path)
+        if src is None:
+            return None
+        try:
+            row, col = src.index(lon, lat)
+        except Exception:  # noqa: BLE001
+            return None
+        return 0.0 if 0 <= row < src.height and 0 <= col < src.width else None
+    return round(v, 2) if v > 0 else 0.0
 
 
 def permanent_water_km(lat: float, lon: float, max_km: float = WATER_KM) -> float | None:
@@ -534,7 +549,7 @@ def as_json(result: dict | None) -> str:
 # a few metres (a better position found later), or a rebuilt layer set is read
 # again.
 
-VERSION = 3   # 3: water searched to 1.5 km
+VERSION = 4   # 3: water searched to 1.5 km; 4: off-flood pixels on the JRC map read as dry
 
 
 def _place_key(pos: dict) -> str:

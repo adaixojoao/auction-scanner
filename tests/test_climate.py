@@ -456,3 +456,25 @@ def test_the_maps_a_batch_loaded_are_let_go_after_it(unindexed_layers, db, add):
         raw_json=json.dumps({"lat": 40.30, "lon": -7.30}))
     assert climate.assess_pending(db, [dict(r) for r in db.execute("SELECT * FROM listings")], {}) == 1
     assert climate.maps_loaded()
+
+
+def test_grade_cause_names_hazards_or_missing_maps():
+    from scoring import grade_cause
+    assert "severe water shortage" in grade_cause({"flags": ["severe_water_stress", "too_hot"], "reasons": []})
+    capped = grade_cause({"flags": [], "score": 68, "reasons": [
+        "hazard data incomplete (flood layer missing): grade capped at caution"]})
+    assert "flood layer missing" in capped and "not measured bad" in capped
+    assert "hotter" not in capped
+
+
+def test_flood_nodata_inside_the_map_is_dry(monkeypatch):
+    import climate
+
+    class Src:
+        height = width = 10
+        def index(self, lon, lat):
+            return (int(lat), int(lon))
+    monkeypatch.setattr(climate, "_sample", lambda *a: None)
+    monkeypatch.setattr(climate, "_raster", lambda p: Src())
+    assert climate.flood_depth(5, 5) == 0.0        # on the map, not flooded
+    assert climate.flood_depth(5, 50) is None      # off the map: unknown

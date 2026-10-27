@@ -1731,7 +1731,8 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
             blocked.append("not by the beach — the distance is not the house's")
         else:
             blocked.append(f"not by the beach ({km:.1f} km)")
-    grade = climate_score(item["climate"], "home")["grade"] if item.get("climate") else "unknown"
+    graded = climate_score(item["climate"], "home") if item.get("climate") else None
+    grade = graded["grade"] if graded else "unknown"
     if grade not in ("good", "excellent", *CLIMATE_FACTORS):
         blocked.append(f"climate {grade} — living here needs a climate grade that was read")
     area, source = building_m2(item)
@@ -1783,7 +1784,7 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
     if climate_factor:
         factor *= climate_factor
         caution = [f"climate {grade} — ranked {round((1 - climate_factor) * 100)}% lower "
-                   "(hotter by 2071-2100 than a good grade allows)"]
+                   f"({grade_cause(graded)})"]
     item["live_rank"] = max(0.0, home_raw)
     item["invest_rank"] = max(0.0, inv_raw)
     item["both_factor"] = factor
@@ -2349,6 +2350,34 @@ _LOCAL_SEVERE = {"deep_flood", "burnt_here", "repeated_burns", "home_in_flood_zo
 _REGIONAL_SEVERE = {"extreme_heat", "severe_water_stress", "very_high_fire_danger"}
 _CAUTION = {"too_hot", "flood_zone", "high_water_stress", "high_fire_danger", "fires_nearby",
             "water_but_floods"}
+
+
+_FLAG_WORDS = {
+    "extreme_heat": "extreme heat by 2071-2100", "too_hot": "too hot by 2071-2100",
+    "flood_zone": "in the 100-year flood zone", "deep_flood": "deep flooding",
+    "permanent_water": "river or lake close by", "water_but_floods": "river or lake that floods",
+    "severe_water_stress": "severe water shortage by 2080", "high_water_stress": "water shortage by 2080",
+    "burnt_here": "burnt here", "repeated_burns": "burnt more than once",
+    "fires_nearby": "fires nearby since 2016", "very_high_fire_danger": "very high fire danger by 2090",
+    "high_fire_danger": "high fire danger by 2090",
+}
+
+
+def grade_cause(graded: dict | None) -> str:
+    """Why the climate grade is not better, in words: the hazards it flags, or
+    the missing data that caps it ("caution" because a map has no reading here)."""
+    if not graded:
+        return "no climate reading"
+    flags = [_FLAG_WORDS.get(f, f.replace("_", " ")) for f in graded.get("flags") or []
+             if f != "home_in_flood_zone"]
+    capped = next((r.split(":")[0] for r in graded.get("reasons") or []
+                   if r.startswith("hazard data incomplete")), None)
+    parts = flags[:3]
+    if capped:
+        parts.append(f"{capped} — capped, not measured bad")
+    if not parts:
+        parts.append(f"climate score {graded.get('score')}")
+    return "; ".join(parts)
 
 
 def _climate_flags(c: dict, kind: str | None) -> list[str]:
