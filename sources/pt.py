@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from common import (LOG, ca_bundle_with, find_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
+from common import (LOG, ca_bundle_with, find_area, find_floor_area, find_price, make_listing, make_session, normalize, parse_date_dmy,
                     parse_price, safe_url, stable_id, to_number, uf_parish, utcnow_iso)
 from db import upsert_listing
 from identity_map import (assign_citius_lot_id, assign_leilosoc_lot_id,
@@ -560,6 +560,14 @@ def scrape_bcp(db, max_price: float = 50000, **_):
 CITIUS_URL = "https://www.citius.mj.pt/portal/consultas/consultasvenda.aspx"
 
 
+def _citius_area(text: str | None) -> float | None:
+    """The floor a Citius notice gives, not its land or footprint: "área total do
+    terreno de 150m2 área de implantação do edifício de 47,05m2 área bruta de
+    construção de 85,45m2" → 85.45 (2026-10-27: stored as 150, the land). A plot,
+    with no floor, keeps its land area."""
+    return find_floor_area(text) or find_area(text)
+
+
 # "S. João" and "R. das Flores" use a period that is not the end of the phrase.
 # A private-use mark stands in for that period while the name is cut out.
 _ABBR_DOT = re.compile(r"\b([A-Za-zÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç]{1,3})\.(?=\s)")
@@ -748,7 +756,7 @@ def citius_listing(f: dict, eid: str) -> dict:
         description=". ".join(desc_parts) if desc_parts else None,
         tipo="imovel",
         # "área coberta de 30 m2 e descoberta com 321 m2" → 30; "4,6905 ha" → 46905
-        area_m2=find_area(desc),
+        area_m2=_citius_area(desc),
         price=f["price"],
         min_price=f["price"],
         district=district, concelho=concelho, freguesia=freguesia,
@@ -855,7 +863,7 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
         if full:
             raw["descricao_completa"] = full[:3000]
             district, concelho, freguesia = _citius_extract_location(full)
-            sets = {"title": full[:120], "area_m2": find_area(full),
+            sets = {"title": full[:120], "area_m2": _citius_area(full),
                     "district": district, "concelho": concelho, "freguesia": freguesia}
             old_desc = db.execute("SELECT description FROM listings WHERE id = ?", (listing_id,)).fetchone()[0] or ""
             rest = old_desc.split(". Modalidade:", 1)

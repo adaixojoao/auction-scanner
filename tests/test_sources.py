@@ -1242,3 +1242,14 @@ def test_citius_is_verified_with_its_missing_intermediate(monkeypatch):
     citius = seen["https://www.citius.mj.pt/portal/x"]
     assert isinstance(citius, str) and open(citius, "rb").read().count(b"BEGIN CERTIFICATE") > 100
     assert seen["https://example.org/"] is None
+
+
+def test_a_citius_house_keeps_its_floor_not_its_land():
+    """citius 189/10.0TBVFC (2026-10-27): 150 m² of land was stored as the area
+    of an 85,45 m² house. A plot, with no floor, keeps its land."""
+    from sources.pt import _citius_area
+    house = ("casa baixa telhada destinada a habitação com quintal, área total do terreno de 150m2 "
+             "área de implantação do edifício de 47,05m2 área bruta de construção de 85,45m2")
+    assert _citius_area(house) == 85.45
+    assert _citius_area("Terreno para construção com 1200 m2") == 1200
+    assert _citius_area("Prédio rústico, área total: 4,6905 ha") == 46905
