@@ -220,15 +220,16 @@ def reachable_since(item: dict, seen) -> bool:
     return bool(at and seen and at > seen and check.get("availability") == "unknown")
 
 
-def check_stale(db, cfg: dict, session, limit: int = STALE_CHECK_N) -> int:
+def check_stale(db, cfg: dict, session, limit: int = STALE_CHECK_N, rows: list[dict] | None = None) -> int:
     """Open the pages of Live and invest's candidates that are about to be hidden
-    as stale and were not opened since. Returns how many were opened."""
+    as stale and were not opened since. Returns how many were opened. `rows`:
+    Live and invest already loaded (pipeline.both_rows), not loaded again."""
     import time
 
     from common import parse_dt
-    from db import load_listings
-    rows = load_listings(db, filters=cfg.get("filters"), include_hidden=True, apply_min_score=False,
-                         mode="both", slim_hidden=True)
+    if rows is None:
+        from pipeline import both_rows
+        rows = both_rows(db, cfg)
     due = []
     for it in rows:
         if not (it.get("hidden_reason") or "").startswith("stale") or it.get("both_factor") is None:

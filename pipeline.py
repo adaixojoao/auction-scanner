@@ -213,23 +213,30 @@ SEASIDE_LOCATE_MAX = 400
 _TOWN_PIN = "position is the town, not the house"
 
 
-def seaside_unplaced(db, cfg: dict, limit: int = SEASIDE_LOCATE_MAX) -> list[dict]:
-    """Shown homes that Live and invest would judge once their pin is the house."""
+def both_rows(db, cfg: dict) -> list[dict]:
+    """Live and invest with its hidden listings, slim: what the seaside lookup
+    and the stale check both start from (loaded once for the two)."""
     from db import load_listings
-    rows = load_listings(db, filters=cfg.get("filters"), include_hidden=True, apply_min_score=False,
+    return load_listings(db, filters=cfg.get("filters"), include_hidden=True, apply_min_score=False,
                          mode="both", slim_hidden=True)
+
+
+def seaside_unplaced(db, cfg: dict, limit: int = SEASIDE_LOCATE_MAX,
+                     rows: list[dict] | None = None) -> list[dict]:
+    """Shown homes that Live and invest would judge once their pin is the house."""
+    rows = both_rows(db, cfg) if rows is None else rows
     out = [it for it in rows if not it.get("hidden_reason") and it.get("kind") == "home"
            and (it.get("reasons") or [""])[0].startswith(_TOWN_PIN)]
     return out[:limit]
 
 
-def locate_seaside(db, cfg: dict, session) -> int:
+def locate_seaside(db, cfg: dict, session, rows: list[dict] | None = None) -> int:
     """Look up the house of each seaside home held back by a town pin, then read
     the climate of those that now have one. Returns how many were tried."""
     import cadastre
     import climate
     import geo
-    seaside = seaside_unplaced(db, cfg)
+    seaside = seaside_unplaced(db, cfg, rows=rows)
     if not seaside:
         return 0
     towns = geo.town_index(db)
@@ -339,8 +346,10 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         climate.assess_pending(db, best, geo.town_index(db), seaside_first=True)
                     except Exception:  # noqa: BLE001 — a map position must never fail the scan
                         LOG.exception("Locating listings failed")
+                    both = None                  # Live and invest, loaded once for two checks
                     try:
-                        locate_seaside(db, cfg, make_session())
+                        both = both_rows(db, cfg)
+                        locate_seaside(db, cfg, make_session(), rows=both)
                     except Exception:  # noqa: BLE001
                         LOG.exception("Locating seaside homes failed")
                     try:
@@ -363,7 +372,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         LOG.exception("Link check failed")
                     try:
                         import confirm                   # off a source's list: is the page still up?
-                        confirm.check_stale(db, cfg, make_session())
+                        confirm.check_stale(db, cfg, make_session(), rows=both)
                     except Exception:  # noqa: BLE001
                         LOG.exception("Stale check failed")
                     if not rescore(db, cfg):
