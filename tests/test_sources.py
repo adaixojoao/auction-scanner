@@ -282,6 +282,16 @@ def test_zvg_parses_aktenzeichen_blocks():
     assert rows[1]["eid"] == "49052" and rows[1]["price"] == 210000
 
 
+def test_zvg_value_skips_sheet_numbers_and_adds_lots():
+    from sources.de import zvg_value
+    assert zvg_value("Grundbuch von Stickenbüttel Blatt 649  lfd.Nr. 1: 258.000,00 €") == 258000
+    assert zvg_value("zu 1: 235.000 EUR zu 2:  4.800 EUR zu 3: 4.100 EUR") == 243900
+    assert zvg_value("Lfd. Nr. 1 Verkehrswert: 135.100,00 € davon entfällt auf Zubehör: 100,00 € "
+                     "Lfd. Nr. 2 Verkehrswert: 1.400,00 € Bietsicherheit ... IBAN: DE51 6005") == 136500
+    assert zvg_value("19.400,00 Bietsicherheit kann ... IBAN: DE51 6005 0101") == 19400
+    assert zvg_value("6.000,00 €") == 6000
+
+
 def test_poland_parses_licytacje_links():
     from sources.pl import parse_poland_list
     html = """

@@ -30,6 +30,35 @@ def _zvg_form(land: str) -> dict:
     return {**_ZVG_EMPTY, "land_abk": land}
 
 
+# "258.000,00 €", "4.800 EUR", "19.400,00" — German amounts, read one by one.
+_ZVG_AMOUNT = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{2})(?![\d.,])")
+# Text that is not the value: the deposit and bank details after it, the
+# accessories already counted inside a lot ("davon entfällt auf Zubehör: 100 €"),
+# land-register sheet numbers ("Blatt 649") and lot labels ("Lfd. Nr. 2", "zu 3:").
+_ZVG_NOT_VALUE = [
+    re.compile(r"Bietsicherheit.*$", re.I | re.S),
+    re.compile(r"davon\s+entf\S*\s+auf\s+Zubeh\S*\s*:?\s*[\d.,]+\s*(?:€|EUR)?", re.I),
+    re.compile(r"Blatt\s+\d+", re.I),
+    re.compile(r"(?:lfd\.?\s*Nr\.?|zu)\s*\d+\s*:?", re.I),
+]
+
+
+def zvg_value(text: str) -> float | None:
+    """Verkehrswert of the whole sale: the lots added up.
+
+    "Grundbuch ... Blatt 649 lfd.Nr. 1: 258.000,00 €" → 258000, not 649;
+    "zu 1: 235.000 EUR zu 2: 4.800 EUR" → 239800, not 1.
+    """
+    s = (text or "").replace(" ", " ")
+    for pattern in _ZVG_NOT_VALUE:
+        s = pattern.sub(" ", s)
+    amounts = [float(a.replace(".", "").replace(",", ".")) for a in _ZVG_AMOUNT.findall(s)]
+    amounts = [a for a in amounts if a > 0]
+    if amounts:
+        return sum(amounts)
+    return parse_price(s)
+
+
 def parse_zvg_results(html: str, land: str) -> list[dict]:
     """One sale per showZvg link. Rows for a sale follow its Aktenzeichen row
     in the results table until the next Detailansicht link."""
@@ -67,7 +96,7 @@ def parse_zvg_results(html: str, land: str) -> list[dict]:
             "eid": zid,
             "title": title,
             "description": f"Aktenzeichen: {az}. {ag}. {lage}. Verkehrswert: {vw}".strip(),
-            "price": parse_price(vw),
+            "price": zvg_value(vw),
             "district": (ag or land).strip()[:60] or None,
             "url": safe_url(href, ZVG_BASE),
             "date_end": parse_date_dmy(termin),
