@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1319,3 +1319,17 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_ran_reads_notary_notices_and_skips_court_sales():
+    from sources.it import ran_listings
+    html = """<input class="avvisolat" id="lat_64702" value=" 41.864558"><input id="lon_64702" value=" 12.486888">
+    <a href="/beni-immobili/dettaglio-avviso/GAV/64702"><div class="divScheda"><div class="divSchedaInfo">
+    <p>DISMISSIONE ENTE PUBBLICO - LVIII Bando ATER Roma. LOCALE DEPOSITO. Mq 37. Stato Libero.</p>
+    <ul><li>Prezzo dell'Avviso: <span>€ 3.548,25</span></li>
+    <li>Data e Ora fine raccolta offerte: <span>10/11/2026 17:00</span></li></ul></div>
+    <div class="divSchedaDett"><small>Via D. Chiodo 1, Roma (Roma)</small></div></div></a>
+    <a href="/beni-immobili/dettaglio-avviso/GAST/4627591"><div class="divSchedaInfo"><p>x</p></div></a>"""
+    (row,) = ran_listings(html)
+    assert row["id"] == "ran:64702" and row["price"] == 3548.25 and row["concelho"] == "Roma"
+    assert row["date_end"] == "2026-11-10T17:00:00" and row["area_m2"] == 37

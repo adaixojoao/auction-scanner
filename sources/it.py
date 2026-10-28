@@ -264,3 +264,81 @@ def scrape_fallcoaste(db, max_price: float = 100000, **_):
         time.sleep(1)
     LOG.info(f"fallcoaste: {total} listings")
     return ScanCount(total, scope, pages)
+
+
+# ─── Rete Aste Notarili (notaries' auctions: state and public bodies) ─
+# The notaries' network runs the sales of the Agenzia del Demanio, public
+# housing (ATER), the Red Cross liquidation (ESaCRI), seized assets (ANBSC),
+# other public bodies and voluntary sales. The search is a form kept in the
+# session: post it once for every province, then page through 5 at a time.
+# "GAST" notices are court sales already read from PVP, so only "GAV" stay.
+RAN = "https://www.avvisinotarili.notariato.it"
+RAN_MAX_PAGES = 200
+_RAN_PLACE = re.compile(r",\s*([^,()]+?)\s*\(([^)]+)\)\s*$")
+
+
+def ran_listings(html: str) -> list[dict]:
+    """The notary notices on one result page of the Rete Aste Notarili."""
+    soup = BeautifulSoup(html, "html.parser")
+    rows = []
+    for link in soup.select('a[href*="/dettaglio-avviso/GAV/"]'):
+        aid = link["href"].rstrip("/").rsplit("/", 1)[-1]
+        info = link.select_one(".divSchedaInfo")
+        if not aid.isdigit() or not info:
+            continue
+        text = info.select_one("p").get_text(" ", strip=True) if info.select_one("p") else ""
+        facts = {li.get_text(" ", strip=True).split(":", 1)[0]: (li.select_one("span").get_text(strip=True)
+                                                                 if li.select_one("span") else "")
+                 for li in info.select("li")}
+        sale = re.match(r"(\d{2})/(\d{2})/(\d{4})\s+(\d{2}):(\d{2})",
+                        facts.get("Data e Ora fine raccolta offerte") or facts.get("Data e Ora vendita") or "")
+        where = link.select_one(".divSchedaDett small")
+        where = where.get_text(" ", strip=True) if where else ""
+        place = _RAN_PLACE.search(where)
+        lat, lon = soup.select_one(f"#lat_{aid}"), soup.select_one(f"#lon_{aid}")
+        raw = {"address": where}
+        try:
+            raw.update(lat=float(lat["value"]), lon=float(lon["value"]))
+        except (TypeError, ValueError, KeyError):
+            pass
+        img = link.select_one("img[src]")
+        rows.append(make_listing(
+            "ran", aid, "IT", title=text[:200] or f"Avviso notarile {aid}", description=text[:3000],
+            tipo="immobile", area_m2=find_area(text), price=parse_price(facts.get("Prezzo dell'Avviso") or ""),
+            concelho=place.group(1).strip().title() if place else None,
+            district=place.group(2).strip().title() if place else None,
+            date_end=f"{sale[3]}-{sale[2]}-{sale[1]}T{sale[4]}:{sale[5]}:00" if sale else None,
+            url=RAN + link["href"], image_url=img["src"] if img else None, raw_json=raw,
+        ))
+    return rows
+
+
+@register("ran", "IT", description="Rete Aste Notarili — Demanio, public housing and other public bodies' sales")
+def scrape_ran(db, max_price: float = 50000, **_):
+    session = make_session(timeout=40)
+    home = session.get(RAN + "/")
+    home.raise_for_status()
+    provinces = [o["value"] for o in BeautifulSoup(home.text, "html.parser").select("select[name=provincia] option")]
+    form = [("tipoBene", "I"), ("statoAvviso", "inCorso"), ("ordinamento", "prezzo:ASC"), ("coords", "")]
+    form += [("provincia", p) for p in provinces] + [("tipologia", "GAV:(*);GAST:(*);GAST_PUB:(*)")]
+    resp = session.post(RAN + "/beni-immobili/?", data=form)
+    resp.raise_for_status()
+    total, seen = 0, set()
+    for page in range(1, RAN_MAX_PAGES + 1):
+        rows = ran_listings(resp.text)
+        for row in rows:
+            if row["id"] in seen or (row["price"] or 0) > 2 * max_price:
+                continue
+            seen.add(row["id"])
+            upsert_listing(db, row)
+            total += 1
+        db.commit()
+        # Sorted by price: once a whole page is over twice the budget, the rest is too.
+        if rows and all((r["price"] or 0) > 2 * max_price for r in rows):
+            break
+        nxt = session.get(f"{RAN}/beni-immobili/?&page={page}")
+        if nxt.status_code != 200 or "dettaglio-avviso" not in nxt.text:
+            break
+        resp = nxt
+        time.sleep(0.3)
+    return total
