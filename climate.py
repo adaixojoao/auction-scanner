@@ -13,6 +13,8 @@ the climate data folder, config climate.data_dir):
 - fire:  EFFIS burnt areas since 2016 within 2 km, and the days a year of high
          fire danger in 2079-2098 (Copernicus fire danger indicators, RCP4.5).
 - flood: water depth of the 100-year river flood at the spot (JRC).
+- air:   the yearly mean PM2.5 and NO2 in µg/m³ (EEA interpolated 1 km maps,
+         from measuring stations), scored against the EU and WHO limits.
 
 `assess(item)` returns a dict of what is known (layers not on this PC are
 skipped); load_listings stores it in item["climate"] and scoring.py turns it
@@ -192,6 +194,16 @@ def _sample(path: str, lat: float, lon: float) -> float | None:
     if math.isnan(val) or (src.nodata is not None and val == src.nodata):
         return None
     return val
+
+
+def air_quality(lat: float, lon: float) -> dict:
+    """{"pm25": µg/m³, "no2": µg/m³}, the yearly means (EEA); empty off the maps."""
+    out = {}
+    for name in ("pm25", "no2"):
+        v = _sample(os.path.join(_layers(), f"air_{name}.tif"), lat, lon)
+        if v is not None:
+            out[name] = round(v, 1)
+    return out
 
 
 def heat(lat: float, lon: float) -> dict:
@@ -491,6 +503,9 @@ def assess(lat: float, lon: float) -> dict:
     d = _read("hot days", hot_days, lat, lon)
     if d:
         out["hot_days"] = d
+    air = _read("air", air_quality, lat, lon)
+    if air:
+        out["air"] = air
     a = _read("AMOC cold", amoc_cold, lat, lon)
     if a:
         out["amoc_cold10"] = a

@@ -22,6 +22,9 @@ Parts:
          RCP8.5, plus 1981-2000. Needs the owner's free Copernicus account: the
          token in %USERPROFILE%\\.cdsapirc ("url: …" and "key: …" lines) and the
          dataset's licence accepted on its page. The token is only sent to CDS.
+- air:   EEA interpolated air quality, 1 km, validated annual means for
+         AIR_YEAR: PM2.5 and NO2 (µg/m³), downloaded from the EEA datashare
+         (no account) and warped to lon/lat → layers/air_pm25.tif, air_no2.tif.
 The JRC flood depth (100-year) and permanent water rasters are read as they
 are downloaded (jrc_flood/).
 """
@@ -45,6 +48,13 @@ FIRE_BOXES = {"PT": (-31.5, 32.4, -6.1, 42.2), "ES": (-18.2, 27.6, 4.4, 43.8), "
               "IT": (6.6, 35.4, 18.6, 47.1), "HR": (13.4, 42.3, 19.5, 46.6), "GR": (19.3, 34.8, 29.7, 41.8),
               "CY": (32.2, 34.5, 34.7, 35.8)}
 FIRST_FIRE_YEAR = 2016
+# The EEA's public datashare (a Nextcloud share): one folder per map.
+EEA_SHARE = "https://sdi.eea.europa.eu/datashare/public.php/dav/files/sptXqwkQr5g7Bp5"
+AIR_YEAR = 2024                          # the newest validated (v01) year, Oct 2026
+AIR_MAPS = {"pm25": f"eea_r_3035_1_km_aq-interpolated-pm25_p_{AIR_YEAR}_v01_r00/pm25_avg_{AIR_YEAR % 100}.tif",
+            "no2": f"eea_r_3035_1_km_aq-interpolated-no2_p_{AIR_YEAR}_v01_r00/no2_avg_{AIR_YEAR % 100}.tif"}
+AIR_BOX = (-32.0, 27.0, 36.0, 61.0)      # the scanned countries, the Azores to Cyprus and Denmark's border
+AIR_RES = 0.0125                         # degrees, about the source's 1 km
 
 
 def build_heat(data_dir: str, out_dir: str) -> None:
@@ -389,6 +399,40 @@ def _write_grid(path: str, grid, lats, lons) -> None:
         dst.write(grid[::-1], 1)
 
 
+def build_air(data_dir: str, out_dir: str) -> None:
+    """air_pm25.tif and air_no2.tif: the EEA's 1 km annual means, in lon/lat."""
+    import numpy as np
+    import rasterio
+    import requests
+    from rasterio.transform import from_origin
+    from rasterio.warp import Resampling, reproject
+    folder = os.path.join(data_dir, "air")
+    os.makedirs(folder, exist_ok=True)
+    west, south, east, north = AIR_BOX
+    width, height = round((east - west) / AIR_RES), round((north - south) / AIR_RES)
+    transform = from_origin(west, north, AIR_RES, AIR_RES)
+    for name, remote in AIR_MAPS.items():
+        local = os.path.join(folder, os.path.basename(remote))
+        if not os.path.exists(local):
+            print(f"air: downloading {os.path.basename(remote)} (~80 MB)", flush=True)
+            with requests.get(f"{EEA_SHARE}/{remote}", stream=True, timeout=600) as r:
+                r.raise_for_status()
+                with open(local + ".part", "wb") as f:
+                    for chunk in r.iter_content(1 << 20):
+                        f.write(chunk)
+            os.replace(local + ".part", local)
+        grid = np.full((height, width), np.nan, dtype="float32")
+        with rasterio.open(local) as src:
+            reproject(rasterio.band(src, 1), grid, src_nodata=src.nodata, dst_transform=transform,
+                      dst_crs="EPSG:4326", dst_nodata=np.nan, resampling=Resampling.bilinear)
+        grid[grid < 0] = np.nan                 # the EEA marks the sea and outside Europe with negatives
+        with rasterio.open(os.path.join(out_dir, f"air_{name}.tif"), "w", driver="GTiff", height=height,
+                           width=width, count=1, dtype="float32", crs="EPSG:4326", nodata=np.nan,
+                           compress="deflate", predictor=3, tiled=True, transform=transform) as dst:
+            dst.write(grid, 1)
+        print(f"air: {name} {AIR_YEAR} → air_{name}.tif", flush=True)
+
+
 def build_cold(data_dir: str, out_dir: str) -> None:
     """The local 1-in-10-year coldest night, which knows valleys from mountains:
     cold10_today.tif  measured, E-OBS 1976-2005 (~11 km, from weather stations);
@@ -512,6 +556,8 @@ def main(argv=None) -> int:
         build_amoc_dry(data_dir, out_dir)
     if "firefuture" in parts:
         build_fire_future(data_dir, out_dir)
+    if "air" in parts:
+        build_air(data_dir, out_dir)
     with open(os.path.join(out_dir, "built.json"), "w", encoding="utf-8") as f:
         json.dump({"parts": parts, "built": time.strftime("%Y-%m-%d %H:%M")}, f)
     return 0

@@ -2706,13 +2706,17 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 climate_writes.append((item["raw_json"], item["id"]))
                 item.pop("_climate_write", None)
 
-        # Heavy industry next to the house (geo.pollution): hidden, like a
-        # filter, unless filters.avoid_heavy_pollution is turned off.
+        # Heavy industry next to the house (geo.pollution), or badly polluted
+        # air at it (scoring.air_hidden): hidden, like a filter, unless
+        # filters.avoid_heavy_pollution is turned off.
         if (reason is None and item["status"] != "shortlisted"
-                and (item.get("pollution") or {}).get("level") == "heavy"
                 and (filters or {}).get("avoid_heavy_pollution", True)):
-            reason = f"heavy pollution: {item['pollution']['text']}"
-            if not include_hidden:
+            from scoring import air_grade, air_hidden
+            if (item.get("pollution") or {}).get("level") == "heavy":
+                reason = f"heavy pollution: {item['pollution']['text']}"
+            elif air_hidden(item):
+                reason = f"badly polluted air: {air_grade(item.get('climate'))[1]}"
+            if reason and not include_hidden:
                 continue
 
         # Live and invest's score is known only against the best candidate:

@@ -1632,14 +1632,52 @@ def _population_outlook_points(item: dict, reasons: list[str]) -> float:
 # (db.load_listings); with that filter off it costs HEAVY points here.
 POLLUTION_POINTS = {"light": -10, "heavy": -30}
 
+# The yearly mean air (climate "air", EEA 1 km maps), in µg/m³. Clean is the
+# WHO guideline; poor is over the EU's limit for 2030; bad is three times the
+# WHO guideline, and at a pin that is the house it is hidden like heavy industry.
+AIR_CLEAN = {"pm25": 5, "no2": 10}
+AIR_POOR = {"pm25": 10, "no2": 20}
+AIR_BAD = {"pm25": 15, "no2": 30}
+AIR_POINTS = {"clean": 5, "poor": -10, "bad": -20}
+AIR_NAMES = {"pm25": "PM2.5", "no2": "NO₂"}
 
-def pollution_penalty(item: dict) -> tuple[float, str | None]:
-    """(points, reason) for the pollution near the property; (0, None) when none."""
+
+def air_grade(climate: dict | None) -> tuple[str | None, str]:
+    """("clean" | "fair" | "poor" | "bad" | None, "PM2.5 12 µg/m³, NO₂ 25 µg/m³")."""
+    air = (climate or {}).get("air") or {}
+    if not air:
+        return None, ""
+    text = ", ".join(f"{AIR_NAMES[k]} {air[k]:g} µg/m³" for k in ("pm25", "no2") if k in air)
+    over = lambda limits: any(air.get(k) is not None and air[k] > v for k, v in limits.items())  # noqa: E731
+    if any(air.get(k) is not None and air[k] >= v for k, v in AIR_BAD.items()):
+        return "bad", text
+    if over(AIR_POOR):
+        return "poor", text
+    if all(air.get(k) is not None and air[k] <= v for k, v in AIR_CLEAN.items()):
+        return "clean", text
+    return "fair", text
+
+
+def air_hidden(item: dict) -> bool:
+    """Bad air at a pin that is the house (an approximate reading only costs points)."""
+    climate = item.get("climate") or {}
+    return air_grade(climate)[0] == "bad" and not climate.get("approx")
+
+
+def pollution_penalty(item: dict) -> tuple[float, list[str]]:
+    """(points, reasons) for the pollution near the property and the air it breathes."""
+    points, reasons = 0.0, []
     found = item.get("pollution") or {}
-    points = POLLUTION_POINTS.get(found.get("level"), 0)
-    if not points:
-        return 0, None
-    return points, f"{'heavy' if found['level'] == 'heavy' else 'some'} pollution nearby: {found['text']}"
+    if POLLUTION_POINTS.get(found.get("level")):
+        points += POLLUTION_POINTS[found["level"]]
+        reasons.append(f"{'heavy' if found['level'] == 'heavy' else 'some'} pollution nearby: {found['text']}")
+    grade, text = air_grade(item.get("climate"))
+    if grade in AIR_POINTS:
+        points += AIR_POINTS[grade]
+        about = "about " if (item.get("climate") or {}).get("approx") else ""
+        reasons.append({"clean": f"clean air ({about}{text})", "poor": f"polluted air ({about}{text})",
+                        "bad": f"badly polluted air ({about}{text})"}[grade])
+    return points, reasons
 
 
 def score_detail(item: dict, now: datetime | None = None,
@@ -1652,7 +1690,7 @@ def score_detail(item: dict, now: datetime | None = None,
         rank, reasons = _score_mode(item, now, targets, mode)
         points, why = pollution_penalty(item)
         if why and rank > 0:
-            rank, reasons = max(0.0, rank + points), [*reasons, why]
+            rank, reasons = max(0.0, rank + points), [*reasons, *why]
         return rank, reasons
     finally:
         _WEIGHTS.reset(token)
