@@ -36,7 +36,7 @@ jobs:
     # request is answered in-process by the Flask app on a temporary database;
     # no auction or registry site is contacted. Playwright is dev-only
     # (requirements-browser.txt); the jobs above skip these tests.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04    # Playwright 1.56 has no Chromium build for ubuntu-latest (26.04)
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

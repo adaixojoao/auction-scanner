@@ -140,6 +140,8 @@ CATALOG: dict[str, dict] = {
     "courtbid": {"kind": "aggregator", "access": "authenticated", "listing_type": "property",
                  "limitation": "Needs Apify token"},
     "greenacres": {"kind": "aggregator", "access": "public_html", "listing_type": "property"},
+    "troostwijk": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
+                   "parser_version": "2026-10"},
     # Public sale portals added 2026-10. Asking prices, in euros.
     "custojusto": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
                    "parser_version": "2026-10"},
