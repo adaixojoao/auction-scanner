@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1319,3 +1319,15 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_agorastore_reads_a_product():
+    from sources.fr import agorastore_listing
+    row = agorastore_listing({
+        "productId": 435215, "productName": "Maison - 70 m² - Sainte-Livrade-sur-Lot (47)",
+        "productPageUrl": "/vente-occasion/immobilier/maison/maison-70-m-sainte-livrade-sur-lot-47-435215.aspx",
+        "subCategories": [{"name": "Maison"}], "sellerName": "Département du Lot-et-Garonne",
+        "sale": {"endDate": "2026-12-10T16:00:00+01:00", "currentPrice": 14999.0, "totalBids": 0}})
+    assert row["id"] == "agorastore:435215" and row["price"] == 14999 and row["current_bid"] is None
+    assert row["concelho"] == "Sainte-Livrade-sur-Lot" and row["district"] == "47" and row["area_m2"] == 70
+    assert row["date_end"] == "2026-12-10T16:00:00" and "Lot-et-Garonne" in row["description"]

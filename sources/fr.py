@@ -706,3 +706,75 @@ def scrape_vench(db, max_price: float = 100000, **_):
         time.sleep(1)
     LOG.info(f"vench: {total} listings")
     return ScanCount(total, scope, pages)
+
+
+# ─── Agorastore (public sellers' property auctions) ────────────────
+# Towns, départements, regions, the State, the forestry office (ONF) and
+# AGRASC (property seized by the courts) sell homes, buildings, offices and
+# land in online auctions. The site's own search API returns them all; the
+# price is the starting price until a bid comes in, then the current bid.
+AGORASTORE = "https://www.agorastore-immo.fr"
+AGORASTORE_PROPERTY = 118
+AGORASTORE_PAGE = 100
+# "Maison - 70 m² - Sainte-Livrade-sur-Lot (47)": the town and département come last.
+_AGORA_TITLE = re.compile(r"(?:^|\s-\s*)([^()]+?)\s*-?\s*\((\d[\dAB]?)\)\s*$")
+_AGORA_SEARCH = {
+    "productsId": [], "categoryId": AGORASTORE_PROPERTY, "subCategoryId": 0, "regionIds": [],
+    "superRegionCodes": [], "regionCodes": [], "departmentIds": [], "categoryIds": [], "subCategoryIds": [],
+    "citiesCodeInsees": [], "siteIds": [], "minPrice": 0, "maxPrice": 0, "sellerType": 0, "sellType": 3,
+    "keywords": [], "specificStringFilters": [], "specificNumberFilters": [], "specificDateFilters": [],
+    "sortByEnum": 0, "showCanceled": False, "showFormationSites": False, "showUndisplayedProducts": False,
+    "includeExtranetSites": False, "sortBy": None, "reserveFor": 0, "bidsCount": 0, "bidComparison": 0,
+    "saleRdvId": 0,
+}
+
+
+def agorastore_listing(product: dict) -> dict | None:
+    """One product of Agorastore's search API as a listing."""
+    pid, name, sale = product.get("productId"), (product.get("productName") or "").strip(), product.get("sale") or {}
+    if not pid or not name:
+        return None
+    kinds = ", ".join(c.get("name") or "" for c in product.get("subCategories") or [])
+    place = _AGORA_TITLE.search(name.rsplit(" - ", 1)[-1] if " - " in name else name)
+    price = sale.get("currentPrice")
+    bids = sale.get("totalBids") or 0
+    facts = " · ".join(f"{d.get('libelle')}: {d.get('value')}" for d in product.get("importantDescriptions") or [])
+    from common import find_area
+    return make_listing(
+        "agorastore", pid, "FR", title=name[:200],
+        description=" · ".join(x for x in (name, kinds, facts, f"vendu par {product.get('sellerName')}",
+                                           "enchères en ligne Agorastore") if x),
+        tipo=kinds or None, area_m2=find_area(name),
+        price=price, current_bid=price if bids else None,
+        concelho=place.group(1).strip() if place else None, district=place.group(2) if place else None,
+        date_end=(sale.get("endDate") or "")[:19] or None,
+        url=AGORASTORE + (product.get("productPageUrl") or ""),
+        image_url=product.get("productImageMediumSizeUrl"),
+        raw_json=json.dumps({"seller": product.get("sellerName"), "bids": bids,
+                             "favourites": product.get("favoritesCount")}, ensure_ascii=False),
+    )
+
+
+@register("agorastore", "FR", description="Agorastore — homes, buildings and land sold by French towns and the State")
+def scrape_agorastore(db, max_price: float = 50000, **_):
+    session = make_session(timeout=30)
+    total, start = 0, 0
+    while True:
+        resp = session.post(f"{AGORASTORE}/api/search/_get-products",
+                            json={"parameters": _AGORA_SEARCH, "culture": "fr", "from": start, "size": AGORASTORE_PAGE})
+        resp.raise_for_status()
+        data = resp.json()
+        products = data.get("products") or []
+        for product in products:
+            row = agorastore_listing(product)
+            # A whole building can be worth more than the budget and still sell to it:
+            # keep what starts within twice the budget.
+            if row and (row["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, row)
+                total += 1
+        db.commit()
+        start += len(products)
+        if not products or start >= (data.get("countTotal") or 0):
+            break
+        time.sleep(0.5)
+    return total
