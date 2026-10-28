@@ -724,6 +724,41 @@ def nearest_hub(item: dict, kind: str, path: str | None = None, towns: dict | No
     return _found(pos, best, _HUB_WORDS[kind]) if best else None
 
 
+POLLUTION_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "polluters.csv")
+# How near a polluter has to be to count (scripts/update_polluters.py says what
+# "heavy" and "light" are). Heavy industry close to the house hides it; farther
+# out, or a lighter source close by, only costs points (scoring.pollution_penalty).
+HEAVY_HIDE_KM = 3
+HEAVY_NEAR_KM = 8
+LIGHT_NEAR_KM = 2
+
+
+def pollution(item: dict, path: str | None = None, towns: dict | None = None) -> dict | None:
+    """{"level": "heavy" | "light", "km", "name", "approx", "text"} for the worst
+    polluter near the property, None when there is none (or no position).
+
+    "heavy": heavy industry within HEAVY_HIDE_KM of a pin that is the house.
+    "light": heavy industry within HEAVY_NEAR_KM (or within HEAVY_HIDE_KM of a
+    town-level pin, which may be anywhere in the town), or a lighter source
+    within LIGHT_NEAR_KM.
+    """
+    pos = _place(item, towns)
+    if not pos:
+        return None
+    path = path or POLLUTION_FILE
+    heavy = _nearest(pos, _points(path, "heavy"), HEAVY_NEAR_KM)
+    light = _nearest(pos, _points(path, "light"), LIGHT_NEAR_KM)
+    exact = pos.get("precision") in EXACT_ENOUGH
+    if heavy and heavy[0] <= HEAVY_HIDE_KM and exact:
+        level, best = "heavy", heavy
+    elif heavy or light:
+        level, best = "light", heavy or light
+    else:
+        return None
+    found = _found(pos, best, "heavy industry" if best is heavy else "a pollution source")
+    return {**found, "level": level}
+
+
 def _town_only(pos: dict) -> bool:
     """A stored lookup made with the town's name alone ("Salvaterra de Magos"):
     older ones were labelled "parish", which gave a house anywhere in the

@@ -1866,7 +1866,7 @@ def _first_prices(db: sqlite3.Connection) -> dict[str, float]:
 # The five wishes are not kept: only the rows on screen show them
 # (dashboard._public), and they were the largest of these fields.
 _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "place_conflict", "beach",
-            "airport", "station", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
+            "airport", "station", "pollution", "guarda", "climate", "unlocated", "predicted_final", "score", "rank",
             "reasons", "excellent", "category", "kind", "live_score", "invest_score",
             "research_only", "extreme_discount", "floor_guess")
 _SCORED: dict[str, dict[str, tuple]] = {}      # mode → {listing id → (row key, results, inputs)}
@@ -1972,7 +1972,8 @@ _SCORE_DBS: dict = {}
 # A dashboard or scraper change must not throw away every kept score. Only
 # these decide the number a listing gets.
 _SCORE_CODE = ("scoring.py", "costs.py", "forestry.py", "land_prices.py", "common.py",
-               "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py", "guesses.py", "outline.py")
+               "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py", "guesses.py", "outline.py",
+               os.path.join("data", "polluters.csv"))   # a refreshed polluter list scores again
 
 
 @functools.lru_cache(maxsize=1)
@@ -1983,8 +1984,11 @@ def _code_version() -> str:
     h = hashlib.sha1()
     for name in _SCORE_CODE:
         h.update(name.encode())
-        with open(os.path.join(here, name), "rb") as f:
-            h.update(f.read())
+        try:
+            with open(os.path.join(here, name), "rb") as f:
+                h.update(f.read())
+        except FileNotFoundError:      # a data file not built yet
+            pass
     return h.hexdigest()[:12]
 _SCORE_LOCK = threading.Lock()     # one file, shared by the app's threads
 
@@ -2247,6 +2251,7 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
     item["beach"] = geo.nearest_beach(item, towns=towns)
     item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
     item["station"] = geo.nearest_hub(item, "station", towns=towns)
+    item["pollution"] = geo.pollution(item, towns=towns)
     item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
     item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)
     item["live_score"] = None
@@ -2700,6 +2705,15 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if item.get("_climate_write"):
                 climate_writes.append((item["raw_json"], item["id"]))
                 item.pop("_climate_write", None)
+
+        # Heavy industry next to the house (geo.pollution): hidden, like a
+        # filter, unless filters.avoid_heavy_pollution is turned off.
+        if (reason is None and item["status"] != "shortlisted"
+                and (item.get("pollution") or {}).get("level") == "heavy"
+                and (filters or {}).get("avoid_heavy_pollution", True)):
+            reason = f"heavy pollution: {item['pollution']['text']}"
+            if not include_hidden:
+                continue
 
         # Live and invest's score is known only against the best candidate:
         # its minimum is applied after the list is scaled (_normalize_both).

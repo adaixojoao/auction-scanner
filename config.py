@@ -61,6 +61,9 @@ DEFAULTS = {
         "rural_min_m2": 10000,    # 1 ha
         "rural_max_eur_m2": 0.5,  # €5,000 per hectare
         "min_score": 1,           # hides a 0, which is the old 50 and below
+        # Heavy industry within 3 km of the house hides it; lighter pollution
+        # nearby only lowers the score (geo.pollution, data/polluters.csv).
+        "avoid_heavy_pollution": True,
         "districts": [],
     },
 

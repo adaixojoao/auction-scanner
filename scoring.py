@@ -1627,6 +1627,21 @@ def _population_outlook_points(item: dict, reasons: list[str]) -> float:
     return (POP_OUTLOOK_STEEP_POINTS if steep else POP_OUTLOOK_MILD) * w("population")
 
 
+# A lighter pollution source nearby, or heavy industry a few km away
+# (geo.pollution). Heavy industry right next to the house is hidden instead
+# (db.load_listings); with that filter off it costs HEAVY points here.
+POLLUTION_POINTS = {"light": -10, "heavy": -30}
+
+
+def pollution_penalty(item: dict) -> tuple[float, str | None]:
+    """(points, reason) for the pollution near the property; (0, None) when none."""
+    found = item.get("pollution") or {}
+    points = POLLUTION_POINTS.get(found.get("level"), 0)
+    if not points:
+        return 0, None
+    return points, f"{'heavy' if found['level'] == 'heavy' else 'some'} pollution nearby: {found['text']}"
+
+
 def score_detail(item: dict, now: datetime | None = None,
                  targets: dict | None = None, mode: str = "home") -> tuple[float, list[str]]:
     """The score before it is clamped to 0–100: several listings can reach 100,
@@ -1634,20 +1649,28 @@ def score_detail(item: dict, now: datetime | None = None,
     token = _WEIGHTS.set((targets or {}).get("weights") or {})
     mode_token = _MODE.set(mode if mode in MODES else "home")
     try:
-        if mode == "invest":
-            return _charged(item, *_score_invest(item, now, targets))
-        if mode == "land":
-            return _score_land(item, now, targets)
-        if mode == "forest":
-            return _score_forest(item, now, targets)
-        if mode == "both":
-            return _score_both(item, now, targets)
-        # A place to live. Investment land used to share this scorer, so a plot
-        # picked up Portugal, summer heat and a cheap total in euros.
-        return _charged(item, *_score_detail(item, now, targets))
+        rank, reasons = _score_mode(item, now, targets, mode)
+        points, why = pollution_penalty(item)
+        if why and rank > 0:
+            rank, reasons = max(0.0, rank + points), [*reasons, why]
+        return rank, reasons
     finally:
         _WEIGHTS.reset(token)
         _MODE.reset(mode_token)
+
+
+def _score_mode(item: dict, now, targets, mode: str) -> tuple[float, list[str]]:
+    if mode == "invest":
+        return _charged(item, *_score_invest(item, now, targets))
+    if mode == "land":
+        return _score_land(item, now, targets)
+    if mode == "forest":
+        return _score_forest(item, now, targets)
+    if mode == "both":
+        return _score_both(item, now, targets)
+    # A place to live. Investment land used to share this scorer, so a plot
+    # picked up Portugal, summer heat and a cheap total in euros.
+    return _charged(item, *_score_detail(item, now, targets))
 
 
 def _floor_guessed(item: dict) -> str | None:
