@@ -37,3 +37,12 @@ def test_effect_of_a_report_on_many_properties_only_asks_to_check():
 def test_effect_without_a_readable_report_is_nothing():
     assert perizia.effect(None) == (None, 1.0, [])
     assert perizia.effect({"found": True, "scanned": True}) == (None, 1.0, [])
+
+
+def test_title_history_and_checklists_are_not_a_share():
+    history = perizia.read(PAD + " Alla sig.ra l'immobile era pervenuto in nuda proprietà per atto di donazione." + PAD)
+    checklist = perizia.read(PAD + " L'avviso deve contenere le seguenti indicazioni: DIRITTO IN VENDITA intera "
+                             "proprietà; nuda proprietà; usufrutto." + PAD)
+    sold = perizia.read(PAD + " L'immobile è pignorato solo per la quota di 1/3 appartenente al debitore." + PAD)
+    assert "share" not in history and "share" not in checklist
+    assert sold["share"]
