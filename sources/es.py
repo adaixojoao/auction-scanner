@@ -733,6 +733,105 @@ def scrape_subastasactivas(db, max_price: float = 100000, **_):
     return total
 
 
+# ─── Patrimonio del Estado (the state's own property) ──────────────
+# The Treasury's provincial offices sell what the state owns or inherits
+# without heirs (abintestato), by sealed-bid auction. The search lists the
+# open auctions office by office; the lots are only in the BOE announcement,
+# a PDF written differently by each office. A round with no bid goes on to
+# the next, cheaper one at the same sitting, so the last price is the floor.
+HACIENDA = "https://www.hacienda.gob.es"
+HACIENDA_LIST = (HACIENDA + "/es-ES/Areas%20Tematicas/Patrimonio%20del%20Estado/Gestion%20Patrimonial%20del%20Estado"
+                 "/Paginas/Subastas/ListadoSubastasConcursos.aspx")
+HACIENDA_OFFICES = range(1, 57)
+_HAC_EVENT = re.compile(r'href="(https://www\.hacienda\.gob\.es/[^"]*/paginas/subastas/deh-[^"]+\.aspx)"', re.I)
+_HAC_LOT = re.compile(r"\blote\s*(?:n[úu]m\.?|n[º°o.]*)?\s*(\d+)\s*(?:[.:–-]+|\s+(?=descripci|finca|en primera|convocatoria))",
+                      re.I)
+_HAC_PAGE_HEAD = re.compile(r"BOLETÍN OFICIAL DEL ESTADO.{0,240}?/arde", re.S)
+_HAC_ROUND = re.compile(r"\b(1|2|3|4|primera|segunda|tercera|cuarta)\s*[ªa]?\s*subasta\b[^€\d]{0,60}?"
+                        r"([\d.]+(?:,\d{1,2})?)\s*(?:€|euros)", re.I)
+_HAC_ORDINAL = {"primera": "1", "segunda": "2", "tercera": "3", "cuarta": "4"}
+# Madrid writes the rounds as a table: "Tipo de licitación 99.000,00 84.150,00 71.257,50 60.798,38".
+_HAC_TABLE = re.compile(r"Tipo de licitaci[óo]n((?:\s+[\d.]+,\d{2}(?:\s*€)?){2,4})", re.I)
+_HAC_POSTCODE = re.compile(r"\(\d{5}\s+([A-ZÁÉÍÓÚÑ][^)]{1,40})\)")
+_HAC_TOWN = re.compile(r"(?:t[ée]rmino municipal de|municipio de|sit[oa]s? en|^\W*(?:inmueble|casa|vivienda) en)\s+([A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü' -]{1,40}?)"
+                       r"\s*(?:\(|,|\.|;| con | calle| c/| avda)", re.I)
+_HAC_HOME = ["vivienda", "casa", "piso", "apartamento", "chalet", "uso residencial", "local comercial con vivienda"]
+
+
+def hacienda_lots(text: str) -> list[dict]:
+    """The home lots of one BOE announcement: {"lot", "text", "town", "area", "price", "floor"}."""
+    text = re.sub(r"\s+", " ", _HAC_PAGE_HEAD.sub(" ", text))
+    parts = _HAC_LOT.split(text)
+    out = []
+    for i in range(1, len(parts) - 1, 2):
+        body = parts[i + 1][:10000]
+        head = body[:400]
+        if not has_term(head, _HAC_HOME, negations=False):
+            continue
+        found = {}
+        for n, amount in _HAC_ROUND.findall(body):
+            found.setdefault(_HAC_ORDINAL.get(n.lower(), n), parse_price(amount))
+        rounds = [found[n] for n in sorted(found) if found[n]]
+        table = _HAC_TABLE.search(body)
+        if not rounds and table:
+            rounds = [p for p in (parse_price(x) for x in table.group(1).replace("€", " ").split()) if p]
+        town = _HAC_POSTCODE.search(head) or _HAC_TOWN.search(head)
+        out.append({"lot": parts[i], "text": body[:1500].strip(), "town": town.group(1).strip().title() if town else None,
+                    "area": find_area(head), "price": rounds[0] if rounds else None,
+                    "floor": rounds[-1] if rounds else None})
+    return out
+
+
+def _hacienda_events(session) -> set[str]:
+    found = set()
+    for office in HACIENDA_OFFICES:
+        resp = session.get(HACIENDA_LIST, params={"den": "", "nat": "Inmuebles urbanos;", "dels": f"{office};"})
+        resp.raise_for_status()
+        found.update(_HAC_EVENT.findall(resp.text))
+    return found
+
+
+@register("hacienda", "ES", description="Patrimonio del Estado — the state's own and heirless homes, by sealed bid")
+def scrape_hacienda(db, max_price: float = 50000, **_):
+    import pymupdf
+    session = make_session(timeout=60)
+    total = 0
+    for event in sorted(_hacienda_events(session)):
+        try:
+            page = BeautifulSoup(session.get(event).text, "html.parser")
+        except Exception as e:  # noqa: BLE001 — one office down is not the source down
+            LOG.info(f"hacienda {event}: {type(e).__name__}")
+            continue
+        words = re.sub(r"\s+", " ", page.get_text(" "))
+        deadline = re.search(r"Fecha límite presentación solicitudes\s*(\d{2}/\d{2}/\d{4})", words)
+        pdfs = [a["href"] for a in page.select("a[href]") if ".pdf" in a["href"].lower()]
+        boe = [h for h in pdfs if re.search(r"(?i)boe|anuncio|publicaci", h) and "cambio" not in h.lower()] or pdfs
+        if not boe:
+            continue
+        url = safe_url(boe[0], HACIENDA)
+        try:
+            with pymupdf.open(stream=session.get(url).content, filetype="pdf") as doc:
+                text = "\n".join(p.get_text() for p in doc)
+        except Exception as e:  # noqa: BLE001
+            LOG.info(f"hacienda {url}: {type(e).__name__}")
+            continue
+        office = event.split("/subastas/")[1].split("/")[0].removeprefix("deh-").replace("-", " ").title()
+        for lot in hacienda_lots(text):
+            if lot["floor"] and lot["floor"] > max_price * 2:
+                continue
+            upsert_listing(db, make_listing(
+                "hacienda", f"{stable_id(event)}-{lot['lot']}", "ES",
+                title=f"Lote {lot['lot']} — {lot['text'][:150]}",
+                description=f"{lot['text']} · Subasta del Estado (Delegación de Hacienda de {office}), sobre cerrado",
+                tipo="inmueble", area_m2=lot["area"], price=lot["price"], min_price=lot["floor"],
+                concelho=lot["town"], district=office,
+                date_end=parse_date_dmy(deadline.group(1)) if deadline else None, url=event,
+            ))
+            total += 1
+        db.commit()
+    return total
+
+
 # ─── Aliseda (Santander's repossessions) ────────────────────────────
 # The site's own search API: price, the map position, the full text and who
 # holds it, 12 a page. Homes (tipo 10) and land (tipo 8) within budget, all Spain.

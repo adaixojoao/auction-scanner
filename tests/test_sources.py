@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1319,3 +1319,17 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_hacienda_reads_home_lots_and_their_rounds():
+    from sources.es import hacienda_lots
+    text = ("LOTE 3 Descripción. VIVIENDA sita en PASEO DE LAS DELICIAS número 35, bajo, puerta B (28045 Madrid). "
+            "Superficie construida de 21,5 m². Tipo de licitación y garantía. Valor de tasación: 99.000,00 euros. "
+            "Subasta Primera Segunda Tercera Cuarta Tipo de licitación 99.000,00 84.150,00 71.257,50 60.798,38 "
+            "Garantía 5% 4.950,00 LOTE 4 Descripción. Solar en calle Mayor. Tipo de licitación 1.000,00 900,00 "
+            "Lote 5.- Casa en Magacela, de cincuenta y dos metros. Segunda Subasta: Tipo de licitación del lote: "
+            "11.039,80 euros. Cuarta Subasta: Tipo de licitación del lote: 7.976,26 euros.")
+    lots = hacienda_lots(text)
+    assert [lot["lot"] for lot in lots] == ["3", "5"]                       # the plot is not a home
+    assert lots[0]["town"] == "Madrid" and lots[0]["price"] == 99000 and lots[0]["floor"] == 60798.38
+    assert lots[1]["town"] == "Magacela" and lots[1]["floor"] == 7976.26
