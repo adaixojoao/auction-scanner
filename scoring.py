@@ -1738,6 +1738,10 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
     area, source = building_m2(item)
     if source not in SCORED_FLOORS or area < SMALL_HOME_M2 or area > INVEST_VALUE_MAX_M2:
         blocked.append("floor area unknown, or the figure is the plot rather than the building")
+    import perizia                     # what the court expert's report says (Italy)
+    perizia_block, perizia_factor, perizia_why = perizia.effect(_raw(item).get("perizia"))
+    if perizia_block:
+        blocked.append(perizia_block)
     if blocked:
         return 0.0, blocked
     # Each component under that goal's own weights. score_detail restores the
@@ -1787,6 +1791,7 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
                    f"({grade_cause(graded)})"]
     item["live_rank"] = max(0.0, home_raw)
     item["invest_rank"] = max(0.0, inv_raw)
+    factor *= perizia_factor
     item["both_factor"] = factor
     rank = (item["live_rank"] + item["invest_rank"]) / 2 * factor
     weaker = [r for r in weaker if not r.startswith("ranked on ")]
@@ -1794,6 +1799,7 @@ def _score_both(item: dict, now: datetime | None, targets: dict | None) -> tuple
         f"the average of the two ({display_score(home_raw):.0f} to live in, "
         f"{display_score(inv_raw):.0f} as an investment, each against the best candidate)",
         *caution,
+        *perizia_why,
         *([guesses.reason(named)] if named else []),
         *weaker[:6],
     ]

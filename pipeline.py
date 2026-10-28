@@ -364,6 +364,12 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         photos.check_pending(db, cfg, photos.queue(db, cfg))
                     except Exception:  # noqa: BLE001 — a photo check must never fail the scan
                         LOG.exception("Photo check failed")
+                    try:
+                        import perizia                   # the expert's report of the best Italian sales
+                        ranked = sorted(both or [], key=lambda it: -(it.get("rank") or 0))
+                        perizia.check_pending(db, make_session(), ranked)
+                    except Exception:  # noqa: BLE001 — a report must never fail the scan
+                        LOG.exception("Perizia check failed")
                     _set_state(db, current="checking links")
                     try:
                         import confirm                   # sold and reserved pages leave the top
