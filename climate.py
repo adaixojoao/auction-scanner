@@ -13,6 +13,10 @@ the climate data folder, config climate.data_dir):
 - fire:  EFFIS burnt areas since 2016 within 2 km, and the days a year of high
          fire danger in 2079-2098 (Copernicus fire danger indicators, RCP4.5).
 - flood: water depth of the 100-year river flood at the spot (JRC).
+- air:   the yearly mean PM2.5 and NO2 in µg/m³ (EEA interpolated 1 km maps,
+         from measuring stations), scored against the EU and WHO limits. The
+         maps leave out the Azores, Madeira and the Canaries: there the nearest
+         background station on the same islands is used.
 
 `assess(item)` returns a dict of what is known (layers not on this PC are
 skipped); load_listings stores it in item["climate"] and scoring.py turns it
@@ -192,6 +196,68 @@ def _sample(path: str, lat: float, lon: float) -> float | None:
     if math.isnan(val) or (src.nodata is not None and val == src.nodata):
         return None
     return val
+
+
+# The islands the EEA air maps leave out (south, west, north, east).
+ISLANDS = {"Azores": (36.8, -31.6, 39.8, -24.9), "Madeira": (32.3, -17.4, 33.2, -16.1),
+           "Canaries": (27.5, -18.3, 29.5, -13.2)}
+AIR_STATION_KM = 20      # a station this near speaks for the place; farther is the islands' background
+
+
+def island(lat: float, lon: float) -> str | None:
+    return next((name for name, (s, w, n, e) in ISLANDS.items() if s <= lat <= n and w <= lon <= e), None)
+
+
+@functools.lru_cache(maxsize=2)
+def _air_stations(path: str, mtime: float) -> list[dict]:
+    import csv
+    stations = []
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                try:
+                    lat, lon = float(row["lat"]), float(row["lon"])
+                except (KeyError, ValueError):
+                    continue
+                values = {k: float(row[k]) for k in ("pm25", "no2") if row.get(k)}
+                stations.append({"station": row.get("station") or "", "lat": lat, "lon": lon,
+                                 "island": island(lat, lon), **values})
+    except OSError:
+        return []
+    return stations
+
+
+def station_air(lat: float, lon: float) -> dict:
+    """On the islands: each pollutant from the nearest background station of
+    the same archipelago that measures it. "far": the nearest is more than
+    AIR_STATION_KM away, so it is the islands' background, not this place's."""
+    group = island(lat, lon)
+    path = os.path.join(_layers(), "air_stations.csv")
+    if not group or not os.path.exists(path):
+        return {}
+    import geo
+    stations = [s for s in _air_stations(path, os.path.getmtime(path)) if s["island"] == group]
+    out: dict = {}
+    for kind in ("pm25", "no2"):
+        near = [(geo.distance_km(lat, lon, s["lat"], s["lon"]), s) for s in stations if kind in s]
+        if not near:
+            continue
+        km, s = min(near, key=lambda pair: pair[0])
+        out[kind] = s[kind]
+        out.setdefault("stations", {})[kind] = {"station": s["station"], "km": round(km, 1)}
+        if km > AIR_STATION_KM:
+            out["far"] = True
+    return out
+
+
+def air_quality(lat: float, lon: float) -> dict:
+    """{"pm25": µg/m³, "no2": µg/m³}, the yearly means (EEA); empty where nothing is known."""
+    out = {}
+    for name in ("pm25", "no2"):
+        v = _sample(os.path.join(_layers(), f"air_{name}.tif"), lat, lon)
+        if v is not None:
+            out[name] = round(v, 1)
+    return out or station_air(lat, lon)
 
 
 def heat(lat: float, lon: float) -> dict:
@@ -491,6 +557,9 @@ def assess(lat: float, lon: float) -> dict:
     d = _read("hot days", hot_days, lat, lon)
     if d:
         out["hot_days"] = d
+    air = _read("air", air_quality, lat, lon)
+    if air:
+        out["air"] = air
     a = _read("AMOC cold", amoc_cold, lat, lon)
     if a:
         out["amoc_cold10"] = a
