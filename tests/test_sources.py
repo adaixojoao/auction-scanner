@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 93
+    assert len(REGISTRY) == 94
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1333,3 +1333,18 @@ def test_hacienda_reads_home_lots_and_their_rounds():
     assert [lot["lot"] for lot in lots] == ["3", "4", "5"]                  # a plot is kept too
     assert lots[0]["town"] == "Madrid" and lots[0]["price"] == 99000 and lots[0]["floor"] == 60798.38
     assert lots[1]["floor"] == 900 and lots[2]["town"] == "Magacela" and lots[2]["floor"] == 7976.26
+
+
+def test_boe_public_picks_property_sales_of_other_public_bodies():
+    from sources.es import boe_sale_notices, hacienda_lots
+    item = lambda t: {"identificador": "BOE-B-1", "titulo": t, "url_html": "u"}
+    summary = {"data": {"sumario": {"diario": [{"seccion": [{"codigo": "5B", "departamento": [
+        {"nombre": "MINISTERIO DE TRABAJO", "item": [
+            item("Anuncio del FOGASA por el que se convoca la venta en subasta pública de bienes inmuebles."),
+            item("Anuncio de suspensión de subasta pública de bien inmueble.")]},
+        {"nombre": "MINISTERIO DE HACIENDA", "item": [
+            item("Anuncio de la Delegación de Economía y Hacienda de Valencia: subasta de inmuebles.")]}]}]}]}}}
+    assert [n["body"] for n in boe_sale_notices(summary)] == ["MINISTERIO DE TRABAJO"]
+    (lot,) = hacienda_lots("Se convoca subasta del inmueble. Vivienda sita en Vigo. El tipo de licitación es "
+                           "61.296 € (sesenta y un mil).", single=True)
+    assert lot["price"] == 61296

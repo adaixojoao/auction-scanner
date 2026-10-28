@@ -758,12 +758,19 @@ _HAC_TOWN = re.compile(r"(?:t[ée]rmino municipal de|municipio de|sit[oa]s? en|^
                        r"\s*(?:\(|,|\.|;| con | calle| c/| avda)", re.I)
 
 
-def hacienda_lots(text: str) -> list[dict]:
+_HAC_TYPE = re.compile(r"(?:tipo|precio)(?: m[ií]nimo)? de (?:licitaci[óo]n|salida)[^\d€]{0,60}?([\d.]+(?:,\d{1,2})?)\s*(?:€|euros)",
+                       re.I)
+
+
+def hacienda_lots(text: str, single: bool = False) -> list[dict]:
     """The property lots of one BOE announcement: {"lot", "text", "town", "area", "price", "floor"}.
 
-    Homes, plots, shops and whole buildings are all kept: the scorer tells them apart."""
+    Homes, plots, shops and whole buildings are all kept: the scorer tells them apart.
+    With `single`, an announcement of one property with no "Lote" in it is that lot."""
     text = re.sub(r"\s+", " ", _HAC_PAGE_HEAD.sub(" ", text))
     parts = _HAC_LOT.split(text)
+    if single and len(parts) < 3:
+        parts = ["", "1", text]
     out = []
     for i in range(1, len(parts) - 1, 2):
         body = parts[i + 1][:10000]
@@ -775,6 +782,10 @@ def hacienda_lots(text: str) -> list[dict]:
         table = _HAC_TABLE.search(body)
         if not rounds and table:
             rounds = [p for p in (parse_price(x) for x in table.group(1).replace("€", " ").split()) if p]
+        if not rounds and _HAC_TYPE.search(body):
+            rounds = [parse_price(_HAC_TYPE.search(body).group(1))]
+        if len(parts) == 3 and single:
+            head = body[:2500]                     # one property: its description follows the preamble
         town = _HAC_POSTCODE.search(head) or _HAC_TOWN.search(head)
         out.append({"lot": parts[i], "text": body[:1500].strip(), "town": town.group(1).strip().title() if town else None,
                     "area": find_area(head), "price": rounds[0] if rounds else None,
@@ -829,6 +840,86 @@ def scrape_hacienda(db, max_price: float = 50000, **_):
             ))
             total += 1
         db.commit()
+    return total
+
+
+# ─── BOE V-B (every public body's property sales) ──────────────────
+# Public bodies announce their property auctions in section V-B of the BOE:
+# Social Security's own buildings, FOGASA, the drugs plan's seized property,
+# port authorities, ADIF, Defence, ministries. The open-data summary of each
+# day lists them; the announcement's text is read with hacienda_lots. The
+# Treasury's own offices are read by scrape_hacienda, so they are left out here.
+BOE_SUMMARY = "https://www.boe.es/datosabiertos/api/boe/sumario/{:%Y%m%d}"
+BOE_DAYS = 45                      # an announcement is open for 20-40 days
+_BOE_SALE = re.compile(r"\b(subasta|enajenaci[oó]n|venta)\b", re.I)
+_BOE_PROPERTY = re.compile(r"inmueble|vivienda|finca|solar|parcela|local|edificio|terreno|bienes patrimoniales|faro",
+                           re.I)
+_BOE_SKIP = re.compile(r"suspensi|tanteo|anula|correcci[oó]n de errores|resultado|desierta|bienes muebles|veh[ií]culo|"
+                       r"aprovechamiento|Econom[ií]a y Hacienda", re.I)
+
+
+def _listed(x) -> list:
+    return x if isinstance(x, list) else [x] if isinstance(x, dict) else []
+
+
+def boe_sale_notices(summary: dict) -> list[dict]:
+    """The V-B items of one day's BOE summary that announce a property sale."""
+    out = []
+    for day in _listed(summary.get("data", {}).get("sumario", {}).get("diario")):
+        for section in _listed(day.get("seccion")):
+            if section.get("codigo") != "5B":
+                continue
+            for dept in _listed(section.get("departamento")):
+                items = _listed(dept.get("item")) + [i for ep in _listed(dept.get("epigrafe")) for i in _listed(ep.get("item"))]
+                for item in items:
+                    title = item.get("titulo") or ""
+                    if _BOE_SALE.search(title) and _BOE_PROPERTY.search(title) and not _BOE_SKIP.search(title):
+                        out.append({"id": item.get("identificador"), "title": title, "body": dept.get("nombre"),
+                                    "url": item.get("url_html")})
+    return out
+
+
+@register("boe_public", "ES", description="BOE V-B — property sales of Spanish public bodies (Social Security, ports, FOGASA…)")
+def scrape_boe_public(db, max_price: float = 50000, **_):
+    session = make_session(timeout=40)
+    today = datetime.now().date()
+    from datetime import timedelta
+    total = 0
+    for back in range(BOE_DAYS):
+        day = today - timedelta(days=back)
+        try:
+            resp = session.get(BOE_SUMMARY.format(day), headers={"Accept": "application/json"})
+            if resp.status_code != 200:          # no BOE on Sundays
+                continue
+            notices = boe_sale_notices(resp.json())
+        except Exception as e:  # noqa: BLE001
+            LOG.info(f"boe_public {day}: {type(e).__name__}")
+            continue
+        for notice in notices:
+            if db.execute("SELECT 1 FROM listings WHERE id LIKE ? LIMIT 1", (f"boe_public:{notice['id']}-%",)).fetchone():
+                continue                         # an announcement does not change once published
+            try:
+                page = BeautifulSoup(session.get(notice["url"]).text, "html.parser")
+            except Exception as e:  # noqa: BLE001
+                LOG.info(f"boe_public {notice['id']}: {type(e).__name__}")
+                continue
+            body = page.select_one("#textoxslt") or page
+            for lot in hacienda_lots(body.get_text(" "), single=True):
+                if lot["floor"] and lot["floor"] > 2 * max_price:
+                    continue
+                upsert_listing(db, make_listing(
+                    "boe_public", f"{notice['id']}-{lot['lot']}", "ES",
+                    title=re.sub(r"^\W*(?:Urbana|R[úu]stica)?\W*", "", lot["text"])[:200],
+                    description=f"{lot['text']} · {notice['body']} (BOE {notice['id']}, {day:%d/%m/%Y})",
+                    tipo="inmueble", area_m2=lot["area"], price=lot["price"], min_price=lot["floor"],
+                    concelho=lot["town"], url=notice["url"],
+                    # The deadline is written a dozen ways; offers close within about 40 days.
+                    date_end=f"{day + timedelta(days=40):%Y-%m-%d}T00:00:00",
+                    raw_json={"published": f"{day:%Y-%m-%d}", "seller": notice["body"], "date_end": "estimated"},
+                ))
+                total += 1
+            db.commit()
+            time.sleep(0.3)
     return total
 
 

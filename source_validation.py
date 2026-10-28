@@ -115,6 +115,8 @@ CATALOG: dict[str, dict] = {
                    "limitation": "Bankruptcy and court sales; card has the court, not the town"},
     "hacienda": {"kind": "official", "access": "public_html", "listing_type": "property",
                  "limitation": "Lots read from each office's BOE PDF; few homes, sealed bid at the office"},
+    "boe_public": {"kind": "official", "access": "public_api", "listing_type": "property",
+                   "limitation": "Read from BOE V-B text; deadline estimated at 40 days; some prices not read"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
               "limitation": "Descriptions are for subscribers; card has town, mise a prix and date"},
     "goauktion_de": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
