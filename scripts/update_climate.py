@@ -25,6 +25,9 @@ Parts:
 - air:   EEA interpolated air quality, 1 km, validated annual means for
          AIR_YEAR: PM2.5 and NO2 (µg/m³), downloaded from the EEA datashare
          (no account) and warped to lon/lat → layers/air_pm25.tif, air_no2.tif.
+         The maps stop short of the Azores, Madeira and the Canaries: there
+         the same year's verified measurements of every background station
+         (EEA download service, no account) are averaged → layers/air_stations.csv.
 The JRC flood depth (100-year) and permanent water rasters are read as they
 are downloaded (jrc_flood/).
 """
@@ -55,6 +58,13 @@ AIR_MAPS = {"pm25": f"eea_r_3035_1_km_aq-interpolated-pm25_p_{AIR_YEAR}_v01_r00/
             "no2": f"eea_r_3035_1_km_aq-interpolated-no2_p_{AIR_YEAR}_v01_r00/no2_avg_{AIR_YEAR % 100}.tif"}
 AIR_BOX = (-32.0, 27.0, 36.0, 61.0)      # the scanned countries, the Azores to Cyprus and Denmark's border
 AIR_RES = 0.0125                         # degrees, about the source's 1 km
+EEA_METADATA = "https://discomap.eea.europa.eu/map/fme/metadata/PanEuropean_metadata.csv"
+EEA_DOWNLOADS = "https://eeadmz1-downloads-api-appservice.azurewebsites.net/ParquetFile/urls"
+AIR_POLLUTANT_CODES = {"8": "no2", "6001": "pm25"}
+# The EEA's metadata server refuses requests without a browser-like User-Agent.
+EEA_HEADERS = {"User-Agent": "Mozilla/5.0 (auction-scanner air quality)"}
+AIR_MIN_COVERAGE = 0.75
+AIR_STATION_YEARS = (AIR_YEAR, AIR_YEAR + 1, AIR_YEAR - 1, AIR_YEAR - 2)                  # the EU's rule for a valid yearly mean: 75% of the hours
 
 
 def build_heat(data_dir: str, out_dir: str) -> None:
@@ -433,6 +443,68 @@ def build_air(data_dir: str, out_dir: str) -> None:
         print(f"air: {name} {AIR_YEAR} → air_{name}.tif", flush=True)
 
 
+def build_air_stations(data_dir: str, out_dir: str) -> None:
+    """air_stations.csv: the yearly mean NO2 and PM2.5 of every background
+    station on the islands the EEA maps leave out (climate.ISLANDS). Traffic
+    stations stand at the kerb and say more about the road than about a house
+    on the island; industrial ones are near the plants geo.pollution already counts."""
+    import csv as _csv
+    import io
+
+    import pandas as pd
+    import requests
+    folder = os.path.join(data_dir, "air", "stations")
+    os.makedirs(folder, exist_ok=True)
+    meta = requests.get(EEA_METADATA, headers=EEA_HEADERS, timeout=600)
+    meta.raise_for_status()
+    points: dict[str, dict] = {}
+    for row in _csv.DictReader(io.StringIO(meta.content.decode("utf-8", "replace")), delimiter="	"):
+        kind = AIR_POLLUTANT_CODES.get(row["AirPollutantCode"].rsplit("/", 1)[-1])
+        try:
+            lat, lon = float(row["Latitude"]), float(row["Longitude"])
+        except ValueError:
+            continue
+        if kind and row["AirQualityStationType"] == "background" and climate.island(lat, lon):
+            points[row["SamplingPoint"]] = {"kind": kind, "station": row["AirQualityStationEoICode"],
+                                            "lat": lat, "lon": lon, "area": row["AirQualityStationArea"]}
+    body = {"countries": ["PT", "ES"], "cities": [], "pollutants": ["NO2", "PM2.5"], "dataset": 2,
+            "source": "Api", "dateTimeStart": f"{AIR_YEAR}-01-01T00:00:00Z",
+            "dateTimeEnd": f"{AIR_YEAR + 1}-01-01T00:00:00Z", "aggregationType": "hour"}
+    listing = requests.post(EEA_DOWNLOADS, json=body, headers=EEA_HEADERS, timeout=600)
+    listing.raise_for_status()
+    stations: dict[str, dict] = {}
+    for url in listing.text.split():
+        name = url.rsplit("/", 1)[-1].removesuffix(".parquet")
+        point = points.get(name)
+        if not point:
+            continue
+        local = os.path.join(folder, f"{name}.parquet")
+        if not os.path.exists(local):
+            r = requests.get(url, headers=EEA_HEADERS, timeout=300)
+            r.raise_for_status()
+            with open(local, "wb") as f:
+                f.write(r.content)
+        hours = pd.read_parquet(local, columns=["Start", "Value", "Validity"])
+        hours = hours[(hours["Validity"] > 0) & (hours["Value"] >= 0)]
+        # The maps' year when the station measured 75% of it, else the nearest year that it did.
+        for year in AIR_STATION_YEARS:
+            those = hours[hours["Start"].dt.year == year]
+            if len(those) >= AIR_MIN_COVERAGE * (8784 if year % 4 == 0 else 8760):
+                here = stations.setdefault(point["station"], {k: point[k] for k in ("station", "lat", "lon", "area")})
+                here[point["kind"]] = round(float(those["Value"].mean()), 1)
+                here[f"{point['kind']}_year"] = year
+                break
+        else:
+            print(f"air: {name} has no year with 75% of its hours measured, left out", flush=True)
+    out = os.path.join(out_dir, "air_stations.csv")
+    with open(out, "w", encoding="utf-8", newline="") as f:
+        writer = _csv.DictWriter(f, fieldnames=("station", "lat", "lon", "area", "pm25", "pm25_year",
+                                                "no2", "no2_year"))
+        writer.writeheader()
+        writer.writerows(sorted(stations.values(), key=lambda s: (s["lat"], s["lon"])))
+    print(f"air: {len(stations)} island background stations → air_stations.csv", flush=True)
+
+
 def build_cold(data_dir: str, out_dir: str) -> None:
     """The local 1-in-10-year coldest night, which knows valleys from mountains:
     cold10_today.tif  measured, E-OBS 1976-2005 (~11 km, from weather stations);
@@ -558,6 +630,7 @@ def main(argv=None) -> int:
         build_fire_future(data_dir, out_dir)
     if "air" in parts:
         build_air(data_dir, out_dir)
+        build_air_stations(data_dir, out_dir)
     with open(os.path.join(out_dir, "built.json"), "w", encoding="utf-8") as f:
         json.dump({"parts": parts, "built": time.strftime("%Y-%m-%d %H:%M")}, f)
     return 0

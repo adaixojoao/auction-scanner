@@ -106,3 +106,29 @@ def test_the_air_layers_are_read_at_the_position(tmp_path, monkeypatch):
     monkeypatch.setattr(climate, "_layers", lambda: str(layers))
     assert climate.air_quality(38.5, -8.5) == {"pm25": 7.2, "no2": 18.0}
     assert climate.air_quality(50.0, 2.0) == {}                     # off the map
+
+
+def test_the_islands_use_their_nearest_background_station(tmp_path, monkeypatch):
+    import climate
+    layers = tmp_path / "layers"
+    layers.mkdir()
+    (layers / "air_stations.csv").write_text(
+        "station,lat,lon,area,pm25,no2\n"
+        "PT06005,32.6497,-16.9183,urban,8.1,14.2\n"        # Funchal
+        "PT07001,38.6050,-28.6314,rural,4.0,\n"             # Faial: PM2.5 only
+        "ES1234,28.1200,-15.4300,urban,,9.5\n", encoding="utf-8")
+    monkeypatch.setattr(climate, "_layers", lambda: str(layers))
+    funchal = climate.air_quality(32.66, -16.92)                     # ~1 km from the station
+    assert funchal["pm25"] == 8.1 and funchal["no2"] == 14.2 and not funchal.get("far")
+    assert funchal["stations"]["pm25"]["station"] == "PT06005"
+    sao_miguel = climate.air_quality(37.74, -25.67)                  # ~270 km from Faial
+    assert sao_miguel == {"pm25": 4.0, "stations": sao_miguel["stations"], "far": True}
+    assert climate.air_quality(28.1, -15.4)["no2"] == 9.5            # the Canaries' own station only
+    assert climate.air_quality(38.7, -9.1) == {}                     # mainland: the maps, not stations
+
+
+def test_a_far_island_station_is_about_and_never_hides():
+    far = {"climate": {"air": {"pm25": 16, "no2": 31, "far": True, "stations": {"pm25": {"km": 40.0}}}}}
+    assert not air_hidden(far)
+    _, why = pollution_penalty(far)
+    assert why == ["badly polluted air (about PM2.5 16 µg/m³, NO₂ 31 µg/m³, measured at a station 40 km away)"]

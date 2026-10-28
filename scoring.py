@@ -1648,6 +1648,9 @@ def air_grade(climate: dict | None) -> tuple[str | None, str]:
     if not air:
         return None, ""
     text = ", ".join(f"{AIR_NAMES[k]} {air[k]:g} µg/m³" for k in ("pm25", "no2") if k in air)
+    measured = [s["km"] for s in (air.get("stations") or {}).values()]
+    if measured:
+        text += f", measured at a station {max(measured):g} km away"
     over = lambda limits: any(air.get(k) is not None and air[k] > v for k, v in limits.items())  # noqa: E731
     if any(air.get(k) is not None and air[k] >= v for k, v in AIR_BAD.items()):
         return "bad", text
@@ -1659,9 +1662,11 @@ def air_grade(climate: dict | None) -> tuple[str | None, str]:
 
 
 def air_hidden(item: dict) -> bool:
-    """Bad air at a pin that is the house (an approximate reading only costs points)."""
+    """Bad air at a pin that is the house (an approximate reading, or an island
+    station far from it, only costs points)."""
     climate = item.get("climate") or {}
-    return air_grade(climate)[0] == "bad" and not climate.get("approx")
+    return (air_grade(climate)[0] == "bad" and not climate.get("approx")
+            and not (climate.get("air") or {}).get("far"))
 
 
 def pollution_penalty(item: dict) -> tuple[float, list[str]]:
@@ -1674,7 +1679,8 @@ def pollution_penalty(item: dict) -> tuple[float, list[str]]:
     grade, text = air_grade(item.get("climate"))
     if grade in AIR_POINTS:
         points += AIR_POINTS[grade]
-        about = "about " if (item.get("climate") or {}).get("approx") else ""
+        climate = item.get("climate") or {}
+        about = "about " if climate.get("approx") or (climate.get("air") or {}).get("far") else ""
         reasons.append({"clean": f"clean air ({about}{text})", "poor": f"polluted air ({about}{text})",
                         "bad": f"badly polluted air ({about}{text})"}[grade])
     return points, reasons
