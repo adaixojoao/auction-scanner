@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1319,3 +1319,14 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_bima_keeps_purchases_and_drops_placeholder_prices():
+    from sources.de import bima_listing
+    plot = bima_listing({"id": "1", "attributes": {"commercialization_type": "BUY", "title": "Baugrundstück",
+                        "city": "Anklam", "federal_state": "mecklenburg_vorpommern", "buy_price": "15000.0",
+                        "display_area": "508.0", "latitude": "53.85", "longitude": "13.69"}})
+    assert plot["id"] == "bima:1" and plot["price"] == 15000 and plot["concelho"] == "Anklam"
+    assert plot["district"] == "Mecklenburg Vorpommern"
+    assert bima_listing({"id": "2", "attributes": {"commercialization_type": "BUY", "buy_price": "1.0"}})["price"] is None
+    assert bima_listing({"id": "3", "attributes": {"commercialization_type": "RENT"}}) is None
