@@ -1196,6 +1196,10 @@ _TGSS_OWNER = re.compile(r"TITULARIDAD:.*?(?=\d+\s*%|PLENO DOMINIO|FINCA|URBANA|
 _TGSS_HECTARES = re.compile(r"Superficie:\s*([\d.]+(?:,\d+)?)\s*\(hect[áa]reas\)", re.I)
 
 
+_TGSS_HOME = re.compile(r"\s*(?:\d+(?:[.,]\d+)?\s*%\s*(?:pleno dominio\s*)?(?:de\s*)?)?"
+                        r"(?:vivienda|casa|piso|chalet|apartamento|d[uú]plex|[aá]tico|adosado)\b", re.I)
+
+
 def _tgss_area(text: str) -> float | None:
     m = _TGSS_HECTARES.search(text or "")
     if m:
@@ -1222,7 +1226,10 @@ def parse_tgss(row: dict, detail: dict) -> dict | None:
     raw = {"charges_eur": row["charges"]} if row.get("charges") else {}
     return make_listing(
         "tgss", row["id"], "ES", title=f"{row['kind']} en {town or row['address']}",
-        description=description, tipo="terreno" if rural else "vivienda",
+        # A "finca urbana" is as often a garage, a shop or a plot as a home: only
+        # a description that opens with a home says "vivienda".
+        description=description, tipo="terreno" if rural else "vivienda" if _TGSS_HOME.match(description)
+        else "inmueble",
         area_m2=_tgss_area(description), price=row["price"], min_price=row["price"],
         concelho=town, date_end=parse_date_dmy(row.get("date")),
         url=f"{TGSS_APP}?opcion=13&EMB_ID={row['id']}&opcion2=1&tipoOperacion=1",
