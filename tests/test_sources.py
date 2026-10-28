@@ -1330,6 +1330,6 @@ def test_hacienda_reads_home_lots_and_their_rounds():
             "Lote 5.- Casa en Magacela, de cincuenta y dos metros. Segunda Subasta: Tipo de licitación del lote: "
             "11.039,80 euros. Cuarta Subasta: Tipo de licitación del lote: 7.976,26 euros.")
     lots = hacienda_lots(text)
-    assert [lot["lot"] for lot in lots] == ["3", "5"]                       # the plot is not a home
+    assert [lot["lot"] for lot in lots] == ["3", "4", "5"]                  # a plot is kept too
     assert lots[0]["town"] == "Madrid" and lots[0]["price"] == 99000 and lots[0]["floor"] == 60798.38
-    assert lots[1]["town"] == "Magacela" and lots[1]["floor"] == 7976.26
+    assert lots[1]["floor"] == 900 and lots[2]["town"] == "Magacela" and lots[2]["floor"] == 7976.26

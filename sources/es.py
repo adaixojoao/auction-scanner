@@ -736,7 +736,8 @@ def scrape_subastasactivas(db, max_price: float = 100000, **_):
 # ─── Patrimonio del Estado (the state's own property) ──────────────
 # The Treasury's provincial offices sell what the state owns or inherits
 # without heirs (abintestato), by sealed-bid auction. The search lists the
-# open auctions office by office; the lots are only in the BOE announcement,
+# open auctions office by office (homes, buildings, shops and land); the lots
+# are only in the BOE announcement,
 # a PDF written differently by each office. A round with no bid goes on to
 # the next, cheaper one at the same sitting, so the last price is the floor.
 HACIENDA = "https://www.hacienda.gob.es"
@@ -755,19 +756,18 @@ _HAC_TABLE = re.compile(r"Tipo de licitaci[óo]n((?:\s+[\d.]+,\d{2}(?:\s*€)?){
 _HAC_POSTCODE = re.compile(r"\(\d{5}\s+([A-ZÁÉÍÓÚÑ][^)]{1,40})\)")
 _HAC_TOWN = re.compile(r"(?:t[ée]rmino municipal de|municipio de|sit[oa]s? en|^\W*(?:inmueble|casa|vivienda) en)\s+([A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü' -]{1,40}?)"
                        r"\s*(?:\(|,|\.|;| con | calle| c/| avda)", re.I)
-_HAC_HOME = ["vivienda", "casa", "piso", "apartamento", "chalet", "uso residencial", "local comercial con vivienda"]
 
 
 def hacienda_lots(text: str) -> list[dict]:
-    """The home lots of one BOE announcement: {"lot", "text", "town", "area", "price", "floor"}."""
+    """The property lots of one BOE announcement: {"lot", "text", "town", "area", "price", "floor"}.
+
+    Homes, plots, shops and whole buildings are all kept: the scorer tells them apart."""
     text = re.sub(r"\s+", " ", _HAC_PAGE_HEAD.sub(" ", text))
     parts = _HAC_LOT.split(text)
     out = []
     for i in range(1, len(parts) - 1, 2):
         body = parts[i + 1][:10000]
         head = body[:400]
-        if not has_term(head, _HAC_HOME, negations=False):
-            continue
         found = {}
         for n, amount in _HAC_ROUND.findall(body):
             found.setdefault(_HAC_ORDINAL.get(n.lower(), n), parse_price(amount))
@@ -785,7 +785,7 @@ def hacienda_lots(text: str) -> list[dict]:
 def _hacienda_events(session) -> set[str]:
     found = set()
     for office in HACIENDA_OFFICES:
-        resp = session.get(HACIENDA_LIST, params={"den": "", "nat": "Inmuebles urbanos;", "dels": f"{office};"})
+        resp = session.get(HACIENDA_LIST, params={"den": "", "nat": "Inmuebles urbanos;Inmuebles rústicos;", "dels": f"{office};"})
         resp.raise_for_status()
         found.update(_HAC_EVENT.findall(resp.text))
     return found
