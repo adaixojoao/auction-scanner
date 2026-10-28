@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1319,3 +1319,21 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_eactivos_reads_a_home_card():
+    from bs4 import BeautifulSoup
+    from sources.es import eactivos_card
+    html = """<div class="liquidation-card card px-0" data-liquidation="25364">
+      <span class="end-date">Finaliza el <span class="date">29/10/2026</span></span>
+      <a class="img-link liquidation-card-image" href="https://www.eactivos.com/6K2P8GMK/subasta-de-vivienda">
+        <img class="card-img-top img-main" src="https://eactivoscdn.azureedge.net/card/a.png"></a>
+      <div class="card-title"><a href="https://www.eactivos.com/6K2P8GMK/subasta-de-vivienda">
+        Subasta de vivienda en barriada Los Pajaritos, Sevilla</a></div>
+      <div class="card-subtitle mb-3 d-flex"><i class="location"></i> Sevilla, Sevilla</div>
+      <div class="text-value current-bid-amount" data-initial-price="0">0€</div>
+      <div class="text-value" data-end-date="2026-10-29 12:00:00"></div>
+      <span class="liquidation-price">25.000€</span></div>"""
+    row = eactivos_card(BeautifulSoup(html, "html.parser").div)
+    assert row["id"] == "eactivos:25364" and row["price"] == 25000 and row["min_price"] == 0
+    assert row["concelho"] == "Sevilla" and row["date_end"] == "2026-10-29T12:00:00"
