@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import re
 import time
+from datetime import datetime, timezone
 
-from common import LOG, land_max_price, make_listing, make_session, stable_id, to_number
+from common import LOG, land_max_price, make_listing, make_session, safe_url, stable_id, to_number
 from db import upsert_listing
 from sources import register
 
@@ -196,3 +198,74 @@ def scrape_greenacres(db, max_price: float = 50000, config: dict | None = None, 
         db.commit()
         LOG.info(f"Green-Acres {country}: {len(found)} listings")
     return total
+
+
+# ─── Troostwijk (TBAuctions) ─────────────────────────────────────────
+# Troostwijk and BVA run on one platform; its real-estate category (houses,
+# land, commercial and industrial property across Europe) is read from each
+# sub-category page's Next.js data, so a lot's kind comes from where it sits.
+TROOSTWIJK = "https://www.troostwijkauctions.com"
+TROOSTWIJK_CATEGORIES = {
+    "huizen/22d00fcf-7627-452d-9dd4-746cad8dadee": "vastgoed",
+    "gronden/dfc469c5-d053-4ff5-858a-5eef223d80e2": "terreno",
+    "commercieel-vastgoed/cbe5b336-370a-4b5d-891e-9a289a5b30b6": "commercieel",
+    "industrieel-onroerend-goed/12672a1a-8b59-492c-9dd8-40dbaf4f3f4b": "commercieel",
+}
+
+
+def troostwijk_listing(lot: dict, tipo: str) -> dict | None:
+    lid = lot.get("displayId") or lot.get("id")
+    if not lid or not lot.get("urlSlug"):
+        return None
+    place = lot.get("location") or {}
+    bid = ((lot.get("currentBidAmount") or {}).get("cents") or 0) / 100
+    end = lot.get("endDate")
+    raw = {k: lot.get(k) for k in ("auctionId", "biddingStatus", "bidsCount", "saleTerm", "platform")}
+    # The bid so far, not a price: an opening bid of €10 says nothing of the value.
+    return make_listing(
+        "troostwijk", lid, (place.get("countryCode") or "nl").upper(),
+        title=lot.get("title"), description=lot.get("description"), tipo=tipo,
+        current_bid=bid or None, concelho=place.get("city"),
+        url=safe_url(f"{TROOSTWIJK}/nl/l/{lot['urlSlug']}"),
+        image_url=safe_url((lot.get("image") or {}).get("url") or ""),
+        date_end=datetime.fromtimestamp(end, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") if end else None,
+        raw_json=json.dumps(raw, ensure_ascii=False),
+    )
+
+
+def troostwijk_lots(html: str) -> tuple[list[dict], int]:
+    """The lots on a category page and how many the category holds."""
+    m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    data = ((json.loads(m.group(1)).get("props") or {}).get("pageProps") or {}).get("lotsData") or {} if m else {}
+    return data.get("results") or [], data.get("totalSize") or 0
+
+
+@register("troostwijk", "EU", description="Troostwijk / BVA — real estate and land auctions across Europe")
+def scrape_troostwijk(db, max_price: float = 100000, **_):
+    """Troostwijk Auctions (also BVA) — houses, land and commercial property."""
+    session = make_session(timeout=30)
+    rows: dict[str, dict] = {}
+    first = True
+    for path, tipo in TROOSTWIJK_CATEGORIES.items():
+        for page in range(1, 20):
+            try:
+                resp = session.get(f"{TROOSTWIJK}/nl/c/vastgoed/{path}", params={"page": page} if page > 1 else None)
+                resp.raise_for_status()
+            except Exception:
+                if first:
+                    raise                     # a dead site must show on the Sources page
+                LOG.info(f"Troostwijk {path} p{page} failed")
+                break
+            first = False
+            lots, total = troostwijk_lots(resp.text)
+            for row in (troostwijk_listing(lot, tipo) for lot in lots):
+                if row:
+                    rows.setdefault(row["id"], row)
+            if not lots or page * max(len(lots), 1) >= total:
+                break
+            time.sleep(0.5)
+    for row in rows.values():
+        upsert_listing(db, row)
+    db.commit()
+    LOG.info(f"Troostwijk: {len(rows)} real-estate lots")
+    return len(rows)

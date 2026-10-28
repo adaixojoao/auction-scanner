@@ -257,3 +257,34 @@ def test_aruodas_reads_ares_as_square_metres_and_skips_a_rental(db, fake_http):
     assert row["concelho"] == "Diržioniškių k."
     assert row["url"] == "https://www.aruodas.lt/sklypai-example-11-1449945/"
     assert row["image_url"] == "https://aruodas-img.dgn.lt/plot.jpg"
+
+
+def _twk_page(lots, total):
+    blob = {"props": {"pageProps": {"lotsData": {"results": lots, "totalSize": total}}}}
+    return '<script id="__NEXT_DATA__" type="application/json">' + json.dumps(blob) + "</script>"
+
+
+def _twk_lot(display_id, title, city, country, cents):
+    return {"displayId": display_id, "id": "uuid-" + display_id, "title": title,
+            "urlSlug": f"lot-{display_id}", "location": {"city": city, "countryCode": country},
+            "currentBidAmount": {"cents": cents, "currency": "EUR"}, "endDate": 1793303940,
+            "image": {"url": "https://media.example/x"}, "biddingStatus": "BIDDING_OPEN"}
+
+
+def test_troostwijk_reads_each_real_estate_category_once(db, fake_http):
+    house = _twk_lot("A1-1-1", "Huis met 660 m2 grond in Voorbeelddorp", "Voorbeelddorp", "bg", 255000)
+    land = _twk_lot("A1-2-1", "Loofbos 11 ha", "Bosdorp", "de", 95000)
+
+    def handler(method, url, kw):
+        if "/huizen/" in url:
+            return FakeResponse(_twk_page([house], 1))
+        if "/gronden/" in url:
+            return FakeResponse(_twk_page([land, house], 2))    # a lot shown twice is one listing
+        return FakeResponse(_twk_page([], 0))
+    fake_http(handler)
+    assert REGISTRY["troostwijk"].func(db) == 2
+    rows = {r["id"]: r for r in db.execute("SELECT * FROM listings")}
+    h, w = rows["troostwijk:A1-1-1"], rows["troostwijk:A1-2-1"]
+    assert h["country"] == "BG" and h["tipo"] == "vastgoed" and h["current_bid"] == 2550 and h["price"] is None
+    assert w["tipo"] == "terreno" and w["url"] == "https://www.troostwijkauctions.com/nl/l/lot-A1-2-1"
+    assert h["date_end"] == "2026-10-29T19:59:00"
