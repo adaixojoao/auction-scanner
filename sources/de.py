@@ -247,3 +247,66 @@ def scrape_immowelt(db, max_price: float = 50000, **_):
     return scrape_named(db, "immowelt", max_price)
 
 
+
+
+# The DGA group's shared object list: one page with every lot of DGA, SGA, NDGA,
+# WDGA, DIIA and P&B (voluntary auctions, often for insolvency administrators,
+# with low starting limits). Every lot is on the page; filtering is client-side.
+GOAUKTION = "https://www.ndga.de"
+GOAUKTION_LIST = f"{GOAUKTION}/immobilie-ersteigern/immobilie-suchen-und-finden.html"
+GOAUKTION_HOUSES = {"D": "DGA", "S": "SGA", "N": "NDGA", "W": "WDGA", "I": "DIIA", "P": "P&B"}
+# Icon names on each lot → tipo.
+GOAUKTION_TYPES = {"EFHZFH": "moradia", "MFHWGH": "predio", "ETWTE": "apartamento",
+                   "GRDBG": "terreno", "GE": "comercial", "Special": "outro"}
+GOAUKTION_STATUS = {"Aktuell", "Nachverkauf"}   # Nachverkauf: unsold, still buyable at the limit
+
+
+def goauktion_listing(item) -> dict | None:
+    """One lot (div[data-jplist-item]) of the DGA group's list as a listing."""
+    link = item.select_one(".katalogpos a[href]")
+    lot = item.select_one(".katalogpos p")
+    status = item.select_one(".verkaufsstatus p")
+    if not link or not lot or (status and status.get_text(strip=True) not in GOAUKTION_STATUS):
+        return None
+    lot_no = lot.get_text(strip=True)
+    limit = item.select_one(".auktionLimitAmoutForSorting")
+    price = float(limit.get_text(strip=True)) if limit and limit.get_text(strip=True).isdigit() else None
+    addr = item.select_one(".objekt .addr-list a")
+    lines = [t.strip() for t in addr.stripped_strings] if addr else []
+    city = re.sub(r"^\d{5}\s*", "", lines[-1]) if lines else None
+    hidden = [s.get("class", [""])[0] for s in item.select(":scope > span[style*='display:none']")]
+    icon = item.select_one(".ortIco img")
+    kind = (icon.get("class") or [""])[0] if icon else ""
+    pin = item.select_one(".ortIco a[data-lat]")
+    raw = {"lot": lot_no, "house": GOAUKTION_HOUSES.get(lot_no[:1]),
+           "status": status.get_text(strip=True) if status else None,
+           "rented": "vermietet" in hidden, "object_type": kind}
+    if pin:
+        raw.update(lat=pin.get("data-lat"), lon=pin.get("data-lon"))
+    img = item.select_one(".image-block img[src]")
+    return make_listing(
+        "goauktion_de", lot_no, "DE",
+        title=f"{raw['house'] or 'Auktion'} {lot_no}: {' · '.join(lines)}"[:200],
+        description="Freiwillige Grundstücksauktion (DGA-Gruppe); price is the Auktionslimit (starting bid)",
+        tipo=GOAUKTION_TYPES.get(kind, "imovel"), price=price, min_price=price,
+        district=hidden[0] if hidden else None, concelho=city,
+        url=safe_url(link["href"], GOAUKTION), image_url=safe_url(img["src"], GOAUKTION) if img else None,
+        raw_json=raw,
+    )
+
+
+@register("goauktion_de", "DE", kind="aggregator", access="public_html", docs_url=GOAUKTION_LIST)
+def scrape_goauktion(db, max_price: float = 50000, **_):
+    """DGA / SGA / NDGA / WDGA property auctions — low-limit lots, often from insolvency administrators."""
+    resp = make_session(timeout=60).get(GOAUKTION_LIST)
+    resp.raise_for_status()
+    total = 0
+    for item in BeautifulSoup(resp.text, "html.parser").select("[data-jplist-item]"):
+        row = goauktion_listing(item)
+        if not row or (row["price"] and row["price"] > max_price):
+            continue
+        upsert_listing(db, row)
+        total += 1
+    db.commit()
+    LOG.info(f"goauktion: {total} listings")
+    return total

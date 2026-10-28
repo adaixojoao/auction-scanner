@@ -642,3 +642,67 @@ def scrape_citya(db, max_price: float = 50000, **_):
     """Citya — houses for sale across France."""
     from sources._market import scrape_named
     return scrape_named(db, "citya", max_price)
+
+
+VENCH = "https://www.vench.fr"
+VENCH_LIST = f"{VENCH}/prochaines-ventes-aux-encheres.html"
+VENCH_MAX_PAGES = 60          # 12 sales a page; about 48 pages (Oct 2026)
+
+
+def vench_listing(card) -> dict | None:
+    """One div.featured-item of vench.fr's upcoming sales as a listing.
+    Descriptions are for subscribers; the card has the title, town, mise à prix and date."""
+    link = card.select_one(".down-content a[href]")
+    m = re.search(r"vente-(\d+)", link["href"]) if link else None
+    if not m:
+        return None
+    heading = card.select_one("h3").get_text(" ", strip=True) if card.select_one("h3") else ""
+    what, _, town = heading.rpartition("•")
+    price_el = card.select_one(".miseAPrixVignette")
+    date_m = re.search(r"(\d{2})/(\d{2})/(\d{2,4})", card.select_one(".dateVenteVignette").get_text()
+                       if card.select_one(".dateVenteVignette") else "")
+    date_end = None
+    if date_m:
+        d, mo, y = date_m.groups()
+        date_end = f"{'20' + y if len(y) == 2 else y}-{mo}-{d}"
+    img = card.select_one("img[data-src]")
+    price = parse_price(price_el.get_text()) if price_el else None
+    return make_listing(
+        "vench", m.group(1), "FR",
+        title=heading[:200], description="Vente judiciaire aux enchères (saisie or liquidation); price is the mise à prix",
+        tipo=(what or heading).strip().lower()[:60] or "bien", price=price, min_price=price,
+        concelho=town.strip() or None, url=f"{VENCH}/{link['href'].lstrip('./')}",
+        image_url=f"{VENCH}{img['data-src']}" if img else None, date_end=date_end,
+    )
+
+
+@register("vench", "FR", kind="aggregator", access="public_html", docs_url=VENCH_LIST)
+def scrape_vench(db, max_price: float = 100000, **_):
+    """Vench — French court property auctions (saisies and liquidations judiciaires)."""
+    from sources import ScanCount
+    session = make_session(timeout=40)
+    total, scope, pages = 0, "partial", 0
+    for page in range(1, VENCH_MAX_PAGES + 1):
+        try:
+            resp = session.get(VENCH_LIST, params={"p": page} if page > 1 else None)
+            resp.raise_for_status()
+        except Exception:
+            if page == 1:
+                raise
+            LOG.warning(f"vench: page {page} failed, keeping earlier pages")
+            break
+        pages += 1
+        cards = BeautifulSoup(resp.text, "html.parser").select("div.featured-item")
+        for card in cards:
+            row = vench_listing(card)
+            if not row or (row["price"] and row["price"] > max_price):
+                continue
+            upsert_listing(db, row)
+            total += 1
+        db.commit()
+        if len(cards) < 12:
+            scope = "full"
+            break
+        time.sleep(1)
+    LOG.info(f"vench: {total} listings")
+    return ScanCount(total, scope, pages)

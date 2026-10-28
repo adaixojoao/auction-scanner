@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 89
+    assert len(REGISTRY) == 92
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1263,3 +1263,48 @@ def test_a_citius_house_keeps_its_floor_not_its_land():
     assert _citius_area(house) == 85.45
     assert _citius_area("Terreno para construção com 1200 m2") == 1200
     assert _citius_area("Prédio rústico, área total: 4,6905 ha") == 46905
+
+
+def test_fallcoaste_reads_a_home_card():
+    from bs4 import BeautifulSoup
+    from sources.it import fallcoaste_listing
+    html = """<article class="hover-block auction horizontal-auction" data-auction-id="1642172"
+      data-auction-data-termine="29/10/2026 10:00" data-auction-url="https://www.fallcoaste.it/vendita/x-1642172.html">
+      <figure><img src="https://cdn/x.jpg"/></figure>
+      <span class="price-block"><strong>11.812,50</strong></span>
+      <div class="name_type"><h3>Porzione di fabbricato di 120 mq in Ballabio</h3>
+      <p>Sincrona telematica</p><p>Tribunale di Lecco - Procedura n.3/2024</p>
+      <ul><li>Porzione di fabbricato di 120 mq</li></ul></div></article>"""
+    row = fallcoaste_listing(BeautifulSoup(html, "html.parser").article)
+    assert row["id"] == "fallcoaste:1642172" and row["price"] == 11812.5
+    assert row["district"] == "Lecco" and row["area_m2"] == 120
+    assert row["date_end"] == "2026-10-29T10:00:00"
+
+
+def test_vench_reads_a_sale_card():
+    from bs4 import BeautifulSoup
+    from sources.fr import vench_listing
+    html = """<div class="featured-item"><img data-src="/vignettes/v1.jpg"/><div class="down-content">
+      <a href="./vente-167055-une-maison-briare.html"><h3>UNE MAISON • Briare</h3></a>
+      <li class="miseAPrixVignette">Mise à prix : 36 000.00 €</li>
+      <li class="dateVenteVignette">Date de la vente : 17/12/26</li></div></div>"""
+    row = vench_listing(BeautifulSoup(html, "html.parser").div)
+    assert row["id"] == "vench:167055" and row["price"] == 36000 == row["min_price"]
+    assert row["concelho"] == "Briare" and row["date_end"] == "2026-12-17"
+
+
+def test_goauktion_reads_a_lot_and_skips_sold_ones():
+    from bs4 import BeautifulSoup
+    from sources.de import goauktion_listing
+    lot = """<div data-jplist-item=""><span class="Sachsen" style="display:none;"></span>
+      <span class="vermietet" style="display:none;"></span>
+      <div class="katalogpos"><a href="/objekt/S26-04-003.html"><p>S26-04-003</p></a></div>
+      <div class="verkaufsstatus"><p>{status}</p></div>
+      <span class="auktionLimitAmoutForSorting">9000</span>
+      <div class="objekt"><p class="addr-list"><a>Einfamilienhaus<br/>Hauptstr. 1<br/>01234 Zwickau</a></p>
+      <div class="ortIco"><a data-lat="50.7" data-lon="12.5"><img class="EFHZFH"/></a></div></div></div>"""
+    row = goauktion_listing(BeautifulSoup(lot.format(status="Aktuell"), "html.parser").div)
+    assert row["id"] == "goauktion_de:S26-04-003" and row["price"] == 9000
+    assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
+    assert json.loads(row["raw_json"])["rented"] is True
+    assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None

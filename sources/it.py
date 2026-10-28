@@ -1,4 +1,4 @@
-"""Italy: astegiudiziarie.it, PVP Giustizia, Gobid Real, Astalegale."""
+"""Italy: astegiudiziarie.it, PVP Giustizia, Gobid Real, Astalegale, Fallco Aste."""
 from __future__ import annotations
 
 import re
@@ -194,3 +194,73 @@ def scrape_astalegale(db, max_price: float = 100000, **_):
         time.sleep(0.3)
     LOG.info(f"Astalegale: {total} listings")
     return total
+
+
+FALLCOASTE = "https://www.fallcoaste.it"
+FALLCOASTE_HOMES = "macro|527^cat0|528^cat1|529"     # Immobili › residenziali (about 700 lots, Oct 2026)
+FALLCOASTE_PAGE = 15
+FALLCOASTE_MAX_PAGES = 80
+
+
+def fallcoaste_listing(art) -> dict | None:
+    """One article.horizontal-auction of fallcoaste.it's search as a listing."""
+    lid, url = art.get("data-auction-id"), art.get("data-auction-url")
+    if not lid or not url:
+        return None
+    h3 = art.select_one(".name_type h3")
+    goods = [li.get_text(" ", strip=True) for li in art.select(".name_type li")]
+    lines = [p.get_text(" ", strip=True) for p in art.select(".name_type p")]
+    court = next((ln for ln in lines if "Tribunale" in ln or "Procedura" in ln), None)
+    court_m = re.search(r"Tribunale di ([^-]+)", court or "")
+    price_el = art.select_one(".price-block strong")
+    price = parse_price(price_el.get_text()) if price_el else None
+    d = re.match(r"(\d{2})/(\d{2})/(\d{4})\s*(\d{2}):(\d{2})", art.get("data-auction-data-termine") or "")
+    desc = " · ".join(goods) or (h3.get_text(" ", strip=True) if h3 else "")
+    img = art.select_one("figure img[src]")
+    return make_listing(
+        "fallcoaste", lid, "IT",
+        title=(h3.get_text(" ", strip=True) if h3 else f"Fallco Aste {lid}")[:200],
+        description=f"{desc} — {court}" if court else desc or None, tipo="immobile",
+        area_m2=find_area(desc), price=price, min_price=None,
+        district=court_m.group(1).strip() if court_m else None, url=url,
+        image_url=img["src"] if img else None,
+        date_end=f"{d[3]}-{d[2]}-{d[1]}T{d[4]}:{d[5]}:00" if d else None,
+        raw_json={"procedura": court, "modalita": lines[0] if lines else None},
+    )
+
+
+@register("fallcoaste", "IT", kind="aggregator", access="public_html", docs_url=FALLCOASTE)
+def scrape_fallcoaste(db, max_price: float = 100000, **_):
+    """Fallco Aste — Italian bankruptcy (fallimento / liquidazione) and court home sales."""
+    from sources import ScanCount
+    session = make_session(timeout=40)
+    total, seen, scope, pages = 0, set(), "partial", 0
+    for page in range(1, FALLCOASTE_MAX_PAGES + 1):
+        try:
+            resp = session.get(f"{FALLCOASTE}/ricerca.html", params={"filter": FALLCOASTE_HOMES, "page": page})
+            resp.raise_for_status()
+        except Exception:
+            if page == 1:
+                raise
+            LOG.warning(f"fallcoaste: page {page} failed, keeping earlier pages")
+            break
+        pages += 1
+        arts = BeautifulSoup(resp.text, "html.parser").select("article.horizontal-auction")
+        new = 0
+        for art in arts:
+            row = fallcoaste_listing(art)
+            if not row or row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            new += 1
+            if row["price"] and row["price"] > max_price:
+                continue
+            upsert_listing(db, row)
+            total += 1
+        db.commit()
+        if len(arts) < FALLCOASTE_PAGE or not new:   # past the last page the site repeats page 1
+            scope = "full"
+            break
+        time.sleep(1)
+    LOG.info(f"fallcoaste: {total} listings")
+    return ScanCount(total, scope, pages)
