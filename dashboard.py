@@ -2561,7 +2561,7 @@ EDITABLE = {
     "max_listings": None,
     "availability_valid_hours": None,   # how long an open-page link check counts (confirm.py)
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
-                "rural_max_eur_m2", "weights"),
+                "rural_max_eur_m2", "avoid_heavy_pollution", "weights"),
     "proponente": PROPONENTE_KEYS,
     "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours",
                  "retry_every_hours", "fotocasa_every_hours"),

@@ -65,6 +65,8 @@
     <div class="field"><label>Hide listings scoring below</label><input type="number" id="min_score" min="0" max="100" step="5">
       <p class="help">0 is an ordinary listing and 100 is the best, so the ones worth a look use the whole scale.</p></div>
     <div class="field"><label>Hide listings smaller than (m²)</label><input type="number" id="min_area_m2" min="0" step="10"></div>
+    <div class="field"><label class="check"><input type="checkbox" id="avoid_heavy_pollution"> Hide homes next to heavy industry</label>
+      <p class="help">Within 3 km of a refinery, steelworks, cement or chemical plant, incinerator or coal power plant. Lighter pollution nearby (landfills, quarries, sewage works, gas plants, or heavy industry up to 8 km) lowers the score instead.</p></div>
   </div>
   <div class="field" style="margin-top:14px"><label>Countries to show</label>
     <p class="help">None ticked = all countries.</p>
@@ -326,7 +328,7 @@ async function load() {
   setv("cash_on_hand", c.cash_on_hand ?? 0);
   setv("max_price", c.max_price); setv("invest_max_price", c.invest_max_price ?? 100000);
   setv("land_max_price", c.land_max_price ?? 100000);
-  setv("check_max_price", c.check_max_price ?? 100000); setv("light_checks_from", c.light_checks_from ?? 50000); setv("max_listings", c.max_listings ?? 100); setv("availability_valid_hours", c.availability_valid_hours ?? 0); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2);
+  setv("check_max_price", c.check_max_price ?? 100000); setv("light_checks_from", c.light_checks_from ?? 50000); setv("max_listings", c.max_listings ?? 100); setv("availability_valid_hours", c.availability_valid_hours ?? 0); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2); setv("avoid_heavy_pollution", f.avoid_heavy_pollution !== false);
   setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
   WEIGHT_KEYS.forEach(([mode, name]) => { const v = Math.round(100 * weightNow(f.weights, mode, name)); $("w_" + mode + "_" + name).value = v; $("wv_" + mode + "_" + name).textContent = v + "%"; });
   document.querySelectorAll("input[name=country]").forEach(cb => cb.checked = (f.countries || []).includes(cb.value));
@@ -455,6 +457,7 @@ async function save() {
     availability_valid_hours: num("availability_valid_hours") || 0,
     filters: {
       min_score: num("min_score") || 0, min_area_m2: num("min_area_m2") || 0,
+      avoid_heavy_pollution: $("avoid_heavy_pollution").checked,
       rural_min_m2: num("rural_min_m2"), rural_max_eur_m2: num("rural_max_eur_m2"),
       weights: WEIGHT_KEYS.reduce((out, [mode, name]) => {
         (out[mode] = out[mode] || {})[name] = Number($("w_" + mode + "_" + name).value) / 100;
