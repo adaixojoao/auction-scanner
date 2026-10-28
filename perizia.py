@@ -23,7 +23,7 @@ import sys
 
 from common import LOG, find_terms
 
-VERSION = 1
+VERSION = 3                       # 2: a share only when the passage is about what is sold; 3: checklists
 PER_SCAN = 40                     # reports read per scan, the best homes first
 MAX_BYTES = 25_000_000
 SOURCES = ("pvp_giustizia", "astalegale")
@@ -108,11 +108,23 @@ def _body(text: str) -> str:
 # Words of the expert's instructions, not of the findings: "in caso di opere
 # abusive, controlli ...", "se trattasi di quota indivisa indichi ...".
 _INSTRUCTION = re.compile(r"\b(in caso di|se trattasi|qualora|controlli|verifichi|indichi|determini|dica se|"
-                          r"precisando|eventuali|eventuale|esprima|predisponendo|ai fini della)\b", re.I)
+                          r"precisando|eventuali|eventuale|esprima|esponga|predisponendo|ai fini della|"
+                          r"nel caso di|in questo caso|se fosse|deve contenere|seguenti indicazioni|"
+                          r"esistenza di)\b", re.I)
+# A share is a finding only when the passage is about what is sold: not the
+# history of the title ("pervenuto in nuda proprietà per donazione") nor a lien
+# copied from the registers ("Contro: ... per la quota di 1/3").
+_SOLD = re.compile(r"\b(pignorat\w*|in vendita|posto in vendita|oggetto della vendita|valore della quota|"
+                   r"diritto e quota|quota in vendita|tipologia del diritto|diritto posto|diritto venduto|"
+                   r"diritti di|intero diritto)\b", re.I)
+_HISTORY = re.compile(r"\b(pervenut\w*|donazione|successione|a favore|contro:|trascritt\w*|iscritt\w*)", re.I)
 
 
-def _snippet(text: str, terms: list[str]) -> str:
-    """The first passage stating one of `terms` as a finding, or ""."""
+def _snippet(text: str, terms: list[str], about_sale: bool = False) -> str:
+    """The first passage stating one of `terms` as a finding, or "".
+
+    With `about_sale` the passage must also be about what is sold, not the
+    title's history."""
     low = text.lower()
     for term in terms:
         start = 0
@@ -120,8 +132,11 @@ def _snippet(text: str, terms: list[str]) -> str:
             start = i + 1
             passage = text[max(0, i - 80): i + 120]
             near = text[max(0, i - 120): i + 40]
-            if find_terms(passage, [term]) and not _INSTRUCTION.search(near):
-                return passage.strip()
+            if not find_terms(passage, [term]) or _INSTRUCTION.search(near):
+                continue
+            if about_sale and (not _SOLD.search(passage) or _HISTORY.search(near)):
+                continue
+            return passage.strip()
     return ""
 
 
@@ -134,7 +149,7 @@ def read(text: str) -> dict:
     out = {"scanned": False, "lots": len(lots) or 1}
     for key, terms in (("share", SHARE), ("not_legal", NOT_LEGAL), ("leased", LEASED), ("occupied", OCCUPIED),
                        ("free", FREE), ("fixable", FIXABLE), ("damp", DAMP), ("stripped", STRIPPED)):
-        found = _snippet(body, terms)
+        found = _snippet(body, terms, about_sale=key == "share")
         if found:
             out[key] = found[:220]
     m = _MARKET.search(body)
