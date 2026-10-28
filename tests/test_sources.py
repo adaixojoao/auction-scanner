@@ -1094,6 +1094,17 @@ def test_tgss_reads_the_table_adds_charges_and_drops_the_owner():
     assert price_to_pay(listing) == 18863.24          # the debts stay with the land
 
 
+def test_a_tgss_urban_finca_is_a_home_only_when_it_says_so():
+    import scoring
+    from sources.es import parse_tgss
+    row = {"id": "82", "kind": "Finca Urbana", "address": "CL RIU SIURANA 53 (TARRAGONA)", "valuation": 15396.41,
+           "price": 15396.41, "date": "02/12/2026 12:00"}
+    garage = parse_tgss(row, {"description": "611/9 TOTALIDAD PARQUING EN TARRAGONA"})
+    flat = parse_tgss(row, {"description": "VIVIENDA EN C CARMEN 1, Descripción Detallada: URBANA"})
+    assert garage["tipo"] == "inmueble" and scoring.property_kind(garage) == "other"
+    assert flat["tipo"] == "vivienda" and scoring.property_kind(flat) == "home"
+
+
 PISOS_CARD = """<div id="675.105" class="ad-preview ad-preview--has-desc">
 <div class="ad-preview__bottom"><div class="ad-preview__info">
 <a href="/comprar/casa_rustica-ortigueira-675_105/" class="ad-preview__title">Casa r&#xFA;stica en calle Lugar Veiga, 4</a>

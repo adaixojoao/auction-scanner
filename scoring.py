@@ -459,6 +459,9 @@ OTHER_WORDS = [   # not a home and not a plot
     "arrecadação", "arrecadacao", "arrumos", "arrumo", "loja", "armazém", "armazem",
     "escritório", "escritorio", "pavilhão", "pavilhao", "industrial", "estabelecimento",
     "local comercial", "nave", "oficina", "trastero", "aparcamiento", "plaza de garaje",
+    "parquing", "pàrquing", "plaza de aparcamiento", "plaça d'aparcament", "garatge", "traster",  # Catalan
+    "cochera", "tienda", "puesto comercial", "plaza de estacionamiento", "almacén", "almacen", "secadero",
+    "local sin uso",
     "commerce", "local commercial", "bureau", "entrepôt", "hangar", "cave",
     "negozio", "magazzino", "capannone", "ufficio", "posto auto",
     "stellplatz", "tiefgarage", "lager", "büro", "gewerbe*", "bedrijfspand", "kantoor",
