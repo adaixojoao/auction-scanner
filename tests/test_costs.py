@@ -383,3 +383,24 @@ def test_serpavi_takes_the_latest_year_flats_then_houses():
     assert update_prices.serpavi_rows(header, rows, "NMUN") == [
         {"municipality": "Tabernas", "eur_m2": 3.6, "period": "2024", "source": "SERPAVI"},
         {"municipality": "Old", "eur_m2": 4.0, "period": "2023", "source": "SERPAVI"}]
+
+
+def test_an_italian_flat_pays_two_years_of_condominium_fees():
+    est = costs.estimate(home(country="IT", source="pvp_giustizia", title="Appartamento in condominio"))
+    assert labels(est)["Unpaid condominium fees"] == 2400
+    assert "Unpaid condominium fees" not in labels(costs.estimate(home(country="IT")))
+
+
+def test_freeing_an_occupied_home_is_priced_by_country():
+    occupied = {"perizia": {"found": True, "lots": 1, "occupied": "occupato dal debitore"}}
+    assert labels(costs.estimate(home(country="ES", raw_json=occupied)))["Freeing the home"] == 2500
+    assert labels(costs.estimate(home(country="IT", raw_json=occupied))).get("Freeing the home", 0) == 0
+    leased = {"perizia": {"found": True, "lots": 1, "leased": "locazione opponibile"}}
+    assert "Freeing the home" not in labels(costs.estimate(home(country="ES", raw_json=leased)))
+
+
+def test_a_stripped_home_in_the_perizia_is_priced_as_a_rebuild():
+    plain = costs.renovation(home(description="in buono stato"))
+    stripped = costs.renovation(home(description="in buono stato",
+                                     raw_json={"perizia": {"lots": 1, "stripped": "vandalizzato"}}))
+    assert stripped["eur_m2"] == costs.RENOVATION_EUR_M2["heavy"] and stripped["low"] > plain["low"]

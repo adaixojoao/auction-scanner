@@ -476,6 +476,15 @@ def renovation(item: dict) -> dict | None:
     if not area:
         return None
     state = condition(item)
+    # The court expert saw the inside: stripped or abandoned is a rebuild,
+    # damp is work, whatever the ad says.
+    perizia = _item_raw(item).get("perizia") or {}
+    seen = ""
+    if (perizia.get("lots") or 1) == 1:
+        if perizia.get("stripped") and state != "heavy":
+            state, seen = "heavy", " (the perizia finds it abandoned or stripped)"
+        elif perizia.get("damp") and state in ("good", "unknown"):
+            state, seen = "some", " (the perizia finds damp or mould)"
     low, high = RENOVATION_EUR_M2[state]
     where = f"{area:,.0f} m²".replace(",", " ")
     if source == "notice":
@@ -485,7 +494,7 @@ def renovation(item: dict) -> dict | None:
     elif source == "capped":
         where += " of building — a larger area is the plot, not floor space"
     return {"low": round(area * low), "high": round(area * high), "eur_m2": (low, high),
-            "note": f"{CONDITION_NOTE[state]}; €{low}–{high}/m² over {where}"}
+            "note": f"{CONDITION_NOTE[state]}{seen}; €{low}–{high}/m² over {where}"}
 
 
 def bands_text() -> str:
@@ -567,6 +576,51 @@ def fee_lines(item: dict, value: float, *, own_home: bool = False) -> list[dict]
 
 def fees(item: dict, value: float, *, own_home: bool = False) -> float:
     return sum(line["amount"] for line in fee_lines(item, value, own_home=own_home))
+
+
+# What a forced sale leaves the buyer to pay besides the price and the taxes.
+# In Italy the buyer answers for the condominium's fees of the current and the
+# previous year (art. 63 disp. att. c.c.); in Spain for the current year and
+# the three before (art. 9 Ley de Propiedad Horizontal). A typical year's fees,
+# not this building's.
+CONDO_YEAR_EUR = {"IT": 1_200, "ES": 700}
+CONDO_YEARS = {"IT": 2, "ES": 4}
+CONDO_WORDS = ["appartamento", "condominio", "condominiale", "piso", "apartamento", "comunidad de propietarios",
+               "propiedad horizontal", "ático", "atico", "dúplex", "duplex"]
+# Getting occupants out after a sale: lawyer and court officer. In Italy the
+# court's custodian frees it at the procedure's cost when the buyer asks before
+# the transfer decree.
+EVICTION_EUR = {"IT": 0, "PT": 1_500, "ES": 2_500, "FR": 3_000}
+EVICTION_DEFAULT = 2_000
+
+
+def extra_lines(item: dict) -> list[dict]:
+    """Unpaid condominium fees and the cost of freeing an occupied home."""
+    if (item.get("kind") or property_kind(item)) != "home":
+        return []
+    from common import has_term
+    import scoring
+    country = (item.get("country") or "PT").upper()
+    text = f"{item.get('title') or ''} {item.get('description') or ''}"
+    lines = []
+    if country in CONDO_YEAR_EUR and has_term(text, CONDO_WORDS):
+        years = CONDO_YEARS[country]
+        lines.append({"label": "Unpaid condominium fees", "amount": float(CONDO_YEAR_EUR[country] * years),
+                      "note": f"the buyer answers for up to {years} years of a flat's fees; "
+                              f"about €{CONDO_YEAR_EUR[country]:,}/year — ask the administrator"})
+    perizia = _item_raw(item).get("perizia") or {}
+    single = (perizia.get("lots") or 1) == 1
+    if single and perizia.get("leased"):
+        return lines                     # a lease the buyer keeps: nobody to evict
+    occupied = (single and perizia.get("occupied")) or (
+        not (single and perizia.get("free")) and scoring._occupied(item, text))
+    if occupied:
+        cost = EVICTION_EUR.get(country, EVICTION_DEFAULT)
+        lines.append({"label": "Freeing the home", "amount": float(cost),
+                      "note": "the court's custodian frees it at no cost to the buyer if asked before the decree"
+                              if country == "IT" and not cost else
+                              f"lawyer and court officer to get occupants out, about €{cost:,}"})
+    return lines
 
 
 def _liquidity_vacancy(population: int | None) -> float:
@@ -820,7 +874,7 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False,
     else:
         basis = "the base value"
 
-    lines = fee_lines(item, value, own_home=own_home)
+    lines = fee_lines(item, value, own_home=own_home) + extra_lines(item)
     fee_total = sum(line["amount"] for line in lines)
     work = renovation(item)
     out = {"base": value, "basis": basis, "lines": lines, "fees": fee_total, "total": value + fee_total,
