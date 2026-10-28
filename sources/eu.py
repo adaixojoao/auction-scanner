@@ -95,6 +95,18 @@ def _ga_size(text: str) -> float | None:
     return find_area(text.replace("\u202f", " ").replace("\xa0", " ").replace("hectares", "ha"))
 
 
+def _ga_town(place: str, country: str) -> str | None:
+    """The municipality of a card. In Portugal "Pitões (Montalegre)" is the
+    village and its municipality; elsewhere "Sedella (Málaga)", "Gerzat
+    (Puy-de-Dôme)" and "San Remo (Imperia)" are the town and its province."""
+    import re
+    inside = re.search(r"\(([^)]+)\)", place)
+    before = place.split("(")[0].split(",")[0].strip()
+    if country == "PT" and inside:
+        return inside.group(1).strip() or None
+    return before or (inside.group(1).strip() if inside else None)
+
+
 def parse_greenacres_page(html: str, country: str) -> list[dict]:
     import base64
     import re
@@ -114,7 +126,6 @@ def parse_greenacres_page(html: str, country: str) -> list[dict]:
         price = parse_price(price_el.get_text(" ", strip=True).replace("\u202f", "")) if price_el else None
         place = card.select_one(".announce-localisation")
         place = place.get_text(" ", strip=True) if place else ""
-        town = re.search(r"\(([^)]+)\)", place)
         tags = {t.get("title", ""): t.get_text(" ", strip=True) for t in card.select(".info-tag")}
         living = next((_ga_size(v) for k, v in tags.items() if "habitable" in k.lower()), None)
         land = next((_ga_size(v) for k, v in tags.items() if k.lower().startswith("terrain")), None)
@@ -127,7 +138,7 @@ def parse_greenacres_page(html: str, country: str) -> list[dict]:
                                    if x),
             tipo="terreno" if is_land else kind or None,
             area_m2=round(land if is_land else living) if (land if is_land else living) else None,
-            price=price, min_price=price, concelho=(town.group(1) if town else place.split(",")[0]).strip() or None,
+            price=price, min_price=price, concelho=_ga_town(place, country),
             url=url, image_url=img.get("src") if img else None,
             raw_json=json.dumps({"land_m2": land, "living_m2": living}, ensure_ascii=False),
         ))
