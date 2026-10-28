@@ -63,3 +63,10 @@ def test_scan_reads_each_detail_once(db, fake_http, monkeypatch):
     assert "rivière" in item["description"] and geo.position(item)["lat"] == 41.84
     scrape_greenacres(db, max_price=50000)
     assert len([c for c in session.calls if "maison-a-vendre" not in c[1]]) == len(details)
+
+
+def test_a_town_and_its_province_keep_the_town():
+    card = _card("Ased", "https://www.green-acres.es/fr/properties/immobilier/sedella/Ased.htm",
+                 "Maison de village", "46 000 €", "Sedella (Málaga)", {"Surface habitable": "49 m²"})
+    (row,) = parse_greenacres_page(f"<html><body>{card}</body></html>", "ES")
+    assert row["concelho"] == "Sedella"
