@@ -5,6 +5,7 @@ import json
 import re
 import time
 from datetime import datetime
+from html import unescape
 
 from bs4 import BeautifulSoup
 
@@ -1955,3 +1956,113 @@ def scrape_habitaclia(db, max_price: float = 50000, **_):
     """Habitaclia — homes for sale in Lugo, Ourense and León."""
     from sources._market import scrape_named
     return scrape_named(db, "habitaclia", max_price)
+
+
+# ─── PLACSP: property sales by every Spanish public body ──────────────
+# The State's procurement platform syndicates every tender of every public
+# body (town halls, regions, the Social Security, public companies), its own
+# and those of the regional platforms. A property sale is a "patrimonial"
+# contract (type 50) with a real-estate CPV (70…) or a sale title; only the
+# ones still open for offers (PUB) are kept. The feeds are large (a page of
+# the State's is ~7 MB, a few hundred tenders), so each scan reads back only
+# to where the last one stopped, kept in kv; the first one goes back a few days.
+PLACSP_FEEDS = (
+    ("643", "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom"),
+    ("1044", "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_1044/PlataformasAgregadasSinMenores.atom"),
+)
+PLACSP_FIRST_DAYS = 4
+PLACSP_MAX_PAGES = 80
+_PLACSP_SALE = re.compile(r"enajenaci[oó]n|venta|subasta|alienaci[oó]|besterentze|alleanament|transmisi[oó]n onerosa", re.I)
+_PLACSP_NOT = re.compile(r"aprovechamiento|madera|pastos|\bcaza\b|corcho|piñ[ao]|leñas?|chatarra|vehículos?|veh[ií]culo|"
+                         r"arrendamiento|alquiler|concesi[oó]n|explotaci[oó]n|bar\b|cafeter|kiosco|quiosco|servicio|"
+                         r"batidas?|monter[ií]as?|cacer[ií]as?|coto|reses|ganado|caballos?|animales", re.I)
+_PLACSP_BODY = re.compile(r"\b(?:Junta|Consejer[ií]a|Ministerio|Diputaci[oó]n|Gobierno|Generalitat|Xunta|Comunidad|"
+                          r"Direcci[oó]n|Tesorer[ií]a|Instituto|Agencia|Sociedad|Entidad)\b", re.I)
+
+
+def _placsp_get(entry: str, pattern: str) -> str | None:
+    m = re.search(pattern, entry, re.S)
+    return re.sub(r"\s+", " ", unescape(m[1])).strip() if m else None
+
+
+def placsp_listing(entry: str, today: str | None = None) -> dict | None:
+    """One feed entry as a listing, or None unless it is an open property sale."""
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    title = _placsp_get(entry, r"<title>(.*?)</title>") or ""
+    kind = _placsp_get(entry, r"<cac:ProcurementProject>.*?<cbc:TypeCode[^>]*>(\d+)<")
+    cpv = _placsp_get(entry, r"<cbc:ItemClassificationCode[^>]*>(\d+)<") or ""
+    status = _placsp_get(entry, r"ContractFolderStatusCode[^>]*>(\w+)<")
+    if status != "PUB" or kind != "50" or _PLACSP_NOT.search(title):
+        return None
+    if not (cpv.startswith("70") or _PLACSP_SALE.search(title)):
+        return None
+    deadline = _placsp_get(entry, r"<cac:TenderSubmissionDeadlinePeriod>.*?<cbc:EndDate>([\d-]+)<")
+    if deadline and deadline < today:
+        return None
+    price = (_placsp_get(entry, r"<cbc:TaxExclusiveAmount[^>]*>([\d.]+)<")
+             or _placsp_get(entry, r"<cbc:EstimatedOverallContractAmount[^>]*>([\d.]+)<"))
+    body = _placsp_get(entry, r"<cac:LocatedContractingParty>.*?<cac:PartyName>\s*<cbc:Name>(.*?)<")
+    town = (_placsp_get(entry, r"<cac:RealizedLocation>.*?<cbc:CityName>(.*?)<")
+            or _placsp_get(entry, r"<cac-place-ext:ParentLocatedParty>\s*<cac:PartyName>\s*<cbc:Name>(.*?)<")
+            or _placsp_get(entry, r"<cac:PostalAddress>\s*<cbc:CityName>(.*?)<"))
+    if town and _PLACSP_BODY.search(town):          # the seller's name, not a place
+        town = None
+    town = town.title() if town and town.isupper() else town
+    province = _placsp_get(entry, r"<cbc:CountrySubentity>(.*?)<")
+    link = _placsp_get(entry, r'<link href="([^"]+)"')
+    ident = _placsp_get(entry, r"<id>(.*?)</id>") or link
+    try:
+        price_eur = float(price) if price else None
+    except ValueError:
+        price_eur = None
+    return make_listing(
+        "placsp", ident.rsplit("/", 1)[-1], "ES", title=title[:200],
+        description=" · ".join(x for x in (title, body, f"{town or ''}, {province or ''}".strip(", "),
+                                           f"plazo de ofertas hasta {deadline}" if deadline else "",
+                                           "enajenación patrimonial de un organismo público (PLACSP); pliego en el enlace") if x),
+        area_m2=find_area(title), price=price_eur or None, concelho=town, district=province,
+        date_end=deadline, url=link, raw_json={"seller": body, "cpv": cpv},
+    )
+
+
+def _placsp_feed(db, session, key: str, url: str, today: str, max_price: float) -> int:
+    """Read one feed back to its saved cursor; returns the sales kept."""
+    from datetime import timedelta
+    from db import get_kv, set_kv
+    stop = get_kv(db, f"placsp_cursor_{key}") or (datetime.now() - timedelta(days=PLACSP_FIRST_DAYS)).strftime("%Y-%m-%dT%H:%M")
+    newest, total = None, 0
+    for _ in range(PLACSP_MAX_PAGES):
+        resp = session.get(url)
+        resp.raise_for_status()
+        text = resp.text
+        entries = re.findall(r"<entry>.*?</entry>", text, re.S)
+        reached = False
+        for entry in entries:
+            updated = (_placsp_get(entry, r"<updated>(.*?)</updated>") or "")[:16]
+            newest = max(newest or updated, updated)
+            if updated and updated < stop:
+                reached = True
+                continue
+            listing = placsp_listing(entry, today)
+            if listing and (listing["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, listing)
+                total += 1
+        db.commit()
+        nxt = re.search(r'<link href="([^"]+)" rel="next"', text)
+        if reached or not nxt or not entries:
+            break
+        url = unescape(nxt[1])
+    if newest:
+        set_kv(db, f"placsp_cursor_{key}", newest)
+        db.commit()
+    return total
+
+
+@register("placsp", "ES", description="PLACSP — land and buildings sold by Spanish town halls, regions and state bodies")
+def scrape_placsp(db, max_price: float = 50000, **_):
+    session = make_session(timeout=180)
+    today = datetime.now().strftime("%Y-%m-%d")
+    total = 0
+    for key, url in PLACSP_FEEDS:
+        total += _placsp_feed(db, session, key, url, today, max_price)
+    return total

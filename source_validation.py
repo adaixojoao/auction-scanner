@@ -139,6 +139,8 @@ CATALOG: dict[str, dict] = {
                      "limitation": "Notices only: no photos, rarely a price; most are one-to-one sales a bidder must contest"},
     "ippatrimonio": {"kind": "official", "access": "public_api", "listing_type": "property",
                      "limitation": "Rail and road property by sealed offer; the sales layer is empty between rounds"},
+    "placsp": {"kind": "official", "access": "public_api", "listing_type": "property",
+               "limitation": "Open patrimonial sales only; price is the base, the plot details are in the PDF pliego"},
     "estamo": {"kind": "official", "access": "public_html", "listing_type": "property",
                "limitation": "A few state lots a year; bidding in person in Lisbon"},
     "etad": {"kind": "official", "access": "public_html", "listing_type": "property",
