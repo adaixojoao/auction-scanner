@@ -27,7 +27,8 @@ def looked_at(item: dict) -> bool:
         pc = json.loads(rj).get("photo_check") or {}
     except (ValueError, TypeError):
         return False
-    return bool(pc.get("shows_house"))
+    # A low-confidence (or unrated) "yes" is a guess, not evidence (F09).
+    return bool(pc.get("shows_house")) and pc.get("confidence") in ("medium", "high")
 
 
 def place_unseen_homes_after(items: list[dict], mode: str) -> list[dict]:

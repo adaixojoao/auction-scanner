@@ -6,6 +6,18 @@ import bidcap
 import dashboard
 
 
+@pytest.fixture(autouse=True)
+def _dataset_prices(monkeypatch):
+    """The test city table is labelled "city estimate", which never bids (F07);
+    relabel it as a dataset so these tests exercise the bid arithmetic."""
+    real = bidcap.local_price
+
+    def labelled(item):
+        eur_m2, source = real(item)
+        return eur_m2, ("INE (test)" if source == "city estimate" else source)
+    monkeypatch.setattr(bidcap, "local_price", labelled)
+
+
 @pytest.fixture
 def client(db):
     import config

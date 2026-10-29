@@ -106,6 +106,15 @@ def test_looked_at_true_when_shows_house_true():
     assert looked_at({"raw_json": rj})
 
 
+@pytest.mark.parametrize("confidence", ["low", None])
+def test_looked_at_false_when_shows_house_true_but_not_confident(confidence):
+    from tops import looked_at
+    pc = {"condition": "good", "shows_house": True, "notes": "blurry"}
+    if confidence:
+        pc["confidence"] = confidence
+    assert not looked_at({"raw_json": json.dumps({"photo_check": pc})})
+
+
 # ─── needs_photo_check() — F09 re-queue ──────────────────────────────────────
 
 def _make_photo_item(shows_house, has_photos=True):
