@@ -43,9 +43,14 @@ DEFAULTS = {
     # availability evidence for the evaluator (confirm.py). 0 means not set:
     # an open page is then recorded but availability stays unresolved.
     "availability_valid_hours": 0,
+    # Longest one source may take in a scan, in minutes (0 = no limit): one
+    # slow site must not hold up the others. What it read is kept.
+    "source_time_limit_min": 30,
 
     "filters": {
-        "countries": ["PT"],      # Portugal focus; [] for all EU
+        # Germany and west of it (scoring.WESTERN_CONTINENTAL_COUNTRIES). Other
+        # countries are neither scanned nor scored unless added here; [] for all.
+        "countries": ["PT", "ES", "FR", "BE", "NL", "LU", "DE", "AT", "CH", "IT"],
         "types": [],
         "exclude_keywords": [
             "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",

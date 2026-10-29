@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from common import (LOG, find_area, find_price, has_term, land_max_price, make_listing, make_session, normalize,
                     parse_date_dmy, parse_price, possession, prefer_stated_area, safe_url, stable_id, to_number)
 from db import upsert_listing
-from sources import SourceUnavailable, register
+from sources import ScanCount, SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
 
 BOE_SEARCH = "https://subastas.boe.es/subastas_ava.php"
@@ -1008,6 +1008,9 @@ def scrape_boe_public(db, max_price: float = 50000, **_):
                 total += 1
             db.commit()
             time.sleep(0.3)
+    return total
+
+
 # ─── AVRA (Andalucía's public housing and land agency) ─────────────
 # AVRA's catalogue is one JSON file of every property it holds in
 # Andalucía; the ones on sale ("oferta": "S") carry a price and the way they
@@ -1425,6 +1428,7 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
         """SELECT external_id FROM listings WHERE source = 'fotocasa'
            AND raw_json LIKE '%"detail_checked"%'""")}
     budget = FOTOCASA_DETAILS_PER_SCAN
+    failed = 0
     for province in FOTOCASA_PROVINCES:
         for kind, min_surface in FOTOCASA_SEARCHES:
             limit = land_max_price(config, max_price) if kind == "terrenos" else max_price
@@ -1442,6 +1446,7 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
                     if total == 0 and province == FOTOCASA_PROVINCES[0]:
                         raise
                     LOG.info(f"Fotocasa {province} {kind} p{page}: {type(e).__name__}")
+                    failed += 1
                     break
                 ads, count = fotocasa_page(resp.text)
                 for ad in ads:
@@ -1465,8 +1470,10 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
                 if not ads or seen >= count:
                     break
                 time.sleep(0.8)
-    LOG.info(f"Fotocasa: {total} listings")
-    return total
+    LOG.info(f"Fotocasa: {total} listings" + (f", {failed} searches failed" if failed else ""))
+    # A search that failed (Fotocasa cut the scan off halfway, 2026-10-29) left its
+    # listings unseen: partial, so they are not taken for gone.
+    return ScanCount(total, "partial") if failed else total
 
 
 # ─── Seguridad Social (TGSS) ─────────────────────────────────────────

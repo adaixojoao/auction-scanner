@@ -985,6 +985,17 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     assert all(c[2]["params"] == {"maxPrice": 100000, "minSurface": 10000} for c in land)
 
 
+def test_fotocasa_cut_off_halfway_is_a_partial_scan(db, fake_http, monkeypatch):
+    import sources.es
+    from sources.es import FOTOCASA_PROVINCES, scrape_fotocasa
+    monkeypatch.setattr(sources.es.time, "sleep", lambda s: None)
+    blocked = FOTOCASA_PROVINCES[len(FOTOCASA_PROVINCES) // 2:]
+    fake_http(lambda m, url, kw: FakeResponse("", status=403) if any(f"/{p}-provincia/" in url for p in blocked)
+              else FakeResponse(_fotocasa_html([FOTOCASA_AD], 1)))
+    got = scrape_fotocasa(db, max_price=50000)
+    assert got > 0 and got.scope == "partial"
+
+
 def test_fotocasa_detail_page_keeps_the_full_text():
     from sources.es import fotocasa_detail, with_fotocasa_detail, parse_fotocasa
     page = {"props": {"pageProps": {"realEstate": {
