@@ -1849,3 +1849,59 @@ def scrape_estamo(db, max_price: float = 50000, **_):
         total += 1
     db.commit()
     return total
+
+
+# ─── IP Património: railway and road property for sale ────────────────
+# The rail and road company's sales ("Alienações") are a layer of its
+# ArcGIS map of business opportunities: one point per property, with the
+# base price, the deadline and the sale notice. Empty between rounds.
+IPP_SALES = ("https://utility.arcgis.com/usrsvcs/servers/1c79b13c1c604fd6ac7e0584b8404f6b/rest/services/"
+             "webapps/Oportunidades_de_negocio/FeatureServer/0/query")
+_IPP_AREA = "dbpatrimonio.patrimoniodata.oport_alienacoes.area"
+
+
+def _ms_day(value) -> str | None:
+    """An ArcGIS date (milliseconds since 1970) as YYYY-MM-DD."""
+    try:
+        return (datetime(1970, 1, 1) + timedelta(milliseconds=float(value))).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+def ippatrimonio_listing(feature: dict) -> dict | None:
+    """One point of the sales layer as a listing, or None once it is closed or removed."""
+    a = feature.get("attributes") or {}
+    if a.get("data_remocao") or (a.get("estado") or "").strip().lower() in {"concluído", "concluido", "vendido", "fechado"}:
+        return None
+    title = (a.get("titulo") or "").strip()
+    if not title:
+        return None
+    raw = {"activity": a.get("atividade"), "state": a.get("estado"), "pdf": a.get("url_pdf")}
+    geo = feature.get("geometry") or {}
+    if geo.get("x") is not None and geo.get("y") is not None:
+        raw.update(lat=geo["y"], lon=geo["x"])
+    place = (a.get("localizacao") or "").strip()
+    return make_listing(
+        "ippatrimonio", a.get("id") or a.get("objectid"), "PT", title=title[:200],
+        description=" · ".join(x for x in (title, place, a.get("atividade"), a.get("area2"), a.get("prazo"),
+                                           "venda pública por carta fechada (IP Património)") if x),
+        area_m2=a.get(_IPP_AREA) or find_area(a.get("area2") or ""), price=a.get("preco_base") or None,
+        concelho=place.split(",")[0].strip() or None, date_end=_ms_day(a.get("data_limite")),
+        url=a.get("link") or a.get("url_pdf") or "https://www.ippatrimonio.pt/pt-pt/oportunidades-ipp",
+        raw_json=raw,
+    )
+
+
+@register("ippatrimonio", "PT", description="IP Património — railway and road buildings and land sold by Infraestruturas de Portugal")
+def scrape_ippatrimonio(db, max_price: float = 50000, **_):
+    session = make_session(timeout=60)
+    resp = session.get(IPP_SALES, params={"where": "1=1", "outFields": "*", "outSR": 4326, "f": "json"})
+    resp.raise_for_status()
+    total = 0
+    for feature in resp.json().get("features") or []:
+        listing = ippatrimonio_listing(feature)
+        if listing and (listing["price"] or 0) <= 2 * max_price:
+            upsert_listing(db, listing)
+            total += 1
+    db.commit()
+    return total

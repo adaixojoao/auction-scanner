@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 104
+    assert len(REGISTRY) == 109
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1464,3 +1464,99 @@ def test_drzavne_nekretnine_reads_every_lot_and_the_deadline():
     [lot] = drzavne_lots(html, "https://hr-nekretnine.hr/natjecaji/k-4-26/", "2026-11-13")
     assert lot["id"] == "drzavne_nekretnine:STAN 4519" and lot["price"] == 41600 and lot["area_m2"] == 29.84
     assert lot["concelho"] == "Zagreb" and lot["tipo"] == "stan" and "Derutno" in lot["description"]
+
+
+def test_ippatrimonio_reads_the_sales_layer():
+    from sources.pt import ippatrimonio_listing
+    point = {"attributes": {"id": 412, "titulo": "Antiga estação de Ervidel", "localizacao": "Aljustrel, Beja",
+                            "preco_base": 18500.0, "data_limite": 1795046400000, "estado": "Em curso",
+                            "dbpatrimonio.patrimoniodata.oport_alienacoes.area": 640.0, "link": "https://x/412"},
+             "geometry": {"x": -8.08, "y": 37.94}}
+    row = ippatrimonio_listing(point)
+    assert row["id"] == "ippatrimonio:412" and row["price"] == 18500 and row["area_m2"] == 640
+    assert row["concelho"] == "Aljustrel" and row["date_end"] == "2026-11-19" and '"lat": 37.94' in row["raw_json"]
+    assert ippatrimonio_listing({"attributes": {**point["attributes"], "data_remocao": 1}}) is None
+
+
+def test_casea1euro_keeps_recent_town_schemes():
+    from datetime import datetime
+    from sources.it import casea1euro_listing
+    post = {"id": 9, "title": {"rendered": "NARO &#8211; Agrigento &#8211; Sicilia &#8211;"}, "categories": [3],
+            "excerpt": {"rendered": "<p>Il Comune di Naro ha avviato il progetto Case a 1 Euro.</p>"},
+            "link": "https://casea1euro.it/sicilia/naro/", "modified": "2026-09-23T10:00:00"}
+    row = casea1euro_listing(post, now=datetime(2026, 10, 29))
+    assert row["id"] == "casea1euro:9" and row["concelho"] == "Naro" and row["district"] == "Agrigento"
+    assert row["price"] is None and "Naro" in row["description"]
+    assert casea1euro_listing({**post, "modified": "2023-01-01"}, now=datetime(2026, 10, 29)) is None
+
+
+def test_bvvg_keeps_sales_and_reads_hectares():
+    from bs4 import BeautifulSoup
+    from sources.de import bvvg_listing, bvvg_m2
+    assert bvvg_m2("2,5924 ha") == 25924 and bvvg_m2("850 m²") == 850
+    card = ("<div class='property'><h3 class='property-title'><a href='https://www.bvvg.de/objekte/ackerland-in-linthe/'>"
+            "Ackerland in Linthe</a></h3><div class='property-subtitle'>Brandenburg, Potsdam-Mittelmark</div>"
+            "<div class='dt'>Objektart</div><div class='dd'>Acker und Grünland</div>"
+            "<div class='dt'>Objekt-Nr.</div><div class='dd'>BB69-1800-089526</div>"
+            "<div class='dt'>Größe</div><div class='dd'>2,5924 ha</div>"
+            "<div class='dt'>Orientierungswert (Kauf)</div><div class='dd'>nach Gebot</div>"
+            "<p>Ausschreibung endet \n am 03.12.2026, um 08:00 Uhr</p></div>")
+    row = bvvg_listing(BeautifulSoup(card, "html.parser").select_one(".property"))
+    assert row["id"] == "bvvg:BB69-1800-089526" and row["area_m2"] == 25924 and row["price"] is None
+    assert row["concelho"] == "Linthe" and row["district"] == "Potsdam-Mittelmark" and row["date_end"].startswith("2026-12-03")
+    lease = card.replace("(Kauf)", "(Pacht)")
+    assert bvvg_listing(BeautifulSoup(lease, "html.parser").select_one(".property")) is None
+
+
+def test_landesimmobilien_reads_a_state_sale_page():
+    from sources.de import land_property_listing
+    html = ("<html><body><header><img src='/res/logo.png'></header><main><h1>Einfamilienhaus Georg-Mayer-Straße 1 in Roth</h1>"
+            "<img src='/mam/header/header.jpg'><img src='/bilder/haus.jpg'>"
+            "<p>Termin zur Angebotsabgabe: 13.11.2026</p><p>Grundstück 612 m², Wohnfläche 95 m²</p></main></body></html>")
+    row = land_property_listing("BY", "https://www.immobilien.bayern.de/immobilien/verkaeufe/rv5/efh/index.html", html)
+    assert row["concelho"] == "Roth" and row["date_end"].startswith("2026-11-13") and row["area_m2"] == 612
+    assert row["image_url"].endswith("/bilder/haus.jpg") and row["district"] == "Bayern"
+    nrw = html.replace("Einfamilienhaus Georg-Mayer-Straße 1 in Roth", "Verwaltungsgebäude, 45128 Essen Ruhrallee")
+    assert land_property_listing("NW", "https://www.blb.nrw.de/x", nrw)["concelho"] == "Essen"
+
+
+def test_placsp_keeps_open_property_sales_only():
+    from sources.es import placsp_listing
+    entry = ("<entry><id>https://contrataciondelestado.es/sindicacion/licitacionesPerfilContratante/17978200</id>"
+             '<link href="https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&amp;idEvl=Az"/>'
+             "<title>Enajenación de dos parcelas municipales, fincas 71342 y 71344</title>"
+             "<updated>2026-10-28T15:03:35.518+01:00</updated>"
+             "<cbc-place-ext:ContractFolderStatusCode listURI='x'>PUB</cbc-place-ext:ContractFolderStatusCode>"
+             "<cac-place-ext:LocatedContractingParty><cac:Party><cac:PartyName><cbc:Name>Alcaldía del Ayuntamiento de Estepona</cbc:Name>"
+             "</cac:PartyName></cac:Party><cac-place-ext:ParentLocatedParty><cac:PartyName><cbc:Name>Estepona</cbc:Name></cac:PartyName>"
+             "</cac-place-ext:ParentLocatedParty></cac-place-ext:LocatedContractingParty>"
+             "<cac:ProcurementProject><cbc:Name>x</cbc:Name><cbc:TypeCode listURI='x'>50</cbc:TypeCode>"
+             "<cac:BudgetAmount><cbc:TaxExclusiveAmount currencyID='EUR'>48000.00</cbc:TaxExclusiveAmount></cac:BudgetAmount>"
+             "<cbc:ItemClassificationCode listURI='x'>70120000</cbc:ItemClassificationCode>"
+             "<cac:RealizedLocation><cbc:CountrySubentity>Málaga</cbc:CountrySubentity></cac:RealizedLocation></cac:ProcurementProject>"
+             "<cac:TenderingProcess><cac:TenderSubmissionDeadlinePeriod><cbc:EndDate>2026-11-20</cbc:EndDate>"
+             "</cac:TenderSubmissionDeadlinePeriod></cac:TenderingProcess></entry>")
+    row = placsp_listing(entry, today="2026-10-29")
+    assert row["id"] == "placsp:17978200" and row["price"] == 48000 and row["concelho"] == "Estepona"
+    assert row["district"] == "Málaga" and row["date_end"] == "2026-11-20" and "&amp;" not in row["url"]
+    assert placsp_listing(entry.replace(">PUB<", ">EV<"), today="2026-10-29") is None           # under evaluation
+    assert placsp_listing(entry.replace(">50<", ">2<"), today="2026-10-29") is None              # a service, not a sale
+    assert placsp_listing(entry.replace("Enajenación de dos parcelas", "Aprovechamiento de pastos"), today="2026-10-29") is None
+    assert placsp_listing(entry, today="2026-12-01") is None                                     # deadline passed
+
+
+def test_placsp_drops_game_sales_and_seller_names_as_towns():
+    from sources.es import placsp_listing
+    base = ("<entry><id>x/1</id><link href='https://x'/><title>{t}</title>"
+            "<cbc-place-ext:ContractFolderStatusCode>PUB</cbc-place-ext:ContractFolderStatusCode>"
+            "<cac-place-ext:LocatedContractingParty><cac:Party><cac:PartyName><cbc:Name>Junta de Andalucía</cbc:Name>"
+            "</cac:PartyName></cac:Party><cac-place-ext:ParentLocatedParty><cac:PartyName><cbc:Name>{town}</cbc:Name>"
+            "</cac:PartyName></cac-place-ext:ParentLocatedParty></cac-place-ext:LocatedContractingParty>"
+            "<cac:ProcurementProject><cbc:TypeCode>50</cbc:TypeCode>"
+            "<cbc:ItemClassificationCode>70120000</cbc:ItemClassificationCode></cac:ProcurementProject></entry>")
+    assert placsp_listing(base.format(t="Venta, mediante subasta, de batidas en el coto", town="Granada"),
+                          today="2026-10-29") is None
+    row = placsp_listing(base.format(t="Enajenación de la parcela 66", town="AÑORA"), today="2026-10-29")
+    assert row["concelho"] == "Añora"
+    seller = placsp_listing(base.format(t="Enajenación de un solar", town="Junta de Andalucía"), today="2026-10-29")
+    assert seller["concelho"] is None
