@@ -141,6 +141,11 @@ def _source_count(result) -> int:
     return count
 
 
+# Longest one source may take (config source_time_limit_min; 0 = no limit).
+# notaires and pisos.com take about 20 minutes on a good day.
+SOURCE_TIME_LIMIT_MIN = 30
+
+
 def run_source(db, source: Source, *, max_price: float, config: dict | None = None) -> dict:
     """Run one scraper, never raising. Records the outcome in scrape_log.
 
@@ -156,6 +161,7 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
     Counts must be non-negative integers; missing counts, None, booleans and
     coerced strings/floats are invalid and recorded as errors.
     """
+    from common import SourceTimeLimit, past_source_deadline, source_deadline
     from db import record_scrape
 
     started_iso = utcnow_iso()
@@ -163,8 +169,12 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
     message = None
     scope: str | None = None
     pages_seen: int | None = None
+    # One slow site must not hold up the rest of the scan (placsp sat 40 min on one feed).
+    limit_min = (config or {}).get("source_time_limit_min", SOURCE_TIME_LIMIT_MIN)
     try:
-        result = source.func(db, max_price=max_price, config=config or {})
+        with source_deadline(limit_min * 60 if limit_min else None):
+            result = source.func(db, max_price=max_price, config=config or {})
+            timed_out = past_source_deadline()
         count = _source_count(result)
         if isinstance(result, dict):
             scope = result.get("scope")
@@ -174,7 +184,17 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
             scope = getattr(result, "scope", "full")
             pages_seen = getattr(result, "pages_seen", None)
         status = "ok" if count > 0 else "empty"
+        if timed_out:
+            # What was read is kept, but unseen listings say nothing about the site.
+            scope = "partial"
+            message = f"stopped at the {limit_min}-minute time limit; the rest is read next scan"
+            LOG.warning(f"Source {source.name}: {message}")
         db.commit()
+    except SourceTimeLimit:
+        db.commit()                     # the pages read before the limit are kept
+        count, status, scope = 0, "error", "partial"
+        message = f"stopped at the {limit_min}-minute time limit before it finished"
+        LOG.warning(f"Source {source.name}: {message}")
     except SourceUnavailable as e:
         db.rollback()
         count, status, scope = 0, "blocked", "partial"

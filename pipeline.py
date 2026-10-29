@@ -289,6 +289,10 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
     cfg = cfg or load_config()
     configure_http(cfg.get("proxies"))
     load_all()
+    # Only the countries on Settings (filters.countries) are scanned; [] is all.
+    allowed = [c.upper() for c in ((cfg.get("filters") or {}).get("countries") or [])]
+    if not source_names and allowed:
+        countries = [c for c in (countries if countries is not None else allowed) if c.upper() in allowed]
     chosen = [REGISTRY[n] for n in source_names] if source_names else sources_for(countries)
     # Keep anything that could serve any goal; each tab caps its own budget.
     from common import scrape_max_price

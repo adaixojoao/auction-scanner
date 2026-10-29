@@ -12,8 +12,10 @@ import hashlib
 import json
 import logging
 import re
+import time
 import unicodedata
 import urllib.parse
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -143,6 +145,30 @@ def configure_http(proxy_config: dict | None):
     _proxy_config = proxy_config if proxy_config and proxy_config.get("enabled") else None
 
 
+class SourceTimeLimit(requests.exceptions.RequestException):
+    """The source ran past its time limit (sources.run_source): every request
+    after that fails at once, so the scraper's own loops end."""
+
+
+# When the source being scraped must stop (time.monotonic()), or None.
+_SOURCE_DEADLINE: list = [None]
+
+
+@contextmanager
+def source_deadline(seconds: float | None):
+    """Requests made inside fail with SourceTimeLimit once `seconds` have passed."""
+    _SOURCE_DEADLINE[0] = time.monotonic() + seconds if seconds else None
+    try:
+        yield
+    finally:
+        _SOURCE_DEADLINE[0] = None
+
+
+def past_source_deadline() -> bool:
+    deadline = _SOURCE_DEADLINE[0]
+    return deadline is not None and time.monotonic() >= deadline
+
+
 class ScraperSession(requests.Session):
     """A requests.Session with a default timeout and optional proxy rotation."""
 
@@ -153,6 +179,14 @@ class ScraperSession(requests.Session):
 
     def request(self, method, url, **kwargs):
         kwargs.setdefault("timeout", self.default_timeout)
+        deadline = _SOURCE_DEADLINE[0]
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise SourceTimeLimit("the source's time limit is over")
+            # One slow request must not run far past the limit either.
+            if isinstance(kwargs["timeout"], (int, float)):
+                kwargs["timeout"] = min(kwargs["timeout"], max(left, 1))
         if self.verify is True and "verify" not in kwargs:
             extra = HOST_INTERMEDIATES.get(urllib.parse.urlsplit(url).hostname or "")
             if extra:

@@ -2529,6 +2529,14 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         # counts for that whole day, so the comparison is the date only.
         clauses.append("(date_end IS NULL OR date_end = '' OR substr(date_end, 1, 10) >= ?)")
         query_params = query_params + (now.date().isoformat(),)
+    # Other countries are not read at all, so they cost no scoring (filters.countries).
+    # One you shortlisted or made an offer on stays, as in filter_reason.
+    countries = [c for c in ((filters or {}).get("countries") or []) if isinstance(c, str)]
+    if countries:
+        clauses.append(f"(country IN ({','.join('?' * len(countries))}) "
+                       "OR id IN (SELECT listing_id FROM listing_status WHERE status = 'shortlisted') "
+                       "OR id IN (SELECT listing_id FROM carta_log WHERE is_offer = 1 AND listing_id IS NOT NULL))")
+        query_params = query_params + tuple(countries)
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     rows = db.execute(sql, query_params).fetchall()
