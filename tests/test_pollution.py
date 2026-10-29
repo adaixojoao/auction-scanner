@@ -14,7 +14,41 @@ def polluters(tmp_path, monkeypatch):
                     "PT,heavy,38.6600,-8.8300,Refinaria (refinery)\n"
                     "PT,light,40.2000,-8.4000,Aterro (landfill)\n", encoding="utf-8")
     monkeypatch.setattr(geo, "POLLUTION_FILE", str(path))
+    monkeypatch.setattr(geo, "EPRTR_FILE", str(tmp_path / "no-eprtr.csv"))
     return str(path)
+
+
+def test_where_the_eu_register_reports_it_decides_what_is_heavy(polluters, tmp_path):
+    eprtr = tmp_path / "eprtr.csv"
+    eprtr.write_text("country,kind,lat,lon,name\n"
+                     "PT,light,41.0000,-8.6000,Fábrica (Chemical installations, E-PRTR 2022)\n"
+                     "PT,heavy,37.9500,-8.8600,Refinaria de Sines (Sulphur oxides 4,000 t/yr, E-PRTR 2022)\n",
+                     encoding="utf-8")
+    # OSM's refinery is only light now: Portugal reports to E-PRTR and it is not in its heavy list.
+    assert geo.pollution(at(38.6700, -8.8300), eprtr_path=str(eprtr))["level"] == "light"
+    sines = geo.pollution(at(37.9600, -8.8600), eprtr_path=str(eprtr))
+    assert sines["level"] == "heavy" and "Sulphur oxides" in sines["text"]
+    assert geo.pollution(at(41.0100, -8.6000), eprtr_path=str(eprtr))["level"] == "light"
+
+
+def test_eprtr_plants_are_heavy_by_what_they_release():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    from update_eprtr import facilities
+
+    def row(fid, pollutant, kg, year=2022, activity="4(a)"):
+        return {"FacilityInspireID": fid, "reportingYear": str(year), "emissions": str(kg), "pollutant": pollutant,
+                "Latitude": "38.1", "Longitude": "-8.1", "countryName": "Portugal", "facilityName": fid,
+                "EPRTRAnnexIMainActivityCode": activity, "EPRTRAnnexIMainActivityLabel": "Chemical installations"}
+    plants = {p["name"].split(" (")[0]: p for p in facilities([
+        row("big", "Sulphur oxides (SOX)", 4_000_000),
+        row("small", "Sulphur oxides (SOX)", 40_000),
+        row("kiln", "Carbon dioxide (CO2)", 9e8, activity="3(c)(i)"),
+        row("closed", "Sulphur oxides (SOX)", 4_000_000, year=2012),
+    ])}
+    assert plants["big"]["kind"] == "heavy" and "4,000 t/yr" in plants["big"]["name"]
+    assert plants["small"]["kind"] == "light" and plants["kiln"]["kind"] == "heavy"
+    assert "closed" not in plants and plants["big"]["country"] == "PT"
 
 
 def at(lat, lon, precision=None):
@@ -79,7 +113,7 @@ def test_air_is_graded_against_the_who_and_eu_limits():
 def test_bad_air_is_hidden_only_at_a_pin_that_is_the_house():
     assert air_hidden({"climate": {"air": {"pm25": 16, "no2": 20}}})
     assert not air_hidden({"climate": {"air": {"pm25": 16, "no2": 20}, "approx": True}})
-    assert not air_hidden({"climate": {"air": {"pm25": 12, "no2": 20}}})
+    assert not air_hidden({"climate": {"air": {"pm25": 11, "no2": 20}}})
 
 
 def test_clean_air_earns_points_and_bad_air_costs_them():
@@ -87,7 +121,7 @@ def test_clean_air_earns_points_and_bad_air_costs_them():
     assert clean_pts == 5 and why == ["clean air (PM2.5 4 µg/m³, NO₂ 6 µg/m³)"]
     bad_pts, why = pollution_penalty({"climate": {"air": {"pm25": 18, "no2": 35}, "approx": True},
                                       "pollution": {"level": "light", "text": "1 km from a landfill"}})
-    assert bad_pts == -30 and why[1].startswith("badly polluted air (about PM2.5 18")
+    assert bad_pts == -40 and why[1].startswith("badly polluted air (about PM2.5 18")
 
 
 def test_the_air_layers_are_read_at_the_position(tmp_path, monkeypatch):
