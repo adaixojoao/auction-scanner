@@ -1,11 +1,12 @@
 """Netherlands: openbareverkoop.nl, veilingnotaris.nl, veilingbiljet.nl and RE/MAX."""
 from __future__ import annotations
 
+import html
 import json
 import re
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
 
@@ -453,6 +454,112 @@ def scrape_biedboek(db, max_price: float = 50000, **_):
                 LOG.info(f"biedboek {row.get('shortId')}: {type(e).__name__}")
                 continue
             listing = biedboek_listing(detail)
+            if listing and (listing["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, listing)
+                total += 1
+            time.sleep(0.2)
+        db.commit()
+    return total
+
+
+# ─── Gemeenteblad: municipal sale notices (Didam) ─────────────────────
+# Since the Didam ruling (Hoge Raad, 26 Nov 2021) a town must publish its
+# intention to sell land or a building. Most notices sell a garden strip to
+# the neighbour; kept are open bidding, and real plots or buildings where a
+# serious bidder ("serieuze gegadigde") can still step in before the deadline.
+GEMEENTEBLAD_SRU = "https://repository.overheid.nl/sru"
+GEMEENTEBLAD_DAYS = 60
+GEMEENTEBLAD_MIN_M2 = 1000
+GEMEENTEBLAD_MIN_BUILDING_M2 = 50
+_GB_SMALL = re.compile(r"snipper|groenstr|strook|stroken|transformator|trafo|erfpacht|bloot eigendom|enexis|liander|stedin|"
+                       r"tennet|alliander|nutsvoorziening|aangrenzend|grenzend aan|achterzijde|achtertuin|zijtuin|"
+                       r"parkeerplaats|vaststellingsovereenkomst|woningcorporatie|sociale huur|stichting|vergunning|ontheffing|APV|"
+                       r"achterkant|voorkant|zijkant|voorzijde|zijkant|ruiling|grondruil|waterschap", re.I)
+_GB_OPEN = re.compile(r"hoogste bieder|openbare (?:inschrijving|verkoop|selectie|biedprocedure)|selectieprocedure|"
+                      r"inschrijvingsprocedure|biedprocedure|bieding\w* (?:kunnen|kenbaar)|tenderned|via (?:een )?makelaar|"
+                      r"funda|kunnen (?:zich )?inschrijven", re.I)
+_GB_ONE = re.compile(r"één[- ]op[- ]één|1[- ]op[- ]1|een[- ]op[- ]een|geen (?:andere )?(?:serieuze )?gegadigden die in aanmerking", re.I)
+_GB_BUILDING = re.compile(r"\b(?:woning|woonhuis|pand|gebouw|schoolgebouw|school|boerderij|kerk|kantoor|loods|bedrijfspand|"
+                          r"woonwagen|opstal\w*)\b", re.I)
+_GB_M2 = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?\s*(?:m2|m²|vierkante meter)", re.I)
+_GB_HA = re.compile(r"(\d+(?:,\d+)?)\s*(?:ha\b|hectare)", re.I)
+_GB_DAYS = re.compile(r"binnen\s+(\d{1,2})\s+(?:kalender|werk)?dagen", re.I)
+_GB_PRICE = re.compile(r"(?:koopprijs|verkoopprijs|vraagprijs|minimumprijs|prijs van|bedrag van)\D{0,25}€\s*([\d.]+(?:,\d+)?)", re.I)
+
+
+def gemeenteblad_m2(text: str) -> float | None:
+    """The largest size in a notice, in m² ("1.250 m²", "2,5 ha")."""
+    sizes = [float(n.replace(".", "")) for n in _GB_M2.findall(text)]
+    sizes += [float(n.replace(",", ".")) * 10000 for n in _GB_HA.findall(text)]
+    return max(sizes) if sizes else None
+
+
+def gemeenteblad_listing(notice: dict) -> dict | None:
+    """One notice (id, title, town, date, text) as a listing, or None when it is
+    a neighbour's strip, a one-to-one sale with no way in, or too small."""
+    title, text = (notice.get("title") or "").strip(), notice.get("text") or ""
+    if "verko" not in f"{title} {text[:400]}".lower() or _GB_SMALL.search(title):
+        return None
+    m2 = gemeenteblad_m2(text)
+    building = bool(_GB_BUILDING.search(title))
+    is_open = bool(_GB_OPEN.search(text)) and not _GB_ONE.search(text)
+    if m2 is not None and m2 < (GEMEENTEBLAD_MIN_BUILDING_M2 if building else GEMEENTEBLAD_MIN_M2 if not is_open else 500):
+        return None
+    if not is_open and (_GB_ONE.search(title) or _GB_SMALL.search(text[:800]) or not (building or m2)):
+        return None
+    days = _GB_DAYS.search(text)
+    try:
+        published = datetime.strptime(notice["date"][:10], "%Y-%m-%d")
+        date_end = (published + timedelta(days=int(days[1]) if days else 20)).strftime("%Y-%m-%d")
+    except (KeyError, TypeError, ValueError):
+        date_end = None
+    price = _GB_PRICE.search(text)
+    how = ("open bidding — send a bid before the deadline" if is_open else
+           "Didam notice — come forward as a serious bidder (serieuze gegadigde) before the deadline to force a competition")
+    return make_listing(
+        "gemeenteblad", notice["id"], "NL", title=f"{title} — {notice.get('town') or ''}".strip(" —")[:200],
+        description=" · ".join((how, text[:2500])), tipo="gebouw" if building else "grond", area_m2=m2,
+        price=parse_price(price[1]) if price else None, concelho=notice.get("town") or None, date_end=date_end,
+        url=f"https://zoek.officielebekendmakingen.nl/{notice['id']}.html",
+        raw_json={"procedure": "open" if is_open else "didam", "published": notice.get("date")},
+    )
+
+
+def gemeenteblad_records(xml: str) -> list[dict]:
+    """The notices in one SRU answer: id, title, town, date and the URL of the text."""
+    out = []
+    for rec in re.findall(r"<sru:record>.*?</sru:record>", xml, re.S):
+        def get(pattern):
+            m = re.search(pattern, rec, re.S)
+            return html.unescape(m[1]).strip() if m else None
+        out.append({"id": get(r"<dcterms:identifier>(.*?)<"), "title": get(r"<dcterms:title>(.*?)<") or "",
+                    "town": get(r"<dcterms:creator[^>]*>(.*?)<"), "date": get(r"<dcterms:modified>(.*?)<"),
+                    "xml": get(r"<gzd:url>([^<]*\.xml)<")})
+    return [r for r in out if r["id"] and r["xml"]]
+
+
+@register("gemeenteblad", "NL", description="Gemeenteblad — land and buildings Dutch towns intend to sell (Didam notices)")
+def scrape_gemeenteblad(db, max_price: float = 50000, **_):
+    session = make_session(timeout=60)
+    since = (datetime.now(timezone.utc) - timedelta(days=GEMEENTEBLAD_DAYS)).strftime("%Y-%m-%d")
+    query = f'w.publicatienaam=="Gemeenteblad" and dt.title any "verkoop verkopen" and dt.modified>={since}'
+    total = 0
+    for start in range(1, 3001, 100):
+        resp = session.get(GEMEENTEBLAD_SRU, params={"query": query, "maximumRecords": 100, "startRecord": start})
+        resp.raise_for_status()
+        records = gemeenteblad_records(resp.text)
+        if not records:
+            break
+        for notice in records:
+            if _GB_SMALL.search(notice["title"]) or _GB_ONE.search(notice["title"]):
+                continue
+            try:
+                body = session.get(notice["xml"]).text
+            except Exception as e:  # noqa: BLE001 — one notice failing is not the source failing
+                LOG.info(f"gemeenteblad {notice['id']}: {type(e).__name__}")
+                continue
+            notice["text"] = re.sub(r"\s+", " ", BeautifulSoup(body, "html.parser").get_text(" ")).strip()
+            listing = gemeenteblad_listing(notice)
             if listing and (listing["price"] or 0) <= 2 * max_price:
                 upsert_listing(db, listing)
                 total += 1

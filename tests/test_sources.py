@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 102
+    assert len(REGISTRY) == 103
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1436,3 +1436,18 @@ def test_etad_keeps_sales_and_reads_the_facts():
     assert row["id"] == "etad:21" and row["price"] == 45000 and row["area_m2"] == 211.85
     assert row["concelho"] == "Αθήνα" and row["date_end"] == "2026-11-02T14:00:00"
     assert etad_listing("22", page("Εκμίσθωση")) is None
+
+
+def test_gemeenteblad_keeps_open_bids_and_real_plots_only():
+    from sources.nl import gemeenteblad_listing, gemeenteblad_m2
+    assert gemeenteblad_m2("perceel van 1.250 m² en 2,5 ha") == 25000
+    base = {"id": "gmb-2026-1", "town": "Dordrecht", "date": "2026-10-26"}
+    bid = gemeenteblad_listing({**base, "title": "Voornemen tot verkoop woonwagen",
+                                "text": "voornemen om aan de hoogste bieder te verkopen een woonwagen. Bieding kenbaar maken."})
+    assert bid["id"] == "gemeenteblad:gmb-2026-1" and bid["tipo"] == "gebouw" and bid["date_end"] == "2026-11-15"
+    plot = gemeenteblad_listing({**base, "title": "Voornemen tot verkoop van gronden",
+                                 "text": "verkoop van een perceel van 8.985 m2. Serieuze gegadigden kunnen binnen 20 kalenderdagen reageren."})
+    assert plot["area_m2"] == 8985 and "didam" in plot["raw_json"]
+    strip = gemeenteblad_listing({**base, "title": "Voornemen verkoop groenstrook nabij Laan 16", "text": "verkoop 40 m2"})
+    small = gemeenteblad_listing({**base, "title": "Voornemen tot verkoop grond", "text": "verkoop van 120 m2 grond"})
+    assert strip is None and small is None
