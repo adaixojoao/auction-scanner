@@ -436,7 +436,8 @@ RURAL_WORDS = [
     "quinta", "finca rústica", "tierra de labor", "olivar", "viñedo",
     "terrain agricole", "terre agricole", "terres agricoles", "bois", "forêt", "prairie",
     "terreno agricolo", "bosco", "uliveto", "vigneto",
-    "ackerland", "landwirtschaftsfläche", "grünland", "wald", "landbouwgrond", "weiland",
+    "ackerland", "landwirtschaftsfläche", "grünland", "wald", "landbouwgrond", "weiland", "grasland", "bosperceel", "bospercelen", "bosgrond",
+    "agrarische grond", "natuurperceel", "natuurpercelen", "akkerland",
 ]
 RURAL_TYPES = {normalize(t) for t in (
     "terreno_rustico", "rustico", "agricola", "florestal", "herdade", "finca", "rustica",

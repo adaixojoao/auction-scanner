@@ -113,6 +113,8 @@ CATALOG: dict[str, dict] = {
     "astalegale": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "fallcoaste": {"kind": "official", "access": "public_html", "listing_type": "property",
                    "limitation": "Bankruptcy and court sales; card has the court, not the town"},
+    "biedboek": {"kind": "official", "access": "public_api", "listing_type": "property",
+                 "limitation": "Public tenders without an asking price; leases and closed tenders left out"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
               "limitation": "Descriptions are for subscribers; card has town, mise a prix and date"},
     "goauktion_de": {"kind": "aggregator", "access": "public_html", "listing_type": "property",

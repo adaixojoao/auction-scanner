@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1319,3 +1319,16 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_biedboek_keeps_sales_and_reads_dutch_parcel_sizes():
+    from sources.nl import biedboek_listing, biedboek_m2
+    assert biedboek_m2("1.68.40") == 16840 and biedboek_m2("5220") == 5220
+    sale = {"shortId": "RpPhi3nO", "parcelSize": "5220", "latitude": "51.43", "longitude": "5.28",
+            "translation": {"name": "Bosperceel", "city": "Vessem", "currentUsage": "Bos",
+                            "realEstateParagraphs": [{"html": "<p>Het Rijksvastgoedbedrijf biedt te koop aan.</p>"}]},
+            "biddingData": {"minimumAmount": 0}}
+    row = biedboek_listing(sale)
+    assert row["id"] == "biedboek:RpPhi3nO" and row["area_m2"] == 5220 and row["price"] is None
+    lease = {**sale, "translation": {**sale["translation"], "name": "Pachtgronden Nederland"}}
+    assert biedboek_listing(lease) is None
