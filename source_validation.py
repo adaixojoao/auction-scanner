@@ -131,6 +131,8 @@ CATALOG: dict[str, dict] = {
              "limitation": "Federal property for sale only (rentals left out); a bidding procedure has no price"},
     "bvvg": {"kind": "official", "access": "public_html", "listing_type": "property",
              "limitation": "Eastern states only; most lots are farmland by tender with no price (bid freely); leases left out"},
+    "landesimmobilien": {"kind": "official", "access": "public_html", "listing_type": "property",
+                         "limitation": "Bavaria and NRW only, a handful at a time; the price is usually only in the PDF expose"},
     "biedboek": {"kind": "official", "access": "public_api", "listing_type": "property",
                  "limitation": "Public tenders without an asking price; leases and closed tenders left out"},
     "gemeenteblad": {"kind": "official", "access": "public_api", "listing_type": "property",

@@ -6,7 +6,7 @@ import time
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_price, make_listing, make_session, parse_date_dmy, parse_price, safe_url
+from common import LOG, find_area, find_price, make_listing, make_session, parse_date_dmy, parse_price, safe_url
 from db import upsert_listing
 from sources import register
 from sources._cards import listing_id_from_url
@@ -37,7 +37,7 @@ _ZVG_AMOUNT = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{2
 # land-register sheet numbers ("Blatt 649") and lot labels ("Lfd. Nr. 2", "zu 3:").
 _ZVG_NOT_VALUE = [
     re.compile(r"Bietsicherheit.*$", re.I | re.S),
-    re.compile(r"davon\s+entf\S*\s+auf\s+Zubeh\S*\s*:?\s*[\d.,]+\s*(?:€|EUR)?", re.I),
+    re.compile(r"davon\s+entf\S*\s+auf\s+Zubeh\S*\s*:?\s*[\d.,]+\s*(?:€|EUR\b)?", re.I),
     re.compile(r"Blatt\s+\d+", re.I),
     re.compile(r"(?:lfd\.?\s*Nr\.?|zu)\s*\d+\s*:?", re.I),
 ]
@@ -436,4 +436,84 @@ def scrape_bvvg(db, max_price: float = 50000, **_):
                 total += 1
         db.commit()
         time.sleep(0.5)
+    return total
+
+
+# ─── State property offices: Bavaria and North Rhine-Westphalia ───────
+# Each state sells its own houses, plots and old public buildings, a handful
+# at a time, by written offer. The list links to one page per property; the
+# price is mostly in the PDF exposé, so a page without one has no price.
+LAENDER_LISTS = (
+    ("BY", "https://www.immobilien.bayern.de/immobilien/verkaeufe/index.html",
+     r'href="(/immobilien/verkaeufe/rv\d/[^"]+/index\.html)"'),
+    ("NW", "https://www.blb.nrw.de/service/service-fuer-immobilieninteressenten/immobilienangebote",
+     r'href="([^"]*/immobilienangebote/immobilie/[^"?#]+)"'),
+)
+_LAND_TOWN = re.compile(r"\b(\d{5})\s+([A-ZÄÖÜ][\wäöüß\-]+(?:\s(?:am|an der|im|in|ob der)\s[A-ZÄÖÜ][\wäöüß\-]+)?)")
+_LAND_TITLE_TOWN = re.compile(r"\bin\s+([A-ZÄÖÜ][\wäöüß\-]+)\s*$")
+_LAND_DEADLINE = re.compile(r"(?:Termin zur Angebotsabgabe|Angebotsfrist|Bieterfrist|Angebotsschluss|Gebotsfrist)\D{0,40}(\d{1,2}\.\d{1,2}\.\d{4})", re.I)
+_LAND_LEASE = re.compile(r"\b(?:Vermietung|Verpachtung|zu vermieten|zu verpachten|Erbbaurecht)\b", re.I)
+
+
+def land_property_listing(state: str, url: str, html: str) -> dict | None:
+    """One state property page as a listing, or None when it is a lease."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+    title = (soup.find("h1") or soup.find("title"))
+    title = re.sub(r"\s+", " ", title.get_text(" ")).split(":")[0].strip() if title else ""
+    main = soup.find("main") or soup
+    text = re.sub(r"\s+", " ", main.get_text(" ")).strip()
+    start = text.find(title) if title else -1
+    body = text[start:] if start >= 0 else text
+    if not title or _LAND_LEASE.search(title):
+        return None
+    town = _LAND_TOWN.search(f"{title} {body[:3000]}")
+    place = town[2] if town else (_LAND_TITLE_TOWN.search(title) or [None, None])[1]
+    deadline = _LAND_DEADLINE.search(body)
+    img = next((i for i in main.find_all("img", src=re.compile(r"\.(?:jpe?g|png|webp)", re.I))
+                if not re.search(r"logo|icon|banner|/header/", i["src"], re.I)), None)
+    return make_listing(
+        "landesimmobilien", url, "DE", title=title[:200],
+        description=" · ".join(x for x in (body[:2500], f"Verkauf durch das Land ({'Bayern' if state == 'BY' else 'NRW'}), "
+                                           "schriftliches Angebot; Preis im Exposé") if x),
+        area_m2=find_area(body[:4000]), price=find_price(body[:4000]),
+        concelho=place, district="Bayern" if state == "BY" else "Nordrhein-Westfalen",
+        date_end=parse_date_dmy(deadline[1]) if deadline else None, url=url,
+        image_url=safe_url(requests_compat_urljoin(url, img["src"])) if img else None,
+        raw_json={"state": state, "postcode": town[1] if town else None},
+    )
+
+
+def requests_compat_urljoin(base: str, link: str) -> str:
+    from urllib.parse import urljoin
+    return urljoin(base, link)
+
+
+@register("landesimmobilien", "DE", description="State property offices of Bavaria and NRW — houses, plots and public buildings for sale")
+def scrape_landesimmobilien(db, max_price: float = 50000, **_):
+    session = make_session(timeout=40)
+    total = 0
+    for state, index, pattern in LAENDER_LISTS:
+        try:
+            page = session.get(index)
+            page.raise_for_status()
+        except Exception as e:  # noqa: BLE001 — one state failing is not the source failing
+            LOG.info(f"landesimmobilien {state}: {type(e).__name__}")
+            continue
+        for link in sorted(set(re.findall(pattern, page.text))):
+            url = requests_compat_urljoin(index, link)
+            try:
+                detail = session.get(url)
+            except Exception as e:  # noqa: BLE001
+                LOG.info(f"landesimmobilien {url}: {type(e).__name__}")
+                continue
+            if detail.status_code != 200:
+                continue
+            listing = land_property_listing(state, url, detail.content.decode("utf-8", "replace"))
+            if listing and (listing["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, listing)
+                total += 1
+            time.sleep(0.5)
+        db.commit()
     return total

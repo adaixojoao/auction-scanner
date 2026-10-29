@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 107
+    assert len(REGISTRY) == 108
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1506,3 +1506,15 @@ def test_bvvg_keeps_sales_and_reads_hectares():
     assert row["concelho"] == "Linthe" and row["district"] == "Potsdam-Mittelmark" and row["date_end"].startswith("2026-12-03")
     lease = card.replace("(Kauf)", "(Pacht)")
     assert bvvg_listing(BeautifulSoup(lease, "html.parser").select_one(".property")) is None
+
+
+def test_landesimmobilien_reads_a_state_sale_page():
+    from sources.de import land_property_listing
+    html = ("<html><body><header><img src='/res/logo.png'></header><main><h1>Einfamilienhaus Georg-Mayer-Straße 1 in Roth</h1>"
+            "<img src='/mam/header/header.jpg'><img src='/bilder/haus.jpg'>"
+            "<p>Termin zur Angebotsabgabe: 13.11.2026</p><p>Grundstück 612 m², Wohnfläche 95 m²</p></main></body></html>")
+    row = land_property_listing("BY", "https://www.immobilien.bayern.de/immobilien/verkaeufe/rv5/efh/index.html", html)
+    assert row["concelho"] == "Roth" and row["date_end"].startswith("2026-11-13") and row["area_m2"] == 612
+    assert row["image_url"].endswith("/bilder/haus.jpg") and row["district"] == "Bayern"
+    nrw = html.replace("Einfamilienhaus Georg-Mayer-Straße 1 in Roth", "Verwaltungsgebäude, 45128 Essen Ruhrallee")
+    assert land_property_listing("NW", "https://www.blb.nrw.de/x", nrw)["concelho"] == "Essen"
