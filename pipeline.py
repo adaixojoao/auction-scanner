@@ -291,6 +291,10 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
     load_all()
     # Only the countries on Settings (filters.countries) are scanned; [] is all.
     allowed = [c.upper() for c in ((cfg.get("filters") or {}).get("countries") or [])]
+    if allowed:
+        # Pan-European portals (Green-Acres, Troostwijk) list homes in the chosen
+        # countries too; each listing carries its own country for scoring.
+        allowed.append("EU")
     if not source_names and allowed:
         countries = [c for c in (countries if countries is not None else allowed) if c.upper() in allowed]
     chosen = [REGISTRY[n] for n in source_names] if source_names else sources_for(countries)

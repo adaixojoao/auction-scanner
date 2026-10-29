@@ -34,7 +34,7 @@ def test_a_scan_covers_only_the_chosen_countries(db, monkeypatch):
     monkeypatch.setattr("sources.run_source", lambda db, s, **kw: ran.append(s.country) or {"count": 0, "status": "empty"})
     cfg = {**config.DEFAULTS, "filters": {"countries": ["PT", "DE"]}}
     pipeline.run_scan(cfg=cfg, report=False, alerts=False, db=db)
-    assert ran and set(ran) <= {"PT", "DE"}
+    assert ran and set(ran) <= {"PT", "DE", "EU"} and "EU" in ran     # Green-Acres covers PT and DE too
     ran.clear()
     pipeline.run_scan(["HR", "DE"], cfg=cfg, report=False, alerts=False, db=db)
     assert set(ran) == {"DE"}
