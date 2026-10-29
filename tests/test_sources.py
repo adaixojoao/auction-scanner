@@ -1396,3 +1396,12 @@ def test_ran_reads_notary_notices_and_skips_court_sales():
     (row,) = ran_listings(html)
     assert row["id"] == "ran:64702" and row["price"] == 3548.25 and row["concelho"] == "Roma"
     assert row["date_end"] == "2026-11-10T17:00:00" and row["area_m2"] == 37
+def test_bima_keeps_purchases_and_drops_placeholder_prices():
+    from sources.de import bima_listing
+    plot = bima_listing({"id": "1", "attributes": {"commercialization_type": "BUY", "title": "Baugrundstück",
+                        "city": "Anklam", "federal_state": "mecklenburg_vorpommern", "buy_price": "15000.0",
+                        "display_area": "508.0", "latitude": "53.85", "longitude": "13.69"}})
+    assert plot["id"] == "bima:1" and plot["price"] == 15000 and plot["concelho"] == "Anklam"
+    assert plot["district"] == "Mecklenburg Vorpommern"
+    assert bima_listing({"id": "2", "attributes": {"commercialization_type": "BUY", "buy_price": "1.0"}})["price"] is None
+    assert bima_listing({"id": "3", "attributes": {"commercialization_type": "RENT"}}) is None

@@ -369,7 +369,7 @@ DWELLING_WORDS = [
     "maison", "appartement", "logement", "pavillon",
     "appartamento", "abitazione", "villetta",
     "wohnung", "haus", "einfamilienhaus", "zweifamilienhaus", "mehrfamilienhaus", "reihenhaus",
-    "doppelhaushälfte", "woning", "woonhuis", "tussenwoning", "huis", "bungalow", "kuća", "house", "apartment",
+    "doppelhaushälfte", "doppelhaushälften", "woning", "woonhuis", "tussenwoning", "huis", "bungalow", "kuća", "house", "apartment",
 ]
 # Household goods sold at auction ("Mobiliário de habitação", "Mobília de casa")
 # are not homes. A text that names a building first is: "Moradia T3 com mobiliário".
@@ -436,7 +436,8 @@ RURAL_WORDS = [
     "quinta", "finca rústica", "tierra de labor", "olivar", "viñedo",
     "terrain agricole", "terre agricole", "terres agricoles", "bois", "forêt", "prairie",
     "terreno agricolo", "bosco", "uliveto", "vigneto",
-    "ackerland", "landwirtschaftsfläche", "grünland", "wald", "landbouwgrond", "weiland",
+    "ackerland", "landwirtschaftsfläche", "grünland", "wald", "ackerfläche*", "waldfläche*",
+    "grünlandfläche*", "forstfläche*", "landbouwgrond", "weiland",
 ]
 RURAL_TYPES = {normalize(t) for t in (
     "terreno_rustico", "rustico", "agricola", "florestal", "herdade", "finca", "rustica",
