@@ -56,7 +56,11 @@ _PERCENT_SHARE = re.compile(
 
 # A share named in words in the text: Slovak/Czech, Croatian, Bulgarian court sales.
 SHARE_WORDS = ["spoluvlastnícky podiel", "spoluvlastnický podíl", "spoluvlastníckeho podielu",
-               "suvlasnički dio", "suvlasnički udio", "идеална част", "идеални части"]
+               "suvlasnički dio", "suvlasnički udio", "идеална част", "идеални части",
+               # "Trata-se de uma metade e vende-se em conjunto com a outra metade
+               # pelo valor total de 275.000€" (whitestar, 2026-10-29). Not bare "metade".
+               "trata-se de uma metade", "trata-se de metade", "a outra metade", "com a outra metade",
+               "se trata de la mitad", "la otra mitad", "mitad indivisa", "la moitié indivise"]
 
 
 # Co-ownership sold as a holiday home: "compartes el inmueble con otros 5 socios".
@@ -503,6 +507,8 @@ HEAVY_WORK = [
     "a rehabilitar", "rehabilitación integral", "rehabilitacion integral", "para reforma", "reforma íntegra",
     "reforma integra", "para rehabilitación", "requiere rehabilitación", "a restaurar",
     "reformarla por completo", "reformar por completo", "reformarla completamente", "reforma completa",
+    # "Casa para restaurar" (Rianxo, 2026-10-29) is a restoration, like "a restaurar".
+    "para restaurar", "reforma importante", "requiere de reforma importante", "reformas importantes",
     "necesita restauración", "necesita restauracion", "necesita ser restaurad*", "necesita ser reformad*",
     "restauración completa", "restauracion completa", "para restarurar", "para restarura",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
@@ -551,7 +557,10 @@ SOME_WORK = [
     "necesita reforma", "necesita reformas",
     # A fibre-cement roof has to come off even when the ad says the house is sound.
     "uralita", "fibrocemento", "amianto", "placas de amianto",
-    "para remodelar", "a remodelar", "para renovar", "a renovar", "para restaurar",
+    "para remodelar", "a remodelar", "para renovar", "a renovar",
+    "requiere de reforma", "requiere de reformas", "necesita de reforma",
+    "a necessitar de algumas intervenções", "necessitar de algumas intervenções", "a necessitar de intervenç*",
+    "une fois rénové*", "une fois restauré*", "condizioni discrete", "in discrete condizioni",
     "para actualizar", "requiere reforma", "requiere reformas", "recomendable reforma", "necesita rehabilitación",
     "necesita rehabilitacion", "para finalizar", "por finalizar",
     "travaux à prévoir", "à rafraîchir", "a rafraichir", "en travaux", "partiellement en travaux",

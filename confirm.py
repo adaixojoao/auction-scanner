@@ -71,12 +71,27 @@ def _raw(item: dict) -> dict:
         return {}
 
 
+# The ad itself says a buyer is already through: "SOUS OFFRE D'ACHAT ACCEPTÉE –
+# DOSSIER EN COURS CHEZ LE NOTAIRE" (bienici, 2026-10-29). Not bare "sous offre".
+UNDER_OFFER_WORDS = (
+    "sous offre d'achat acceptée", "offre d'achat acceptée", "sous offre d’achat acceptée",
+    "offre d’achat acceptée", "offre acceptée", "sous compromis",
+    "compromis signé", "compromis de vente signé", "under offer", "sale agreed",
+    "reservada por", "en proceso de venta", "com proposta aceite",
+    "proposta accettata", "sotto proposta", "onder bod", "verkocht onder voorbehoud",
+)
+
+
 def gone_reason(item: dict) -> str | None:
     """The stored reason this link is no longer a sale, or None.
 
     Checks both the new typed availability field and the legacy gone/why fields
-    for backwards compatibility.
+    for backwards compatibility, and the ad's own words for a buyer already
+    through (UNDER_OFFER_WORDS).
     """
+    said = find_terms(f"{item.get('title') or ''} {item.get('description') or ''}", UNDER_OFFER_WORDS)
+    if said:
+        return f"under offer: the ad says \"{said[0]}\""
     check = _raw(item).get("link_check") or {}
     avail = check.get("availability")
     if avail in ("withdrawn", "reserved", "ended"):
