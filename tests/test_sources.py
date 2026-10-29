@@ -25,7 +25,7 @@ def test_registry_is_complete():
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY", "GR"} | {"EU"}
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY"} | {"EU"}   # GR: ETAD
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name
@@ -1428,3 +1428,12 @@ def test_estamo_reads_lots_but_not_the_visit_schedule():
     assert [r["id"] for r in lots] == ["estamo:1-3", "estamo:1-5"]
     assert lots[0]["price"] == 159200 and lots[0]["date_end"] == "2026-03-30T17:00:00"
     assert lots[1]["price"] == 337000 and "alienação" not in lots[1]["description"]
+def test_etad_keeps_sales_and_reads_the_facts():
+    from sources.gr import etad_listing
+    page = lambda kind: (f"<h1>Διαμέρισμα 4ου Οροφου</h1><div>Νομός: Αττική Πόλη: Αθήνα Τετραγωνικά Μέτρα Κτισμάτων: "
+                         f"211.85 Κατηγορία Συναλλαγής: {kind} Χρόνος Λήξης: 02/11/2026 - 14:00:00 "
+                         f"Τιμή Εκκίνησης: 45.000 € Βήμα Διαγωνισμού: 5 %</div>")
+    row = etad_listing("21", page("Πώληση"))
+    assert row["id"] == "etad:21" and row["price"] == 45000 and row["area_m2"] == 211.85
+    assert row["concelho"] == "Αθήνα" and row["date_end"] == "2026-11-02T14:00:00"
+    assert etad_listing("22", page("Εκμίσθωση")) is None

@@ -131,6 +131,8 @@ CATALOG: dict[str, dict] = {
                  "limitation": "Public tenders without an asking price; leases and closed tenders left out"},
     "estamo": {"kind": "official", "access": "public_html", "listing_type": "property",
                "limitation": "A few state lots a year; bidding in person in Lisbon"},
+    "etad": {"kind": "official", "access": "public_html", "listing_type": "property",
+             "limitation": "Sales only (most ETAD tenders are leases); an expected tender has no price yet"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
               "limitation": "Descriptions are for subscribers; card has town, mise a prix and date"},
     "goauktion_de": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
