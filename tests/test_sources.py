@@ -1374,3 +1374,13 @@ def test_avra_keeps_what_is_on_sale_with_its_position():
     assert row["id"] == "avra:3801-VP-022-400" and row["price"] == 60920.3 and row["area_m2"] == 100.11
     assert row["concelho"] == "Almeria" and '"lat": 37.38906' in row["raw_json"]
     assert avra_listing({**entry, "oferta": "N"}) is None
+def test_agorastore_reads_a_product():
+    from sources.fr import agorastore_listing
+    row = agorastore_listing({
+        "productId": 435215, "productName": "Maison - 70 m² - Sainte-Livrade-sur-Lot (47)",
+        "productPageUrl": "/vente-occasion/immobilier/maison/maison-70-m-sainte-livrade-sur-lot-47-435215.aspx",
+        "subCategories": [{"name": "Maison"}], "sellerName": "Département du Lot-et-Garonne",
+        "sale": {"endDate": "2026-12-10T16:00:00+01:00", "currentPrice": 14999.0, "totalBids": 0}})
+    assert row["id"] == "agorastore:435215" and row["price"] == 14999 and row["current_bid"] is None
+    assert row["concelho"] == "Sainte-Livrade-sur-Lot" and row["district"] == "47" and row["area_m2"] == 70
+    assert row["date_end"] == "2026-12-10T16:00:00" and "Lot-et-Garonne" in row["description"]
