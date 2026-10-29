@@ -1365,3 +1365,12 @@ def test_boe_public_picks_property_sales_of_other_public_bodies():
     (lot,) = hacienda_lots("Se convoca subasta del inmueble. Vivienda sita en Vigo. El tipo de licitación es "
                            "61.296 € (sesenta y un mil).", single=True)
     assert lot["price"] == 61296
+def test_avra_keeps_what_is_on_sale_with_its_position():
+    from sources.es import avra_listing
+    entry = {"referencia_inmueble": "3801-VP-022-400", "tipo_inmueble": "VIVIENDA", "municipio": "ALMERIA",
+             "provincia": "ALMERIA", "mconstruidos": "100.11", "precio": "60920.3", "oferta": "S",
+             "tipo_oferta": "SUBASTA", "centroide": "POINT(-2.150192 37.38906)"}
+    row = avra_listing(entry)
+    assert row["id"] == "avra:3801-VP-022-400" and row["price"] == 60920.3 and row["area_m2"] == 100.11
+    assert row["concelho"] == "Almeria" and '"lat": 37.38906' in row["raw_json"]
+    assert avra_listing({**entry, "oferta": "N"}) is None

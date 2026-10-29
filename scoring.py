@@ -473,6 +473,7 @@ OTHER_WORDS = [   # not a home and not a plot
 OTHER_TYPES = {normalize(t) for t in (
     "loja/escritorio", "loja", "escritório", "armazem", "industrial", "garagem", "hotel",
     "local", "local comercial", "nave", "garaje", "trastero", "commerce",
+    "garajes", "trasteros", "locales", "naves industriales",
 )}
 PARKING_WORDS = OTHER_WORDS   # older name
 

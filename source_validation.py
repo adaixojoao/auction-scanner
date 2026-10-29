@@ -119,6 +119,8 @@ CATALOG: dict[str, dict] = {
                  "limitation": "Lots read from each office's BOE PDF; few homes, sealed bid at the office"},
     "boe_public": {"kind": "official", "access": "public_api", "listing_type": "property",
                    "limitation": "Read from BOE V-B text; deadline estimated at 40 days; some prices not read"},
+    "avra": {"kind": "official", "access": "public_api", "listing_type": "property",
+             "limitation": "Only the catalogue entries on sale; sold by sealed-bid auction or contest"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
               "limitation": "Descriptions are for subscribers; card has town, mise a prix and date"},
     "goauktion_de": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
