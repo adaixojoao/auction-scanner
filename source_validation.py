@@ -160,6 +160,8 @@ CATALOG: dict[str, dict] = {
     "croatia": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "drzavne_nekretnine": {"kind": "official", "access": "public_html", "listing_type": "property",
                            "limitation": "A few tenders a year, mostly small Zagreb flats and premises; offers on paper in Zagreb"},
+    "eos_hr": {"kind": "servicer", "access": "public_html", "listing_type": "property",
+               "limitation": "Card data only (title, price, photo); leases left out"},
     "fina": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "zvg": {"kind": "official", "access": "public_html", "listing_type": "property",
             "docs_url": "https://www.zvg-portal.de", "parser_version": "2026-10"},

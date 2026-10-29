@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 111
+    assert len(REGISTRY) == 112
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1587,3 +1587,14 @@ def test_intrum_gr_reads_a_repossession_and_its_kind():
     assert "beach about 1.2 km" in row["description"] and property_kind(row) == "urban_plot"
     assert intrum_listing({**item, "price": 0})["price"] is None                      # price on request
     assert intrum_listing({**item, "acquired": True}) is None
+
+
+def test_eos_hr_reads_sale_cards_and_drops_leases():
+    from sources.hr import eos_hr_cards
+    card = ('<div class="item_header"><div class="item_tag item_price"><span><strong>{p}</strong></span></div>'
+            '<a class="item_thumb" href="https://eos-nekretnine.hr/kuca/{slug}" title="{t}"><img src="x.jpg"></a></div>')
+    html = (card.format(p="50.000€", slug="kuca-kolan-pag", t="Kuća, Kolan - Pag, 60 m²")
+            + card.format(p="3.000€", slug="zakup-vinarija", t="ZAKUP Stambeno-poslovni objekt, Višnjan, 450 m²"))
+    [row] = eos_hr_cards(html, "kuća")
+    assert row["id"] == "eos_hr:kuca-kolan-pag" and row["price"] == 50000 and row["area_m2"] == 60
+    assert row["concelho"] == "Pag" and row["tipo"] == "kuća" and row["image_url"] == "x.jpg"

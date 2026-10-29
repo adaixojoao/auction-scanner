@@ -11,7 +11,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import LOG, land_max_price, make_listing, make_session, parse_price
+from common import LOG, find_area, land_max_price, make_listing, make_session, parse_price
 from db import upsert_listing
 from sources import register
 
@@ -359,6 +359,62 @@ def scrape_drzavne_nekretnine(db, max_price: float = 50000, **_):
             if (listing["price"] or 0) <= 2 * max_price:
                 upsert_listing(db, listing)
                 total += 1
+        db.commit()
+        time.sleep(0.5)
+    return total
+
+
+# ─── EOS Croatia: repossessed homes and land from bought-up bad loans ──
+# EOS buys the banks' unpaid loans and sells the property behind them, by
+# category page. Each card: price, title ("Kuća, Muntić - Pula, 100 m²"),
+# photo. "ZAKUP" in the title is a lease and is left out.
+EOS_HR = "https://eos-nekretnine.hr/nekretnine/"
+EOS_HR_KINDS = {"stanovi": "stan", "kuce": "kuća", "zemljista": "zemljište", "apartmani": "apartman",
+                "poslovni-prostori": "poslovni prostor", "garaze": "garaža", "spremista": "spremište"}
+_EOS_LEASE = re.compile(r"\b(?:ZAKUP|NAJAM|iznajmljivanje)\b", re.I)
+
+
+def eos_hr_cards(html: str, kind: str) -> list[dict]:
+    """The sale cards of one category page as listings."""
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for thumb in soup.select("a.item_thumb[href]"):
+        title = (thumb.get("title") or "").strip()
+        if not title or _EOS_LEASE.search(title):
+            continue
+        header = thumb.find_parent(class_="item_header") or thumb.parent
+        price_tag = header.select_one(".item_price") if header else None
+        parts = [p.strip() for p in title.split(",")]
+        place = parts[1] if len(parts) > 2 else (parts[1] if len(parts) == 2 and "m²" not in parts[1] else None)
+        town = place.split(" - ")[-1].strip() if place else None
+        img = thumb.find("img")
+        out.append(make_listing(
+            "eos_hr", thumb["href"].rstrip("/").rsplit("/", 1)[-1], "HR", title=title[:200],
+            description=" · ".join((title, kind, "nekretnina iz otkupljenih potraživanja (EOS Matrix)")),
+            tipo=kind, area_m2=find_area(title), price=parse_price(price_tag.get_text(" ", strip=True)) if price_tag else None,
+            concelho=town, url=thumb["href"], image_url=img.get("src") if img else None,
+            raw_json={"place": place},
+        ))
+    return out
+
+
+@register("eos_hr", "HR", description="EOS nekretnine — Croatian homes and land repossessed from bought-up bank loans")
+def scrape_eos_hr(db, max_price: float = 50000, **_):
+    session = make_session(timeout=40)
+    total, seen = 0, set()
+    for slug, kind in EOS_HR_KINDS.items():
+        try:
+            page = session.get(EOS_HR + slug)
+            page.raise_for_status()
+        except Exception as e:  # noqa: BLE001 — one category failing is not the source failing
+            LOG.info(f"eos_hr {slug}: {type(e).__name__}")
+            continue
+        for listing in eos_hr_cards(page.text, kind):
+            if listing["id"] in seen or (listing["price"] or 0) > 2 * max_price:
+                continue
+            seen.add(listing["id"])
+            upsert_listing(db, listing)
+            total += 1
         db.commit()
         time.sleep(0.5)
     return total
