@@ -404,3 +404,23 @@ def test_a_stripped_home_in_the_perizia_is_priced_as_a_rebuild():
     stripped = costs.renovation(home(description="in buono stato",
                                      raw_json={"perizia": {"lots": 1, "stripped": "vandalizzato"}}))
     assert stripped["eur_m2"] == costs.RENOVATION_EUR_M2["heavy"] and stripped["low"] > plain["low"]
+
+
+def test_a_town_average_rent_earns_points_only_up_to_a_modest_yield(pt_rents):
+    """Úbeda and Chaves topped Investment home on 13% and 11% town averages
+    (2026-10-29): above INVEST_TOWN_RENT_MAX an estimate is shown, not credited."""
+    import scoring
+    house = {"title": "Moradia T3", "tipo": "moradia", "country": "PT", "source": "financas",
+             "concelho": "Reguengos de Monsaraz", "district": "Évora", "area_m2": 100,
+             "description": "Moradia em bom estado", "raw_json": "{}"}
+    cheap, cheaper = ({**house, "price": p} for p in (14000, 9000))
+    a, ra = scoring.score(cheap, mode="invest")
+    b, rb = scoring.score(cheaper, mode="invest")
+    yields = [costs.estimate(h)["rent"]["net_yield_pct"] for h in (cheap, cheaper)]
+    assert all(y > scoring.INVEST_TOWN_RENT_MAX for y in yields)
+    text = " ".join(rb)
+    assert f"counted up to {scoring.INVEST_TOWN_RENT_MAX}%" in text
+    # A lease the ad states is the home's own rent and keeps its full points.
+    _, leased = scoring.score({**cheaper, "description": "Moradia em bom estado, arrendada, renda mensal de 400 euros"},
+                              mode="invest")
+    assert any("lease in the ad" in r for r in leased) and "counted up to" not in " ".join(leased)
