@@ -141,6 +141,8 @@ CATALOG: dict[str, dict] = {
                      "limitation": "Rail and road property by sealed offer; the sales layer is empty between rounds"},
     "placsp": {"kind": "official", "access": "public_api", "listing_type": "property",
                "limitation": "Open patrimonial sales only; price is the base, the plot details are in the PDF pliego"},
+    "edikte": {"kind": "official", "access": "public_html", "listing_type": "property",
+               "limitation": "Court sales in person at the district court; foreign bidders need land-transfer approval"},
     "estamo": {"kind": "official", "access": "public_html", "listing_type": "property",
                "limitation": "A few state lots a year; bidding in person in Lisbon"},
     "etad": {"kind": "official", "access": "public_html", "listing_type": "property",

@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 109
+    assert len(REGISTRY) == 110
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1560,3 +1560,14 @@ def test_placsp_drops_game_sales_and_seller_names_as_towns():
     assert row["concelho"] == "Añora"
     seller = placsp_listing(base.format(t="Enajenación de un solar", town="Junta de Andalucía"), today="2026-10-29")
     assert seller["concelho"] is None
+
+
+def test_edikte_reads_an_austrian_court_auction():
+    import os
+    from sources.at import edikt_listing
+    html = open(os.path.join(os.path.dirname(__file__), "fixtures", "edikte_notice.html"), encoding="utf-8").read()
+    row = edikt_listing("https://edikte.justiz.gv.at/edikte/ex/exedi3.nsf/alldoc/ce33!OpenDocument", html)
+    assert row["id"] == "edikte:ce33" and row["tipo"] == "Einfamilienhaus" and row["concelho"] == "Franzhausen"
+    assert row["price"] == 80500 and row["area_m2"] == 100 and row["date_end"].startswith("2026-11-09")
+    assert "Schätzwert 161,000" in row["description"]
+    assert edikt_listing("u/x!OpenDocument", html.replace("Verschiebung - Einfamilienhaus", "Entfall des Termins")) is None
