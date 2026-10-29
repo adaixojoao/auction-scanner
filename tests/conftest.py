@@ -72,9 +72,11 @@ def isolated_files(tmp_path, monkeypatch):
     import prices
     monkeypatch.setattr(prices, "PT_FILE", str(tmp_path / "no_pt_home_prices.csv"))
     monkeypatch.setattr(prices, "PT_PARISH_FILE", str(tmp_path / "no_pt_parish_prices.csv"))
-    # data/polluters.csv is refreshed from OpenStreetMap: tests that need one write their own.
+    # data/polluters.csv (OpenStreetMap) and data/eprtr.csv (the EU register) are
+    # refreshed from outside: tests that need one write their own.
     import geo
     monkeypatch.setattr(geo, "POLLUTION_FILE", str(tmp_path / "no_polluters.csv"))
+    monkeypatch.setattr(geo, "EPRTR_FILE", str(tmp_path / "no_eprtr.csv"))
 
 
 @pytest.fixture(autouse=True)

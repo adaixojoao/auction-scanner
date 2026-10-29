@@ -27,7 +27,9 @@ sys.path.insert(0, HERE)
 from geo import POLLUTION_FILE  # noqa: E402
 from update_transport import SERVERS  # noqa: E402
 
-COUNTRIES = ("PT", "ES", "FR", "IT", "HR", "GR", "CY", "NL", "BE", "DE")
+from common import COUNTRY_NAMES  # noqa: E402
+
+COUNTRIES = tuple(COUNTRY_NAMES)   # every country the scanner covers
 COLUMNS = ("country", "kind", "lat", "lon", "name")
 HEAVY_FUEL = "coal|lignite|oil|diesel|waste"
 # "oil" is how the biggest refineries are tagged (Shell Pernis: industrial=oil),

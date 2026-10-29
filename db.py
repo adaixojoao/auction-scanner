@@ -1973,7 +1973,8 @@ _SCORE_DBS: dict = {}
 # these decide the number a listing gets.
 _SCORE_CODE = ("scoring.py", "costs.py", "forestry.py", "land_prices.py", "common.py",
                "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py", "guesses.py", "outline.py",
-               os.path.join("data", "polluters.csv"))   # a refreshed polluter list scores again
+               os.path.join("data", "polluters.csv"),   # a refreshed polluter list scores again
+               os.path.join("data", "eprtr.csv"))
 
 
 @functools.lru_cache(maxsize=1)
