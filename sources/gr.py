@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from bs4 import BeautifulSoup
 
@@ -121,4 +122,72 @@ def scrape_etad(db, max_price: float = 50000, **_):
             upsert_listing(db, row)
             total += 1
     db.commit()
+    return total
+
+
+# ─── Intrum Greece: repossessed homes, land and premises ──────────────
+# Intrum services a large share of the Greek banks' bad loans and sells the
+# repossessed property on its marketplace, with an open JSON search: map
+# point, size, type, region and the distance to the beach. "Price on request"
+# comes as 0 and is stored as no price.
+INTRUM_API = "https://api.marketplace.intrum.gr/v1/listings/search"
+_INTRUM_HEADERS = {"Accept": "application/json", "Origin": "https://marketplace.intrum.gr",
+                   "Referer": "https://marketplace.intrum.gr/"}
+
+
+def _intrum_text(values, locale: str = "en") -> str:
+    for value in values or []:
+        if value.get("locale") == locale:
+            return value.get("value") or ""
+    return (values or [{}])[0].get("value") or "" if values else ""
+
+
+def intrum_listing(item: dict) -> dict | None:
+    """One marketplace listing as a listing, or None when it is sold or reserved."""
+    if item.get("acquired") or item.get("commercialization") != "sale":
+        return None
+    if (item.get("availability_status") or {}).get("slug") not in (None, "available"):
+        return None
+    title = _intrum_text(item.get("title")) or _intrum_text(item.get("title"), "el")
+    region = _intrum_text(item.get("region"))
+    raw = {"code": item.get("property_code"), "category": item.get("category"), "type": item.get("type"),
+           "sea_front": item.get("sea_front"), "build_year": item.get("build_year")}
+    coords = item.get("coordinates") or []
+    if len(coords) == 2:
+        raw.update(lat=coords[0], lon=coords[1])
+    beach = item.get("proximity_beach_driving")
+    price = item.get("price") or None
+    town = (item.get("locations") or [""])[-1].split("-")[-1].replace("_", " ").title() or None
+    images = item.get("images") or []
+    return make_listing(
+        "intrum_gr", item.get("id"), "GR", title=title[:200],
+        description=" · ".join(x for x in (
+            title, region, f"{item.get('type') or ''} {item.get('category') or ''}".strip(),
+            f"built {item['build_year']}" if item.get("build_year") else "",
+            "sea front" if item.get("sea_front") else (f"beach about {beach / 1000:.1f} km by road" if beach else ""),
+            "price on request" if not price else "", "bank repossession sold by Intrum Hellas") if x),
+        tipo=item.get("type") or item.get("category"), area_m2=item.get("size") or None, price=price,
+        district=region or None, concelho=town, url=f"https://marketplace.intrum.gr/en/listings/{item.get('id')}",
+        image_url=((images[0].get("sizes") or {}).get("md")) if images else None, raw_json=raw,
+    )
+
+
+@register("intrum_gr", "GR", description="Intrum Hellas — repossessed Greek homes, land and premises from the banks' bad loans")
+def scrape_intrum_gr(db, max_price: float = 50000, **_):
+    session = make_session(timeout=60)
+    total = 0
+    for page in range(1, 80):
+        resp = session.get(INTRUM_API, headers=_INTRUM_HEADERS,
+                           params={"filter_by": "commercialization:=sale", "page": page, "sort_by": "price:asc", "per_page": 50})
+        resp.raise_for_status()
+        data = resp.json()
+        for item in (data.get("data") or {}).get("listings") or []:
+            listing = intrum_listing(item)
+            if listing and (listing["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, listing)
+                total += 1
+        db.commit()
+        if page >= ((data.get("meta") or {}).get("last_page") or page):
+            break
+        time.sleep(0.5)
     return total

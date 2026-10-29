@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 109
+    assert len(REGISTRY) == 112
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1560,3 +1560,41 @@ def test_placsp_drops_game_sales_and_seller_names_as_towns():
     assert row["concelho"] == "Añora"
     seller = placsp_listing(base.format(t="Enajenación de un solar", town="Junta de Andalucía"), today="2026-10-29")
     assert seller["concelho"] is None
+
+
+def test_edikte_reads_an_austrian_court_auction():
+    import os
+    from sources.at import edikt_listing
+    html = open(os.path.join(os.path.dirname(__file__), "fixtures", "edikte_notice.html"), encoding="utf-8").read()
+    row = edikt_listing("https://edikte.justiz.gv.at/edikte/ex/exedi3.nsf/alldoc/ce33!OpenDocument", html)
+    assert row["id"] == "edikte:ce33" and row["tipo"] == "Einfamilienhaus" and row["concelho"] == "Franzhausen"
+    assert row["price"] == 80500 and row["area_m2"] == 100 and row["date_end"].startswith("2026-11-09")
+    assert "Schätzwert 161,000" in row["description"]
+    assert edikt_listing("u/x!OpenDocument", html.replace("Verschiebung - Einfamilienhaus", "Entfall des Termins")) is None
+
+
+def test_intrum_gr_reads_a_repossession_and_its_kind():
+    from scoring import property_kind
+    from sources.gr import intrum_listing
+    item = {"id": "2480", "commercialization": "sale", "acquired": False,
+            "availability_status": {"slug": "available"}, "category": "land", "type": "landPlot",
+            "title": [{"locale": "el", "value": "Οικόπεδο"}, {"locale": "en", "value": "Land plot of 1.523 sqm in Kassandra"}],
+            "region": [{"locale": "en", "value": "Chalkidiki"}], "locations": ["chalkidiki-kassandra-afitos"],
+            "coordinates": [40.1, 23.4], "size": 1523, "price": 8000, "proximity_beach_driving": 1200}
+    row = intrum_listing(item)
+    assert row["id"] == "intrum_gr:2480" and row["price"] == 8000 and row["area_m2"] == 1523
+    assert row["concelho"] == "Afitos" and row["district"] == "Chalkidiki" and '"lat": 40.1' in row["raw_json"]
+    assert "beach about 1.2 km" in row["description"] and property_kind(row) == "urban_plot"
+    assert intrum_listing({**item, "price": 0})["price"] is None                      # price on request
+    assert intrum_listing({**item, "acquired": True}) is None
+
+
+def test_eos_hr_reads_sale_cards_and_drops_leases():
+    from sources.hr import eos_hr_cards
+    card = ('<div class="item_header"><div class="item_tag item_price"><span><strong>{p}</strong></span></div>'
+            '<a class="item_thumb" href="https://eos-nekretnine.hr/kuca/{slug}" title="{t}"><img src="https://storage.nekretnine1.hr/x.jpg"></a></div>')
+    html = (card.format(p="50.000€", slug="kuca-kolan-pag", t="Kuća, Kolan - Pag, 60 m²")
+            + card.format(p="3.000€", slug="zakup-vinarija", t="ZAKUP Stambeno-poslovni objekt, Višnjan, 450 m²"))
+    [row] = eos_hr_cards(html, "kuća")
+    assert row["id"] == "eos_hr:kuca-kolan-pag" and row["price"] == 50000 and row["area_m2"] == 60
+    assert row["concelho"] == "Pag" and row["tipo"] == "kuća" and row["image_url"] == "https://storage.nekretnine1.hr/x.jpg"
