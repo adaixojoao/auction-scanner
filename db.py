@@ -1453,6 +1453,23 @@ def latest_offers(db: sqlite3.Connection) -> dict[str, dict]:
 
 # ─── Source health ───────────────────────────────────────────────────
 
+# A run that read under this share of the source's usual count is "dropped":
+# Fotocasa read 1-2k of its usual 13k for weeks, each run marked ok (2026-10-29).
+DROPPED_SHARE = 0.5
+
+
+def _usual_count(history) -> int | None:
+    """The median count of the earlier full runs that returned listings."""
+    counts = sorted(h["count"] for h in history[1:]
+                    if (h["count"] or 0) > 0 and h["status"] == "ok" and h["scope"] != "partial")
+    return counts[len(counts) // 2] if len(counts) >= 2 else None
+
+
+def _dropped(last, history) -> bool:
+    usual = _usual_count(history)
+    return bool(usual) and last["count"] < usual * DROPPED_SHARE
+
+
 def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
     """Per-source status from scrape_log, worst first.
 
@@ -1461,7 +1478,7 @@ def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
     """
     runs: dict[str, list] = defaultdict(list)
     for r in db.execute(
-            "SELECT source, timestamp, count, status, message, duration_s FROM scrape_log "
+            "SELECT source, timestamp, count, status, message, duration_s, scope FROM scrape_log "
             "ORDER BY timestamp DESC, id DESC"):
         if len(runs[r["source"]]) < 50:
             runs[r["source"]].append(r)
@@ -1486,6 +1503,10 @@ def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
             state = "blocked"
         elif last["status"] == "error":
             state = "error"
+        elif (last["count"] or 0) > 0 and last["scope"] == "partial":
+            state = "partial"
+        elif (last["count"] or 0) > 0 and _dropped(last, history):
+            state = "dropped"
         elif (last["count"] or 0) > 0:
             state = "ok"
         elif last_ok is None:
@@ -1500,13 +1521,15 @@ def source_health(db: sqlite3.Connection, known_sources=None) -> list[dict]:
             "last_status": last["status"] if last else None,
             "last_message": last["message"] if last else None,
             "last_duration_s": last["duration_s"] if last else None,
+            "last_scope": last["scope"] if last else None,
+            "usual_count": _usual_count(history),
             "last_ok": last_ok["timestamp"] if last_ok else None,
             "failing_runs": failing,
             "listings": listing_counts.get(name, 0),
         })
     # blocked sits with error: the site is not giving us listings either way.
     order = {"error": 0, "blocked": 0, "broken": 1, "fixture failing": 1,
-             "never worked": 2, "never run": 3, "ok": 4}
+             "dropped": 2, "partial": 2, "never worked": 2, "never run": 3, "ok": 4}
     out.sort(key=lambda s: (order.get(s["state"], 9), s["source"]))
     return out
 
