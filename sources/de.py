@@ -367,3 +367,73 @@ def scrape_bima(db, max_price: float = 50000, **_):
             break
         time.sleep(0.3)
     return total
+
+
+# ─── BVVG: federal farmland, forest and village houses in the East ─────
+# The federal land agency sells farmland, forest, building plots and a few
+# houses in the eastern states by tender. Every card on the list has the
+# type, size, guide price ("nach Gebot": bid freely) and the tender's end.
+# Leases (Pacht) are left out: only cards with a purchase value are sales.
+BVVG = "https://www.bvvg.de/objekte/"
+_BVVG_TOWN = re.compile(r"\b(?:in|bei)\s+(?:\d{5}\s+)?([A-ZÄÖÜ][\wäöüß.\- ]+?)(?:\s+(?:OT|LOS|Los|Teil|–|-|\()|,|$)")
+_BVVG_END = re.compile(r"endet\s+am\s+(\d{2}\.\d{2}\.\d{4})")
+
+
+def bvvg_m2(size: str | None) -> float | None:
+    """"2,5924 ha" or "850 m²" in m²."""
+    m = re.search(r"([\d.]+(?:,\d+)?)\s*(ha|m²|m2)", size or "")
+    if not m:
+        return None
+    value = float(m[1].replace(".", "").replace(",", "."))
+    return round(value * 10000 if m[2] == "ha" else value)
+
+
+def bvvg_listing(card) -> dict | None:
+    """One card of the object list as a listing, or None for a lease."""
+    facts = {dt.get_text(" ", strip=True): dd.get_text(" ", strip=True)
+             for dt, dd in zip(card.select(".dt"), card.select(".dd"))}
+    value_key = next((k for k in facts if k.startswith("Orientierungswert")), "")
+    if "Kauf" not in value_key:
+        return None
+    link = card.select_one(".property-title a")
+    if not link:
+        return None
+    title = link.get_text(" ", strip=True)
+    region = card.select_one(".property-subtitle")
+    state, _, district = (region.get_text(" ", strip=True) if region else "").partition(",")
+    town = _BVVG_TOWN.search(title)
+    end = _BVVG_END.search(card.get_text(" "))
+    kind = facts.get("Objektart") or ""
+    img = card.select_one("img")
+    return make_listing(
+        "bvvg", facts.get("Objekt-Nr.") or link["href"], "DE", title=f"{title} — {kind}".strip(" —")[:200],
+        description=" · ".join(x for x in (title, kind, facts.get("Größe"), f"{state.strip()}, {district.strip()}",
+                                           f"Orientierungswert: {facts.get(value_key)}",
+                                           "Ausschreibung der BVVG (Gebot abgeben)") if x),
+        tipo=kind or None, area_m2=bvvg_m2(facts.get("Größe")), price=parse_price(facts.get(value_key) or ""),
+        district=district.strip() or state.strip() or None, concelho=town[1].strip() if town else None,
+        date_end=parse_date_dmy(end[1]) if end else None, url=link["href"], image_url=img.get("src") if img else None,
+        raw_json={"state": state.strip(), "object": facts.get("Objekt-Nr.")},
+    )
+
+
+@register("bvvg", "DE", description="BVVG — federal farmland, forest and village houses sold by tender in eastern Germany")
+def scrape_bvvg(db, max_price: float = 50000, **_):
+    session = make_session(timeout=40)
+    total = 0
+    for page in range(1, 30):
+        resp = session.get(BVVG if page == 1 else f"{BVVG}page/{page}/")
+        if resp.status_code == 404:
+            break
+        resp.raise_for_status()
+        cards = BeautifulSoup(resp.text, "html.parser").select(".property")
+        if not cards:
+            break
+        for card in cards:
+            listing = bvvg_listing(card)
+            if listing and (listing["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, listing)
+                total += 1
+        db.commit()
+        time.sleep(0.5)
+    return total

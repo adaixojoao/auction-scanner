@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 106
+    assert len(REGISTRY) == 107
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1488,3 +1488,21 @@ def test_casea1euro_keeps_recent_town_schemes():
     assert row["id"] == "casea1euro:9" and row["concelho"] == "Naro" and row["district"] == "Agrigento"
     assert row["price"] is None and "Naro" in row["description"]
     assert casea1euro_listing({**post, "modified": "2023-01-01"}, now=datetime(2026, 10, 29)) is None
+
+
+def test_bvvg_keeps_sales_and_reads_hectares():
+    from bs4 import BeautifulSoup
+    from sources.de import bvvg_listing, bvvg_m2
+    assert bvvg_m2("2,5924 ha") == 25924 and bvvg_m2("850 m²") == 850
+    card = ("<div class='property'><h3 class='property-title'><a href='https://www.bvvg.de/objekte/ackerland-in-linthe/'>"
+            "Ackerland in Linthe</a></h3><div class='property-subtitle'>Brandenburg, Potsdam-Mittelmark</div>"
+            "<div class='dt'>Objektart</div><div class='dd'>Acker und Grünland</div>"
+            "<div class='dt'>Objekt-Nr.</div><div class='dd'>BB69-1800-089526</div>"
+            "<div class='dt'>Größe</div><div class='dd'>2,5924 ha</div>"
+            "<div class='dt'>Orientierungswert (Kauf)</div><div class='dd'>nach Gebot</div>"
+            "<p>Ausschreibung endet \n am 03.12.2026, um 08:00 Uhr</p></div>")
+    row = bvvg_listing(BeautifulSoup(card, "html.parser").select_one(".property"))
+    assert row["id"] == "bvvg:BB69-1800-089526" and row["area_m2"] == 25924 and row["price"] is None
+    assert row["concelho"] == "Linthe" and row["district"] == "Potsdam-Mittelmark" and row["date_end"].startswith("2026-12-03")
+    lease = card.replace("(Kauf)", "(Pacht)")
+    assert bvvg_listing(BeautifulSoup(lease, "html.parser").select_one(".property")) is None
