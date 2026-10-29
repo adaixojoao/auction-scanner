@@ -14,6 +14,8 @@
 <div class="card" style="margin-bottom:14px">
   <div class="row small">
     <span><b class="ok">ok</b> returned listings last run</span>
+    <span><b class="warn">partial</b> the last run stopped early (refused, time limit) — unread listings are not taken for gone</span>
+    <span><b class="warn">dropped</b> the last run read under half of what this source usually returns</span>
     <span><b class="bad">broken</b> used to work, now returns nothing — usually the site changed</span>
     <span><b class="warn">never worked</b> has never returned a listing — its page layout was never confirmed</span>
     <span><b class="bad">blocked</b> bot wall, closed site, or login-only — not worked around</span>
@@ -40,7 +42,8 @@
 {% block scripts %}
 <script>
 const CLS = {"ok": "ok", "broken": "bad", "error": "bad", "blocked": "bad",
-             "never worked": "warn", "never run": "faint", "fixture failing": "warn"};
+             "never worked": "warn", "never run": "faint", "fixture failing": "warn",
+             "partial": "warn", "dropped": "warn"};
 async function validateSrc(name, live) {
   const btn = event.currentTarget;
   btn.disabled = true;
@@ -92,7 +95,7 @@ async function load() {
     <td class="small">${AS.esc(h.access || "–")}</td>
     <td class="${CLS[h.state] || ""}" style="font-weight:700">${AS.esc(h.state)}</td>
     <td class="small nowrap">${AS.ago(h.last_run)}</td>
-    <td>${h.last_count ?? "–"}</td>
+    <td>${h.last_count ?? "–"}${h.usual_count ? `<span class="small muted"> / usually ${h.usual_count}</span>` : ""}</td>
     <td>${h.failing_runs}</td>
     <td class="small nowrap ${h.attention ? "bad" : ""}" title="${AS.esc(h.attention || "")}">${h.last_ok ? AS.ago(h.last_ok) : "–"}${h.attention ? `<div class="small">${AS.esc(h.attention)}</div>` : ""}</td>
     <td>${h.listings}</td>
