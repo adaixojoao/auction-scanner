@@ -1791,3 +1791,61 @@ def scrape_casasapo(db, max_price: float = 50000, **_):
     """Casa Sapo — plots for sale across Portugal."""
     from sources._market import scrape_named
     return scrape_named(db, "casasapo", max_price)
+
+
+# ─── ESTAMO (the Portuguese state's property company) ──────────────
+# ESTAMO took over the sale of state property from the DGTF. It sells by
+# public auction (hasta pública), bidding in person, a few times a year;
+# every auction's lots are on one page with a sale value and a base value.
+ESTAMO_HASTA = "https://www.estamo.pt/hasta-publica/"
+# Each lot: "IMÓVEL N.º3 <name and description> VALOR DE ALIENAÇÃO 164.200,00€ VALOR BASE 159.200,00 €".
+# The schedule above names them too ("Visita ao Imóvel n.º1"), in lower case.
+_ESTAMO_LOT = re.compile(r"IMÓVEL N\.º\s*(\d+)\s+(.+?)(?=IMÓVEL N\.º|Documentos associados|$)")
+_ESTAMO_BASE = re.compile(r"VALOR BASE(?: DE ALIENA[ÇC][ÃA]O)?\s+([\d.,]+)\s*€")
+_ESTAMO_SALE = re.compile(r"VALOR DE ALIENA[ÇC][ÃA]O\s+([\d.,]+)\s*€")
+_ESTAMO_AUCTION = re.compile(r"HASTA P[ÚU]BLICA N\.?\s*º\s*(\d+)", re.I)
+_ESTAMO_DEADLINE = re.compile(r"(\d{1,2}) de (\w+) (\d{4})\s+At[ée] às [\d:h]+\s+Prazo limite para apresenta[çc][ãa]o de propostas",
+                              re.I)
+_PT_MONTHS = {m: i for i, m in enumerate(("janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto",
+                                          "setembro", "outubro", "novembro", "dezembro"), 1)}
+
+
+def estamo_lots(html: str) -> list[dict]:
+    """The lots of ESTAMO's auction page."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "header"]):
+        tag.decompose()
+    text = re.sub(r"\s+", " ", soup.get_text(" "))
+    auction = _ESTAMO_AUCTION.search(text[text.find("CALENDARIZA"):] if "CALENDARIZA" in text else text)
+    when = _ESTAMO_DEADLINE.search(text)
+    month = _PT_MONTHS.get(when.group(2).lower()) if when else None
+    deadline = f"{when.group(3)}-{month:02d}-{int(when.group(1)):02d}T17:00:00" if when and month else None
+    rows = []
+    for m in _ESTAMO_LOT.finditer(text):
+        chunk = m.group(2)
+        base, sale = _ESTAMO_BASE.search(chunk), _ESTAMO_SALE.search(chunk)
+        body = re.split(r"\s+VALOR (?:DE ALIENA|BASE)", chunk, maxsplit=1)[0].strip()
+        sold = "arrematado" not in chunk.lower() and sale is not None
+        rows.append(make_listing(
+            "estamo", f"{auction.group(1) if auction else 0}-{m.group(1)}", "PT", title=body[:200],
+            description=f"{body[:2500]} · hasta pública ESTAMO (licitação presencial)"
+                        + (f" · valor de alienação {sale.group(1)} €" if sold else ""),
+            tipo="imovel", area_m2=find_area(body), price=parse_price(base.group(1)) if base else None,
+            min_price=parse_price(base.group(1)) if base else None,
+            date_end=deadline, url=ESTAMO_HASTA,
+            raw_json={"sale_value": parse_price(sale.group(1)) if sold else None},
+        ))
+    return rows
+
+
+@register("estamo", "PT", description="ESTAMO — Portuguese state buildings and land by public auction")
+def scrape_estamo(db, max_price: float = 50000, **_):
+    resp = make_session(timeout=30).get(ESTAMO_HASTA)
+    resp.raise_for_status()
+    resp.encoding = "utf-8"
+    total = 0
+    for row in estamo_lots(resp.text):
+        upsert_listing(db, row)          # few lots a year: keep them all, big buildings too
+        total += 1
+    db.commit()
+    return total

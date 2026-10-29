@@ -310,3 +310,60 @@ def scrape_goauktion(db, max_price: float = 50000, **_):
     db.commit()
     LOG.info(f"goauktion: {total} listings")
     return total
+
+
+# ─── BImA (the Federal Real Estate Agency) ─────────────────────────
+# The federal state sells former barracks, staff houses, building plots and
+# forest. Its portal's search API is public; nearly every offer is a flat to
+# rent, so only the purchases (commercialization_type BUY) are kept. A price
+# of €1 is a placeholder for a bidding procedure, not a price.
+BIMA_API = "https://apis.bundesimmobilien.de/immo/real_estate_offers/search"
+BIMA_PORTAL = "https://immobilienportal.bundesimmobilien.de/results"
+BIMA_PAGE = 10                      # the API answers 10 at a time whatever is asked
+
+
+def bima_listing(record: dict) -> dict | None:
+    """One BImA search record as a listing, or None when it is not for sale."""
+    a = record.get("attributes") or {}
+    if a.get("commercialization_type") != "BUY":
+        return None
+    price = a.get("buy_price") or a.get("display_price")
+    price = float(price) if price and float(price) > 1 else None
+    text = " · ".join(str(a[k]).strip() for k in ("title", "description_note", "location_note", "furnishing_note",
+                                                  "other_note") if a.get(k))
+    raw = {"offer_id": a.get("offer_id"), "property_type": a.get("property_type"),
+           "plot_m2": a.get("plot_area"), "until": a.get("published_until")}
+    try:
+        raw.update(lat=float(a["latitude"]), lon=float(a["longitude"]))
+    except (KeyError, TypeError, ValueError):
+        pass
+    return make_listing(
+        "bima", record.get("id"), "DE", title=(a.get("title") or f"BImA {a.get('city')}")[:200],
+        description=f"{text[:3000]} · Bundesanstalt für Immobilienaufgaben (BImA)",
+        tipo=a.get("property_type"), area_m2=a.get("living_space") or a.get("display_area"),
+        price=price, concelho=a.get("city"), district=(a.get("federal_state") or "").replace("_", " ").title() or None,
+        date_end=(a.get("published_until") or "")[:19] or None,
+        url=f"{BIMA_PORTAL}?search=Bundesweit&region=national#offer-{record.get('id')}", raw_json=raw,
+    )
+
+
+@register("bima", "DE", description="BImA — houses, plots and land sold by the German federal state")
+def scrape_bima(db, max_price: float = 50000, **_):
+    session = make_session(timeout=30)
+    total, offset = 0, 0
+    while True:
+        resp = session.get(BIMA_API, params={"q": "*", "filters[commercialization_type]": "BUY", "offset": offset})
+        resp.raise_for_status()
+        data = resp.json()
+        records = data.get("data") or []
+        for record in records:
+            row = bima_listing(record)
+            if row and (row["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, row)
+                total += 1
+        db.commit()
+        offset += len(records)
+        if not records or offset >= ((data.get("meta") or {}).get("total") or 0):
+            break
+        time.sleep(0.3)
+    return total

@@ -733,6 +733,329 @@ def scrape_subastasactivas(db, max_price: float = 100000, **_):
     return total
 
 
+# ─── eActivos (insolvency and court liquidations) ──────────────────
+# Online auctions run for administradores concursales and courts. Most start
+# at €0 against a stated valuation; the administrator may refuse a result
+# against the interest of the concurso. The homes list (asset type 16) comes
+# 12 a page; the best bid is its own small JSON call.
+EACTIVOS = "https://www.eactivos.com"
+EACTIVOS_HOMES = 16
+EACTIVOS_MAX_PAGES = 20
+
+
+def eactivos_card(card) -> dict | None:
+    """One div.liquidation-card of eActivos' list as a listing (no bid yet)."""
+    lid = card.get("data-liquidation")
+    link = card.select_one(".card-title a[href]")
+    if not lid or not link:
+        return None
+    title = link.get_text(" ", strip=True)
+    place = card.select_one(".card-subtitle")
+    town, _, province = (place.get_text(" ", strip=True) if place else "").partition(",")
+    value = card.select_one(".liquidation-price")
+    start = card.select_one(".current-bid-amount")
+    end = card.select_one("[data-end-date]")
+    img = card.select_one("img.img-main[src]")
+    valuation = parse_price(value.get_text()) if value else None
+    return make_listing(
+        "eactivos", lid, "ES", title=title[:200],
+        description=f"{title} · valoración {valuation:,.0f} € · subasta concursal o judicial (eActivos)"
+        if valuation else title,
+        tipo="inmueble", price=valuation,
+        min_price=float(start["data-initial-price"]) if start and start.get("data-initial-price") else None,
+        concelho=town.strip() or None, district=province.strip() or None,
+        date_end=end["data-end-date"].replace(" ", "T") if end else None,
+        url=link["href"], image_url=img["src"] if img else None,
+        raw_json=json.dumps({"valuation": valuation}),
+    )
+
+
+@register("eactivos", "ES", description="eActivos — insolvency (concurso) and court home auctions, all Spain")
+def scrape_eactivos(db, max_price: float = 50000, **_):
+    session = make_session(timeout=30)
+    total, seen = 0, set()
+    for page in range(1, EACTIVOS_MAX_PAGES + 1):
+        resp = session.get(f"{EACTIVOS}/listado-de-liquidaciones/obtener",
+                           params={"page": page, "asset_type[]": EACTIVOS_HOMES})
+        resp.raise_for_status()
+        cards = BeautifulSoup(resp.text, "html.parser").select("div.liquidation-card[data-liquidation]")
+        if not cards:
+            break
+        for card in cards:
+            row = eactivos_card(card)
+            if not row or row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            try:
+                bid = session.get(f"{EACTIVOS}/liquidacion/{card['data-liquidation']}/mejor-puja",
+                                  timeout=15).json().get("amount")
+            except Exception:  # noqa: BLE001 — the bid is a detail, the card is the listing
+                bid = None
+            row["current_bid"] = float(bid) if bid else None
+            # A valuation far over the budget can still sell low, but not from €0
+            # to under the budget: keep what a bid or a valuation puts within reach.
+            if (row["current_bid"] or 0) > max_price or (not row["current_bid"] and (row["price"] or 0) > 4 * max_price):
+                continue
+            row.update(_keep_eactivos_text(db, session, row))
+            upsert_listing(db, row)
+            total += 1
+        db.commit()
+        time.sleep(0.5)
+    return total
+
+
+def _keep_eactivos_text(db, session, row: dict) -> dict:
+    """The detail page's description, read once per listing."""
+    old = db.execute("SELECT description FROM listings WHERE id = ?", (row["id"],)).fetchone()
+    if old and old[0] and "Descripción:" in old[0]:
+        return {"description": old[0], "area_m2": find_area(old[0])}
+    try:
+        resp = session.get(row["url"], timeout=30)
+        resp.raise_for_status()
+    except Exception:  # noqa: BLE001 — try again next scan
+        return {}
+    el = BeautifulSoup(resp.text, "html.parser").select_one("#tab-description")
+    text = el.get_text(" ", strip=True).replace("Descripción ", "", 1) if el else ""
+    if not text:
+        return {}
+    full = f"{row['description']} · Descripción: {text[:2500]}"
+    return {"description": full, "area_m2": find_area(text)}
+# ─── Patrimonio del Estado (the state's own property) ──────────────
+# The Treasury's provincial offices sell what the state owns or inherits
+# without heirs (abintestato), by sealed-bid auction. The search lists the
+# open auctions office by office (homes, buildings, shops and land); the lots
+# are only in the BOE announcement,
+# a PDF written differently by each office. A round with no bid goes on to
+# the next, cheaper one at the same sitting, so the last price is the floor.
+HACIENDA = "https://www.hacienda.gob.es"
+HACIENDA_LIST = (HACIENDA + "/es-ES/Areas%20Tematicas/Patrimonio%20del%20Estado/Gestion%20Patrimonial%20del%20Estado"
+                 "/Paginas/Subastas/ListadoSubastasConcursos.aspx")
+HACIENDA_OFFICES = range(1, 57)
+_HAC_EVENT = re.compile(r'href="(https://www\.hacienda\.gob\.es/[^"]*/paginas/subastas/deh-[^"]+\.aspx)"', re.I)
+_HAC_LOT = re.compile(r"\blote\s*(?:n[úu]m\.?|n[º°o.]*)?\s*(\d+)\s*(?:[.:–-]+|\s+(?=descripci|finca|en primera|convocatoria))",
+                      re.I)
+_HAC_PAGE_HEAD = re.compile(r"BOLETÍN OFICIAL DEL ESTADO.{0,240}?/arde", re.S)
+_HAC_ROUND = re.compile(r"\b(1|2|3|4|primera|segunda|tercera|cuarta)\s*[ªa]?\s*subasta\b[^€\d]{0,60}?"
+                        r"([\d.]+(?:,\d{1,2})?)\s*(?:€|euros)", re.I)
+_HAC_ORDINAL = {"primera": "1", "segunda": "2", "tercera": "3", "cuarta": "4"}
+# Madrid writes the rounds as a table: "Tipo de licitación 99.000,00 84.150,00 71.257,50 60.798,38".
+_HAC_TABLE = re.compile(r"Tipo de licitaci[óo]n((?:\s+[\d.]+,\d{2}(?:\s*€)?){2,4})", re.I)
+_HAC_POSTCODE = re.compile(r"\(\d{5}\s+([A-ZÁÉÍÓÚÑ][^)]{1,40})\)")
+_HAC_TOWN = re.compile(r"(?:t[ée]rmino municipal de|municipio de|sit[oa]s? en|^\W*(?:inmueble|casa|vivienda) en)\s+([A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü' -]{1,40}?)"
+                       r"\s*(?:\(|,|\.|;| con | calle| c/| avda)", re.I)
+
+
+_HAC_TYPE = re.compile(r"(?:tipo|precio)(?: m[ií]nimo)? de (?:licitaci[óo]n|salida)[^\d€]{0,60}?([\d.]+(?:,\d{1,2})?)\s*(?:€|euros)",
+                       re.I)
+
+
+def hacienda_lots(text: str, single: bool = False) -> list[dict]:
+    """The property lots of one BOE announcement: {"lot", "text", "town", "area", "price", "floor"}.
+
+    Homes, plots, shops and whole buildings are all kept: the scorer tells them apart.
+    With `single`, an announcement of one property with no "Lote" in it is that lot."""
+    text = re.sub(r"\s+", " ", _HAC_PAGE_HEAD.sub(" ", text))
+    parts = _HAC_LOT.split(text)
+    if single and len(parts) < 3:
+        parts = ["", "1", text]
+    out = []
+    for i in range(1, len(parts) - 1, 2):
+        body = parts[i + 1][:10000]
+        head = body[:400]
+        found = {}
+        for n, amount in _HAC_ROUND.findall(body):
+            found.setdefault(_HAC_ORDINAL.get(n.lower(), n), parse_price(amount))
+        rounds = [found[n] for n in sorted(found) if found[n]]
+        table = _HAC_TABLE.search(body)
+        if not rounds and table:
+            rounds = [p for p in (parse_price(x) for x in table.group(1).replace("€", " ").split()) if p]
+        if not rounds and _HAC_TYPE.search(body):
+            rounds = [parse_price(_HAC_TYPE.search(body).group(1))]
+        if len(parts) == 3 and single:
+            head = body[:2500]                     # one property: its description follows the preamble
+        town = _HAC_POSTCODE.search(head) or _HAC_TOWN.search(head)
+        out.append({"lot": parts[i], "text": body[:1500].strip(), "town": town.group(1).strip().title() if town else None,
+                    "area": find_area(head), "price": rounds[0] if rounds else None,
+                    "floor": rounds[-1] if rounds else None})
+    return out
+
+
+def _hacienda_events(session) -> set[str]:
+    found = set()
+    for office in HACIENDA_OFFICES:
+        resp = session.get(HACIENDA_LIST, params={"den": "", "nat": "Inmuebles urbanos;Inmuebles rústicos;", "dels": f"{office};"})
+        resp.raise_for_status()
+        found.update(_HAC_EVENT.findall(resp.text))
+    return found
+
+
+@register("hacienda", "ES", description="Patrimonio del Estado — the state's own and heirless homes, by sealed bid")
+def scrape_hacienda(db, max_price: float = 50000, **_):
+    import pymupdf
+    session = make_session(timeout=60)
+    total = 0
+    for event in sorted(_hacienda_events(session)):
+        try:
+            page = BeautifulSoup(session.get(event).text, "html.parser")
+        except Exception as e:  # noqa: BLE001 — one office down is not the source down
+            LOG.info(f"hacienda {event}: {type(e).__name__}")
+            continue
+        words = re.sub(r"\s+", " ", page.get_text(" "))
+        deadline = re.search(r"Fecha límite presentación solicitudes\s*(\d{2}/\d{2}/\d{4})", words)
+        pdfs = [a["href"] for a in page.select("a[href]") if ".pdf" in a["href"].lower()]
+        boe = [h for h in pdfs if re.search(r"(?i)boe|anuncio|publicaci", h) and "cambio" not in h.lower()] or pdfs
+        if not boe:
+            continue
+        url = safe_url(boe[0], HACIENDA)
+        try:
+            with pymupdf.open(stream=session.get(url).content, filetype="pdf") as doc:
+                text = "\n".join(p.get_text() for p in doc)
+        except Exception as e:  # noqa: BLE001
+            LOG.info(f"hacienda {url}: {type(e).__name__}")
+            continue
+        office = event.split("/subastas/")[1].split("/")[0].removeprefix("deh-").replace("-", " ").title()
+        for lot in hacienda_lots(text):
+            if lot["floor"] and lot["floor"] > max_price * 2:
+                continue
+            upsert_listing(db, make_listing(
+                "hacienda", f"{stable_id(event)}-{lot['lot']}", "ES",
+                title=f"Lote {lot['lot']} — {lot['text'][:150]}",
+                description=f"{lot['text']} · Subasta del Estado (Delegación de Hacienda de {office}), sobre cerrado",
+                tipo="inmueble", area_m2=lot["area"], price=lot["price"], min_price=lot["floor"],
+                concelho=lot["town"], district=office,
+                date_end=parse_date_dmy(deadline.group(1)) if deadline else None, url=event,
+            ))
+            total += 1
+        db.commit()
+    return total
+
+
+# ─── BOE V-B (every public body's property sales) ──────────────────
+# Public bodies announce their property auctions in section V-B of the BOE:
+# Social Security's own buildings, FOGASA, the drugs plan's seized property,
+# port authorities, ADIF, Defence, ministries. The open-data summary of each
+# day lists them; the announcement's text is read with hacienda_lots. The
+# Treasury's own offices are read by scrape_hacienda, so they are left out here.
+BOE_SUMMARY = "https://www.boe.es/datosabiertos/api/boe/sumario/{:%Y%m%d}"
+BOE_DAYS = 45                      # an announcement is open for 20-40 days
+_BOE_SALE = re.compile(r"\b(subasta|enajenaci[oó]n|venta)\b", re.I)
+_BOE_PROPERTY = re.compile(r"inmueble|vivienda|finca|solar|parcela|local|edificio|terreno|bienes patrimoniales|faro",
+                           re.I)
+_BOE_SKIP = re.compile(r"suspensi|tanteo|anula|correcci[oó]n de errores|resultado|desierta|bienes muebles|veh[ií]culo|"
+                       r"aprovechamiento|Econom[ií]a y Hacienda", re.I)
+
+
+def _listed(x) -> list:
+    return x if isinstance(x, list) else [x] if isinstance(x, dict) else []
+
+
+def boe_sale_notices(summary: dict) -> list[dict]:
+    """The V-B items of one day's BOE summary that announce a property sale."""
+    out = []
+    for day in _listed(summary.get("data", {}).get("sumario", {}).get("diario")):
+        for section in _listed(day.get("seccion")):
+            if section.get("codigo") != "5B":
+                continue
+            for dept in _listed(section.get("departamento")):
+                items = _listed(dept.get("item")) + [i for ep in _listed(dept.get("epigrafe")) for i in _listed(ep.get("item"))]
+                for item in items:
+                    title = item.get("titulo") or ""
+                    if _BOE_SALE.search(title) and _BOE_PROPERTY.search(title) and not _BOE_SKIP.search(title):
+                        out.append({"id": item.get("identificador"), "title": title, "body": dept.get("nombre"),
+                                    "url": item.get("url_html")})
+    return out
+
+
+@register("boe_public", "ES", description="BOE V-B — property sales of Spanish public bodies (Social Security, ports, FOGASA…)")
+def scrape_boe_public(db, max_price: float = 50000, **_):
+    session = make_session(timeout=40)
+    today = datetime.now().date()
+    from datetime import timedelta
+    total = 0
+    for back in range(BOE_DAYS):
+        day = today - timedelta(days=back)
+        try:
+            resp = session.get(BOE_SUMMARY.format(day), headers={"Accept": "application/json"})
+            if resp.status_code != 200:          # no BOE on Sundays
+                continue
+            notices = boe_sale_notices(resp.json())
+        except Exception as e:  # noqa: BLE001
+            LOG.info(f"boe_public {day}: {type(e).__name__}")
+            continue
+        for notice in notices:
+            if db.execute("SELECT 1 FROM listings WHERE id LIKE ? LIMIT 1", (f"boe_public:{notice['id']}-%",)).fetchone():
+                continue                         # an announcement does not change once published
+            try:
+                page = BeautifulSoup(session.get(notice["url"]).text, "html.parser")
+            except Exception as e:  # noqa: BLE001
+                LOG.info(f"boe_public {notice['id']}: {type(e).__name__}")
+                continue
+            body = page.select_one("#textoxslt") or page
+            for lot in hacienda_lots(body.get_text(" "), single=True):
+                if lot["floor"] and lot["floor"] > 2 * max_price:
+                    continue
+                upsert_listing(db, make_listing(
+                    "boe_public", f"{notice['id']}-{lot['lot']}", "ES",
+                    title=re.sub(r"^\W*(?:Urbana|R[úu]stica)?\W*", "", lot["text"])[:200],
+                    description=f"{lot['text']} · {notice['body']} (BOE {notice['id']}, {day:%d/%m/%Y})",
+                    tipo="inmueble", area_m2=lot["area"], price=lot["price"], min_price=lot["floor"],
+                    concelho=lot["town"], url=notice["url"],
+                    # The deadline is written a dozen ways; offers close within about 40 days.
+                    date_end=f"{day + timedelta(days=40):%Y-%m-%d}T00:00:00",
+                    raw_json={"published": f"{day:%Y-%m-%d}", "seller": notice["body"], "date_end": "estimated"},
+                ))
+                total += 1
+            db.commit()
+            time.sleep(0.3)
+# ─── AVRA (Andalucía's public housing and land agency) ─────────────
+# AVRA's catalogue is one JSON file of every property it holds in
+# Andalucía; the ones on sale ("oferta": "S") carry a price and the way they
+# are sold (subasta or concurso). Homes, garages, shops, building plots and
+# rural land alike: the scorer tells them apart.
+AVRA = "https://www.juntadeandalucia.es/avra"
+AVRA_JSON = AVRA + "/opencms/catalogo-inmuebles/recursos-propios/inmuebles.json"
+_AVRA_POINT = re.compile(r"POINT\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)")
+
+
+def avra_listing(item: dict) -> dict | None:
+    """One AVRA catalogue entry as a listing, or None when it is not on sale."""
+    if item.get("oferta") != "S" or not item.get("referencia_inmueble"):
+        return None
+    kind = (item.get("tipo_inmueble") or "").title()
+    town = (item.get("municipio") or "").title() or None
+    built = to_number(item.get("mconstruidos"))
+    land = to_number(item.get("superficie"))
+    raw = {"type": item.get("id_tipo_inmueble"), "cadastre": item.get("ref_catastral"),
+           "sale": item.get("tipo_oferta"), "plot_m2": land, "buildable": item.get("edificabilidad")}
+    point = _AVRA_POINT.search(item.get("centroide") or "")
+    if point:
+        raw.update(lon=float(point.group(1)), lat=float(point.group(2)))
+    notes = " ".join(str(item.get(k) or "") for k in ("observaciones", "observaciones_oferta"))
+    return make_listing(
+        "avra", item["referencia_inmueble"], "ES",
+        title=f"{kind} en {town} — {item.get('nombre') or ''}".strip(" —")[:200],
+        description=f"{kind} en {town} ({(item.get('provincia') or '').title()}). {notes[:2500]} · "
+                    f"{(item.get('tipo_oferta') or 'venta').lower()} de AVRA (Junta de Andalucía)",
+        tipo=kind or None, area_m2=built or land, price=to_number(item.get("precio")), min_price=to_number(item.get("precio")),
+        concelho=town, district=(item.get("provincia") or "").title() or None,
+        url=f"{AVRA}/catalogo-inmuebles/#/inmueble/{item['referencia_inmueble']}", raw_json=raw,
+    )
+
+
+@register("avra", "ES", description="AVRA — Andalucía's public homes, garages, plots and land for sale")
+def scrape_avra(db, max_price: float = 50000, **_):
+    resp = make_session(timeout=90).get(AVRA_JSON, params={"_start": 0, "_limit": 10000})
+    resp.raise_for_status()
+    total = 0
+    for item in resp.json():
+        row = avra_listing(item)
+        if row and (row["price"] or 0) <= 2 * max_price:
+            upsert_listing(db, row)
+            total += 1
+    db.commit()
+    return total
+
+
 # ─── Aliseda (Santander's repossessions) ────────────────────────────
 # The site's own search API: price, the map position, the full text and who
 # holds it, 12 a page. Homes (tipo 10) and land (tipo 8) within budget, all Spain.

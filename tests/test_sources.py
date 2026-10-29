@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 102
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -24,7 +24,7 @@ def test_registry_is_complete():
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY", "GR"} | {"EU"}
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY"} | {"EU"}   # GR: ETAD
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name
@@ -1319,3 +1319,120 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_eactivos_reads_a_home_card():
+    from bs4 import BeautifulSoup
+    from sources.es import eactivos_card
+    html = """<div class="liquidation-card card px-0" data-liquidation="25364">
+      <span class="end-date">Finaliza el <span class="date">29/10/2026</span></span>
+      <a class="img-link liquidation-card-image" href="https://www.eactivos.com/6K2P8GMK/subasta-de-vivienda">
+        <img class="card-img-top img-main" src="https://eactivoscdn.azureedge.net/card/a.png"></a>
+      <div class="card-title"><a href="https://www.eactivos.com/6K2P8GMK/subasta-de-vivienda">
+        Subasta de vivienda en barriada Los Pajaritos, Sevilla</a></div>
+      <div class="card-subtitle mb-3 d-flex"><i class="location"></i> Sevilla, Sevilla</div>
+      <div class="text-value current-bid-amount" data-initial-price="0">0€</div>
+      <div class="text-value" data-end-date="2026-10-29 12:00:00"></div>
+      <span class="liquidation-price">25.000€</span></div>"""
+    row = eactivos_card(BeautifulSoup(html, "html.parser").div)
+    assert row["id"] == "eactivos:25364" and row["price"] == 25000 and row["min_price"] == 0
+    assert row["concelho"] == "Sevilla" and row["date_end"] == "2026-10-29T12:00:00"
+def test_hacienda_reads_home_lots_and_their_rounds():
+    from sources.es import hacienda_lots
+    text = ("LOTE 3 Descripción. VIVIENDA sita en PASEO DE LAS DELICIAS número 35, bajo, puerta B (28045 Madrid). "
+            "Superficie construida de 21,5 m². Tipo de licitación y garantía. Valor de tasación: 99.000,00 euros. "
+            "Subasta Primera Segunda Tercera Cuarta Tipo de licitación 99.000,00 84.150,00 71.257,50 60.798,38 "
+            "Garantía 5% 4.950,00 LOTE 4 Descripción. Solar en calle Mayor. Tipo de licitación 1.000,00 900,00 "
+            "Lote 5.- Casa en Magacela, de cincuenta y dos metros. Segunda Subasta: Tipo de licitación del lote: "
+            "11.039,80 euros. Cuarta Subasta: Tipo de licitación del lote: 7.976,26 euros.")
+    lots = hacienda_lots(text)
+    assert [lot["lot"] for lot in lots] == ["3", "4", "5"]                  # a plot is kept too
+    assert lots[0]["town"] == "Madrid" and lots[0]["price"] == 99000 and lots[0]["floor"] == 60798.38
+    assert lots[1]["floor"] == 900 and lots[2]["town"] == "Magacela" and lots[2]["floor"] == 7976.26
+
+
+def test_boe_public_picks_property_sales_of_other_public_bodies():
+    from sources.es import boe_sale_notices, hacienda_lots
+    item = lambda t: {"identificador": "BOE-B-1", "titulo": t, "url_html": "u"}
+    summary = {"data": {"sumario": {"diario": [{"seccion": [{"codigo": "5B", "departamento": [
+        {"nombre": "MINISTERIO DE TRABAJO", "item": [
+            item("Anuncio del FOGASA por el que se convoca la venta en subasta pública de bienes inmuebles."),
+            item("Anuncio de suspensión de subasta pública de bien inmueble.")]},
+        {"nombre": "MINISTERIO DE HACIENDA", "item": [
+            item("Anuncio de la Delegación de Economía y Hacienda de Valencia: subasta de inmuebles.")]}]}]}]}}}
+    assert [n["body"] for n in boe_sale_notices(summary)] == ["MINISTERIO DE TRABAJO"]
+    (lot,) = hacienda_lots("Se convoca subasta del inmueble. Vivienda sita en Vigo. El tipo de licitación es "
+                           "61.296 € (sesenta y un mil).", single=True)
+    assert lot["price"] == 61296
+def test_avra_keeps_what_is_on_sale_with_its_position():
+    from sources.es import avra_listing
+    entry = {"referencia_inmueble": "3801-VP-022-400", "tipo_inmueble": "VIVIENDA", "municipio": "ALMERIA",
+             "provincia": "ALMERIA", "mconstruidos": "100.11", "precio": "60920.3", "oferta": "S",
+             "tipo_oferta": "SUBASTA", "centroide": "POINT(-2.150192 37.38906)"}
+    row = avra_listing(entry)
+    assert row["id"] == "avra:3801-VP-022-400" and row["price"] == 60920.3 and row["area_m2"] == 100.11
+    assert row["concelho"] == "Almeria" and '"lat": 37.38906' in row["raw_json"]
+    assert avra_listing({**entry, "oferta": "N"}) is None
+def test_agorastore_reads_a_product():
+    from sources.fr import agorastore_listing
+    row = agorastore_listing({
+        "productId": 435215, "productName": "Maison - 70 m² - Sainte-Livrade-sur-Lot (47)",
+        "productPageUrl": "/vente-occasion/immobilier/maison/maison-70-m-sainte-livrade-sur-lot-47-435215.aspx",
+        "subCategories": [{"name": "Maison"}], "sellerName": "Département du Lot-et-Garonne",
+        "sale": {"endDate": "2026-12-10T16:00:00+01:00", "currentPrice": 14999.0, "totalBids": 0}})
+    assert row["id"] == "agorastore:435215" and row["price"] == 14999 and row["current_bid"] is None
+    assert row["concelho"] == "Sainte-Livrade-sur-Lot" and row["district"] == "47" and row["area_m2"] == 70
+    assert row["date_end"] == "2026-12-10T16:00:00" and "Lot-et-Garonne" in row["description"]
+def test_ran_reads_notary_notices_and_skips_court_sales():
+    from sources.it import ran_listings
+    html = """<input class="avvisolat" id="lat_64702" value=" 41.864558"><input id="lon_64702" value=" 12.486888">
+    <a href="/beni-immobili/dettaglio-avviso/GAV/64702"><div class="divScheda"><div class="divSchedaInfo">
+    <p>DISMISSIONE ENTE PUBBLICO - LVIII Bando ATER Roma. LOCALE DEPOSITO. Mq 37. Stato Libero.</p>
+    <ul><li>Prezzo dell'Avviso: <span>€ 3.548,25</span></li>
+    <li>Data e Ora fine raccolta offerte: <span>10/11/2026 17:00</span></li></ul></div>
+    <div class="divSchedaDett"><small>Via D. Chiodo 1, Roma (Roma)</small></div></div></a>
+    <a href="/beni-immobili/dettaglio-avviso/GAST/4627591"><div class="divSchedaInfo"><p>x</p></div></a>"""
+    (row,) = ran_listings(html)
+    assert row["id"] == "ran:64702" and row["price"] == 3548.25 and row["concelho"] == "Roma"
+    assert row["date_end"] == "2026-11-10T17:00:00" and row["area_m2"] == 37
+def test_bima_keeps_purchases_and_drops_placeholder_prices():
+    from sources.de import bima_listing
+    plot = bima_listing({"id": "1", "attributes": {"commercialization_type": "BUY", "title": "Baugrundstück",
+                        "city": "Anklam", "federal_state": "mecklenburg_vorpommern", "buy_price": "15000.0",
+                        "display_area": "508.0", "latitude": "53.85", "longitude": "13.69"}})
+    assert plot["id"] == "bima:1" and plot["price"] == 15000 and plot["concelho"] == "Anklam"
+    assert plot["district"] == "Mecklenburg Vorpommern"
+    assert bima_listing({"id": "2", "attributes": {"commercialization_type": "BUY", "buy_price": "1.0"}})["price"] is None
+    assert bima_listing({"id": "3", "attributes": {"commercialization_type": "RENT"}}) is None
+def test_biedboek_keeps_sales_and_reads_dutch_parcel_sizes():
+    from sources.nl import biedboek_listing, biedboek_m2
+    assert biedboek_m2("1.68.40") == 16840 and biedboek_m2("5220") == 5220
+    sale = {"shortId": "RpPhi3nO", "parcelSize": "5220", "latitude": "51.43", "longitude": "5.28",
+            "translation": {"name": "Bosperceel", "city": "Vessem", "currentUsage": "Bos",
+                            "realEstateParagraphs": [{"html": "<p>Het Rijksvastgoedbedrijf biedt te koop aan.</p>"}]},
+            "biddingData": {"minimumAmount": 0}}
+    row = biedboek_listing(sale)
+    assert row["id"] == "biedboek:RpPhi3nO" and row["area_m2"] == 5220 and row["price"] is None
+    lease = {**sale, "translation": {**sale["translation"], "name": "Pachtgronden Nederland"}}
+    assert biedboek_listing(lease) is None
+def test_estamo_reads_lots_but_not_the_visit_schedule():
+    from sources.pt import estamo_lots
+    html = """<p>CALENDARIZAÇÃO DA HASTA PÚBLICA N.º1 18 de março 2026 Visita ao Imóvel n.º3 (Prédio Rústico)
+    30 de março 2026 Até às 17h00 Prazo limite para apresentação de propostas</p>
+    <p>IMÓVEL N.º3 Prédio Rústico "Bouça das Cruzes" em Marco de Canaveses Terreno rústico com 1,3429 hectares
+    VALOR DE ALIENAÇÃO 164.200,00€ VALOR BASE 159.200,00 € Documentação</p>
+    <p>IMÓVEL N.º5 Parcelas de Terreno na Póvoa de Varzim VALOR DE ALIENAÇÃO Nao Arrematado VALOR BASE 337.000,00 €</p>
+    <p>Documentos associados</p>"""
+    lots = estamo_lots(html)
+    assert [r["id"] for r in lots] == ["estamo:1-3", "estamo:1-5"]
+    assert lots[0]["price"] == 159200 and lots[0]["date_end"] == "2026-03-30T17:00:00"
+    assert lots[1]["price"] == 337000 and "alienação" not in lots[1]["description"]
+def test_etad_keeps_sales_and_reads_the_facts():
+    from sources.gr import etad_listing
+    page = lambda kind: (f"<h1>Διαμέρισμα 4ου Οροφου</h1><div>Νομός: Αττική Πόλη: Αθήνα Τετραγωνικά Μέτρα Κτισμάτων: "
+                         f"211.85 Κατηγορία Συναλλαγής: {kind} Χρόνος Λήξης: 02/11/2026 - 14:00:00 "
+                         f"Τιμή Εκκίνησης: 45.000 € Βήμα Διαγωνισμού: 5 %</div>")
+    row = etad_listing("21", page("Πώληση"))
+    assert row["id"] == "etad:21" and row["price"] == 45000 and row["area_m2"] == 211.85
+    assert row["concelho"] == "Αθήνα" and row["date_end"] == "2026-11-02T14:00:00"
+    assert etad_listing("22", page("Εκμίσθωση")) is None
