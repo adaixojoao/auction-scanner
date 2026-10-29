@@ -875,6 +875,9 @@ _INVEST_PRIORITIES = (
     "homes: when it names the type and not the floor, each flat is counted at a modest "
     "planning size and the figure says so. That size is not the building's floor, so it "
     "is not a discount against local sale prices, and the repairs are not in the yield. "
+    "A rent worked out from the town's average, not stated in the ad, counts only up to "
+    "about 7% net (5% on planning sizes): a high yield on an average is a reason to check "
+    "rents there, not a bargain. "
     "Italian cadastral vani, when the notice states no floor, are counted at 15 m² each: "
     "a cautious estimate, not a measured floor, so the same limits apply. "
     "Not wanted: a gap so wide it cannot be real (more than about 70% under the local price, a "
@@ -3105,6 +3108,13 @@ def mixed_order(item: dict) -> tuple:
 
 INVEST_DISCOUNT_POINTS = [(0.1, 0), (0.3, 12), (0.5, 25), (0.7, 35)]     # share below the local price
 INVEST_YIELD_POINTS = [(3, 0), (5, 8), (7, 16), (11, 24)]                # net rent a year, % of the cost
+# A rent the ad does not state is the town's average per m², not this home's
+# lease: it earns points only up to this net yield (Úbeda and Chaves topped the
+# list on 13% and 11% town averages, 2026-10-29). The full figure is still shown.
+INVEST_TOWN_RENT_MAX = 7
+# Flats counted at a planning size (costs.flat_block, the ad states no floor):
+# a size nobody measured earns less again (Cherbourg showed 57% on four of them).
+INVEST_PLANNING_RENT_MAX = 5
 INVEST_BEACH_POINTS = [(0.5, 20), (1, 16), (3, 10), (10, 3), (20, 0)]    # km to the sea
 INVEST_FORCED_SALE = 8          # a court, tax or social-security sale
 INVEST_BANK_SALE = 4            # a bank selling what it repossessed
@@ -3297,7 +3307,10 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(f"town rent about €{rent['monthly']:,.0f}/month ({rent['yield_pct']}% gross) "
                        "is not counted — someone is in it and the ad does not state the lease")
     elif rent:
-        s += curve(rent["net_yield_pct"], INVEST_YIELD_POINTS)
+        counted = rent["net_yield_pct"]
+        if not rent.get("stated"):
+            counted = min(counted, INVEST_PLANNING_RENT_MAX if rent.get("planning") else INVEST_TOWN_RENT_MAX)
+        s += curve(counted, INVEST_YIELD_POINTS)
         head = (f"lease in the ad €{rent['monthly']:,.0f}/month"
                 if rent.get("stated") else f"rent about €{rent['monthly']:,.0f}/month")
         reasons.append(f"{head}: {rent['net_yield_pct']}% a year net of "
@@ -3307,7 +3320,9 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                           if rent.get("province_average")
                           else " (a town average — check rents there)" if rent["yield_pct"] > 15 else "")
                        + (f" — {rent['planning']}; repairs are not in this yield"
-                          if rent.get("planning") else ""))
+                          if rent.get("planning") else "")
+                       + (f"; counted up to {counted:g}% (not the ad's own lease)"
+                          if counted < rent["net_yield_pct"] else ""))
     elif not area:
         block = costs.flat_block(item)
         if block and not block.get("area"):
