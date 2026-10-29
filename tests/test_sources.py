@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 105
+    assert len(REGISTRY) == 106
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1476,3 +1476,15 @@ def test_ippatrimonio_reads_the_sales_layer():
     assert row["id"] == "ippatrimonio:412" and row["price"] == 18500 and row["area_m2"] == 640
     assert row["concelho"] == "Aljustrel" and row["date_end"] == "2026-11-19" and '"lat": 37.94' in row["raw_json"]
     assert ippatrimonio_listing({"attributes": {**point["attributes"], "data_remocao": 1}}) is None
+
+
+def test_casea1euro_keeps_recent_town_schemes():
+    from datetime import datetime
+    from sources.it import casea1euro_listing
+    post = {"id": 9, "title": {"rendered": "NARO &#8211; Agrigento &#8211; Sicilia &#8211;"}, "categories": [3],
+            "excerpt": {"rendered": "<p>Il Comune di Naro ha avviato il progetto Case a 1 Euro.</p>"},
+            "link": "https://casea1euro.it/sicilia/naro/", "modified": "2026-09-23T10:00:00"}
+    row = casea1euro_listing(post, now=datetime(2026, 10, 29))
+    assert row["id"] == "casea1euro:9" and row["concelho"] == "Naro" and row["district"] == "Agrigento"
+    assert row["price"] is None and "Naro" in row["description"]
+    assert casea1euro_listing({**post, "modified": "2023-01-01"}, now=datetime(2026, 10, 29)) is None

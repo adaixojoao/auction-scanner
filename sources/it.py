@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
@@ -341,4 +342,61 @@ def scrape_ran(db, max_price: float = 50000, **_):
             break
         resp = nxt
         time.sleep(0.3)
+    return total
+
+
+# ─── Case a 1 euro: towns selling old houses for €1 ───────────────────
+# casea1euro.it keeps one post per town scheme ("NARO – Agrigento – Sicilia").
+# The house is free, the renovation is not: a deposit and works within about
+# three years. Each scheme is a lead with no price; the town's own call has the
+# houses. Schemes not updated for 18 months are left out as likely closed.
+CASEA1EURO_POSTS = "https://casea1euro.it/wp-json/wp/v2/posts"
+CASEA1EURO_CATEGORY = 3
+CASEA1EURO_MONTHS = 18
+_IT_REGIONS = re.compile(r"\b(?:Abruzzo|Basilicata|Calabria|Campania|Emilia[- ]?Romagna|Friuli[- ]Venezia Giulia|Lazio|Liguria|"
+                         r"Lombardia|Marche|Molise|Piemonte|Puglia|Sardegna|Sicilia|Toscana|Trentino[- ]Alto Adige|Umbria|"
+                         r"Valle d['’]Aosta|Veneto)\b", re.I)
+
+
+def casea1euro_listing(post: dict, now: datetime | None = None) -> dict | None:
+    """One town scheme as a listing, or None when it is old or not a town."""
+    from html import unescape
+    now = now or datetime.now()
+    modified = (post.get("modified") or "")[:10]
+    if not modified or modified < (now - timedelta(days=30 * CASEA1EURO_MONTHS)).strftime("%Y-%m-%d"):
+        return None
+    title = _IT_REGIONS.sub(" ", unescape(post.get("title", {}).get("rendered") or ""))
+    parts = [p.strip() for p in re.split(r"\s*[–-]\s+|\s+[–-]\s*", title) if p.strip()]
+    if not parts or CASEA1EURO_CATEGORY not in (post.get("categories") or []):
+        return None
+    town, province = parts[0].title(), (parts[1].title() if len(parts) > 1 else None)
+    excerpt = re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", post.get("excerpt", {}).get("rendered") or ""))).strip()
+    return make_listing(
+        "casea1euro", post.get("id") or post.get("link"), "IT", title=f"Case a 1 euro — {town} ({province})",
+        description=" · ".join(x for x in (excerpt[:1500], "casa a 1 euro: deposito cauzionale e ristrutturazione entro circa 3 anni; "
+                                           "gli immobili e le scadenze sono nel bando del Comune") if x),
+        tipo="casa (case a 1 euro)", price=None, concelho=town, district=province,
+        url=post.get("link"), raw_json={"scheme": "case a 1 euro", "updated": modified},
+    )
+
+
+@register("casea1euro", "IT", description="Case a 1 euro — Italian towns selling empty old houses for €1 against renovation")
+def scrape_casea1euro(db, max_price: float = 50000, **_):
+    session = make_session(timeout=60)
+    total = 0
+    for page in range(1, 6):
+        resp = session.get(CASEA1EURO_POSTS, params={"per_page": 100, "page": page, "categories": CASEA1EURO_CATEGORY,
+                                                     "_fields": "id,title,excerpt,categories,link,modified"})
+        if resp.status_code == 400:      # past the last page
+            break
+        resp.raise_for_status()
+        posts = resp.json()
+        for post in posts:
+            listing = casea1euro_listing(post)
+            if listing:
+                upsert_listing(db, listing)
+                total += 1
+        db.commit()
+        if len(posts) < 100:
+            break
     return total
