@@ -427,8 +427,10 @@ URBAN_PLOT_WORDS = [
     "suelo urbano", "parcela edificable", "terreno urbanizable",
     "terrain à bâtir", "terrain constructible", "terreno edificabile", "lotto edificabile",
     "baugrundstück", "bauplatz", "bouwgrond", "bouwkavel", "kavel",
+    "land-plot", "land plot", "building plot", "unbebaute liegenschaft", "bebaubare liegenschaft",
 ]
-URBAN_PLOT_TYPES = {normalize(t) for t in ("terreno_urbano", "suelo", "solar", "terrain à bâtir")}
+URBAN_PLOT_TYPES = {normalize(t) for t in ("terreno_urbano", "suelo", "solar", "terrain à bâtir", "landPlot",
+                                            "unbebaute Liegenschaft", "bebaubare Liegenschaft")}
 
 RURAL_WORDS = [
     "prédio rústico", "rústico", "rústica", "terreno rústico", "terreno agrícola", "agrícola",
@@ -442,10 +444,12 @@ RURAL_WORDS = [
     "grünlandfläche*", "forstfläche*", "landbouwgrond", "weiland",
     "ackerland", "landwirtschaftsfläche", "grünland", "wald", "landbouwgrond", "weiland", "grasland", "bosperceel", "bospercelen", "bosgrond",
     "agrarische grond", "natuurperceel", "natuurpercelen", "akkerland",
+    "agricultural land", "land-parcel", "land parcel", "farmland", "land- und forstwirtschaftlich",
     "ackerland", "landwirtschaftsfläche", "grünland", "wald", "αγροτεμάχιο", "αγρός", "γήπεδο", "ελαιώνας", "landbouwgrond", "weiland",
 ]
 RURAL_TYPES = {normalize(t) for t in (
     "terreno_rustico", "rustico", "agricola", "florestal", "herdade", "finca", "rustica",
+    "parcel", "land- und forstwirtschaftlich genutzte Liegenschaft",
 )}
 
 # A stable, hayloft or shed sold under a "Casa en …" title. A house that also
@@ -472,6 +476,7 @@ OTHER_WORDS = [   # not a home and not a plot
     "negozio", "magazzino", "capannone", "ufficio", "posto auto",
     "locale deposito", "locale ad uso deposito", "autorimessa", "box auto", "cantina",
     "κατάστημα", "γραφείο", "αποθήκη", "θέση στάθμευσης",
+    "storage unit", "storage room", "storage space", "parking space", "gewerbliche liegenschaft",
     "stellplatz", "tiefgarage", "lager", "büro", "gewerbe*", "bedrijfspand", "kantoor",
     "bedrijfsruimte", "bedrijfshal*", "bedrijfshallen", "bedrijfsunit*", "winkelruimte",
     "hotel", "restaurante", "café",
@@ -482,6 +487,7 @@ OTHER_TYPES = {normalize(t) for t in (
     "loja/escritorio", "loja", "escritório", "armazem", "industrial", "garagem", "hotel",
     "local", "local comercial", "nave", "garaje", "trastero", "commerce",
     "garajes", "trasteros", "locales", "naves industriales",
+    "retail", "warehouse", "office", "otherCommercial", "parking", "hotel", "gewerbliche Liegenschaft",
 )}
 PARKING_WORDS = OTHER_WORDS   # older name
 

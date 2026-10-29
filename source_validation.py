@@ -145,6 +145,8 @@ CATALOG: dict[str, dict] = {
                "limitation": "Court sales in person at the district court; foreign bidders need land-transfer approval"},
     "estamo": {"kind": "official", "access": "public_html", "listing_type": "property",
                "limitation": "A few state lots a year; bidding in person in Lisbon"},
+    "intrum_gr": {"kind": "servicer", "access": "public_api", "listing_type": "property",
+                  "limitation": "Bank repossessions; some prices are on request (no price stored)"},
     "etad": {"kind": "official", "access": "public_html", "listing_type": "property",
              "limitation": "Sales only (most ETAD tenders are leases); an expected tender has no price yet"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",

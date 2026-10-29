@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 110
+    assert len(REGISTRY) == 111
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1571,3 +1571,19 @@ def test_edikte_reads_an_austrian_court_auction():
     assert row["price"] == 80500 and row["area_m2"] == 100 and row["date_end"].startswith("2026-11-09")
     assert "Schätzwert 161,000" in row["description"]
     assert edikt_listing("u/x!OpenDocument", html.replace("Verschiebung - Einfamilienhaus", "Entfall des Termins")) is None
+
+
+def test_intrum_gr_reads_a_repossession_and_its_kind():
+    from scoring import property_kind
+    from sources.gr import intrum_listing
+    item = {"id": "2480", "commercialization": "sale", "acquired": False,
+            "availability_status": {"slug": "available"}, "category": "land", "type": "landPlot",
+            "title": [{"locale": "el", "value": "Οικόπεδο"}, {"locale": "en", "value": "Land plot of 1.523 sqm in Kassandra"}],
+            "region": [{"locale": "en", "value": "Chalkidiki"}], "locations": ["chalkidiki-kassandra-afitos"],
+            "coordinates": [40.1, 23.4], "size": 1523, "price": 8000, "proximity_beach_driving": 1200}
+    row = intrum_listing(item)
+    assert row["id"] == "intrum_gr:2480" and row["price"] == 8000 and row["area_m2"] == 1523
+    assert row["concelho"] == "Afitos" and row["district"] == "Chalkidiki" and '"lat": 40.1' in row["raw_json"]
+    assert "beach about 1.2 km" in row["description"] and property_kind(row) == "urban_plot"
+    assert intrum_listing({**item, "price": 0})["price"] is None                      # price on request
+    assert intrum_listing({**item, "acquired": True}) is None
