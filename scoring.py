@@ -1647,10 +1647,12 @@ POLLUTION_POINTS = {"light": -10, "heavy": -30}
 # The yearly mean air (climate "air", EEA 1 km maps), in µg/m³. Clean is the
 # WHO guideline; poor is over the EU's limit for 2030; bad is three times the
 # WHO guideline, and at a pin that is the house it is hidden like heavy industry.
+# Fine dust is stricter than that: the buyer has asthma, which PM2.5 sets off
+# well below the EU limit (poor from 8, bad from 12, and it costs more).
 AIR_CLEAN = {"pm25": 5, "no2": 10}
-AIR_POOR = {"pm25": 10, "no2": 20}
-AIR_BAD = {"pm25": 15, "no2": 30}
-AIR_POINTS = {"clean": 5, "poor": -10, "bad": -20}
+AIR_POOR = {"pm25": 8, "no2": 20}
+AIR_BAD = {"pm25": 12, "no2": 30}
+AIR_POINTS = {"clean": 5, "poor": -15, "bad": -30}
 AIR_NAMES = {"pm25": "PM2.5", "no2": "NO₂"}
 
 

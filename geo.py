@@ -731,9 +731,51 @@ POLLUTION_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "da
 HEAVY_HIDE_KM = 3
 HEAVY_NEAR_KM = 8
 LIGHT_NEAR_KM = 2
+# The EU register of plants and what they release (scripts/update_eprtr.py).
+# Where a country reports to it, its "heavy" says which plants really pollute,
+# and OpenStreetMap's heavy sites there only count as light.
+EPRTR_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "eprtr.csv")
+_POLLUTION_GRIDS: dict = {}
 
 
-def pollution(item: dict, path: str | None = None, towns: dict | None = None) -> dict | None:
+def _pollution_grids(path: str, eprtr_path: str) -> tuple[dict, dict]:
+    """(heavy, light) grids from the OpenStreetMap list and the E-PRTR one."""
+    def stamp(p):
+        try:
+            return _os.path.getmtime(p)
+        except OSError:
+            return None
+    key = (path, stamp(path), eprtr_path, stamp(eprtr_path))
+    if key in _POLLUTION_GRIDS:
+        return _POLLUTION_GRIDS[key]
+    heavy: dict = {}
+    light: dict = {}
+    rows: list[tuple[str, str, float, float, str, str]] = []
+    for source in (eprtr_path, path):
+        try:
+            with open(source, encoding="utf-8", newline="") as f:
+                for row in _csv.DictReader(f):
+                    try:
+                        rows.append((source, row.get("kind") or "", float(row["lat"]), float(row["lon"]),
+                                     row.get("name") or "", row.get("country") or ""))
+                    except (KeyError, TypeError, ValueError):
+                        continue
+        except OSError:
+            continue
+    reported = {country for source, *_rest, country in rows if source == eprtr_path}
+    for source, kind, lat, lon, name, country in rows:
+        if kind == "heavy" and source == path and country in reported:
+            kind = "light"
+        grid = heavy if kind == "heavy" else light if kind == "light" else None
+        if grid is not None:
+            grid.setdefault((int(lat // _CELL), int(lon // _CELL)), []).append((lat, lon, name))
+    _POLLUTION_GRIDS.clear()
+    _POLLUTION_GRIDS[key] = (heavy, light)
+    return heavy, light
+
+
+def pollution(item: dict, path: str | None = None, towns: dict | None = None,
+              eprtr_path: str | None = None) -> dict | None:
     """{"level": "heavy" | "light", "km", "name", "approx", "text"} for the worst
     polluter near the property, None when there is none (or no position).
 
@@ -745,9 +787,9 @@ def pollution(item: dict, path: str | None = None, towns: dict | None = None) ->
     pos = _place(item, towns)
     if not pos:
         return None
-    path = path or POLLUTION_FILE
-    heavy = _nearest(pos, _points(path, "heavy"), HEAVY_NEAR_KM)
-    light = _nearest(pos, _points(path, "light"), LIGHT_NEAR_KM)
+    heavy_grid, light_grid = _pollution_grids(path or POLLUTION_FILE, eprtr_path or EPRTR_FILE)
+    heavy = _nearest(pos, heavy_grid, HEAVY_NEAR_KM)
+    light = _nearest(pos, light_grid, LIGHT_NEAR_KM)
     exact = pos.get("precision") in EXACT_ENOUGH
     if heavy and heavy[0] <= HEAVY_HIDE_KM and exact:
         level, best = "heavy", heavy
