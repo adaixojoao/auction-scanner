@@ -1416,3 +1416,15 @@ def test_biedboek_keeps_sales_and_reads_dutch_parcel_sizes():
     assert row["id"] == "biedboek:RpPhi3nO" and row["area_m2"] == 5220 and row["price"] is None
     lease = {**sale, "translation": {**sale["translation"], "name": "Pachtgronden Nederland"}}
     assert biedboek_listing(lease) is None
+def test_estamo_reads_lots_but_not_the_visit_schedule():
+    from sources.pt import estamo_lots
+    html = """<p>CALENDARIZAÇÃO DA HASTA PÚBLICA N.º1 18 de março 2026 Visita ao Imóvel n.º3 (Prédio Rústico)
+    30 de março 2026 Até às 17h00 Prazo limite para apresentação de propostas</p>
+    <p>IMÓVEL N.º3 Prédio Rústico "Bouça das Cruzes" em Marco de Canaveses Terreno rústico com 1,3429 hectares
+    VALOR DE ALIENAÇÃO 164.200,00€ VALOR BASE 159.200,00 € Documentação</p>
+    <p>IMÓVEL N.º5 Parcelas de Terreno na Póvoa de Varzim VALOR DE ALIENAÇÃO Nao Arrematado VALOR BASE 337.000,00 €</p>
+    <p>Documentos associados</p>"""
+    lots = estamo_lots(html)
+    assert [r["id"] for r in lots] == ["estamo:1-3", "estamo:1-5"]
+    assert lots[0]["price"] == 159200 and lots[0]["date_end"] == "2026-03-30T17:00:00"
+    assert lots[1]["price"] == 337000 and "alienação" not in lots[1]["description"]

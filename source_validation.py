@@ -129,6 +129,8 @@ CATALOG: dict[str, dict] = {
              "limitation": "Federal property for sale only (rentals left out); a bidding procedure has no price"},
     "biedboek": {"kind": "official", "access": "public_api", "listing_type": "property",
                  "limitation": "Public tenders without an asking price; leases and closed tenders left out"},
+    "estamo": {"kind": "official", "access": "public_html", "listing_type": "property",
+               "limitation": "A few state lots a year; bidding in person in Lisbon"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
               "limitation": "Descriptions are for subscribers; card has town, mise a prix and date"},
     "goauktion_de": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
