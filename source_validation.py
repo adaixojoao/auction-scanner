@@ -127,6 +127,8 @@ CATALOG: dict[str, dict] = {
             "limitation": "Notary notices only (state and public bodies, voluntary sales); court sales come from PVP"},
     "bima": {"kind": "official", "access": "public_api", "listing_type": "property",
              "limitation": "Federal property for sale only (rentals left out); a bidding procedure has no price"},
+    "biedboek": {"kind": "official", "access": "public_api", "listing_type": "property",
+                 "limitation": "Public tenders without an asking price; leases and closed tenders left out"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
               "limitation": "Descriptions are for subscribers; card has town, mise a prix and date"},
     "goauktion_de": {"kind": "aggregator", "access": "public_html", "listing_type": "property",

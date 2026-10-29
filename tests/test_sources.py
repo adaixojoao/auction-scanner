@@ -1405,3 +1405,14 @@ def test_bima_keeps_purchases_and_drops_placeholder_prices():
     assert plot["district"] == "Mecklenburg Vorpommern"
     assert bima_listing({"id": "2", "attributes": {"commercialization_type": "BUY", "buy_price": "1.0"}})["price"] is None
     assert bima_listing({"id": "3", "attributes": {"commercialization_type": "RENT"}}) is None
+def test_biedboek_keeps_sales_and_reads_dutch_parcel_sizes():
+    from sources.nl import biedboek_listing, biedboek_m2
+    assert biedboek_m2("1.68.40") == 16840 and biedboek_m2("5220") == 5220
+    sale = {"shortId": "RpPhi3nO", "parcelSize": "5220", "latitude": "51.43", "longitude": "5.28",
+            "translation": {"name": "Bosperceel", "city": "Vessem", "currentUsage": "Bos",
+                            "realEstateParagraphs": [{"html": "<p>Het Rijksvastgoedbedrijf biedt te koop aan.</p>"}]},
+            "biddingData": {"minimumAmount": 0}}
+    row = biedboek_listing(sale)
+    assert row["id"] == "biedboek:RpPhi3nO" and row["area_m2"] == 5220 and row["price"] is None
+    lease = {**sale, "translation": {**sale["translation"], "name": "Pachtgronden Nederland"}}
+    assert biedboek_listing(lease) is None

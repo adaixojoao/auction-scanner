@@ -380,3 +380,82 @@ def scrape_remaxnl(db, max_price: float = 50000, **_):
     """RE/MAX — homes for sale in the Netherlands."""
     from sources._market import scrape_named
     return scrape_named(db, "remaxnl", max_price)
+
+
+# ─── Biedboek (Dutch public bodies' property) ──────────────────────
+# The Rijksvastgoedbedrijf, Staatsbosbeheer, provinces, water boards and
+# municipalities sell land, forest, houses and buildings by public tender
+# here. There is no asking price: you bid what you offer. Most records are
+# leases (pacht, huur) or closed tenders; status 100 is the state's open
+# sale, the other bodies' objects carry their own statuses.
+BIEDBOEK = "https://www.biedboek.nl"
+BIEDBOEK_OPEN = {100, 200, 300, 500, 900, 1000, 1400, 1900}
+_BIEDBOEK_LEASE = re.compile(r"\b(?:pacht\w*|verhuur\w*|huurrecht\w*|te huur|in gebruik geven|ingebruikgeving)\b", re.I)
+_BIEDBOEK_CLOSED = re.compile(r"\b(?:gesloten|niet meer reageren|teruggetrokken|verkocht|gegund)\b", re.I)
+
+
+def biedboek_m2(size) -> float | None:
+    """A parcel size in m²: "5220", or the Dutch "1.68.40" (1 ha, 68 are, 40 centiare)."""
+    parts = str(size or "").strip().split(".")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2])
+        return float(str(size).replace(",", ".")) if size else None
+    except ValueError:
+        return None
+
+
+def biedboek_listing(detail: dict) -> dict | None:
+    """One Biedboek object's detail as a listing, or None when it is a lease or closed."""
+    tr = detail.get("translation") or {}
+    html = (tr.get("descriptionHtml") or "") + " ".join(p.get("html") or "" for p in tr.get("realEstateParagraphs") or [])
+    text = re.sub(r"\s+", " ", BeautifulSoup(html, "html.parser").get_text(" ")).strip()
+    name = (tr.get("name") or detail.get("title") or "").strip()
+    if _BIEDBOEK_LEASE.search(f"{name} {text[:600]}") or _BIEDBOEK_CLOSED.search(text[:300]):
+        return None
+    bidding = detail.get("biddingData") or {}
+    raw = {"use": tr.get("currentUsage"), "destination": tr.get("destinationUsage"),
+           "procedure": detail.get("salesProcedure"), "reference": detail.get("fileReference")}
+    try:
+        raw.update(lat=float(detail["latitude"]), lon=float(detail["longitude"]))
+    except (KeyError, TypeError, ValueError):
+        pass
+    size = detail.get("parcelSize")
+    return make_listing(
+        "biedboek", detail.get("shortId") or detail.get("id"), "NL", title=f"{name} — {tr.get('city') or ''}".strip(" —")[:200],
+        description=" · ".join(x for x in (tr.get("address"), tr.get("currentUsage"), tr.get("destinationUsage"),
+                                           text[:2500], "openbare inschrijving (Biedboek), geen vraagprijs") if x),
+        tipo=tr.get("currentUsage") or None, area_m2=biedboek_m2(size),
+        price=float(bidding["minimumAmount"]) if bidding.get("minimumAmount") else None,
+        concelho=(tr.get("city") or detail.get("city") or "").strip() or None,
+        date_end=(bidding.get("endDate") or "")[:19] or None,
+        url=f"{BIEDBOEK}/nl/realestate/{detail.get('shortId')}", raw_json=raw,
+    )
+
+
+@register("biedboek", "NL", description="Biedboek — land, forest and buildings sold by Dutch public bodies by tender")
+def scrape_biedboek(db, max_price: float = 50000, **_):
+    session = make_session(timeout=30)
+    total = 0
+    for page in range(1, 60):
+        resp = session.get(f"{BIEDBOEK}/api/real-estate/preview",
+                           params={"pageSize": 100, "pageNumber": page, "adv": "false", "language": "nl"})
+        resp.raise_for_status()
+        rows = (resp.json().get("realEstates") or {}).get("data") or []
+        if not rows:
+            break
+        for row in rows:
+            if row.get("archivedObject") or row.get("realEstateStatus") not in BIEDBOEK_OPEN:
+                continue
+            try:
+                detail = session.get(f"{BIEDBOEK}/api/real-estate/{row['shortId']}", params={"language": "nl"}).json()
+            except Exception as e:  # noqa: BLE001 — one object failing is not the source failing
+                LOG.info(f"biedboek {row.get('shortId')}: {type(e).__name__}")
+                continue
+            listing = biedboek_listing(detail)
+            if listing and (listing["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, listing)
+                total += 1
+            time.sleep(0.2)
+        db.commit()
+    return total
