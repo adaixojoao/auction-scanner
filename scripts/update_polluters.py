@@ -7,8 +7,9 @@ house hides it, a lighter source nearby costs points.
     python scripts/update_polluters.py              # every country
     python scripts/update_polluters.py PT ES        # just these (the others are kept)
 
-- heavy: coal, lignite, oil and waste-burning power plants; refineries,
-  steelworks, smelters, cement, chemical and petrochemical plants; incinerators.
+- heavy: coal, lignite, oil and waste-burning power plants; refineries and oil
+  terminals, steelworks, smelters, cement, chemical, petrochemical and
+  fertiliser plants; incinerators.
 - light: gas power plants, landfills, quarries, sewage works.
 
 Commit the file through a pull request; once a year is plenty.
@@ -29,8 +30,11 @@ from update_transport import SERVERS  # noqa: E402
 COUNTRIES = ("PT", "ES", "FR", "IT", "HR", "GR", "CY", "NL", "BE", "DE")
 COLUMNS = ("country", "kind", "lat", "lon", "name")
 HEAVY_FUEL = "coal|lignite|oil|diesel|waste"
-HEAVY_INDUSTRY = "refinery|oil_refinery|steelmaker|steel|steelworks|smelter|smelting|cement|chemical|petrochemical|" \
-                 "incineration|incinerator|aluminium|metallurgy|coke"
+# "oil" is how the biggest refineries are tagged (Shell Pernis: industrial=oil),
+# and oil terminals with them.
+HEAVY_INDUSTRY = "refinery|oil_refinery|oil|steelmaker|steel|steelworks|steel_mill|blast_furnace|smelter|smelting|" \
+                 "cement|chemical|petrochemical|incineration|incinerator|aluminium|metallurgy|coke|coking|" \
+                 "fertiliser|fertilizer"
 QUERIES = {
     "heavy": ('nwr["power"="plant"]["plant:source"~"{fuel}"](area.a);'
               'nwr["industrial"~"^({ind})$"](area.a);'
@@ -76,7 +80,12 @@ def fetch(requests, country: str, kind: str) -> list[dict]:
             r = requests.post(server, data={"data": query(country, kind)}, timeout=460,
                               headers={"User-Agent": "auction-scanner (polluter list)"})
             r.raise_for_status()
-            return parse(country, kind, r.json())
+            payload = r.json()
+            # A server that ran out of time still answers 200, with no elements
+            # and a "remark": that is a failure, not a country with nothing in it.
+            if "error" in (payload.get("remark") or "").lower() or "timed out" in (payload.get("remark") or ""):
+                raise RuntimeError(payload["remark"][:120])
+            return parse(country, kind, payload)
         except Exception as e:  # noqa: BLE001: busy server, try the next
             print(f"  {country} {kind}: {server} failed ({type(e).__name__}), retrying", flush=True)
             time.sleep(20 * (attempt + 1))
@@ -94,11 +103,11 @@ def write(rows: list[dict]) -> None:
 def main(argv=None) -> int:
     import requests
     wanted = [c.upper() for c in (argv if argv is not None else sys.argv[1:])] or list(COUNTRIES)
-    kept = []
+    before = []
     if os.path.exists(POLLUTION_FILE):
         with open(POLLUTION_FILE, encoding="utf-8", newline="") as f:
-            kept = [r for r in csv.DictReader(f) if r["country"] not in wanted]
-    rows = list(kept)
+            before = list(csv.DictReader(f))
+    rows = [r for r in before if r["country"] not in wanted]
     for country in wanted:
         found = []
         for kind in ("heavy", "light"):
@@ -110,7 +119,9 @@ def main(argv=None) -> int:
                 break
             print(f"{country}: {len(got)} {kind}", flush=True)
         if found is None:
-            continue                      # half a country would read as "clean": keep it out
+            # Half a country would read as "clean": keep what the last run found instead.
+            rows += [r for r in before if r["country"] == country]
+            continue
         rows += found
         write(rows)                       # saved country by country: a stopped run keeps what it got
     write(rows)
