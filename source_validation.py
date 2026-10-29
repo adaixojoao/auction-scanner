@@ -144,6 +144,8 @@ CATALOG: dict[str, dict] = {
     "veilingbiljet": {"kind": "experimental", "access": "public_html",
                       "limitation": "Same lots as openbareverkoop.nl"},
     "croatia": {"kind": "official", "access": "public_html", "listing_type": "property"},
+    "drzavne_nekretnine": {"kind": "official", "access": "public_html", "listing_type": "property",
+                           "limitation": "A few tenders a year, mostly small Zagreb flats and premises; offers on paper in Zagreb"},
     "fina": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "zvg": {"kind": "official", "access": "public_html", "listing_type": "property",
             "docs_url": "https://www.zvg-portal.de", "parser_version": "2026-10"},

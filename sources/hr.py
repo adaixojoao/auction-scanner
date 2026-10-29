@@ -9,6 +9,8 @@ import re
 import time
 from datetime import datetime
 
+from bs4 import BeautifulSoup
+
 from common import LOG, land_max_price, make_listing, make_session, parse_price
 from db import upsert_listing
 from sources import register
@@ -261,4 +263,102 @@ def scrape_index_oglasi(db, max_price: float = 50000, config: dict | None = None
                 break
             time.sleep(1)
     LOG.info(f"Index Oglasi: {total} listings")
+    return total
+
+
+# ─── Državne nekretnine: the State's own flats, houses and premises ────
+# The State's property company sells by sealed offer a few times a year
+# ("Natječaj za prodaju nekretnina K-4/26"); every lot is on the tender page
+# with its size, starting price, deposit and viewing slot. The offer deadline
+# is only in the attached call ("Javni poziv", a Word file).
+DN_BASE = "https://hr-nekretnine.hr"
+_DN_TENDER = re.compile(r"/natjecaji/natjecaj-za-prodaju-nekretnina-k-\d+-(\d\d)/?$")
+_DN_HEAD = re.compile(r"^(.+?)\s+-\s+(.+?)\s*\(([^)]+)\)")
+_HR_MONTHS = {m: i for i, m in enumerate(("siječnja", "veljače", "ožujka", "travnja", "svibnja", "lipnja", "srpnja",
+                                          "kolovoza", "rujna", "listopada", "studenog", "prosinca"), 1)}
+_DN_DEADLINE = re.compile(r"ROK ZA PODNOŠENJE PONUDA:\s*(\d{1,2})\.\s*([a-zčćšžđ]+)\s+(20\d\d)", re.I)
+_DN_HOME = re.compile(r"\b(?:stan|kuća|kuć[aei]|obiteljsk)", re.I)
+
+
+def drzavne_deadline(text: str) -> str | None:
+    """"ROK ZA PODNOŠENJE PONUDA: 13. studenog 2026." as 2026-11-13."""
+    m = _DN_DEADLINE.search(text or "")
+    month = _HR_MONTHS.get(m[2].lower().replace("studenoga", "studenog")) if m else None
+    return f"{m[3]}-{month:02d}-{int(m[1]):02d}" if month else None
+
+
+def drzavne_lots(html: str, url: str, deadline: str | None = None) -> list[dict]:
+    """Every lot on one tender page as a listing (garages and premises too: the scoring sorts them)."""
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for item in soup.select(".tab-pane_item"):
+        head = item.find(["h2", "h3"])
+        m = _DN_HEAD.match(head.get_text(" ", strip=True) if head else "")
+        if not m:
+            continue
+        town, street, ref = m[1].strip().title(), m[2].strip(), m[3].strip()
+        facts = {dt.get_text(" ", strip=True).rstrip(":"): dd.get_text(" ", strip=True)
+                 for dt, dd in zip(item.find_all("dt"), item.find_all("dd"))}
+        size = next((v for k, v in facts.items() if k.startswith("Površina")), None)
+        price = next((v for k, v in facts.items() if k.startswith("Početna cijena")), None)
+        block = item.find_parent(class_="row") or item.parent
+        text = re.sub(r"\s+", " ", block.get_text(" ")) if block else ""
+        desc = facts.get("Opis nekretnine") or (re.search(r"Opis nekretnine:\s*(.+?)(?:Tehnički podaci|Zatvori|$)", text) or [None, ""])[1]
+        condition = (re.search(r"(\w+ stanje nekretnine)", text) or [None, ""])[1]
+        img = block.find("img") if block else None
+        kind = "stan" if ref.upper().startswith("STAN") else "kuća" if _DN_HOME.search(desc[:80]) else "poslovni prostor"
+        if "garaž" in desc.lower()[:60]:
+            kind = "garaža"
+        out.append(make_listing(
+            "drzavne_nekretnine", ref, "HR", title=f"{kind.capitalize()} — {street}, {town}"[:200],
+            description=" · ".join(x for x in (desc[:2000], condition, f"jamčevina {facts.get('Jamčevina') or '?'}",
+                                               f"pregled {facts.get('Datum i vrijeme pregleda nekretnine') or '?'}",
+                                               "javno prikupljanje ponuda (sealed offers), Državne nekretnine") if x),
+            tipo=kind, area_m2=parse_price(size), price=parse_price(price), concelho=town,
+            date_end=deadline, url=url, image_url=img.get("src") if img else None,
+            raw_json={"reference": ref, "deposit": parse_price(facts.get("Jamčevina"))},
+        ))
+    return out
+
+
+def _drzavne_call_deadline(session, html: str) -> str | None:
+    """The offer deadline, read from the tender's Word call."""
+    import zipfile
+    m = re.search(r'href="([^"]+Javni-poziv[^"]*\.docx)"', html)
+    if not m:
+        return None
+    try:
+        doc = zipfile.ZipFile(io.BytesIO(session.get(m[1]).content)).read("word/document.xml").decode("utf8")
+    except Exception as e:  # noqa: BLE001 — no deadline is not a failed source
+        LOG.info(f"drzavne_nekretnine call: {type(e).__name__}")
+        return None
+    return drzavne_deadline(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", doc)))
+
+
+@register("drzavne_nekretnine", "HR", description="Državne nekretnine — flats and premises the Croatian State sells by sealed offer")
+def scrape_drzavne_nekretnine(db, max_price: float = 50000, **_):
+    session = make_session(timeout=40)
+    index = session.get(f"{DN_BASE}/vrsta-natjecaja/prodaja-nekretnina/")
+    index.raise_for_status()
+    year = datetime.now().year % 100
+    tenders = sorted({u for u in re.findall(r'href="([^"]+)"', index.text)
+                      if (m := _DN_TENDER.search(u)) and int(m[1]) >= year}, reverse=True)
+    total, today = 0, datetime.now().strftime("%Y-%m-%d")
+    for url in tenders:
+        try:
+            page = session.get(url)
+        except Exception as e:  # noqa: BLE001 — one tender failing is not the source failing
+            LOG.info(f"drzavne_nekretnine {url}: {type(e).__name__}")
+            continue
+        if page.status_code != 200:
+            continue
+        deadline = _drzavne_call_deadline(session, page.text)
+        if not deadline or deadline < today:
+            continue
+        for listing in drzavne_lots(page.text, url, deadline):
+            if (listing["price"] or 0) <= 2 * max_price:
+                upsert_listing(db, listing)
+                total += 1
+        db.commit()
+        time.sleep(0.5)
     return total
