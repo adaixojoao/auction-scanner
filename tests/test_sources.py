@@ -1384,3 +1384,15 @@ def test_agorastore_reads_a_product():
     assert row["id"] == "agorastore:435215" and row["price"] == 14999 and row["current_bid"] is None
     assert row["concelho"] == "Sainte-Livrade-sur-Lot" and row["district"] == "47" and row["area_m2"] == 70
     assert row["date_end"] == "2026-12-10T16:00:00" and "Lot-et-Garonne" in row["description"]
+def test_ran_reads_notary_notices_and_skips_court_sales():
+    from sources.it import ran_listings
+    html = """<input class="avvisolat" id="lat_64702" value=" 41.864558"><input id="lon_64702" value=" 12.486888">
+    <a href="/beni-immobili/dettaglio-avviso/GAV/64702"><div class="divScheda"><div class="divSchedaInfo">
+    <p>DISMISSIONE ENTE PUBBLICO - LVIII Bando ATER Roma. LOCALE DEPOSITO. Mq 37. Stato Libero.</p>
+    <ul><li>Prezzo dell'Avviso: <span>€ 3.548,25</span></li>
+    <li>Data e Ora fine raccolta offerte: <span>10/11/2026 17:00</span></li></ul></div>
+    <div class="divSchedaDett"><small>Via D. Chiodo 1, Roma (Roma)</small></div></div></a>
+    <a href="/beni-immobili/dettaglio-avviso/GAST/4627591"><div class="divSchedaInfo"><p>x</p></div></a>"""
+    (row,) = ran_listings(html)
+    assert row["id"] == "ran:64702" and row["price"] == 3548.25 and row["concelho"] == "Roma"
+    assert row["date_end"] == "2026-11-10T17:00:00" and row["area_m2"] == 37

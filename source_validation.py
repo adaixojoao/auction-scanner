@@ -123,6 +123,8 @@ CATALOG: dict[str, dict] = {
              "limitation": "Only the catalogue entries on sale; sold by sealed-bid auction or contest"},
     "agorastore": {"kind": "official", "access": "public_api", "listing_type": "property",
                    "limitation": "Public sellers only (towns, State, ONF, AGRASC); few homes at a time"},
+    "ran": {"kind": "official", "access": "public_html", "listing_type": "property",
+            "limitation": "Notary notices only (state and public bodies, voluntary sales); court sales come from PVP"},
     "vench": {"kind": "aggregator", "access": "public_html", "listing_type": "property",
               "limitation": "Descriptions are for subscribers; card has town, mise a prix and date"},
     "goauktion_de": {"kind": "aggregator", "access": "public_html", "listing_type": "property",

@@ -464,6 +464,7 @@ OTHER_WORDS = [   # not a home and not a plot
     "local sin uso",
     "commerce", "local commercial", "bureau", "entrepôt", "hangar", "cave",
     "negozio", "magazzino", "capannone", "ufficio", "posto auto",
+    "locale deposito", "locale ad uso deposito", "autorimessa", "box auto", "cantina",
     "stellplatz", "tiefgarage", "lager", "büro", "gewerbe*", "bedrijfspand", "kantoor",
     "bedrijfsruimte", "bedrijfshal*", "bedrijfshallen", "bedrijfsunit*", "winkelruimte",
     "hotel", "restaurante", "café",
