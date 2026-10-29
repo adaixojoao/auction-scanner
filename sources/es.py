@@ -1322,6 +1322,12 @@ FOTOCASA_PROVINCES = (   # all of Spain: the score decides, not the region (owne
 FOTOCASA_SEARCHES = (("viviendas", None), ("terrenos", 10000))     # homes; land from 1 ha
 FOTOCASA_MAX_PAGES = 25
 FOTOCASA_DETAILS_PER_SCAN = 300
+# Fotocasa refuses a scan partway (every search from Lleida on failed within
+# seconds, 2026-10-29; only 1-2k of 13k listings read since 10-24). On a refusal
+# it waits this long and asks again once; still refused, the scan stops there
+# and the rest is read next time, instead of failing every remaining province.
+FOTOCASA_BLOCK_WAIT_S = 120
+FOTOCASA_REFUSED = (403, 429)
 
 
 def fotocasa_detail(html: str) -> dict:
@@ -1429,8 +1435,22 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
            AND raw_json LIKE '%"detail_checked"%'""")}
     budget = FOTOCASA_DETAILS_PER_SCAN
     failed = 0
+    refused = False
+
+    def get_page(path, params):
+        resp = session.get(path, params=params)
+        if resp.status_code in FOTOCASA_REFUSED:
+            LOG.info(f"Fotocasa refused ({resp.status_code}); waiting {FOTOCASA_BLOCK_WAIT_S}s")
+            time.sleep(FOTOCASA_BLOCK_WAIT_S)
+            resp = session.get(path, params=params)
+        return resp
+
     for province in FOTOCASA_PROVINCES:
+        if refused:
+            break
         for kind, min_surface in FOTOCASA_SEARCHES:
+            if refused:
+                break
             limit = land_max_price(config, max_price) if kind == "terrenos" else max_price
             params = {"maxPrice": int(limit)}
             if min_surface:
@@ -1439,14 +1459,16 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
             for page in range(1, FOTOCASA_MAX_PAGES + 1):
                 path = f"{FOTOCASA}/es/comprar/{kind}/{province}-provincia/todas-las-zonas/l" + \
                        (f"/{page}" if page > 1 else "")
+                resp = None
                 try:
-                    resp = session.get(path, params=params)
+                    resp = get_page(path, params)
                     resp.raise_for_status()
                 except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
                     if total == 0 and province == FOTOCASA_PROVINCES[0]:
                         raise
                     LOG.info(f"Fotocasa {province} {kind} p{page}: {type(e).__name__}")
                     failed += 1
+                    refused = getattr(resp, "status_code", None) in FOTOCASA_REFUSED
                     break
                 ads, count = fotocasa_page(resp.text)
                 for ad in ads:
@@ -1470,7 +1492,8 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
                 if not ads or seen >= count:
                     break
                 time.sleep(0.8)
-    LOG.info(f"Fotocasa: {total} listings" + (f", {failed} searches failed" if failed else ""))
+    LOG.info(f"Fotocasa: {total} listings" + (f", {failed} searches failed" if failed else "")
+             + ("; stopped: Fotocasa kept refusing" if refused else ""))
     # A search that failed (Fotocasa cut the scan off halfway, 2026-10-29) left its
     # listings unseen: partial, so they are not taken for gone.
     return ScanCount(total, "partial") if failed else total

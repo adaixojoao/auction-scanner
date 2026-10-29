@@ -996,6 +996,37 @@ def test_fotocasa_cut_off_halfway_is_a_partial_scan(db, fake_http, monkeypatch):
     assert got > 0 and got.scope == "partial"
 
 
+def test_fotocasa_waits_once_then_stops_when_it_keeps_refusing(db, fake_http, monkeypatch):
+    import sources.es
+    from sources.es import FOTOCASA_PROVINCES, scrape_fotocasa
+    waits = []
+    blocked = set(FOTOCASA_PROVINCES[3:])
+    session = fake_http(lambda m, url, kw: FakeResponse("", status=403)
+                        if any(f"/{p}-provincia/" in url for p in blocked)
+                        else FakeResponse(_fotocasa_html([FOTOCASA_AD], 1)))
+    monkeypatch.setattr(sources.es.time, "sleep", waits.append)
+    got = scrape_fotocasa(db, max_price=50000)
+    assert got.scope == "partial" and sources.es.FOTOCASA_BLOCK_WAIT_S in waits
+    # Refused twice, it stops: the other 40-odd provinces are not each asked and failed.
+    assert len([c for c in session.calls if any(f"/{p}-provincia/" in c[1] for p in blocked)]) == 2
+
+
+def test_fotocasa_goes_on_when_the_retry_is_let_through(db, fake_http, monkeypatch):
+    import sources.es
+    from sources.es import FOTOCASA_PROVINCES, scrape_fotocasa
+    monkeypatch.setattr(sources.es.time, "sleep", lambda s: None)
+    first = []
+
+    def answer(m, url, kw):
+        if "/albacete-provincia/" in url and not first:
+            first.append(url)
+            return FakeResponse("", status=429)
+        return FakeResponse(_fotocasa_html([FOTOCASA_AD], 1))
+    fake_http(answer)
+    got = scrape_fotocasa(db, max_price=50000)
+    assert got == 2 * len(FOTOCASA_PROVINCES) and getattr(got, "scope", "full") == "full"
+
+
 def test_fotocasa_detail_page_keeps_the_full_text():
     from sources.es import fotocasa_detail, with_fotocasa_detail, parse_fotocasa
     page = {"props": {"pageProps": {"realEstate": {
