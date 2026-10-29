@@ -159,15 +159,42 @@ def run_eu_scrape():
     _scan([c for c in COUNTRY_NAMES if c != "PT"], "other countries (scheduled)")
 
 
+# A source whose last read stopped early (refused, time limit) is read again
+# once this long has passed: soon enough that Fotocasa's unread provinces do
+# not wait a week, not so soon that a site refusing us is asked every 2 hours.
+PARTIAL_RETRY_AFTER_H = 12
+
+
+def retry_names(health, registry, countries, now) -> list[str]:
+    """The sources the retry job runs: failed ones, and partial ones after
+    PARTIAL_RETRY_AFTER_H, in the countries on Settings ([] is all)."""
+    from common import parse_dt
+    wanted = {c.upper() for c in countries or []}
+    names = []
+    for h in health:
+        source = registry.get(h["source"])
+        if source is None or (wanted and source.country not in wanted):
+            continue
+        if h["state"] in ("error", "broken", "blocked"):
+            names.append(h["source"])
+        elif h["state"] == "partial":
+            last = parse_dt(h.get("last_run"))
+            if last and now - last >= timedelta(hours=PARTIAL_RETRY_AFTER_H):
+                names.append(h["source"])
+    return names
+
+
 def run_retry():
-    """Sources whose latest scrape failed, without waiting for the weekly scan."""
+    """Sources whose latest scrape failed or stopped early, without waiting for the weekly scan."""
+    from common import utcnow
+    from config import load_config
     from db import connect, source_health
     from sources import load_all
     LOG.info("=== Retry of failed sources ===")
+    countries = (load_config().get("filters") or {}).get("countries")
     db = connect()
     try:
-        names = [h["source"] for h in source_health(db, load_all())
-                 if h["state"] in ("error", "broken", "blocked")]
+        names = retry_names(source_health(db, load_all()), load_all(), countries, utcnow())
     finally:
         db.close()
     if not names:
