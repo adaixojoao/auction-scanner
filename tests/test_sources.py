@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 104
+    assert len(REGISTRY) == 105
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1464,3 +1464,15 @@ def test_drzavne_nekretnine_reads_every_lot_and_the_deadline():
     [lot] = drzavne_lots(html, "https://hr-nekretnine.hr/natjecaji/k-4-26/", "2026-11-13")
     assert lot["id"] == "drzavne_nekretnine:STAN 4519" and lot["price"] == 41600 and lot["area_m2"] == 29.84
     assert lot["concelho"] == "Zagreb" and lot["tipo"] == "stan" and "Derutno" in lot["description"]
+
+
+def test_ippatrimonio_reads_the_sales_layer():
+    from sources.pt import ippatrimonio_listing
+    point = {"attributes": {"id": 412, "titulo": "Antiga estação de Ervidel", "localizacao": "Aljustrel, Beja",
+                            "preco_base": 18500.0, "data_limite": 1795046400000, "estado": "Em curso",
+                            "dbpatrimonio.patrimoniodata.oport_alienacoes.area": 640.0, "link": "https://x/412"},
+             "geometry": {"x": -8.08, "y": 37.94}}
+    row = ippatrimonio_listing(point)
+    assert row["id"] == "ippatrimonio:412" and row["price"] == 18500 and row["area_m2"] == 640
+    assert row["concelho"] == "Aljustrel" and row["date_end"] == "2026-11-19" and '"lat": 37.94' in row["raw_json"]
+    assert ippatrimonio_listing({"attributes": {**point["attributes"], "data_remocao": 1}}) is None

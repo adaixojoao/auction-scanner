@@ -131,6 +131,8 @@ CATALOG: dict[str, dict] = {
                  "limitation": "Public tenders without an asking price; leases and closed tenders left out"},
     "gemeenteblad": {"kind": "official", "access": "public_api", "listing_type": "property",
                      "limitation": "Notices only: no photos, rarely a price; most are one-to-one sales a bidder must contest"},
+    "ippatrimonio": {"kind": "official", "access": "public_api", "listing_type": "property",
+                     "limitation": "Rail and road property by sealed offer; the sales layer is empty between rounds"},
     "estamo": {"kind": "official", "access": "public_html", "listing_type": "property",
                "limitation": "A few state lots a year; bidding in person in Lisbon"},
     "etad": {"kind": "official", "access": "public_html", "listing_type": "property",
