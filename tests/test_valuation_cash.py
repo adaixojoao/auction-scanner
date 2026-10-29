@@ -2,9 +2,23 @@
 from __future__ import annotations
 
 
+import pytest
+
 import bidcap
 import costs
 from scoring import climate_score
+
+
+@pytest.fixture(autouse=True)
+def _dataset_prices(monkeypatch):
+    """The test city table is labelled "city estimate", which never bids (F07);
+    relabel it as a dataset so these tests exercise the bid arithmetic."""
+    real = bidcap.local_price
+
+    def labelled(item):
+        eur_m2, source = real(item)
+        return eur_m2, ("INE (test)" if source == "city estimate" else source)
+    monkeypatch.setattr(bidcap, "local_price", labelled)
 
 
 def _home(**over):
@@ -41,6 +55,15 @@ def test_unknown_market_value_blocks_bid_cap():
     assert cap["basis"] is None
     assert cap["market_value_confidence"] == "unknown"
     assert any("market value is unknown" in r.lower() for r in cap["reasons"])
+
+
+def test_low_confidence_market_value_blocks_bid_cap():
+    """A median on a home of unknown condition ranks it but never bids (F07)."""
+    cap = bidcap.calculate_bid_cap(_home(title="Moradia", description="Moradia T3"),
+                                   _settings(), _exact_evidence())
+    assert cap["market_value_confidence"] == "low"
+    assert cap["recommended_bid"] is None and cap["absolute_max_bid"] is None
+    assert any("low-confidence" in r for r in cap["reasons"])
 
 
 def test_ruin_value_base_equals_sound_home_value_base():

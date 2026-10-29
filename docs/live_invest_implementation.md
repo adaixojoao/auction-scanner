@@ -85,6 +85,7 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Implementation | `bidcap.py` — `_value()` returns market value (area × local_price_per_m²) with `basis="market"`, note says "After-work value — renovation is deducted separately"; when `value is None` (no area or no local price), `calculate_bid_cap` returns early with "No bid cap: market value is unknown" and `basis=None` — the bid cap is blocked |
 | Tests | `tests/test_valuation_cash.py` — 4 tests for F07 incl. `test_unknown_market_value_blocks_bid_cap` |
 | Status | **partial** |
+| Update 2026-10-29 | `calculate_bid_cap` now also returns early with no bid when `value["confidence"] == "low"` (city estimate or unknown condition); test `test_low_confidence_market_value_blocks_bid_cap`. |
 | Gap | No explicit "as-is" basis separate from "after-work". The note says "after-work value" but `mv = area × local_price_per_m²` is a municipal median, not a surveyed after-work valuation. When `value["confidence"] == "low"` (city estimate or unknown condition) the bid cap is still computed — only a fully missing `value` (None) is blocked. |
 
 ---
@@ -109,7 +110,8 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Implementation | `photos.py` — `looked_at()` checks `shows_house is not False`; `needs_photo_check()` checks gallery hash |
 | Tests | `tests/test_extreme_discount_gallery.py` — 5 tests for F10 (gallery hash) |
 | Status | **partial** |
-| Gap | `looked_at()` treats any non-False value of `shows_house` as a satisfied check, including `None`. `shows_house=True` with confidence="low" passes the gate. No independent building-matching logic exists. The listing GET path does not write hazard evidence (F03 in the reviewer's phrasing — confirmed: `looked_at()` is checked in `common.light_checks_from()` before hazard scoring, not interleaved). |
+| Update 2026-10-29 | `tops.looked_at()` now also requires `confidence` of `medium` or `high`; a low or missing confidence fails. Test `test_looked_at_false_when_shows_house_true_but_not_confident`. |
+| Gap | `looked_at()` requires `bool(shows_house)` which correctly rejects `None` and `False`. Remaining: `shows_house=True` with `confidence="low"` still passes — no confidence-level check exists. No independent building-matching logic exists. |
 
 ---
 
@@ -201,9 +203,9 @@ See F11 above. Fully implemented: the `evaluator_decisions` table stores `eviden
 | F04 | Location capability tiers | **implemented and verified** |
 | F05 | Extreme-discount finalist gate | **implemented and verified** |
 | F06 | Duplicate relations | **implemented and verified** |
-| F07 | Valuation basis | partial — no as-is basis, unknown doesn't block |
+| F07 | Valuation basis | partial — unknown and low-confidence values block; no as-is basis in bidcap |
 | F08 | Cash scenario — unified MV-based reserve | **implemented and verified** |
-| F09 | Photo evidence quality gate | partial — `shows_house` single-boolean |
+| F09 | Photo evidence quality gate | partial — confidence now required; no independent building match |
 | F10 | Gallery URL hash requeue | **implemented and verified** |
 | F11 | Evidence revision tracking | **implemented and verified** |
 | F12 | Typed availability states | **implemented and verified** |

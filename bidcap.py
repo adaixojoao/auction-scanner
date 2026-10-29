@@ -162,6 +162,11 @@ def calculate_bid_cap(listing: dict, settings: dict | None, evidence: dict | Non
         reasons.append("No bid cap: market value is unknown"
                        + (f" — {unknowns[0]} is missing." if unknowns else "."))
         return out
+    if value["confidence"] == "low":
+        # A city estimate or an unknown condition is discovery evidence, not a bid basis (F07).
+        reasons.append("No bid cap: the market value is only a low-confidence estimate"
+                       " (a city median or an unknown condition) — find matched sales first.")
+        return out
     base = value["amount"]
     if not base:
         reasons.append("No bid cap: nothing to work from.")
