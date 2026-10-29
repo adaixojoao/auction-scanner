@@ -369,7 +369,7 @@ DWELLING_WORDS = [
     "maison", "appartement", "logement", "pavillon",
     "appartamento", "abitazione", "villetta",
     "wohnung", "haus", "einfamilienhaus", "zweifamilienhaus", "mehrfamilienhaus", "reihenhaus",
-    "doppelhaushälfte", "woning", "woonhuis", "tussenwoning", "huis", "bungalow", "kuća", "house", "apartment",
+    "doppelhaushälfte", "διαμέρισμα", "μονοκατοικία", "μεζονέτα", "κατοικία", "οικία", "σπίτι", "woning", "woonhuis", "tussenwoning", "huis", "bungalow", "kuća", "house", "apartment",
 ]
 # Household goods sold at auction ("Mobiliário de habitação", "Mobília de casa")
 # are not homes. A text that names a building first is: "Moradia T3 com mobiliário".
@@ -420,6 +420,7 @@ HOUSE_TYPES = {normalize(t) for t in (
 # Not bare "lote": in Portuguese auctions it means the auction lot. Not "solar"
 # outside Spain: in Portugal a solar is a manor house.
 URBAN_PLOT_WORDS = [
+    "οικόπεδο", "οικόπεδα",
     "terreno para construção", "terreno urbano", "terrenos urbanos", "lote de terreno",
     "lote para construção", "urbanizável", "urbanizavel", "parcela urbana", "terreno urbanizável",
     "suelo urbano", "parcela edificable", "terreno urbanizable",
@@ -436,7 +437,7 @@ RURAL_WORDS = [
     "quinta", "finca rústica", "tierra de labor", "olivar", "viñedo",
     "terrain agricole", "terre agricole", "terres agricoles", "bois", "forêt", "prairie",
     "terreno agricolo", "bosco", "uliveto", "vigneto",
-    "ackerland", "landwirtschaftsfläche", "grünland", "wald", "landbouwgrond", "weiland",
+    "ackerland", "landwirtschaftsfläche", "grünland", "wald", "αγροτεμάχιο", "αγρός", "γήπεδο", "ελαιώνας", "landbouwgrond", "weiland",
 ]
 RURAL_TYPES = {normalize(t) for t in (
     "terreno_rustico", "rustico", "agricola", "florestal", "herdade", "finca", "rustica",
@@ -464,6 +465,7 @@ OTHER_WORDS = [   # not a home and not a plot
     "local sin uso",
     "commerce", "local commercial", "bureau", "entrepôt", "hangar", "cave",
     "negozio", "magazzino", "capannone", "ufficio", "posto auto",
+    "κατάστημα", "γραφείο", "αποθήκη", "θέση στάθμευσης",
     "stellplatz", "tiefgarage", "lager", "büro", "gewerbe*", "bedrijfspand", "kantoor",
     "bedrijfsruimte", "bedrijfshal*", "bedrijfshallen", "bedrijfsunit*", "winkelruimte",
     "hotel", "restaurante", "café",

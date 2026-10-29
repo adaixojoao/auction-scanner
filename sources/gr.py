@@ -50,3 +50,75 @@ def scrape_greece(db, max_price: float = 50000, **_):
         ))
         total_scraped += 1
     return total_scraped
+
+
+# ─── ETAD (the Greek state's property company) ─────────────────────
+# ETAD (hppc.gr) offers state property by open electronic tender: most of it
+# to lease, some for sale (Πώληση). The tenders page links every property;
+# each detail page lists its facts as "label: value".
+ETAD = "https://hppc.gr"
+ETAD_TENDERS = ETAD + "/axiopoiisi-akiniton/diagonismoi-akiniton/"
+_ETAD_PID = re.compile(r"/axiopoiisi-akiniton/property/\?pid=([\w-]+)")
+_ETAD_LABELS = ("Νομός", "Πόλη", "Περιοχή", "Οδός", "Ταχυδρομικός Κώδικας", "Εντός Σχεδίου Πόλεως",
+                "Τετραγωνικά Μέτρα Οικοπέδου", "Τετραγωνικά Μέτρα Κτισμάτων", "Όροφος", "Δωμάτια", "Διαθεσιμότητα",
+                "ΑΜ Ακινήτου", "Φορέας", "Είδος Διαγωνισμού", "Φάση Διαγωνισμού", "Κατηγορία Συναλλαγής",
+                "Τρόπος Πληρωμής", "Χρόνος Έναρξης", "Χρόνος Λήξης", "Τιμή Εκκίνησης", "Βήμα Διαγωνισμού",
+                "Κωδικός Διαγωνισμού")
+
+
+def etad_facts(text: str) -> dict:
+    """The "label: value" facts of one ETAD property page."""
+    marks = sorted((m.start(), m.end(), label) for label in _ETAD_LABELS
+                   for m in [re.search(re.escape(label) + r"\s*:", text)] if m)
+    return {label: text[end:(marks[i + 1][0] if i + 1 < len(marks) else end + 120)].strip(" -")
+            for i, (_, end, label) in enumerate(marks)}
+
+
+def etad_listing(pid: str, html: str) -> dict | None:
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer"]):
+        tag.decompose()
+    text = re.sub(r"\s+", " ", soup.get_text(" "))
+    facts = etad_facts(text)
+    if "Πώληση" not in (facts.get("Κατηγορία Συναλλαγής") or ""):
+        return None                              # leases and building rights are not purchases
+    title = soup.select_one("h1")
+    title = title.get_text(" ", strip=True) if title else f"ETAD {pid}"
+    end = re.match(r"(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{2}):(\d{2})", facts.get("Χρόνος Λήξης") or "")
+    built = to_float(facts.get("Τετραγωνικά Μέτρα Κτισμάτων"))
+    return make_listing(
+        "etad", pid, "GR", title=title[:200],
+        description=" · ".join(f"{k}: {v}" for k, v in facts.items() if v) + " · ETAD (e-publicrealestate.gr)",
+        tipo="ακίνητο", area_m2=built or to_float(facts.get("Τετραγωνικά Μέτρα Οικοπέδου")),
+        price=find_price(facts.get("Τιμή Εκκίνησης") or ""), concelho=facts.get("Πόλη") or facts.get("Περιοχή"),
+        district=facts.get("Νομός"), date_end=f"{end[3]}-{end[2]}-{end[1]}T{end[4]}:{end[5]}:00" if end else None,
+        url=f"{ETAD}/axiopoiisi-akiniton/property/?pid={pid}",
+        raw_json={"plot_m2": to_float(facts.get("Τετραγωνικά Μέτρα Οικοπέδου")), "phase": facts.get("Φάση Διαγωνισμού"),
+                  "availability": facts.get("Διαθεσιμότητα")},
+    )
+
+
+def to_float(value) -> float | None:
+    try:
+        return float(str(value).split()[0]) if value else None
+    except ValueError:
+        return None
+
+
+@register("etad", "GR", description="ETAD — Greek state property for sale by electronic tender")
+def scrape_etad(db, max_price: float = 50000, **_):
+    session = make_session(timeout=30)
+    resp = session.get(ETAD_TENDERS)
+    resp.raise_for_status()
+    total = 0
+    for pid in sorted(set(_ETAD_PID.findall(resp.text))):
+        try:
+            row = etad_listing(pid, session.get(f"{ETAD}/axiopoiisi-akiniton/property/", params={"pid": pid}).text)
+        except Exception as e:  # noqa: BLE001
+            LOG.info(f"etad {pid}: {type(e).__name__}")
+            continue
+        if row:
+            upsert_listing(db, row)
+            total += 1
+    db.commit()
+    return total

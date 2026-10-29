@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -24,7 +24,7 @@ def test_registry_is_complete():
     # every country has at least one default source, except those whose only
     # source is walled off; PT runs first
     # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY", "GR"} | {"EU"}
+    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY"} | {"EU"}   # GR: ETAD
     assert sources_for(None)[0].country == "PT"
     assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
     # the CLI accepts every registered name
@@ -1319,3 +1319,14 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_etad_keeps_sales_and_reads_the_facts():
+    from sources.gr import etad_listing
+    page = lambda kind: (f"<h1>Διαμέρισμα 4ου Οροφου</h1><div>Νομός: Αττική Πόλη: Αθήνα Τετραγωνικά Μέτρα Κτισμάτων: "
+                         f"211.85 Κατηγορία Συναλλαγής: {kind} Χρόνος Λήξης: 02/11/2026 - 14:00:00 "
+                         f"Τιμή Εκκίνησης: 45.000 € Βήμα Διαγωνισμού: 5 %</div>")
+    row = etad_listing("21", page("Πώληση"))
+    assert row["id"] == "etad:21" and row["price"] == 45000 and row["area_m2"] == 211.85
+    assert row["concelho"] == "Αθήνα" and row["date_end"] == "2026-11-02T14:00:00"
+    assert etad_listing("22", page("Εκμίσθωση")) is None
