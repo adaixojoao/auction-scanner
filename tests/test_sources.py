@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 103
+    assert len(REGISTRY) == 104
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1451,3 +1451,16 @@ def test_gemeenteblad_keeps_open_bids_and_real_plots_only():
     strip = gemeenteblad_listing({**base, "title": "Voornemen verkoop groenstrook nabij Laan 16", "text": "verkoop 40 m2"})
     small = gemeenteblad_listing({**base, "title": "Voornemen tot verkoop grond", "text": "verkoop van 120 m2 grond"})
     assert strip is None and small is None
+
+
+def test_drzavne_nekretnine_reads_every_lot_and_the_deadline():
+    from sources.hr import drzavne_deadline, drzavne_lots
+    assert drzavne_deadline("ROK ZA PODNOŠENJE PONUDA: 13. studenog 2026. godine do 12:00") == "2026-11-13"
+    html = ("<div class='row'><div><img src='a.jpg'></div><div class='tab-pane_item'>"
+            "<h2 class='h4'>ZAGREB - HUGA BADALIĆA 32 (STAN 4519)*</h2><dl>"
+            "<dt>Površina (m<sup>2</sup>):</dt><dd>29,84</dd><dt>Početna cijena nekretnine:</dt><dd>41.600,00 EUR</dd>"
+            "<dt>Jamčevina:</dt><dd>4.160,00 EUR</dd></dl><p>Opis nekretnine: Jednosobni stan u podrumu."
+            " Tehnički podaci: Derutno stanje nekretnine</p></div></div>")
+    [lot] = drzavne_lots(html, "https://hr-nekretnine.hr/natjecaji/k-4-26/", "2026-11-13")
+    assert lot["id"] == "drzavne_nekretnine:STAN 4519" and lot["price"] == 41600 and lot["area_m2"] == 29.84
+    assert lot["concelho"] == "Zagreb" and lot["tipo"] == "stan" and "Derutno" in lot["description"]
