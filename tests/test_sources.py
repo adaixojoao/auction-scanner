@@ -10,7 +10,7 @@ from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 92
+    assert len(REGISTRY) == 93
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
@@ -1319,3 +1319,14 @@ def test_goauktion_reads_a_lot_and_skips_sold_ones():
     assert row["tipo"] == "moradia" and row["concelho"] == "Zwickau" and row["district"] == "Sachsen"
     assert json.loads(row["raw_json"])["rented"] is True
     assert goauktion_listing(BeautifulSoup(lot.format(status="Verkauft"), "html.parser").div) is None
+
+
+def test_avra_keeps_what_is_on_sale_with_its_position():
+    from sources.es import avra_listing
+    entry = {"referencia_inmueble": "3801-VP-022-400", "tipo_inmueble": "VIVIENDA", "municipio": "ALMERIA",
+             "provincia": "ALMERIA", "mconstruidos": "100.11", "precio": "60920.3", "oferta": "S",
+             "tipo_oferta": "SUBASTA", "centroide": "POINT(-2.150192 37.38906)"}
+    row = avra_listing(entry)
+    assert row["id"] == "avra:3801-VP-022-400" and row["price"] == 60920.3 and row["area_m2"] == 100.11
+    assert row["concelho"] == "Almeria" and '"lat": 37.38906' in row["raw_json"]
+    assert avra_listing({**entry, "oferta": "N"}) is None

@@ -733,6 +733,55 @@ def scrape_subastasactivas(db, max_price: float = 100000, **_):
     return total
 
 
+# ─── AVRA (Andalucía's public housing and land agency) ─────────────
+# AVRA's catalogue is one JSON file of every property it holds in
+# Andalucía; the ones on sale ("oferta": "S") carry a price and the way they
+# are sold (subasta or concurso). Homes, garages, shops, building plots and
+# rural land alike: the scorer tells them apart.
+AVRA = "https://www.juntadeandalucia.es/avra"
+AVRA_JSON = AVRA + "/opencms/catalogo-inmuebles/recursos-propios/inmuebles.json"
+_AVRA_POINT = re.compile(r"POINT\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)")
+
+
+def avra_listing(item: dict) -> dict | None:
+    """One AVRA catalogue entry as a listing, or None when it is not on sale."""
+    if item.get("oferta") != "S" or not item.get("referencia_inmueble"):
+        return None
+    kind = (item.get("tipo_inmueble") or "").title()
+    town = (item.get("municipio") or "").title() or None
+    built = to_number(item.get("mconstruidos"))
+    land = to_number(item.get("superficie"))
+    raw = {"type": item.get("id_tipo_inmueble"), "cadastre": item.get("ref_catastral"),
+           "sale": item.get("tipo_oferta"), "plot_m2": land, "buildable": item.get("edificabilidad")}
+    point = _AVRA_POINT.search(item.get("centroide") or "")
+    if point:
+        raw.update(lon=float(point.group(1)), lat=float(point.group(2)))
+    notes = " ".join(str(item.get(k) or "") for k in ("observaciones", "observaciones_oferta"))
+    return make_listing(
+        "avra", item["referencia_inmueble"], "ES",
+        title=f"{kind} en {town} — {item.get('nombre') or ''}".strip(" —")[:200],
+        description=f"{kind} en {town} ({(item.get('provincia') or '').title()}). {notes[:2500]} · "
+                    f"{(item.get('tipo_oferta') or 'venta').lower()} de AVRA (Junta de Andalucía)",
+        tipo=kind or None, area_m2=built or land, price=to_number(item.get("precio")), min_price=to_number(item.get("precio")),
+        concelho=town, district=(item.get("provincia") or "").title() or None,
+        url=f"{AVRA}/catalogo-inmuebles/#/inmueble/{item['referencia_inmueble']}", raw_json=raw,
+    )
+
+
+@register("avra", "ES", description="AVRA — Andalucía's public homes, garages, plots and land for sale")
+def scrape_avra(db, max_price: float = 50000, **_):
+    resp = make_session(timeout=90).get(AVRA_JSON, params={"_start": 0, "_limit": 10000})
+    resp.raise_for_status()
+    total = 0
+    for item in resp.json():
+        row = avra_listing(item)
+        if row and (row["price"] or 0) <= 2 * max_price:
+            upsert_listing(db, row)
+            total += 1
+    db.commit()
+    return total
+
+
 # ─── Aliseda (Santander's repossessions) ────────────────────────────
 # The site's own search API: price, the map position, the full text and who
 # holds it, 12 a page. Homes (tipo 10) and land (tipo 8) within budget, all Spain.
