@@ -366,7 +366,7 @@ def casea1euro_listing(post: dict, now: datetime | None = None) -> dict | None:
     if not modified or modified < (now - timedelta(days=30 * CASEA1EURO_MONTHS)).strftime("%Y-%m-%d"):
         return None
     title = _IT_REGIONS.sub(" ", unescape(post.get("title", {}).get("rendered") or ""))
-    parts = [p.strip() for p in re.split(r"\s*[–-]\s+|\s+[–-]\s*", title) if p.strip()]
+    parts = [p.strip(" –-") for p in re.split(r"\s*[–-]\s+|\s+[–-]\s*", title) if p.strip(" –-")]
     if not parts or CASEA1EURO_CATEGORY not in (post.get("categories") or []):
         return None
     town, province = parts[0].title(), (parts[1].title() if len(parts) > 1 else None)
