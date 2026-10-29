@@ -109,7 +109,6 @@ def _ga_town(place: str, country: str) -> str | None:
 
 def parse_greenacres_page(html: str, country: str) -> list[dict]:
     import base64
-    import re
     from bs4 import BeautifulSoup
     from common import parse_price
     rows = []
