@@ -60,7 +60,11 @@ SHARE_WORDS = ["spoluvlastnícky podiel", "spoluvlastnický podíl", "spoluvlast
                # "Trata-se de uma metade e vende-se em conjunto com a outra metade
                # pelo valor total de 275.000€" (whitestar, 2026-10-29). Not bare "metade".
                "trata-se de uma metade", "trata-se de metade", "a outra metade", "com a outra metade",
-               "se trata de la mitad", "la otra mitad", "mitad indivisa", "la moitié indivise"]
+               "se trata de la mitad", "la otra mitad", "mitad indivisa", "la moitié indivise",
+               # "Somos proprietários de 171m2 e a totalidade do imóvel é de 232m2 ... em
+               # simultâneo com o proprietário do remanescente" (Torres Novas, 2026-10-31).
+               "proprietário do remanescente", "proprietários do remanescente",
+               "em simultâneo com o proprietário", "em simultaneo com o proprietario"]
 
 
 # Co-ownership sold as a holiday home: "compartes el inmueble con otros 5 socios".
@@ -133,7 +137,11 @@ SUBSIDISED_HOUSING = ["vivienda protegida", "vivienda de protección oficial", "
 
 UNFINISHED_HOUSE = ["vivienda en construcción", "vivienda en construccion", "casa en construcción",
                     "obra parada", "obra sin terminar", "obra inacabada", "construção inacabada",
-                    "moradia inacabada", "em construção", "maison inachevée"]
+                    "moradia inacabada", "em construção", "maison inachevée",
+                    # "Moradia em fase de construção" (Torres Novas, 2026-10-31).
+                    "em fase de construção", "em fase de construcao", "fase de construção",
+                    "en fase de construcción", "en construcción", "in costruzione", "in corso di costruzione",
+                    "en cours de construction"]
 NO_VIEWING = ["sin visitas previas", "subasta fácil", "subasta facil", "cesión de remate", "cesion de remate"]
 # The price shown is a down payment: monthly payments for years (or for life) follow.
 INSTALMENT_SALE = ["viager", "vente à terme", "vente a terme"]
@@ -146,7 +154,10 @@ NOT_REGISTERED = ["no está registrada", "no está registrado", "no está inscri
 NOT_VISITABLE = ["no visitable", "no se puede visitar", "sin posibilidad de visita", "não visitável"]
 
 NOT_A_BUILDING = ["casa movel", "casa móvel", "casa prefabricada móvil", "mobile home", "mobil-home",
-                  "mobilhome", "caravana residencial"]
+                  "mobilhome", "caravana residencial",
+                  # "Casa Mobile Homme T3", "casa mobihomme" (Famalicão, 2026-10-31).
+                  "mobile homme", "mobil homme", "mobihomme", "mobilhomme", "mobile-home", "mobile-homme",
+                  "casa mobile", "autocaravana", "roulotte"]
 
 USUFRUCT_PATTERNS = [
     "usufruto", "usufructo", "usufruct", "nue-propri*", "nuda proprietà",

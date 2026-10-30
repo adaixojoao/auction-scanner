@@ -678,7 +678,9 @@ def auction_occupation(flags) -> str | None:
 # A size the text gives the land, not the house: "un terrain de 400 m²", "parcela de 767 m2".
 _LAND_BEFORE_AREA = re.compile(
     r"\b(?:terrain|terreno|terrenos|parcela|parcelle|jardin|jard[ií]n|garden|plot|lote|solar|finca|"
-    r"quintal|logradouro|land|grundst\w*|giardino|cour|courette|patio)\b[^.;,\d]{0,20}$", re.I)
+    r"quintal|logradouro|land|grundst\w*|giardino|cour|courette|patio)\b[^.;,\d]{0,32}$", re.I)
+# {0,32}: "terreno pertinenziale di circa 324 mq" (Sanremo, 2026-10-31) is 24
+# characters from the land word to the figure, and the house had no size of its own.
 # The footprint on the ground, not the floor: "área de implantação do edifício de 47 m²".
 _FOOTPRINT_BEFORE_AREA = re.compile(
     r"\b(?:implanta\w*|emprise|footprint)\b[^.;,\d]{0,24}$", re.I)

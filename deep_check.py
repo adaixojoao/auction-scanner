@@ -51,8 +51,9 @@ HOME_KINDS = ("home",)
 
 def text_findings(item: dict) -> list[tuple[str, str]]:
     """(level, reason) from the listing's own title and description."""
+    from common import land_figure
     from confirm import gone_reason
-    from scoring import is_fractional_share, is_percent_share, property_kind
+    from scoring import NOT_A_BUILDING, UNFINISHED_HOUSE, is_fractional_share, is_percent_share, property_kind
     text = f"{item.get('title') or ''} {item.get('description') or ''}"
     out: list[tuple[str, str]] = []
     gone = gone_reason(item)
@@ -60,13 +61,20 @@ def text_findings(item: dict) -> list[tuple[str, str]]:
         out.append(("reject", f"no longer a sale: {gone}"))
     if is_fractional_share(item.get("title") or "") or is_percent_share(text):
         out.append(("reject", "only a share of the property is sold"))
+    # The scorer's own lists, so the two cannot disagree (2026-10-31: a mobile
+    # home and a house still being built had reached the top of Investment home).
     for level, words, what in (("caution", LIVED_IN, "lived in or occupied"),
                                ("caution", POOR_STATE, "poor condition"),
                                ("caution", UNREGISTERED, "works not on the registry or not legal"),
-                               ("reject", NOT_A_HOME, "not a home")):
-        found = find_terms(text, words)
+                               ("reject", NOT_A_HOME, "not a home"),
+                               ("reject", NOT_A_BUILDING, "a mobile home or caravan, not a house"),
+                               ("reject", UNFINISHED_HOUSE, "still being built")):
+        found = find_terms(text, words, negations=words not in (NOT_A_BUILDING, UNFINISHED_HOUSE))
         if found and (level != "reject" or property_kind(item) in HOME_KINDS):
             out.append((level, f"{what}: the notice says \"{found[0]}\""))
+    area = item.get("area_m2")
+    if area and land_figure(text, area):
+        out.append(("caution", f"the size stored ({area:,.0f} m²) is the land in the notice, not the home"))
     return out
 
 

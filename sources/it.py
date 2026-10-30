@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from common import LOG, auction_occupation, find_area, find_price, make_listing, make_session, parse_price
+from common import LOG, auction_occupation, find_area, find_floor_area, find_price, make_listing, make_session, parse_price
 from db import upsert_listing
 from sources import register
 from sources._cards import CardSite, scrape_cards
@@ -58,6 +58,21 @@ PVP_OCCUPANCY = {"LIBER": "libero", "OCCUP": "occupato", "OCCST": "occupato senz
                  "INCOR": "in corso di liberazione"}
 
 
+# A sale with a dwelling in it: its land figure is not its size.
+_DWELLING = re.compile(r"\b(?:appartament\w*|abitazion\w*|casa|villa|villett\w*|fabbricat\w*|caseggiat\w*|"
+                       r"rustico|alloggi\w*|immobile residenziale)\b", re.I)
+
+
+def _area(text: str) -> float | None:
+    """The floor of a home, never its plot: "appartamento con terreno pertinenziale
+    di circa 324 mq" (Sanremo, 2026-10-31) has no size of its own. A sale of land
+    alone keeps the land figure: that is its size."""
+    floor = find_floor_area(text)
+    if floor or _DWELLING.search(text or ""):
+        return floor
+    return find_area(text)
+
+
 def pvp_listing(lot: dict) -> dict | None:
     lid = lot.get("id")
     if not lid:
@@ -80,7 +95,7 @@ def pvp_listing(lot: dict) -> dict | None:
         "pvp_giustizia", str(lid), "IT", id_prefix="pvp",
         title=f"{(desc[:90] or 'Immobile')} · {where.get('citta') or ''}"[:200],
         description=". ".join(p for p in parts if p)[:3000] or None, tipo="immobile",
-        area_m2=find_area(desc), price=lot.get("prezzoBaseAsta"), min_price=lot.get("offertaMinima"),
+        area_m2=_area(desc), price=lot.get("prezzoBaseAsta"), min_price=lot.get("offertaMinima"),
         district=where.get("provincia"), concelho=where.get("citta"),
         url=f"{PVP}/pvp/it/detail_annuncio.page?idAnnuncio={lid}",
         date_end=f"{date}:00" if date and len(date) == 16 else date, raw_json=raw,
@@ -152,7 +167,7 @@ def astalegale_listing(lot: dict) -> dict | None:
         "astalegale", lid, "IT",
         title=f"{lot.get('tipologia') or 'Immobile'} · {lot.get('titolo') or ''} · {lot.get('comune') or ''}"[:200],
         description=desc[:3000] or None, tipo=(lot.get("tipologia") or "immobile").lower(),
-        area_m2=find_area(desc), price=lot.get("prezzoNum") or parse_price(lot.get("prezzo") or ""),
+        area_m2=_area(desc), price=lot.get("prezzoNum") or parse_price(lot.get("prezzo") or ""),
         min_price=parse_price(lot.get("offertaMinima") or ""),
         district=lot.get("provincia"), concelho=lot.get("comune"),
         url=f"{ASTALEGALE}/Aste/Detail/{lot.get('friendlyId') or lid}",
@@ -222,7 +237,7 @@ def fallcoaste_listing(art) -> dict | None:
         "fallcoaste", lid, "IT",
         title=(h3.get_text(" ", strip=True) if h3 else f"Fallco Aste {lid}")[:200],
         description=f"{desc} — {court}" if court else desc or None, tipo="immobile",
-        area_m2=find_area(desc), price=price, min_price=None,
+        area_m2=_area(desc), price=price, min_price=None,
         district=court_m.group(1).strip() if court_m else None, url=url,
         image_url=img["src"] if img else None,
         date_end=f"{d[3]}-{d[2]}-{d[1]}T{d[4]}:{d[5]}:00" if d else None,
@@ -305,7 +320,7 @@ def ran_listings(html: str) -> list[dict]:
         img = link.select_one("img[src]")
         rows.append(make_listing(
             "ran", aid, "IT", title=text[:200] or f"Avviso notarile {aid}", description=text[:3000],
-            tipo="immobile", area_m2=find_area(text), price=parse_price(facts.get("Prezzo dell'Avviso") or ""),
+            tipo="immobile", area_m2=_area(text), price=parse_price(facts.get("Prezzo dell'Avviso") or ""),
             concelho=place.group(1).strip().title() if place else None,
             district=place.group(2).strip().title() if place else None,
             date_end=f"{sale[3]}-{sale[2]}-{sale[1]}T{sale[4]}:{sale[5]}:00" if sale else None,
