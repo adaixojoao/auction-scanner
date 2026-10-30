@@ -23,9 +23,10 @@ import sys
 
 from common import LOG, find_terms
 
-VERSION = 3                       # 2: a share only when the passage is about what is sold; 3: checklists
+VERSION = 4                       # 2: a share only when the passage is about what is sold; 3: checklists; 4: reports under other codes, summaries for scans
 PER_SCAN = 40                     # reports read per scan, the best homes first
 MAX_BYTES = 25_000_000
+MAX_TRIES = 3                     # candidate reports read for one listing (a scan gives way to the next)
 SOURCES = ("pvp_giustizia", "astalegale")
 PVP_API = "https://pvp.giustizia.it/ve-3f723b85-986a1b71/ve-ms/vendite/{}/restricted"
 PVP_FILES = "https://resource-pvp.giustizia.it"
@@ -62,8 +63,37 @@ def _session():
     return make_session()
 
 
+# Another attachment that is the report all the same: a "Perizia.pdf" filed as
+# ALTRO (Mondolfo, 2026-10-30), or the expert's summary ("quadro sinottico",
+# coded STIMA), read when the report itself is a scan (Nepi).
+_REPORT_NAME = re.compile(r"perizi|relazione|\bctu\b|stima|sinottico", re.I)
+_SUPPLEMENT = re.compile(r"integrativ", re.I)
+
+
+def pvp_reports(files: list[dict]) -> list[str]:
+    """The PVP attachments that can be the expert's report, best first: the
+    reports coded PERIZ (a supplement after the main one), then one filed
+    under another code with a report's name, then the expert's summary."""
+    def rank(f):
+        code, link = f.get("codiceTipoAllegato"), f.get("linkAllegato") or ""
+        name = link.rsplit("/", 1)[-1]
+        if code == "PERIZ":
+            return 1 if _SUPPLEMENT.search(name) else 0
+        if code == "STIMA":
+            return 3
+        return 2 if _REPORT_NAME.search(name) else None
+    ranked = [(rank(f), i, f["linkAllegato"]) for i, f in enumerate(files) if f.get("linkAllegato")]
+    return [PVP_FILES + link for r, _, link in sorted(x for x in ranked if x[0] is not None)]
+
+
 def report_url(session, item: dict) -> tuple[str | None, str]:
     """(link to the report, why) for a listing, or (None, why there is none)."""
+    links, why = report_urls(session, item)
+    return (links[0] if links else None), why
+
+
+def report_urls(session, item: dict) -> tuple[list[str], str]:
+    """([links to the report and what can stand in for it, best first], why)."""
     url = item.get("url") or ""
     pvp = _PVP_ID.search(url)
     code = _ASTALEGALE_CODE.search(url)
@@ -71,11 +101,8 @@ def report_url(session, item: dict) -> tuple[str | None, str]:
     if pvp_id:
         resp = session.get(PVP_API.format(pvp_id), timeout=30)
         resp.raise_for_status()
-        files = (resp.json().get("body") or {}).get("allegati") or []
-        for f in files:
-            if f.get("codiceTipoAllegato") == "PERIZ" and f.get("linkAllegato"):
-                return PVP_FILES + f["linkAllegato"], "pvp"
-        return None, "no report among the PVP attachments"
+        links = pvp_reports((resp.json().get("body") or {}).get("allegati") or [])
+        return (links, "pvp") if links else ([], "no report among the PVP attachments")
     if code:
         resp = session.get(url, timeout=30)
         resp.raise_for_status()
@@ -83,9 +110,9 @@ def report_url(session, item: dict) -> tuple[str | None, str]:
             before = re.sub(r"<[^>]*>", " ", resp.text[max(0, m.start() - 600):m.start()])
             labels = _ASTALEGALE_LABEL.findall(before)
             if labels and "perizia" in labels[-1].lower():
-                return m.group(1), "astalegale"
-        return None, "no report linked on the astalegale page"
-    return None, "not a PVP or astalegale page"
+                return [m.group(1)], "astalegale"
+        return [], "no report linked on the astalegale page"
+    return [], "not a PVP or astalegale page"
 
 
 def pdf_text(data: bytes) -> str:
@@ -132,7 +159,10 @@ def _snippet(text: str, terms: list[str], about_sale: bool = False) -> str:
             start = i + 1
             passage = text[max(0, i - 80): i + 120]
             near = text[max(0, i - 120): i + 40]
-            if not find_terms(passage, [term]) or _INSTRUCTION.search(near):
+            # Judge this occurrence, not an earlier one in the passage: under the
+            # heading "DIFFORMITA':", "non presenta difformità" is negated (Nepi).
+            here = text[max(0, i - 40): i + len(term) + 1]
+            if not find_terms(here, [term]) or _INSTRUCTION.search(near):
                 continue
             if about_sale and (not _SOLD.search(passage) or _HISTORY.search(near)):
                 continue
@@ -198,14 +228,24 @@ def effect(stored: dict | None) -> tuple[str | None, float, list[str]]:
 
 
 def check(session, item: dict) -> dict:
-    link, why = report_url(session, item)
-    if not link:
+    """The first readable report among the candidates. One that is a scan or
+    too large gives way to the next (the expert's summary); when none can be
+    read, the first one's state is kept."""
+    links, why = report_urls(session, item)
+    if not links:
         return {"found": False, "why": why}
-    resp = session.get(link, timeout=60)
-    resp.raise_for_status()
-    if len(resp.content) > MAX_BYTES:
-        return {"found": True, "url": link, "why": "report too large to read"}
-    return {"found": True, "url": link, **read(pdf_text(resp.content))}
+    first = None
+    for link in links[:MAX_TRIES]:
+        resp = session.get(link, timeout=60)
+        resp.raise_for_status()
+        if len(resp.content) > MAX_BYTES:
+            got = {"found": True, "url": link, "why": "report too large to read"}
+        else:
+            got = {"found": True, "url": link, **read(pdf_text(resp.content))}
+        if not got.get("scanned") and "why" not in got:
+            return got
+        first = first or got
+    return first
 
 
 def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
