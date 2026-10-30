@@ -369,3 +369,42 @@ def test_open_aerial_and_street_photos_need_no_key():
     else:
         raise AssertionError("a failed picture server should be tried again, not stored")
 
+
+
+def test_the_local_model_s_answer_is_capped(db, fake_http):
+    """A looping answer stops at OLLAMA_MAX_ANSWER_TOKENS, not at the end of the
+    model's context 15 minutes later."""
+    from conftest import FakeResponse
+    sent = []
+
+    def handler(method, url, kw):
+        if url.endswith("/api/chat"):
+            sent.append(kw["json"])
+            return FakeResponse(json_data={"message": {"content": json.dumps(
+                {"condition": "good", "confidence": "medium", "notes": "Sound."})}})
+        resp = FakeResponse("")
+        resp.content = bytes([0xFF, 0xD8]) + b"jpeg"
+        return resp
+    upsert_listing(db, make_listing("eleiloes", "1", **HOUSE))
+    db.commit()
+    photos.check_pending(db, {}, load_listings(db, apply_min_score=False), looker=photos.OllamaLooker(fake_http(handler)))
+    assert sent and sent[0]["options"]["num_predict"] == photos.OLLAMA_MAX_ANSWER_TOKENS
+
+
+def test_an_unreadable_answer_skips_the_home_not_the_looker(db):
+    """Two homes that trip the model in a row are skipped; the rest are still looked at."""
+    for n in range(4):
+        upsert_listing(db, make_listing("eleiloes", str(n), **HOUSE))
+    db.commit()
+
+    class Looper:
+        name, calls = "ollama", 0
+
+        def look(self, urls, prompt):
+            Looper.calls += 1
+            if Looper.calls <= 2:
+                raise json.JSONDecodeError("cut off", "{\"notes\": \"the the the", 20)
+            return {"condition": "good", "confidence": "medium", "notes": "Sound."}
+
+    assert photos.check_pending(db, {}, load_listings(db, apply_min_score=False), looker=Looper()) == 2
+    assert Looper.calls == 4

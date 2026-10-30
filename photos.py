@@ -246,6 +246,10 @@ class ClaudeLooker:
 
 
 OLLAMA_PHOTO_SIDE = 448   # px: enough to see a roof or damp; a full photo is ~10x the work on a CPU
+# An answer is ~100 tokens. The small model sometimes repeats itself to the
+# end of its context (4,000 tokens, 15 minutes on a CPU) and the answer is cut
+# off unreadable; stop it well before that.
+OLLAMA_MAX_ANSWER_TOKENS = 512
 
 
 def shrink(data: bytes, side: int = OLLAMA_PHOTO_SIDE) -> bytes:
@@ -292,7 +296,7 @@ class OllamaLooker:
         if not images:
             raise ValueError("no photo could be fetched")
         resp = self.session.post(f"{self.url}/api/chat", json={
-            "model": self.model, "stream": False, "format": PHOTO_SCHEMA, "options": {"temperature": 0},
+            "model": self.model, "stream": False, "format": PHOTO_SCHEMA, "options": {"temperature": 0, "num_predict": OLLAMA_MAX_ANSWER_TOKENS},
             "keep_alive": "5m",                # held between houses; freed soon after (6 GB laptop)
 
             "messages": [{"role": "user", "content": prompt, "images": images}],
@@ -305,7 +309,7 @@ class OllamaLooker:
         if not encoded:
             raise ValueError("no photo could be fetched")
         resp = self.session.post(f"{self.url}/api/chat", json={
-            "model": self.model, "stream": False, "format": OUTSIDE_SCHEMA, "options": {"temperature": 0},
+            "model": self.model, "stream": False, "format": OUTSIDE_SCHEMA, "options": {"temperature": 0, "num_predict": OLLAMA_MAX_ANSWER_TOKENS},
             "keep_alive": "5m",
             "messages": [{"role": "user", "content": prompt, "images": encoded}],
         }, timeout=900)
@@ -837,6 +841,9 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
                     session = make_session(timeout=30)
                 found = check_outside(looker, item, session)
                 field = "outside_check"
+        except ValueError as e:      # an unreadable answer: the looker is up, this home tripped it
+            LOG.info(f"Photo check of {item['id']} failed ({type(e).__name__}); trying next scan")
+            continue
         except Exception as e:  # noqa: BLE001: a photo check must never fail the scan
             LOG.info(f"Photo check of {item['id']} failed ({type(e).__name__}); trying next scan")
             failed += 1
