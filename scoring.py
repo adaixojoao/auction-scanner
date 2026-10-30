@@ -3317,6 +3317,14 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
             if skipped and not too_far:
                 adjusted += skipped
             reasons.append(f"{disc:.0%} below local prices all-in ({found[1]}{adjusted})")
+            # A gap is not all profit: the agent, and the tax on a quick sale.
+            note = costs.resale_tax_note(item.get("country"))
+            if note:
+                reasons.append(note)
+            if sane and not too_far:
+                profit = costs.resale_profit_note(item.get("country"), all_in, disc)
+                if profit:
+                    reasons.append(profit)
         if too_far:
             unbelievable = True
             item["extreme_discount"] = True
@@ -3363,6 +3371,13 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                           if rent.get("planning") else "")
                        + (f"; counted up to {counted:g}% (not the ad's own lease)"
                           if counted < rent["net_yield_pct"] else ""))
+        # The tax on that rent where the home is (costs.OWNER_TAX): shown, not
+        # scored, since the owner's own return decides it.
+        taxed = costs.after_tax_yield(rent, item.get("country"))
+        if taxed:
+            reasons.append(f"after tax on the rent about {taxed[0]}% a year ({taxed[1]})")
+        elif costs.rent_tax_note(item.get("country")):
+            reasons.append(costs.rent_tax_note(item.get("country")))
     elif not area:
         block = costs.flat_block(item)
         if block and not block.get("area"):
