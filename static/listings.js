@@ -15,7 +15,7 @@ function listingParams(state) {
   return new URLSearchParams({
     country: state.country, source: state.source, kind: state.kind,
     max_price: state.max_price, min_score: state.min_score,
-    search: state.search, properties: state.properties ? 1 : 0,
+    search: state.search, properties: state.properties ? 1 : 0, forced: state.forced ? 1 : 0,
     // The view's "hidden" is the API's show_hidden, here only.
     show_hidden: state.status === "hidden" ? 1 : 0, status: state.status === "shortlisted" ? "shortlisted" : "",
     climate: state.climate, climate_exact: state.climate_exact ? 1 : 0, sale_method: state.sale_method,
@@ -249,7 +249,7 @@ document.querySelectorAll("#modes button").forEach(button => {
 AS.initGoalTabs($("modes"), activateGoal);
 
 // Lists and boxes apply at once; search and numbers after a pause, or on Enter.
-["f-country", "f-kind", "f-source", "f-sale-method", "f-status", "f-properties", "f-climate", "f-climate-exact"]
+["f-country", "f-kind", "f-source", "f-sale-method", "f-status", "f-properties", "f-forced", "f-climate", "f-climate-exact"]
   .forEach(id => $(id).addEventListener("change", () => commitControls("push")));
 $("f-search").addEventListener("input", () => searchDebounce());
 ["f-maxprice", "f-minscore"].forEach(id => $(id).addEventListener("input", () => {

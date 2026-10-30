@@ -709,6 +709,8 @@ def _view_filters(args) -> dict | str:
          "search": args.get("search", "").strip(), "tipo": args.get("type", ""), "status": args.get("status", ""),
          "kind": args.get("kind", ""),          # home / urban_plot / rural_plot / other
          "properties_only": args.get("properties", "0") == "1",
+         # Court, tax, social-security and bank sales (source_validation kind official / bank).
+         "forced_only": args.get("forced", "0") == "1",
          "climate": args.get("climate", ""),   # excellent / good / caution: at least; poor / unknown: exactly
          "climate_exact": args.get("climate_exact", "0") == "1", "sale_method": args.get("sale_method", "")}
     if f["max_price"] is None or f["min_score"] is None:
@@ -717,6 +719,12 @@ def _view_filters(args) -> dict | str:
             or f["sale_method"] not in ("", *(v for v, _ in SALE_METHODS))):
         return "unknown sort, direction, type, status, climate, sale method or page"
     return f
+
+
+def _forced_sale(it: dict) -> bool:
+    """A sale that must happen: a court, tax or social-security auction, or a bank selling what it repossessed."""
+    import source_validation
+    return (source_validation.CATALOG.get(it.get("source")) or {}).get("kind") in ("official", "bank")
 
 
 def _view_matched(rows: list, f: dict, mode: str, show_hidden: bool) -> list:
@@ -738,6 +746,7 @@ def _view_matched(rows: list, f: dict, mode: str, show_hidden: bool) -> list:
                # long-ended sales are not counted among the open view's hidden ones
                and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
                and (not f["properties_only"] or it["category"] == "imoveis")
+               and (not f["forced_only"] or _forced_sale(it))
                and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
     if f["climate"] or f["climate_exact"]:
         matched = [it for it in matched if _climate_matches(it, f["climate"], f["climate_exact"])]

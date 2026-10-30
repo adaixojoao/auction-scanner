@@ -1229,8 +1229,11 @@ _PART_OF_HOUSE = re.compile(
 # The portal's own state, when the text says nothing: fotocasa's conservationStatus
 # (1 casi nuevo, 2 muy bien, 3 bien, 4 a reformar, 8 reformado — read off its pages,
 # 2026-10) and imovirtual's construction_status.
+# Imovirtual's "ready_to_use" says the building is finished (not under
+# construction), not that it is sound: two of three such homes on the
+# 2026-10-30 audit were run down or abandoned shells. It names no state.
 PORTAL_CONDITION = {1: "good", 2: "good", 3: "good", 4: "some", 8: "good",
-                    "ready_to_use": "good", "to_renovation": "some", "to_completion": "heavy"}
+                    "to_renovation": "some", "to_completion": "heavy"}
 
 
 def _whole_house_good(text: str) -> bool:

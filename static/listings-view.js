@@ -30,7 +30,7 @@ const MODE_INTRO = {
 // Browsing state only: never notes, buyer details or anything secret.
 const VIEW_STORAGE_KEY = "auction-scanner:listings-view:v1";
 const VIEW_KEYS = ["mode", "country", "source", "kind", "status", "max_price", "min_score", "search",
-                   "properties", "climate", "climate_exact", "sale_method", "sort", "dir", "page"];
+                   "properties", "forced", "climate", "climate_exact", "sale_method", "sort", "dir", "page"];
 const VALID_MODES = new Set(Object.keys(MODE_NOTE));
 const VALID_KINDS = new Set(["", "home", "urban_plot", "rural_plot", "other"]);
 const VALID_STATUSES = new Set(["", "shortlisted", "hidden"]);
@@ -43,7 +43,7 @@ const SALE_METHOD_LABEL = {};
 function goalDefaults(goal) {
   const budget = GOAL_BUDGETS[goal];
   return {mode: goal, country: "", source: "", kind: "", status: "", max_price: budget ? budget : "",
-          min_score: 0, search: "", properties: true, climate: "", climate_exact: false,
+          min_score: 0, search: "", properties: true, forced: false, climate: "", climate_exact: false,
           sale_method: "", sort: "score", dir: "desc", page: 1};
 }
 
@@ -86,6 +86,7 @@ function normalizeView(raw, fallbackMode, dropped = []) {
     min_score: boundedInteger(raw.min_score, defaults.min_score, 0, 100),
     search: typeof raw.search === "string" ? raw.search.trim() : defaults.search,
     properties: booleanValue(raw.properties, defaults.properties),
+    forced: booleanValue(raw.forced, defaults.forced),
     climate: pick("climate", v => VALID_CLIMATES.has(v)),
     climate_exact: booleanValue(raw.climate_exact, defaults.climate_exact),
     sale_method: pick("sale_method", v => allowed.saleMethods.has(v), "Sale method"),
@@ -126,6 +127,7 @@ function validateSavedView(raw) {
   text("search", () => true, "Search");
   out.search = out.search.trim();
   flag("properties", "Property only");
+  flag("forced", "Forced sales only");
   flag("climate_exact", "Exact climate data only");
   const price = raw.max_price == null ? defaults.max_price : raw.max_price;
   if (!(price === "" || (typeof price === "number" && Number.isFinite(price) && price >= 0))) {
@@ -259,7 +261,7 @@ function readControls() {
     status: $("f-status").value, sale_method: $("f-sale-method").value,
     max_price: price === "" ? "" : Number(price),
     min_score: score === "" ? 0 : Number(score),
-    search: $("f-search").value.trim(), properties: $("f-properties").checked,
+    search: $("f-search").value.trim(), properties: $("f-properties").checked, forced: $("f-forced").checked,
     climate: $("f-climate").value, climate_exact: $("f-climate-exact").checked,
   };
 }
@@ -272,6 +274,7 @@ function restoreControls() {
   $("f-status").value = view.status;
   $("f-search").value = view.search;
   $("f-properties").checked = view.properties;
+  $("f-forced").checked = view.forced;
   $("f-climate").value = view.climate;
   $("f-climate-exact").checked = view.climate_exact;
   $("f-minscore").value = String(view.min_score);
@@ -311,6 +314,7 @@ function activeFilters() {
   if (view.sale_method !== d.sale_method) add("sale_method", "Sale method", SALE_METHOD_LABEL[view.sale_method] || view.sale_method);
   if (view.search !== d.search) add("search", "Search", view.search);
   if (view.properties !== d.properties) add("properties", "Property only", "off");
+  if (view.forced !== d.forced) add("forced", "Forced sales only", "");
   return chips;
 }
 
