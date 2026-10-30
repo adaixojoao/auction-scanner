@@ -30,8 +30,12 @@ def _zvg_form(land: str) -> dict:
     return {**_ZVG_EMPTY, "land_abk": land}
 
 
-# "258.000,00 €", "4.800 EUR", "19.400,00" — German amounts, read one by one.
-_ZVG_AMOUNT = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{2})(?![\d.,])")
+# "258.000,00 €", "4.800 EUR", "19.400,00", "1.031,- €" — German amounts, read
+# one by one. ",-" and ",--" mean no cents (Saarburg, 2026-10-30: "1.031,- €"
+# was missed, so the first of four lots stood in for the whole sale).
+_ZVG_AMOUNT = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{2})(?:,-{1,2})?(?![\d.]|,\d)")
+# A total the court states itself: it is the value, not one more lot.
+_ZVG_TOTAL = re.compile(r"Gesamt(?:verkehrs)?wert\s*:?\s*", re.I)
 # Text that is not the value: the deposit and bank details after it, the
 # accessories already counted inside a lot ("davon entfällt auf Zubehör: 100 €"),
 # land-register sheet numbers ("Blatt 649") and lot labels ("Lfd. Nr. 2", "zu 3:").
@@ -50,6 +54,11 @@ def zvg_value(text: str) -> float | None:
     "zu 1: 235.000 EUR zu 2: 4.800 EUR" → 239800, not 1.
     """
     s = (text or "").replace(" ", " ")
+    total = _ZVG_TOTAL.search(s)
+    if total:
+        stated = _ZVG_AMOUNT.search(s, total.end())
+        if stated:
+            return float(stated.group(1).replace(".", "").replace(",", "."))
     for pattern in _ZVG_NOT_VALUE:
         s = pattern.sub(" ", s)
     amounts = [float(a.replace(".", "").replace(",", ".")) for a in _ZVG_AMOUNT.findall(s)]

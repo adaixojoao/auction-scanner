@@ -8,6 +8,7 @@ the link is tried again next scan.
 from __future__ import annotations
 
 import json
+import re
 
 from common import LOG, find_terms, utcnow_iso
 
@@ -80,6 +81,14 @@ UNDER_OFFER_WORDS = (
     "reservada por", "en proceso de venta", "com proposta aceite",
     "proposta accettata", "sotto proposta", "onder bod", "verkocht onder voorbehoud",
 )
+# An agency that marks the ad itself: it opens with the word ("VENDU EN 1
+# JOURNEE", "RESERVADA / V14057", 2026-10-30). Only at the start: "vendu
+# meublé" and "vendu loué" in the body describe how it is sold, not that it is.
+_SOLD_HEADLINE = re.compile(
+    r"^\W*(vendu|vendue|vendido|vendida|venduto|venduta|verkauft|verkocht|sold|"
+    r"reservad[oa]|riservat[oa]|r[eé]serv[eé]e?)\b"
+    r"(?!\s+(?:meubl|lou[eé]|libre|avec|en l'[eé]tat|as is))",
+    re.I)
 
 
 def gone_reason(item: dict) -> str | None:
@@ -92,6 +101,10 @@ def gone_reason(item: dict) -> str | None:
     said = find_terms(f"{item.get('title') or ''} {item.get('description') or ''}", UNDER_OFFER_WORDS)
     if said:
         return f"under offer: the ad says \"{said[0]}\""
+    for text in (item.get("title"), item.get("description")):
+        head = _SOLD_HEADLINE.match(text or "")
+        if head:
+            return f"the ad opens with \"{head.group(1)}\""
     check = _raw(item).get("link_check") or {}
     avail = check.get("availability")
     if avail in ("withdrawn", "reserved", "ended"):
