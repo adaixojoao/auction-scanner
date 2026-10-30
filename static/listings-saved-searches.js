@@ -14,7 +14,7 @@
   const STORAGE_KEY = "auction-scanner:saved-searches:v1";
   const FIELDS = [
     "mode", "country", "source", "kind", "status", "max_price", "min_score",
-    "search", "properties", "climate", "climate_exact", "sale_method", "sort", "dir"
+    "search", "properties", "forced", "climate", "climate_exact", "sale_method", "sort", "dir"
   ];
   const MAX_RECORDS = 50;
   const MAX_NAME = 80;
