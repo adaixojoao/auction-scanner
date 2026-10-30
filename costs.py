@@ -559,6 +559,78 @@ RENT_RUNNING_SHARE = 0.20    # property tax, insurance, repairs, management
 RENT_VACANCY_SHARE = 0.08    # about a month a year between tenants
 NET_RENT_SHARE = 1 - RENT_RUNNING_SHARE - RENT_VACANCY_SHARE
 
+# Tax for an owner who is an individual tax resident in Portugal (the owner of
+# this scanner), on rent and on selling at a gain, where the home is. Checked on
+# 2026-10-30 against the tax authorities' pages and specialist guides; general
+# rules, not this owner's return. Portugal also taxes a resident's foreign rent
+# and gains (IRS Anexo J), with a credit for the tax paid abroad.
+#   rent_rate: share of the yearly rent left after running costs (net), except
+#     Italy's cedolare secca, charged on the rent itself (rent_on_gross).
+#   gain_rate: on the gain of a sale within gain_free_after years; None when it
+#     is the owner's own income-tax rate.
+OWNER_TAX = {
+    "PT": {"rent_rate": 0.25, "rent_on_gross": False,
+           "rent": "IRS 25% on rents (10% for a moderate rent on a lease of 3 years or more, EBF art. 45.º-C)",
+           "gain_rate": None, "gain_free_after": None,
+           "gain": "half the gain is added to your income and taxed at your IRS rate"},
+    "ES": {"rent_rate": 0.19, "rent_on_gross": False,
+           "rent": "IRNR 19% of the net rent (an EU resident)",
+           "gain_rate": 0.19, "gain_free_after": None,
+           "gain": "19% of the gain (IRNR); the buyer holds back 3% of the price, and the town's plusvalía is extra"},
+    "IT": {"rent_rate": 0.21, "rent_on_gross": True,
+           "rent": "cedolare secca 21% of the rent",
+           "gain_rate": 0.26, "gain_free_after": 5,
+           "gain": "26% of the gain within 5 years of buying; none after"},
+    "FR": {"rent_rate": 0.275, "rent_on_gross": False,
+           "rent": "at least 20% plus the 7.5% solidarity levy (an EU resident)",
+           "gain_rate": 0.265, "gain_free_after": None,
+           "gain": "19% plus the 7.5% levy, reduced for each year held from the 6th"},
+    "DE": {"rent_rate": 0.25, "rent_on_gross": False,
+           "rent": "at least 25% of the net rent: no tax-free allowance for a non-resident (§ 50 EStG)",
+           "gain_rate": None, "gain_free_after": 10,
+           "gain": "your income-tax rate on the gain within 10 years of buying; none after"},
+    # Where the tax is not a share of the rent, the rule is shown in words and
+    # no after-tax yield is worked out (rent_rate None).
+    "BE": {"rent_rate": None, "rent_on_gross": False,
+           "rent": "taxed on the home's indexed cadastral income, not on the rent itself",
+           "gain_rate": 0.165, "gain_free_after": 5,
+           "gain": "16.5% of the gain plus the town's surcharge if sold within 5 years of the deed; "
+                   "the notary withholds it from a non-resident seller"},
+    "NL": {"rent_rate": None, "rent_on_gross": False,
+           "rent": "box 3: 36% of a deemed 6% return on the home's value each year (2026), let or not",
+           "gain_rate": 0.0, "gain_free_after": None,
+           "gain": "no tax on the gain itself (box 3 already taxes the value each year)"},
+    "LU": {"rent_rate": None, "rent_on_gross": False,
+           "rent": "your Luxembourg income-tax rate on the net rent (progressive, up to about 46%)",
+           "gain_rate": None, "gain_free_after": None,
+           "gain": "within 5 years of buying, your full income-tax rate on the gain; after, half that "
+                   "rate, with a €50,000 allowance once every 10 years"},
+}
+
+
+def after_tax_yield(rent: dict, country: str | None) -> tuple[float, str] | None:
+    """(net yield after the tax on rent, % a year, the rule), or None where the
+    rule is not known. A planning figure: the owner's own return decides."""
+    rule = OWNER_TAX.get((country or "").upper())
+    if not rule or rule["rent_rate"] is None or not rent or rent.get("net_yield_pct") is None:
+        return None
+    base = rent["yield_pct"] if rule["rent_on_gross"] else rent["net_yield_pct"]
+    kept = rent["net_yield_pct"] - base * rule["rent_rate"]
+    return round(kept, 1), rule["rent"]
+
+
+def rent_tax_note(country: str | None) -> str | None:
+    """The tax on rent in words, where it is not a share of the rent (Belgium,
+    the Netherlands, Luxembourg), or None."""
+    rule = OWNER_TAX.get((country or "").upper())
+    return f"tax on the rent: {rule['rent']}" if rule and rule["rent_rate"] is None else None
+
+
+def resale_tax_note(country: str | None) -> str | None:
+    """What selling soon at a gain would pay, in words, or None."""
+    rule = OWNER_TAX.get((country or "").upper())
+    return f"selling at a gain: {rule['gain']}" if rule else None
+
 
 # The fee lines are one figure; the bid calculator plans on this much more at
 # the high end (a VPT above the price in Portugal, a dearer region elsewhere).
