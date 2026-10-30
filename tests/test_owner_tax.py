@@ -1,4 +1,4 @@
-"""Tax on rent and on a quick resale for an owner resident in Portugal
+"""Tax on rent and on a resale for an owner resident in the Netherlands
 (costs.OWNER_TAX, checked 2026-10-30): shown in the reasons, never scored."""
 import pytest
 
@@ -52,3 +52,41 @@ def test_the_tax_lines_do_not_change_the_score():
     finally:
         costs.OWNER_TAX.update(saved)
     assert with_tax == without
+
+
+@pytest.mark.parametrize("country,years,tax", [
+    ("IT", 1, 26.0), ("IT", 5, 0.0),          # 26% within 5 years, none after
+    ("BE", 4, 16.5), ("BE", 5, 0.0),          # 16.5% within 5 years
+    ("ES", 30, 19.0),                         # always 19%
+    ("NL", 1, 0.0),                           # box 3 instead
+    ("DE", 10, 0.0),                          # tax-free after 10 years
+    ("FR", 1, 26.5), ("FR", 30, 0.0),         # 19% + 7.5%, none after 30 years
+])
+def test_the_tax_on_a_gain_of_100(country, years, tax):
+    assert round(costs.gain_tax(country, 100.0, years), 2) == tax
+
+
+@pytest.mark.parametrize("country,years", [("PT", 1), ("DE", 9), ("LU", 3), ("HR", 1)])
+def test_a_tax_at_the_owner_s_own_rate_has_no_figure(country, years):
+    assert costs.gain_tax(country, 100.0, years) is None
+
+
+def test_france_reduces_the_tax_from_the_sixth_year():
+    # Year 10: income tax cut by 30%, the levy by 8.25%.
+    assert costs.gain_tax("FR", 100.0, 10) == pytest.approx(19 * 0.70 + 7.5 * (1 - 0.0825))
+    assert costs.gain_tax("FR", 100.0, 22) == pytest.approx(7.5 * (1 - 0.28))
+
+
+def test_the_profit_after_selling_costs_and_tax():
+    # Bought for 50,000 all-in, worth 100,000: 95,000 after selling costs.
+    assert costs.resale_after_tax("IT", 50000, 100000, 1) == pytest.approx(45000 * 0.74)
+    assert costs.resale_after_tax("IT", 50000, 100000, 6) == pytest.approx(45000)
+    assert costs.resale_after_tax("IT", 99000, 100000, 1) == pytest.approx(-4000)   # a loss is not taxed
+
+
+def test_the_profit_note_skips_years_without_a_figure():
+    note = costs.resale_profit_note("DE", 50000, 0.5)
+    assert "after 10 years" in note and "after 1 year" not in note
+    assert costs.resale_profit_note("PT", 50000, 0.5) is None
+    assert costs.resale_profit_note("IT", 50000, 0.0) is None
+    assert "€33,300 after 1 year" in costs.resale_profit_note("IT", 50000, 0.5)

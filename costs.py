@@ -559,20 +559,22 @@ RENT_RUNNING_SHARE = 0.20    # property tax, insurance, repairs, management
 RENT_VACANCY_SHARE = 0.08    # about a month a year between tenants
 NET_RENT_SHARE = 1 - RENT_RUNNING_SHARE - RENT_VACANCY_SHARE
 
-# Tax for an owner who is an individual tax resident in Portugal (the owner of
-# this scanner), on rent and on selling at a gain, where the home is. Checked on
-# 2026-10-30 against the tax authorities' pages and specialist guides; general
-# rules, not this owner's return. Portugal also taxes a resident's foreign rent
-# and gains (IRS Anexo J), with a credit for the tax paid abroad.
+# Tax for an owner who is an individual tax resident in the Netherlands (the
+# owner of this scanner), on rent and on selling at a gain, where the home is.
+# Checked on 2026-10-30 against the tax authorities' pages and specialist
+# guides; general rules, not this owner's return. The Netherlands counts a
+# foreign home in box 3 and gives treaty relief for it (pro rata since 2023, so
+# a little can remain); it does not tax the rent or the gain itself.
 #   rent_rate: share of the yearly rent left after running costs (net), except
 #     Italy's cedolare secca, charged on the rent itself (rent_on_gross).
 #   gain_rate: on the gain of a sale within gain_free_after years; None when it
-#     is the owner's own income-tax rate.
+#     is a progressive income-tax rate that depends on the owner.
 OWNER_TAX = {
     "PT": {"rent_rate": 0.25, "rent_on_gross": False,
            "rent": "IRS 25% on rents (10% for a moderate rent on a lease of 3 years or more, EBF art. 45.º-C)",
            "gain_rate": None, "gain_free_after": None,
-           "gain": "half the gain is added to your income and taxed at your IRS rate"},
+           "gain": "half the gain, taxed at Portugal's progressive IRS rates (a non-resident since 2023; "
+                   "no reinvestment relief)"},
     "ES": {"rent_rate": 0.19, "rent_on_gross": False,
            "rent": "IRNR 19% of the net rent (an EU resident)",
            "gain_rate": 0.19, "gain_free_after": None,
@@ -630,6 +632,72 @@ def resale_tax_note(country: str | None) -> str | None:
     """What selling soon at a gain would pay, in words, or None."""
     rule = OWNER_TAX.get((country or "").upper())
     return f"selling at a gain: {rule['gain']}" if rule else None
+
+
+# France reduces the tax on a gain for each year held from the 6th: income tax
+# by 6% a year to the 21st and 4% in the 22nd (none from 22 years), the social
+# levy by 1.65% a year to the 21st, 1.6% in the 22nd and 9% a year after (none
+# from 30 years). CGI art. 150 VC.
+FR_GAIN_IR, FR_GAIN_LEVY = 0.19, 0.075
+# Agent and paperwork when selling: a planning share of the sale price.
+RESALE_COST_SHARE = 0.05
+
+
+def _fr_relief(years: int) -> tuple[float, float]:
+    ir = 0.0 if years < 6 else 1.0 if years >= 22 else 0.06 * (years - 5)
+    if years < 6:
+        levy = 0.0
+    elif years <= 21:
+        levy = 0.0165 * (years - 5)
+    elif years == 22:
+        levy = 0.0165 * 16 + 0.016
+    else:
+        levy = min(1.0, 0.0165 * 16 + 0.016 + 0.09 * (years - 22))
+    return ir, levy
+
+
+def gain_tax(country: str | None, gain: float, years: int) -> float | None:
+    """The tax on a gain made after `years`, or None where it depends on the
+    owner's own progressive rate (Portugal, Germany within 10 years,
+    Luxembourg)."""
+    rule = OWNER_TAX.get((country or "").upper())
+    if not rule:
+        return None
+    if gain <= 0:
+        return 0.0
+    if rule["gain_free_after"] is not None and years >= rule["gain_free_after"]:
+        return 0.0
+    if (country or "").upper() == "FR":
+        ir, levy = _fr_relief(years)
+        return gain * (FR_GAIN_IR * (1 - ir) + FR_GAIN_LEVY * (1 - levy))
+    return None if rule["gain_rate"] is None else gain * rule["gain_rate"]
+
+
+def resale_after_tax(country: str | None, cost: float, value: float, years: int) -> float | None:
+    """Profit after selling costs and the tax on the gain, for a home bought
+    all-in at `cost` and sold at `value` after `years`; None when the tax
+    depends on the owner's own rate. A planning figure."""
+    gain = value * (1 - RESALE_COST_SHARE) - cost
+    tax = gain_tax(country, gain, years)
+    return None if tax is None else gain - tax
+
+
+RESALE_YEARS = (1, 5, 10)
+
+
+def resale_profit_note(country: str | None, cost: float, discount: float) -> str | None:
+    """The profit after selling costs and tax when sold at local prices after
+    1, 5 and 10 years, in words; holding periods whose tax depends on the
+    owner's own rate are left out. None when none can be given."""
+    if not (0 < discount < 1) or cost <= 0:
+        return None
+    value = cost / (1 - discount)
+    parts = [f"€{p:,.0f} after {y} year{'s' if y > 1 else ''}"
+             for y in RESALE_YEARS
+             if (p := resale_after_tax(country, cost, value, y)) is not None]
+    if not parts:
+        return None
+    return f"sold at local prices, profit after selling costs and tax: {', '.join(parts)}"
 
 
 # The fee lines are one figure; the bid calculator plans on this much more at

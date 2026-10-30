@@ -3310,6 +3310,10 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
             note = costs.resale_tax_note(item.get("country"))
             if note:
                 reasons.append(note)
+            if sane and not too_far:
+                profit = costs.resale_profit_note(item.get("country"), all_in, disc)
+                if profit:
+                    reasons.append(profit)
         if too_far:
             unbelievable = True
             item["extreme_discount"] = True
