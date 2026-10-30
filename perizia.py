@@ -23,7 +23,7 @@ import sys
 
 from common import LOG, find_terms
 
-VERSION = 4                       # 2: a share only when the passage is about what is sold; 3: checklists; 4: reports under other codes, summaries for scans
+VERSION = 5                       # 2: a share only when the passage is about what is sold; 3: checklists; 4: reports under other codes, summaries for scans; 5: owners still living there
 PER_SCAN = 40                     # reports read per scan, the best homes first
 MAX_BYTES = 25_000_000
 MAX_TRIES = 3                     # candidate reports read for one listing (a scan gives way to the next)
@@ -48,7 +48,12 @@ NOT_LEGAL = ["non sanabile", "non sanabili", "non è sanabile", "non sono sanabi
 LEASED = ["locazione opponibile", "contratto di locazione opponibile", "occupato da terzi con contratto",
           "occupato da terzi con titolo", "comodato opponibile"]
 OCCUPIED = ["occupato dal debitore", "occupato dall'esecutato", "occupato da terzi senza titolo",
-            "occupato dal fallito", "abitato dal debitore"]
+            "occupato dal fallito", "abitato dal debitore",
+            # Todi and Sala Consilina, 2026-10-31: the owners or the debtor still live there.
+            "occupato dagli attuali proprietari", "occupato dai proprietari", "abitato dai proprietari",
+            "occupato dagli esecutati"]
+# Not "occupata dallo stesso esecutato": Sala Consilina's report says it of
+# "altra unità immobiliare", the debtor's other flat next door.
 FREE = ["risulta libero", "immobile libero", "è libero", "libero da persone"]
 FIXABLE = ["sanatoria", "regolarizzabile", "regolarizzabili", "difformità"]
 DAMP = ["muffa", "muffe", "infiltrazioni", "umidità di risalita", "tracce di umidità"]
