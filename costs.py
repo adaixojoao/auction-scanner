@@ -30,7 +30,8 @@ import re
 
 from common import (counted_flats, find_floor_area, footprint_figure, land_figure, normalize,
                     parse_price, price_to_pay)
-from scoring import INVEST_VALUE_MAX_M2, categorize, condition, market_value_estimate, property_kind
+from scoring import (INVEST_VALUE_MAX_M2, TOWN_KM_VALUE, categorize, condition, curve, market_value_estimate,
+                     property_kind)
 
 IMT_YEAR = 2025
 
@@ -978,9 +979,21 @@ def rent(item: dict, cost: float) -> dict | None:
     province = "province" in source
     if province:
         eur_m2 = eur_m2 / 2
+    # A home well outside the town does not let at the town's rate: the same
+    # cut as its price (scoring.TOWN_KM_VALUE). The province figure is already halved.
+    near = item.get("town_distance")
+    town_cut = None
+    if not province and near and near.get("km") is not None:
+        factor = curve(near["km"], TOWN_KM_VALUE)
+        if factor < 1:
+            eur_m2 *= factor
+            town_cut = (factor, near["km"])
     monthly = round(used * eur_m2)
     out = _finish_rent(item, cost, monthly, source=source, province=province,
                        eur_m2=eur_m2, area_used=used)
+    if out and town_cut:
+        out["town_cut"] = town_cut
+        out["note"] += f"; the town's rent counted at {town_cut[0]:.0%}, {town_cut[1]:.0f} km from town"
     planned = block if block and block.get("area") else (vani if vani and vani.get("area") else None)
     if out and planned and planned.get("label"):
         out["planning"] = planned["label"]

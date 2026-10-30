@@ -1574,6 +1574,7 @@ LOW_MIN_BID_POINTS = [(100, 10), (500, 10), (1500, 0)]
 CONDITION_VALUE = {"good": 1.0, "unknown": 0.75, "some": 0.6, "heavy": 0.35}
 BUILT_YEAR_VALUE = [(1940, 0.8), (1980, 0.9), (2000, 1.0)]
 TOWN_KM_VALUE = [(2, 1.0), (5, 0.85), (10, 0.7)]
+FAR_FROM_TOWN_NOTE_KM = 10   # an invest home this far out is told the town's figures may not apply
 # Years on sale (the portal's publication date) and a court case's age: nobody
 # bought it in all that time, which usually has a reason.
 YEARS_ON_SALE_POINTS = [(1.5, 0), (3, -4), (5, -8), (8, -12)]
@@ -3334,6 +3335,12 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
             )
         elif disc is not None and not _discount_skipped(item, why):
             s += curve(disc, INVEST_DISCOUNT_POINTS) * w("price")
+    # The prices and rents are the town's: say so when the pin is a village
+    # well outside it (Cinco Casas is 24 km from Alcázar de San Juan).
+    near = item.get("town_distance")
+    if near and near.get("km") is not None and near["km"] >= FAR_FROM_TOWN_NOTE_KM and not near.get("approx"):
+        reasons.append(f"{near['text']}: the local price and rent are the town's — a village there "
+                       "usually sells and lets for less, so check prices in the village")
     _mention_sold_move(item, reasons)
     # A price this far under local sales is not a rent. Drop whatever figure was
     # worked out, including when the comparison was a province average.
@@ -3366,6 +3373,9 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                        f"paid back in {rent['payback_years']} years"
                        + (" (a province average, halved — check rents in the village)"
                           if rent.get("province_average")
+                          else f" (the town's rent, counted at {rent['town_cut'][0]:.0%} "
+                               f"{rent['town_cut'][1]:.0f} km out)"
+                          if rent.get("town_cut")
                           else " (a town average — check rents there)" if rent["yield_pct"] > 15 else "")
                        + (f" — {rent['planning']}; repairs are not in this yield"
                           if rent.get("planning") else "")
