@@ -1230,6 +1230,23 @@ def test_solvia_reads_its_search_api():
     assert parse_solvia({**item, "categoriaTipoVivienda": {"nombre": "Garajes"}}) is None
 
 
+def test_solvia_flags_mark_occupied_and_reserved_homes():
+    """Solvia's "situación especial" (56 of 89 cheap homes, 2026-10-31) and
+    "reservado" were ignored; an unflagged home stays as it was."""
+    from confirm import gone_reason
+    from scoring import _occupation
+    from sources.es import parse_solvia
+    item = {"id": "1-2-O", "precio": 20000.0, "m2": 80.0, "mostrarPrecio": True,
+            "categoriaTipoVivienda": {"nombre": "Viviendas"}, "tipoVivienda": {"nombre": "Piso"},
+            "poblacion": {"nombre": "Sevilla"}, "provincia": {"nombre": "Sevilla"}}
+    special = parse_solvia({**item, "situacionEspecial": True})
+    assert _occupation(special) == "occupied" and "Situación especial" in special["description"]
+    assert _occupation(parse_solvia({**item, "sinPosesion": True})) == "occupied"
+    assert gone_reason(parse_solvia({**item, "reservado": True}))
+    clean = parse_solvia(item)
+    assert _occupation(clean) is None and gone_reason(clean) is None
+
+
 IMOT_CARD = """<div class="item  " id="ida1j1"><div class="photo"><a class="image"><img
 src="//cdn3.focus.bg/imot/1j1_Je.jpg" class="pic"></a></div><div class="text"><div class="zaglavie">
 <a href="//www.imot.bg/obiava-1j164942254773629-prodava-kashta-oblast-gabrovo-s-slaveykovo" class="title">Продава
@@ -1640,3 +1657,18 @@ def test_eos_hr_reads_sale_cards_and_drops_leases():
     [row] = eos_hr_cards(html, "kuća")
     assert row["id"] == "eos_hr:kuca-kolan-pag" and row["price"] == 50000 and row["area_m2"] == 60
     assert row["concelho"] == "Pag" and row["tipo"] == "kuća" and row["image_url"] == "https://storage.nekretnine1.hr/x.jpg"
+
+
+def test_a_flag_solvia_lifts_is_lifted_on_the_next_scan(db):
+    from db import upsert_listing
+    from scoring import _occupation
+    from sources.es import parse_solvia
+    item = {"id": "1-2-O", "precio": 20000.0, "m2": 80.0, "mostrarPrecio": True,
+            "categoriaTipoVivienda": {"nombre": "Viviendas"}, "tipoVivienda": {"nombre": "Piso"},
+            "poblacion": {"nombre": "Sevilla"}, "provincia": {"nombre": "Sevilla"}}
+    upsert_listing(db, parse_solvia({**item, "situacionEspecial": True}))
+    db.commit()
+    upsert_listing(db, parse_solvia(item))
+    db.commit()
+    row = dict(db.execute("SELECT * FROM listings WHERE id = 'solvia:1-2'").fetchone())
+    assert _occupation(row) is None and "Situación especial" not in row["description"]

@@ -180,6 +180,16 @@ def is_timeshare(text: str) -> bool:
 # Sales where you name the price: a sealed-bid letter or a private negotiation.
 # Often no price is published at all, and that is the chance, not a gap.
 OFFER_SALE_PATTERNS = ["negociação particular", "negociacao particular", "venda por negociação"]
+# A public body selling land by tender, with no asking price: Dutch state and
+# provincial plots (Biedboek), a town's Didam notice (Gemeenteblad). On the
+# land goals the bid is yours to set for a rural plot; a home or a building
+# plot sold this way stays unpriced (the state sells those at market prices).
+TENDER_SOURCES = {"biedboek", "gemeenteblad"}
+TENDER_PATTERNS = ["openbare inschrijving", "geen vraagprijs", "hoogste bieder", "serieuze gegadigde"]
+
+
+def is_land_tender(item: dict, full: str) -> bool:
+    return item.get("source") in TENDER_SOURCES or has_term(full, TENDER_PATTERNS, negations=False)
 
 SEALED_BID_PATTERNS = [
     "carta fechada", "proposta em carta", "propostas em carta",
@@ -2882,10 +2892,14 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
         s += 4
         reasons.append("tax seizure — no reserve")
     min_p = item.get("min_price") or 0
-    offer_sale = sealed or is_forced or has_term(full, OFFER_SALE_PATTERNS, negations=False)
+    offer_sale = (sealed or is_forced or has_term(full, OFFER_SALE_PATTERNS, negations=False)
+                  or (kind == "rural_plot" and is_land_tender(item, full)))
     if not pay and offer_sale:
         s += 18 * w("sale")
         reasons.append("no price — you set your offer")
+        hint = tender_bid_hint(item, area)
+        if hint:
+            reasons.append(hint)
     elif not pay:
         caps.append(NO_PRICE_CAP)
         reasons.append(item.get("price_unusable") or "price unknown — cannot judge cheapness")
@@ -2907,6 +2921,18 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
         s = min(s, *caps)
     s += _population_outlook_points(item, reasons)
     return s, reasons
+
+
+def tender_bid_hint(item: dict, area: float) -> str | None:
+    """What the scanner's own land benchmark puts a no-price plot at, as a
+    starting point for a bid, or None where it has no honest figure."""
+    import land_prices
+    fair = land_prices.land_value(item) if area else None
+    if not fair:
+        return None
+    worth = fair["eur_ha"] * area / 10000
+    return (f"a bid starting point: land here sells for about €{fair['eur_ha']:,.0f}/ha ({fair['label']}), "
+            f"about €{worth:,.0f} for this plot — bid under it")
 
 
 def _land_points(item: dict, kind: str, area: float, pay: float, full: str,

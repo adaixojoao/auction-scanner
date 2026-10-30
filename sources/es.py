@@ -1932,11 +1932,21 @@ def parse_solvia(item: dict) -> dict | None:
     sub = (item.get("tipoVivienda") or {}).get("nombre") or ""
     town = (item.get("poblacion") or {}).get("nombre")
     province = (item.get("provincia") or {}).get("nombre")
-    notes = [bank_share_sentence(item), item.get("tituloFicha"), sub,
+    # "Reservado" opens the text, so the listing counts as gone (confirm.gone_reason).
+    # "Situación especial" is Solvia's flag for a home it cannot hand over clean
+    # (most often occupied, else a charge or a dispute): 56 of 89 cheap homes
+    # carried it on 2026-10-31. Read as occupied until a viewing says otherwise.
+    notes = ["Reservado" if item.get("reservado") else None,
+             bank_share_sentence(item), item.get("tituloFicha"), sub,
              "Sin posesión: inmueble ocupado" if item.get("sinPosesion") else None,
+             "Situación especial según Solvia (ocupación o cargas): comprobar" if item.get("situacionEspecial") else None,
              "Para reformar" if item.get("reformar") else None,
              "En subasta" if item.get("enSubasta") else None,
              "En la costa" if item.get("enCosta") else None]
+    raw = {}
+    if item.get("sinPosesion") or item.get("situacionEspecial"):
+        raw["occupation"] = "occupied"
+        raw["solvia_flag"] = "sin posesión" if item.get("sinPosesion") else "situación especial"
     ref = str(item["id"]).rsplit("-", 1)[0]           # "192413-155113-O" → "192413-155113"
     images = item.get("listaImagenesInmueble_vPC") or []
     return make_listing(
@@ -1944,6 +1954,7 @@ def parse_solvia(item: dict) -> dict | None:
         description=" · ".join(n for n in notes if n), tipo=kind, area_m2=item.get("m2") or item.get("totalM2"),
         price=float(item["precio"]), min_price=float(item["precio"]), district=province, concelho=town,
         url=f"{SOLVIA}/es/propiedades/comprar/{kind}-{ref}", image_url=images[0] if images else None,
+        raw_json=raw,                   # {} when clean: a flag Solvia lifts is lifted here too
     )
 
 
