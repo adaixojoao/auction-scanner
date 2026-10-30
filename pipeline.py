@@ -338,57 +338,62 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         outcomes.record_results(db)      # ended sales and their last bid
                     except Exception:  # noqa: BLE001
                         LOG.exception("Recording auction results failed")
-                    _set_state(db, current="map positions")
-                    try:
-                        import geo
-                        best = enrich_order(db, cfg)
-                        session = make_session()
-                        geo.locate_towns(db, session, best)
-                        geo.geocode_pending(db, session, best, towns=geo.town_index(db))
-                        import cadastre
-                        cadastre.locate_pending(db, session, best, geo.town_index(db))
-                        geo.check_water_pending(db, session, best)
-                        import outline                    # the house and its plot on the map
-                        outline.check_pending(db, session, best)
-                        import climate                   # heat by 2090, water, fire, flood: local files
-                        climate.assess_pending(db, best, geo.town_index(db), seaside_first=True)
-                    except Exception:  # noqa: BLE001 — a map position must never fail the scan
-                        LOG.exception("Locating listings failed")
-                    both = None                  # Live and invest, loaded once for two checks
-                    try:
-                        both = both_rows(db, cfg)
-                        locate_seaside(db, cfg, make_session(), rows=both)
-                    except Exception:  # noqa: BLE001
-                        LOG.exception("Locating seaside homes failed")
-                    try:
-                        import site_check                 # slope, forest type, Natura: land and forestry
-                        plots = _plots_for_site_check(db, cfg)
-                        site_check.check_pending(db, plots)
-                    except Exception:  # noqa: BLE001
-                        LOG.exception("Site check failed")
-                    _set_state(db, current="photo check")
-                    try:
-                        import photos                    # the photos of the best homes (needs a looker)
-                        photos.check_pending(db, cfg, photos.queue(db, cfg))
-                    except Exception:  # noqa: BLE001 — a photo check must never fail the scan
-                        LOG.exception("Photo check failed")
-                    try:
-                        import perizia                   # the expert's report of the best Italian sales
-                        ranked = sorted(both or [], key=lambda it: -(it.get("rank") or 0))
-                        perizia.check_pending(db, make_session(), ranked)
-                    except Exception:  # noqa: BLE001 — a report must never fail the scan
-                        LOG.exception("Perizia check failed")
-                    _set_state(db, current="checking links")
-                    try:
-                        import confirm                   # sold and reserved pages leave the top
-                        confirm.check_top(db, cfg, make_session())
-                    except Exception:  # noqa: BLE001 — a dead link must never fail the scan
-                        LOG.exception("Link check failed")
-                    try:
-                        import confirm                   # off a source's list: is the page still up?
-                        confirm.check_stale(db, cfg, make_session(), rows=both)
-                    except Exception:  # noqa: BLE001
-                        LOG.exception("Stale check failed")
+                    # The lookups only need to know which listings to look at: a goal list
+                    # is read once here and handed out again (db.reuse_lists). The rescore
+                    # below reads afresh, with what the lookups found.
+                    from db import reuse_lists
+                    with reuse_lists():
+                        _set_state(db, current="map positions")
+                        try:
+                            import geo
+                            best = enrich_order(db, cfg)
+                            session = make_session()
+                            geo.locate_towns(db, session, best)
+                            geo.geocode_pending(db, session, best, towns=geo.town_index(db))
+                            import cadastre
+                            cadastre.locate_pending(db, session, best, geo.town_index(db))
+                            geo.check_water_pending(db, session, best)
+                            import outline                    # the house and its plot on the map
+                            outline.check_pending(db, session, best)
+                            import climate                   # heat by 2090, water, fire, flood: local files
+                            climate.assess_pending(db, best, geo.town_index(db), seaside_first=True)
+                        except Exception:  # noqa: BLE001 — a map position must never fail the scan
+                            LOG.exception("Locating listings failed")
+                        both = None                  # Live and invest, loaded once for two checks
+                        try:
+                            both = both_rows(db, cfg)
+                            locate_seaside(db, cfg, make_session(), rows=both)
+                        except Exception:  # noqa: BLE001
+                            LOG.exception("Locating seaside homes failed")
+                        try:
+                            import site_check                 # slope, forest type, Natura: land and forestry
+                            plots = _plots_for_site_check(db, cfg)
+                            site_check.check_pending(db, plots)
+                        except Exception:  # noqa: BLE001
+                            LOG.exception("Site check failed")
+                        _set_state(db, current="photo check")
+                        try:
+                            import photos                    # the photos of the best homes (needs a looker)
+                            photos.check_pending(db, cfg, photos.queue(db, cfg))
+                        except Exception:  # noqa: BLE001 — a photo check must never fail the scan
+                            LOG.exception("Photo check failed")
+                        try:
+                            import perizia                   # the expert's report of the best Italian sales
+                            ranked = sorted(both or [], key=lambda it: -(it.get("rank") or 0))
+                            perizia.check_pending(db, make_session(), ranked)
+                        except Exception:  # noqa: BLE001 — a report must never fail the scan
+                            LOG.exception("Perizia check failed")
+                        _set_state(db, current="checking links")
+                        try:
+                            import confirm                   # sold and reserved pages leave the top
+                            confirm.check_top(db, cfg, make_session())
+                        except Exception:  # noqa: BLE001 — a dead link must never fail the scan
+                            LOG.exception("Link check failed")
+                        try:
+                            import confirm                   # off a source's list: is the page still up?
+                            confirm.check_stale(db, cfg, make_session(), rows=both)
+                        except Exception:  # noqa: BLE001
+                            LOG.exception("Stale check failed")
                     if not rescore(db, cfg):
                         raise RuntimeError("Post-enrichment rescoring failed; reports and alerts not published")
                     publication_rescored = True

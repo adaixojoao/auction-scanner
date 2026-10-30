@@ -21,6 +21,7 @@ import sqlite3
 import threading
 import time
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 from common import (
@@ -2545,10 +2546,51 @@ def load_decision(db: sqlite3.Connection, listing_id: str,
     }
 
 
+# A scan's lookups (map, water, outlines, sites, photos, reports, links) each
+# asked for the same goal lists again, and each read walked all ~130,000 rows
+# even with every score kept: about six extra passes of 10-15 minutes on
+# 2026-10-30. Inside reuse_lists() a list already read with the same arguments
+# is handed out again (a copy of each row): the lookups only need to know which
+# listings to look at. A refresh, a read for a moment (`now`) and anything
+# outside the block always read afresh.
+_REUSE: list = [None]
+
+
+@contextmanager
+def reuse_lists():
+    """Hand out goal lists already read in this block instead of reading them again."""
+    outer = _REUSE[0]
+    _REUSE[0] = {} if outer is None else outer
+    try:
+        yield
+    finally:
+        _REUSE[0] = outer
+
+
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
                   where: str = "", params=(), apply_min_score: bool = True, mode: str = "home",
                   refresh: bool = False, slim_hidden: bool = False) -> list[dict]:
+    """Every listing a view should consider, scored, with hidden ones removed
+    (db._load_listings; inside reuse_lists() a repeated read is a copy of the first)."""
+    kept = _REUSE[0]
+    if kept is None or refresh or now is not None:
+        return _load_listings(db, filters=filters, include_hidden=include_hidden, now=now, where=where,
+                              params=params, apply_min_score=apply_min_score, mode=mode,
+                              refresh=refresh, slim_hidden=slim_hidden)
+    key = (mode, json.dumps(filters or {}, sort_keys=True, default=str), include_hidden, where,
+           tuple(params), apply_min_score, slim_hidden)
+    if key not in kept:
+        kept[key] = _load_listings(db, filters=filters, include_hidden=include_hidden, where=where,
+                                   params=params, apply_min_score=apply_min_score, mode=mode,
+                                   slim_hidden=slim_hidden)
+    return [dict(it) for it in kept[key]]
+
+
+def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
+                   include_hidden: bool = False, now: datetime | None = None,
+                   where: str = "", params=(), apply_min_score: bool = True, mode: str = "home",
+                   refresh: bool = False, slim_hidden: bool = False) -> list[dict]:
     """Every listing a view should consider, scored, with hidden ones removed.
 
     Each item gains: score, reasons, category, hidden_reason (None if visible),
