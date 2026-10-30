@@ -48,7 +48,8 @@ SCHEMA_VERSION = 34
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
 # Why a listing was dismissed. The dashboard asks; a script turns the answers into tests.
-DISMISS_REASONS = ("occupied", "heavy work", "not a home", "sold", "false price", "no papers", "other")
+# "closed": the sale itself was closed or cancelled (not sold to you or anyone).
+DISMISS_REASONS = ("occupied", "heavy work", "not a home", "sold", "closed", "false price", "no papers", "other")
 
 
 # ─── Connection & migrations ─────────────────────────────────────────
@@ -1089,6 +1090,10 @@ def record_scrape(db: sqlite3.Connection, source: str, *, count: int, status: st
     db.commit()
 
 
+# Plots this large and over: an exact match of area (to the m²), price and
+# municipality is one plot listed twice (mark_duplicates).
+PLOT_EXACT_MIN_M2 = 5000
+
 RELISTING_SOURCES = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira",
                      "pisos", "thinkspain", "immoweb", "solvia", "imot", "indexoglasi", "nehnutelnosti", "sslv", "safer"}
 
@@ -1312,6 +1317,25 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                 possible.pop(r["id"], None)
             elif r["id"] not in possible:
                 possible[r["id"]] = cheapest["id"]
+
+    # A plot with the very same area to the square metre, the same price and
+    # the same municipality is one plot listed twice (fotocasa and Solvia:
+    # 76,974 m² in Escariche at €22,000, 2026-10-30). Two different rural plots
+    # almost never measure the same to the m²; a house's floor often does, so
+    # only plots of PLOT_EXACT_MIN_M2 and more count.
+    for group in buckets.values():
+        # A round area ("10 000 m²") is a size two plots can share; 76 974 m² is not.
+        plots = [r for r in group if r["id"] not in dup_of
+                 and (r["area_m2"] or 0) >= PLOT_EXACT_MIN_M2 and r["area_m2"] % 100]
+        plots.sort(key=completeness, reverse=True)
+        for i, keeper in enumerate(plots):
+            if keeper["id"] in dup_of:
+                continue
+            for other in plots[i + 1:]:
+                if (other["id"] not in dup_of and other["area_m2"] == keeper["area_m2"]
+                        and abs(other["price"] - keeper["price"]) <= 500):
+                    dup_of[other["id"]] = keeper["id"]
+                    possible.pop(other["id"], None)
 
     # A Citius sale joined to its e-leilões auction (links.py) is one sale.
     from links import linked_pairs
@@ -1894,6 +1918,8 @@ _DERIVED = ("price_drop_pct", "earlier_round", "case_land", "town_distance", "pl
             "research_only", "extreme_discount", "floor_guess")
 _SCORED: dict[str, dict[str, tuple]] = {}      # mode → {listing id → (row key, results, inputs)}
 _UNSCORED = {"last_seen", "is_new"}
+# Hidden reasons for a listing that cannot be bought any more: listed, not scored.
+CLOSED_REASONS = ("dismissed", "expired", "duplicate of ")
 # What a hidden listing keeps when load_listings(slim_hidden=True): what a list
 # filters, searches, sorts and counts it by (dashboard.api_listings, the
 # report's counts, load_best's choice of goal). 99.7% of each goal's listings
@@ -2682,6 +2708,23 @@ def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 item["unconfirmed_since"] = f"{seen:%Y-%m-%d}"
 
         if reason and not include_hidden:
+            continue
+
+        # A closed listing (dismissed, ended, a duplicate) is still listed but
+        # never bought: scoring it was wasted work (8,000 ended sales scored on
+        # every hidden-inclusive read, 2026-10-30). One asked for by id (where=)
+        # is still scored in full.
+        if reason and not where and reason.startswith(CLOSED_REASONS):
+            from scoring import categorize, property_kind
+            item.update({k: None for k in _DERIVED})
+            item.update(score=0, rank=0, reasons=[], excellent=False,
+                        category=categorize(item), kind=property_kind(item))
+            item["hidden_reason"] = reason
+            seen_first = parse_dt(item.get("first_seen"))
+            item["is_recent"] = bool(seen_first and now - seen_first <= RECENT)
+            if slim_hidden:
+                item = {**{k: item[k] for k in _SLIM if k in item}, "_slim": True}
+            items.append(item)
             continue
 
         row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],
