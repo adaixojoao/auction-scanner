@@ -122,3 +122,47 @@ def region_note(item: dict, path: str = NIGHTS_PATH) -> str | None:
         trend = f", {'+' if change >= 0 else ''}{change:.0f}% on the year before"
     return (f"{found['nights']:,} nights booked on Airbnb, Booking and Expedia in {region['name']} in "
             f"{found['year']} ({per_resident:.1f} per resident{trend}){level} (Eurostat, experimental)")
+
+
+# ─── Every EU country: homes that are nobody's main home (Census 2021) ──
+DWELLINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "dwellings_2021.csv")
+MANY, FEW = 1.3, 0.7                   # times the country's share
+
+
+@functools.lru_cache(maxsize=4)
+def _dwellings(path: str = DWELLINGS_PATH) -> dict[str, tuple[int, int]]:
+    """{geo: (dwellings, not a main home)} (scripts/update_dwellings.py)."""
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            return {r["geo"]: (int(r["dwellings"]), int(r["not_main_home"])) for r in csv.DictReader(f)}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def dwellings_note(item: dict, path: str = DWELLINGS_PATH, nights_path: str = NIGHTS_PATH) -> str | None:
+    """The share of the region's homes that are nobody's main home, against
+    the country's; with the platform nights, whether that looks like second
+    homes (a holiday area) or empty ones (weak demand)."""
+    import prices
+    country = (item.get("country") or "PT").upper()
+    place = item.get("concelho") or (item.get("district") if country != "PT" else None)
+    region = prices.population_outlook(country, place)
+    table = _dwellings(path)
+    code = "EL" if country == "GR" else country
+    mine, national = table.get((region or {}).get("nuts3", "")), table.get(code)
+    if not region or not mine or not national or not mine[0]:
+        return None
+    share, country_share = mine[1] / mine[0], national[1] / national[0]
+    ratio = share / country_share if country_share else 1
+    level = ("many for the country" if ratio >= MANY else "few for the country" if ratio <= FEW
+             else "about average for the country")
+    why = ""
+    if ratio >= MANY:
+        found, median = _nights(nights_path).get(region["nuts3"]), _country_median(code, nights_path)
+        if found and median and region.get("pop_2019"):
+            busy = found["nights"] / region["pop_2019"] / median
+            why = (": a holiday area, many are second homes" if busy >= 1.5
+                   else ": few holiday stays, so many are likely empty — weak demand, slower to resell"
+                   if busy <= 0.75 else "")
+    return (f"{share * 100:.0f}% of homes in {region['name']} are nobody's main home (empty or second homes; "
+            f"country {country_share * 100:.0f}%) — {level}{why} (Census 2021, Eurostat)")

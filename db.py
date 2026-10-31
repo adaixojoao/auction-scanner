@@ -2046,7 +2046,7 @@ _SCORE_DBS: dict = {}
 # these decide the number a listing gets.
 _SCORE_CODE = ("scoring.py", "costs.py", "forestry.py", "land_prices.py", "common.py",
                "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py", "guesses.py", "outline.py",
-               "surroundings.py", "holiday_lets.py", "crime.py", os.path.join("data", "crime.csv"),
+               "surroundings.py", "holiday_lets.py", "crime.py", "property_tax.py", os.path.join("data", "crime.csv"), os.path.join("data", "dwellings_2021.csv"),
                os.path.join("data", "polluters.csv"),   # a refreshed polluter list scores again
                os.path.join("data", "eprtr.csv"))
 

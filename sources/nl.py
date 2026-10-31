@@ -473,7 +473,7 @@ GEMEENTEBLAD_MIN_M2 = 1000
 GEMEENTEBLAD_MIN_BUILDING_M2 = 50
 _GB_SMALL = re.compile(r"snipper|groenstr|strook|stroken|transformator|trafo|erfpacht|bloot eigendom|enexis|liander|stedin|"
                        r"tennet|alliander|nutsvoorziening|aangrenzend|grenzend aan|achterzijde|achtertuin|zijtuin|"
-                       r"parkeerplaats|vaststellingsovereenkomst|woningcorporatie|sociale huur|stichting|vergunning|ontheffing|APV|"
+                       r"parkeerplaats|vaststellingsovereenkomst|woningcorporatie|sociale huur|stichting|vergunning|ontheffing|\bAPV\b|"
                        r"achterkant|voorkant|zijkant|voorzijde|zijkant|ruiling|grondruil|waterschap", re.I)
 _GB_OPEN = re.compile(r"hoogste bieder|openbare (?:inschrijving|verkoop|selectie|biedprocedure)|selectieprocedure|"
                       r"inschrijvingsprocedure|biedprocedure|bieding\w* (?:kunnen|kenbaar)|tenderned|via (?:een )?makelaar|"
