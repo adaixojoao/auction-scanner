@@ -12,6 +12,9 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   period (10% in 50 years), the figure building codes use;
 - amenities (every EU country): the nearest supermarket, pharmacy, doctor,
   school, bus or tram stop and train station within 2 km, from OpenStreetMap;
+- power (every EU country): high-voltage lines (110 kV and up) within 1 km,
+  wind turbines and wind or solar farms within 2 km, from OpenStreetMap,
+  which maps the grid well. Buyers pay less next to pylons and turbines;
 - zoning: France, the local plan's zone (PLU, IGN Géoportail de
   l'urbanisme), or that the town has none online (national rules, RNU);
   Portugal, whether the point is in the national farmland (RAN) or ecological
@@ -25,6 +28,10 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   works and IMT/IMI exemptions (Estatuto dos Benefícios Fiscais, art. 45 and
   71). The register misses some towns (Lisbon's ARU is not on it), so a miss
   says to ask the câmara;
+- land values: Germany, the official Bodenrichtwert of the zone (the local
+  Gutachterausschuss, from sales), €/m² of land without the building. North
+  Rhine-Westphalia so far (BORIS-NRW, open data); each state runs its own
+  service and Bavaria's is not open;
 - energy ratings: France only, the energy performance certificates (DPE,
   ADEME) issued at the address since July 2021. One whose floor area matches
   the listing's is probably this home's. A G home cannot be let on a new lease
@@ -74,6 +81,13 @@ PT_RESERVES = {
     "REN": ("https://servicos.dgterritorio.pt/SDISNITWMSSRUP_REN_PT1/WMService.aspx", "REN_em_Vigor",
             "national ecological reserve (REN)"),
 }
+# BORIS-NRW layers: building land (one or two storeys, several, outlying,
+# other), then farmland and forest
+DE_BORIS = {"NRW": ("https://www.wms.nrw.de/boris/wms_nw_brw", (51.9, 6.1, 52.6, 9.5), (50.3, 5.8, 51.9, 9.5))}
+DE_BORIS_LAYERS = {"20": "building land", "17": "building land (flats)", "5": "building land outside the village",
+                   "2": "other land", "14": "commercial land", "8": "farmland", "11": "forest"}
+DE_LAND_USE = {"W": "residential", "MI": "mixed", "WS": "small-holding", "A": "arable", "GR": "grassland",
+               "F": "forest", "G": "commercial", "M": "mixed"}
 PT_ARU = ("https://servicos.dgterritorio.pt/SDISNITWMSARU/WMService.aspx", "ARU")
 AMENITIES = {               # name: Overpass filters
     "supermarket": ('["shop"~"^(supermarket|convenience)$"]',),
@@ -85,6 +99,8 @@ AMENITIES = {               # name: Overpass filters
     "train station": ('["railway"~"^(station|halt)$"]',),
 }
 AMENITY_RADIUS_M = 2000
+LINE_RADIUS_M, PLANT_RADIUS_M = 1000, 2000
+HIGH_VOLTAGE = 110000
 
 
 # ─── The sources (each raises on a failed request; None: nothing there) ──
@@ -164,6 +180,109 @@ def amenities(session, lat: float, lon: float, item: dict) -> dict:
                         headers={"User-Agent": USER_AGENT}, timeout=90)
     resp.raise_for_status()
     return nearest_amenities(resp.json().get("elements") or [], lat, lon)
+
+
+def power_query(lat: float, lon: float) -> str:
+    return (f'[out:json][timeout:60];(way["power"="line"](around:{LINE_RADIUS_M},{lat},{lon});'
+            f'node["power"="generator"]["generator:source"="wind"](around:{PLANT_RADIUS_M},{lat},{lon});'
+            f'nwr["power"="plant"]["plant:source"~"wind|solar"](around:{PLANT_RADIUS_M},{lat},{lon}););out tags geom;')
+
+
+def _segment_m(lat, lon, a, b) -> float:
+    """Metres from the point to the segment a-b (flat projection: fine within a few km)."""
+    k = math.cos(math.radians(lat)) * 111320
+    ax, ay, bx, by = (a["lon"] - lon) * k, (a["lat"] - lat) * 110540, (b["lon"] - lon) * k, (b["lat"] - lat) * 110540
+    dx, dy = bx - ax, by - ay
+    t = 0.0 if not (dx or dy) else max(0.0, min(1.0, -(ax * dx + ay * dy) / (dx * dx + dy * dy)))
+    return math.hypot(ax + t * dx, ay + t * dy)
+
+
+def _volts(tag) -> int:
+    return max((int(v) for v in str(tag or "").replace(",", ";").split(";") if v.strip().isdigit()), default=0)
+
+
+def _centre(el: dict) -> tuple[float, float] | None:
+    if el.get("lat") is not None:
+        return el["lat"], el["lon"]
+    pts = el.get("geometry") or [p for m in el.get("members") or [] for p in (m.get("geometry") or [])]
+    if not pts:
+        b = el.get("bounds")
+        return ((b["minlat"] + b["maxlat"]) / 2, (b["minlon"] + b["maxlon"]) / 2) if b else None
+    return sum(p["lat"] for p in pts) / len(pts), sum(p["lon"] for p in pts) / len(pts)
+
+
+def power_nearby(elements: list[dict], lat: float, lon: float) -> dict:
+    """{"line": {"kv", "m"} or None, "turbines": n, "turbine_m", "farms": [{"source", "m"}]}."""
+    line, turbines, farms = None, [], []
+    for el in elements:
+        tags = el.get("tags") or {}
+        if tags.get("power") == "line" and el.get("geometry"):
+            volts = _volts(tags.get("voltage"))
+            if volts and volts < HIGH_VOLTAGE:
+                continue
+            pts = el["geometry"]
+            d = min(_segment_m(lat, lon, a, b) for a, b in zip(pts, pts[1:])) if len(pts) > 1 else None
+            if d is not None and (line is None or d < line["m"]):
+                line = {"kv": volts // 1000 or None, "m": round(d)}
+        elif tags.get("power") == "generator":
+            c = _centre(el)
+            if c:
+                turbines.append(round(_distance_m(lat, lon, *c)))
+        elif tags.get("power") == "plant":
+            c = _centre(el)
+            if c:
+                farms.append({"source": tags.get("plant:source"), "m": round(_distance_m(lat, lon, *c))})
+    return {"line": line, "turbines": len(turbines), "turbine_m": min(turbines) if turbines else None,
+            "farms": sorted(farms, key=lambda f: f["m"])[:3]}
+
+
+def power(session, lat: float, lon: float, item: dict) -> dict:
+    from geo import OVERPASS, USER_AGENT
+    resp = session.post(OVERPASS, data={"data": power_query(lat, lon)}, headers={"User-Agent": USER_AGENT},
+                        timeout=90)
+    resp.raise_for_status()
+    return power_nearby(resp.json().get("elements") or [], lat, lon)
+
+
+def _in(box, lat, lon) -> bool:
+    return box[0] <= lat <= box[2] and box[1] <= lon <= box[3]
+
+
+def de_land(session, lat: float, lon: float, item: dict) -> dict:
+    """{"zones": [{"layer", "eur_m2", "date", "use", "place"}]} for the zones at
+    the point, or {"zones": [], "state": None} where no open service covers it."""
+    for state, (url, *boxes) in DE_BORIS.items():
+        if not any(_in(b, lat, lon) for b in boxes):
+            continue
+        d = 0.0005
+        layers = ",".join(DE_BORIS_LAYERS)
+        resp = session.get(url, params={
+            "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetFeatureInfo", "LAYERS": layers,
+            "QUERY_LAYERS": layers, "STYLES": "", "CRS": "EPSG:4326", "BBOX": f"{lat - d},{lon - d},{lat + d},{lon + d}",
+            "WIDTH": 101, "HEIGHT": 101, "I": 50, "J": 50, "INFO_FORMAT": "application/geo+json",
+            "FEATURE_COUNT": 10}, timeout=40)
+        resp.raise_for_status()
+        zones = boris_zones(resp.json())
+        if zones:
+            return {"state": state, "zones": zones}
+    return {"state": None, "zones": []}
+
+
+def boris_zones(geojson: dict) -> list[dict]:
+    order = {"brw_ein_zweigeschossig": "20", "brw_mehrgeschossige_bauweise": "17", "brw_aussenbereich": "5",
+             "brw_sonstige_flaechen": "2", "brw_gewerbe_industrie_sondergebiete": "14", "brw_landwirtschaft": "8",
+             "brw_forstwirtschaft": "11"}
+    out = []
+    for f in geojson.get("features") or []:
+        layer = order.get(f.get("layerName"))
+        p = f.get("properties") or {}
+        value = _float(str(p.get("BRW") or "").replace(".", "").replace(",", "."))
+        if not layer or value is None:
+            continue
+        out.append({"layer": layer, "eur_m2": value, "date": (p.get("STAG") or "")[:4],
+                    "use": (p.get("NUTA") or "").strip(), "place": (p.get("ORTST") or p.get("GENA") or "").strip()})
+    out.sort(key=lambda z: list(order.values()).index(z["layer"]))
+    return out
 
 
 def _fr_commune(session, lat: float, lon: float, arrondissement: bool = False) -> dict | None:
@@ -365,12 +484,14 @@ SOURCES = {
     "noise": (noise, None, BUILDING_PINS, {"home"}),
     "quake": (quake, None, None, {"home", "land"}),
     "amenities": (amenities, None, NEAR_PINS, {"home"}),
+    "power": (power, None, BUILDING_PINS | {"street"}, {"home", "land"}),
     "fr_zoning": (fr_zoning, {"FR"}, BUILDING_PINS, {"home", "land"}),
     "pt_zoning": (pt_zoning, {"PT"}, BUILDING_PINS, {"home", "land"}),
     "pt_aru": (pt_aru, {"PT"}, BUILDING_PINS, {"home"}),
     "fr_risks": (fr_risks, {"FR"}, None, {"home", "land"}),
     "fr_sold": (fr_sold, {"FR"}, None, {"home"}),
     "fr_energy": (fr_energy, {"FR"}, BUILDING_PINS, {"home"}),
+    "de_land": (de_land, {"DE"}, BUILDING_PINS | {"street"}, {"home", "land"}),
 }
 
 
@@ -502,6 +623,22 @@ def notes(item: dict) -> list[str]:
         if lacking:
             line += f"; no {', '.join(lacking)} within 2 km"
         out.append(line + " (OpenStreetMap, may be incomplete)")
+    pw = found.get("power")
+    if pw is not None:
+        bits = []
+        if pw.get("line"):
+            kv = f" ({pw['line']['kv']} kV)" if pw["line"].get("kv") else ""
+            bits.append(f"high-voltage line{kv} {_metres(pw['line']['m'])} away")
+        if pw.get("turbines"):
+            bits.append(f"{pw['turbines']} wind turbine{'s' if pw['turbines'] > 1 else ''} within 2 km, nearest "
+                        f"{_metres(pw['turbine_m'])}")
+        farms = [f for f in pw.get("farms") or [] if not (f["source"] == "wind" and pw.get("turbines"))]
+        for f in farms[:1]:
+            bits.append(f"{'solar' if f['source'] == 'solar' else 'wind'} farm {_metres(f['m'])} away")
+        if bits:
+            out.append(f"{'; '.join(bits)} — buyers pay less near pylons and turbines (OpenStreetMap)")
+        else:
+            out.append("no high-voltage line within 1 km, nor wind turbine or solar farm within 2 km (OpenStreetMap)")
     z = found.get("fr_zoning")
     if z:
         if z.get("zone") is None:
@@ -552,12 +689,51 @@ def notes(item: dict) -> list[str]:
         if mine:
             line += f"; this one €{mine:,.0f}/m², {(mine / s['median'] - 1) * 100:+.0f}%"
         out.append(line + " (DVF, actual sale prices)")
+    land = found.get("de_land")
+    if land and land.get("zones"):
+        line = _land_note(land, item)
+        if line:
+            out.append(line)
     e = found.get("fr_energy")
     if e is not None:
         line = _energy_note(e.get("certificates") or [], item)
         if line:
             out.append(line)
     return out
+
+
+def _land_note(land: dict, item: dict) -> str | None:
+    """The zone that fits the listing: building land for a home; for land, the
+    building land when the plot is in one, else farmland or forest."""
+    from common import has_term
+    from scoring import property_kind
+    zones = land["zones"]
+    building = [z for z in zones if z["layer"] in ("20", "17", "5", "2", "14")]
+    rural = [z for z in zones if z["layer"] in ("8", "11")]
+    kind = _kind(item)
+    if property_kind(item) not in ("home", "urban_plot") and rural:
+        # Farm and forest zones lie under the building ones: pick what the plot is
+        text = f"{item.get('title') or ''} {item.get('description') or ''}"
+        want = ("F" if has_term(text, ["wald", "forst", "waldfläche", "waldgrundstück"], negations=False)
+                else "GR" if has_term(text, ["grünland", "wiese", "weide", "dauergrünland"], negations=False)
+                else "A")
+        z = next((r for r in rural if r["use"] == want), rural[0])
+    else:
+        z = (building or rural)[0] if building or kind == "home" else rural[0] if rural else None
+    if not z:
+        return None
+    what = DE_BORIS_LAYERS[z["layer"]]
+    use = f", {DE_LAND_USE[z['use']]}" if z["use"] in DE_LAND_USE and z["use"] != "F" else ""
+    money = f"€{z['eur_m2']:,.0f}" if z["eur_m2"] >= 10 else f"€{z['eur_m2']:,.2f}"
+    place = f", {z['place']}" if z["place"] else ""
+    line = f"official land value {money}/m² ({what}{use}{place}, {z['date']})"
+    try:
+        area = float(item.get("area_m2") or 0)
+    except (TypeError, ValueError):
+        area = 0
+    if kind == "land" and area:
+        line += f" — this {area:,.0f} m² about €{area * z['eur_m2']:,.0f}"
+    return line + " — land only, without buildings (Bodenrichtwert, BORIS-NRW)"
 
 
 def _energy_note(certs: list[dict], item: dict) -> str | None:
