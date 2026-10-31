@@ -848,6 +848,8 @@ def _surroundings(item: dict, reasons: list[str]) -> None:
     """What official maps and statistics say about the place (surroundings.py,
     crime.py): shown, not scored."""
     import crime
+    import incomes
+    import population_change
     import property_tax
     import rent_rules
     import surroundings
@@ -861,6 +863,12 @@ def _surroundings(item: dict, reasons: list[str]) -> None:
     found = crime.note(item)
     if found:
         reasons.append(found)
+    earned = incomes.note(item)
+    if earned:
+        reasons.append(earned)
+    people = population_change.note(item)
+    if people:
+        reasons.append(people)
     hospital = item.get("hospital")
     if hospital:
         urgent = hospital.get("emergency")

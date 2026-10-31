@@ -22,7 +22,9 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
 - French risks: clay shrink-swell (RGA), radon class and seismic zone of the
   commune, mines and cavities within 500 m (BRGM / Géorisques);
 - sold prices: France only, the houses or flats sold in the commune in the
-  last two years (DVF, the tax office's register of sales);
+  last two years (DVF, the tax office's register of sales); and every sale
+  of the cadastral parcel itself since 2021, once the outline has found it:
+  the house's own past price, or the flats sold in its building;
 - urban regeneration areas: Portugal, whether the point is in an ARU on
   DGT's national register. Renovating there can qualify for 6% VAT on the
   works and IMT/IMI exemptions (Estatuto dos Benefícios Fiscais, art. 45 and
@@ -42,7 +44,10 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   site patrimonial remarquable. Works there need the Architecte des Bâtiments
   de France's agreement. Portugal, DGPC's atlas of classified heritage
   (mainland): a classified building or ensemble and its protection zones
-  (ZGP, ZEP), where works need the heritage office's opinion.
+  (ZGP, ZEP), where works need the heritage office's opinion;
+- Italian hazards: the basin authorities' landslide (P1-P4, attention areas)
+  and flood (P1-P3) zones as ISPRA's IdroGEO joins them for the whole
+  country, and whether a mapped landslide (IFFI inventory) is at the point.
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -99,6 +104,10 @@ FR_HERITAGE = {"ac1": "monument", "ac2": "site", "ac4": "spr"}
 PT_HERITAGE = ("https://geo.patrimoniocultural.gov.pt/arcgis/rest/services/PatrimonioClassificadoEmViasClassificacao/"
                "Atlas_Patrimonio_Servicos/MapServer/identify")
 PT_HERITAGE_LAYERS = {"PatrimonioImovel": "inside", "ZEP": "zep", "ZGP": "zgp", "Restricoes": "zep"}
+IT_IDROGEO = "https://idrogeo.isprambiente.it/geoserver/ows"
+IT_LANDSLIDE = {1: "moderate (P1)", 2: "medium (P2)", 3: "high (P3)", 4: "very high (P4)", 5: "an attention area"}
+IT_FLOOD = {"scenariop1": (1, "low (P1, rare floods)"), "scenariop2": (2, "medium (P2, every 100–200 years)"),
+            "scenariop3": (3, "high (P3, every 20–50 years)")}
 PT_ARU = ("https://servicos.dgterritorio.pt/SDISNITWMSARU/WMService.aspx", "ARU")
 AMENITIES = {               # name: Overpass filters
     "supermarket": ('["shop"~"^(supermarket|convenience)$"]',),
@@ -441,6 +450,32 @@ def pt_protections(results: list[dict]) -> dict:
     return out
 
 
+def _idrogeo(session, layer: str, lat: float, lon: float) -> list[dict]:
+    d = 0.0005
+    resp = session.get(IT_IDROGEO, params={
+        "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetFeatureInfo", "LAYERS": layer, "QUERY_LAYERS": layer,
+        "STYLES": "", "CRS": "EPSG:4326", "BBOX": f"{lat - d},{lon - d},{lat + d},{lon + d}",
+        "WIDTH": 101, "HEIGHT": 101, "I": 50, "J": 50, "INFO_FORMAT": "application/json", "FEATURE_COUNT": 10},
+        timeout=60)
+    resp.raise_for_status()
+    return [f.get("properties") or {} for f in resp.json().get("features") or []]
+
+
+def it_hazard(session, lat: float, lon: float, item: dict) -> dict:
+    return it_hazards(_idrogeo(session, "idrogeo:pericolosita_frane", lat, lon),
+                      _idrogeo(session, "idrogeo:pericolosita_alluvioni", lat, lon),
+                      _idrogeo(session, "idrogeo:frane", lat, lon))
+
+
+def it_hazards(landslide: list[dict], flood: list[dict], mapped: list[dict]) -> dict:
+    """{"landslide": the highest class 1-4 (5: attention area), "flood": 1-3, "mapped": landslides on the inventory}."""
+    classes = [int(p["cod_per_it"]) for p in landslide if str(p.get("cod_per_it") or "").isdigit()]
+    real = [c for c in classes if c <= 4]
+    flood_classes = [IT_FLOOD[k][0] for p in flood for k in p if k in IT_FLOOD and p[k]]
+    return {"landslide": max(real) if real else (5 if 5 in classes else None),
+            "flood": max(flood_classes) if flood_classes else None, "mapped": len(mapped)}
+
+
 def _georisques(session, path: str, params: dict) -> dict:
     resp = session.get(GEORISQUES + path, params=params, timeout=40)
     resp.raise_for_status()
@@ -535,6 +570,53 @@ def fr_sold(session, lat: float, lon: float, item: dict) -> dict | None:
     return found
 
 
+def _parcel_ref(item: dict) -> str | None:
+    """The French cadastral parcel the outline found at this pin (IGN idu, 14 characters)."""
+    import outline
+    found = outline.current(item) or {}
+    ref = str(((found.get("plot") or {}).get("ref")) or "")
+    return ref if len(ref) == 14 else None
+
+
+def fr_parcel(session, lat: float, lon: float, item: dict) -> dict:
+    """{"ref", "sales": [...]}: every sale of the parcel in DVF (2021 on)."""
+    ref = _parcel_ref(item)
+    insee = ref[:5]
+    dep = insee[:3] if insee.startswith("97") else insee[:2]
+    rows: list[dict] = []
+    for year in range(2021, int(utcnow_iso()[:4]) + 1):
+        resp = session.get(DVF.format(year=year, dep=dep, insee=insee), timeout=60)
+        if resp.status_code == 404:
+            continue
+        resp.raise_for_status()
+        rows.extend(r for r in csv.DictReader(io.StringIO(resp.content.decode("utf-8", "replace")))
+                    if ref in (r.get("id_parcelle"), r.get("ancien_id_parcelle")))
+    return {"ref": ref, "sales": parcel_sales(rows)}
+
+
+def parcel_sales(rows: list[dict]) -> list[dict]:
+    """One entry per sale, newest first: {"date", "price", "homes": [types], "built", "land",
+    "eur_m2": for the sale of a single house or flat}."""
+    by_sale: dict[str, list[dict]] = {}
+    for r in rows:
+        if r.get("nature_mutation") in ("Vente", "Adjudication", "Vente en l'état futur d'achèvement"):
+            by_sale.setdefault(r.get("id_mutation") or "", []).append(r)
+    out = []
+    for parts in by_sale.values():
+        price = _float(parts[0].get("valeur_fonciere"))
+        if not price:
+            continue
+        homes = [r for r in parts if r.get("type_local") in ("Maison", "Appartement")]
+        built = sum(_float(r.get("surface_reelle_bati")) or 0 for r in homes)
+        land = max((_float(r.get("surface_terrain")) or 0 for r in parts), default=0)
+        single = dvf_sales(parts, homes[0]["type_local"]) if len(homes) == 1 else []
+        out.append({"date": parts[0].get("date_mutation"), "price": round(price),
+                    "auction": parts[0].get("nature_mutation") == "Adjudication",
+                    "homes": [r["type_local"] for r in homes], "built": round(built), "land": round(land),
+                    "eur_m2": round(single[0]["eur_m2"]) if single else None})
+    return sorted(out, key=lambda x: x["date"] or "", reverse=True)
+
+
 def fr_energy(session, lat: float, lon: float, item: dict) -> dict:
     """{"certificates": [{"class", "date", "area", "m", "kind"}]}: the DPE issued
     within DPE_RADIUS_M of the pin, nearest first (no address is kept)."""
@@ -576,7 +658,10 @@ SOURCES = {
     "de_land": (de_land, {"DE"}, BUILDING_PINS | {"street"}, {"home", "land"}),
     "fr_heritage": (fr_heritage, {"FR"}, BUILDING_PINS, {"home", "land"}),
     "pt_heritage": (pt_heritage, {"PT"}, BUILDING_PINS, {"home", "land"}),
+    "fr_parcel": (fr_parcel, {"FR"}, BUILDING_PINS, {"home", "land"}),
+    "it_hazard": (it_hazard, {"IT"}, BUILDING_PINS | {"street"}, {"home", "land"}),
 }
+NEEDS_PARCEL = {"fr_parcel"}          # asked once the outline has found the parcel
 
 
 # ─── Which listings, and storing what was found ──────────────────────────
@@ -601,6 +686,8 @@ def applicable(item: dict, pos: dict) -> list[str]:
         if pins and pos.get("precision") not in pins:
             continue
         if kind not in kinds:
+            continue
+        if name in NEEDS_PARCEL and not _parcel_ref(item):
             continue
         out.append(name)
     return out
@@ -678,6 +765,51 @@ def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
 def _metres(m: int) -> str:
     return f"{m} m" if m < 1000 else f"{m / 1000:.1f} km"
 
+
+
+def _it_hazard_note(h: dict | None) -> str | None:
+    if not h:
+        return None
+    bits = []
+    if h.get("landslide"):
+        bits.append(f"landslide hazard {IT_LANDSLIDE[h['landslide']]}")
+    if h.get("mapped"):
+        bits.append("a mapped landslide at the point (IFFI)")
+    if h.get("flood"):
+        flood = {v[0]: v[1] for v in IT_FLOOD.values()}[h["flood"]]
+        bits.append(f"flood hazard {flood}")
+    if not bits:
+        return "no landslide or flood hazard zone at the point (ISPRA IdroGEO, basin plans)"
+    return "; ".join(bits) + " (ISPRA IdroGEO, basin plans)"
+
+
+_HOMES = {"Maison": "house", "Appartement": "flat"}
+
+
+def _parcel_note(p: dict | None, item: dict) -> str | None:
+    """What the parcel sold for before. A flat's parcel is its whole building."""
+    from outline import is_flat
+    if not p:
+        return None
+    sales = p.get("sales") or []
+    if not sales:
+        return f"no sale of this parcel ({p['ref']}) recorded since 2021 (DVF)"
+    if is_flat(item):
+        rates = sorted(x["eur_m2"] for x in sales if x.get("eur_m2"))
+        line = f"this building's parcel sold {len(sales)} time{'s' if len(sales) > 1 else ''} since 2021"
+        if rates:
+            line += f", flats at a median €{statistics.median(rates):,.0f}/m² ({len(rates)} single-flat sales)"
+        return line + " (DVF)"
+    shown = []
+    for x in sales[:3]:
+        what = [_HOMES.get(h, h) for h in x.get("homes") or []]
+        bits = (", ".join(what) + (f" {x['built']} m²" if x.get("built") else "")) if what else "no building"
+        if x.get("land"):
+            bits += f", land {x['land']:,} m²"
+        how = "at auction " if x.get("auction") else ""
+        shown.append(f"{x['date']} {how}for €{x['price']:,} ({bits})")
+    more = f"; {len(sales) - 3} earlier" if len(sales) > 3 else ""
+    return f"this parcel ({p['ref']}) sold " + "; ".join(shown) + more + " (DVF)"
 
 
 def _names(names: list[str], most: int = 2) -> str:
@@ -794,6 +926,12 @@ def notes(item: dict) -> list[str]:
             out.append("not in an urban regeneration area (ARU) on DGT's register — some towns are missing "
                        "there, so ask the câmara")
     out.extend(_heritage_notes(found))
+    line = _it_hazard_note(found.get("it_hazard"))
+    if line:
+        out.append(line)
+    line = _parcel_note(found.get("fr_parcel"), item)
+    if line:
+        out.append(line)
     r = found.get("fr_risks")
     if r:
         bits = []
