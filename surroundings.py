@@ -20,6 +20,11 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   commune, mines and cavities within 500 m (BRGM / Géorisques);
 - sold prices: France only, the houses or flats sold in the commune in the
   last two years (DVF, the tax office's register of sales);
+- urban regeneration areas: Portugal, whether the point is in an ARU on
+  DGT's national register. Renovating there can qualify for 6% VAT on the
+  works and IMT/IMI exemptions (Estatuto dos Benefícios Fiscais, art. 45 and
+  71). The register misses some towns (Lisbon's ARU is not on it), so a miss
+  says to ask the câmara;
 - energy ratings: France only, the energy performance certificates (DPE,
   ADEME) issued at the address since July 2021. One whose floor area matches
   the listing's is probably this home's. A G home cannot be let on a new lease
@@ -69,6 +74,7 @@ PT_RESERVES = {
     "REN": ("https://servicos.dgterritorio.pt/SDISNITWMSSRUP_REN_PT1/WMService.aspx", "REN_em_Vigor",
             "national ecological reserve (REN)"),
 }
+PT_ARU = ("https://servicos.dgterritorio.pt/SDISNITWMSARU/WMService.aspx", "ARU")
 AMENITIES = {               # name: Overpass filters
     "supermarket": ('["shop"~"^(supermarket|convenience)$"]',),
     "pharmacy": ('["amenity"="pharmacy"]',),
@@ -207,6 +213,29 @@ def pt_reserve_hit(xml: str) -> bool:
     return "<FIELDS" in xml or "SERVIDAO" in xml.upper() or "TIPOLOGIA" in xml.upper()
 
 
+def pt_aru(session, lat: float, lon: float, item: dict) -> dict:
+    """{"name", "notice"} of the ARU at the point, or {"name": None} outside every ARU on the register."""
+    d = 0.0005
+    url, layer = PT_ARU
+    resp = session.get(url, params={
+        "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetFeatureInfo", "LAYERS": layer, "QUERY_LAYERS": layer,
+        "STYLES": "", "CRS": "EPSG:4326", "BBOX": f"{lat - d},{lon - d},{lat + d},{lon + d}",
+        "WIDTH": 101, "HEIGHT": 101, "I": 50, "J": 50, "INFO_FORMAT": "text/xml", "FEATURE_COUNT": 1}, timeout=40)
+    resp.raise_for_status()
+    return aru_attributes(resp.content.decode("utf-8", "replace"))
+
+
+def aru_attributes(xml: str) -> dict:
+    import html
+    import re
+    found = {k: html.unescape(v).strip() for k, v in re.findall(r'<Attribute Name="([^"]+)">([^<]*)<', xml)}
+    if not found:
+        return {"name": None}
+    name = next((v for k, v in found.items() if k.startswith("Designa")), None)
+    return {"name": name, "notice": found.get("DR"),
+            "town": found.get("Concelho")}
+
+
 def pt_zoning(session, lat: float, lon: float, item: dict) -> dict:
     return {key: _pt_reserve(session, url, layer, lat, lon) for key, (url, layer, _) in PT_RESERVES.items()}
 
@@ -338,6 +367,7 @@ SOURCES = {
     "amenities": (amenities, None, NEAR_PINS, {"home"}),
     "fr_zoning": (fr_zoning, {"FR"}, BUILDING_PINS, {"home", "land"}),
     "pt_zoning": (pt_zoning, {"PT"}, BUILDING_PINS, {"home", "land"}),
+    "pt_aru": (pt_aru, {"PT"}, BUILDING_PINS, {"home"}),
     "fr_risks": (fr_risks, {"FR"}, None, {"home", "land"}),
     "fr_sold": (fr_sold, {"FR"}, None, {"home"}),
     "fr_energy": (fr_energy, {"FR"}, BUILDING_PINS, {"home"}),
@@ -491,6 +521,15 @@ def notes(item: dict) -> list[str]:
                        "ask the câmara before counting on works (DGT)")
         else:
             out.append("outside the national farmland (RAN) and ecological (REN) reserves (DGT)")
+    aru = found.get("pt_aru")
+    if aru:
+        if aru.get("name"):
+            notice = f"; {aru['notice'].split(' - ')[0]}" if aru.get("notice") else ""
+            out.append(f"in the {aru['name']}{notice}: renovating can qualify for 6% VAT on the works and IMT and "
+                       "IMI exemptions — the câmara must approve the works first (DGT ARU register; EBF art. 45)")
+        else:
+            out.append("not in an urban regeneration area (ARU) on DGT's register — some towns are missing "
+                       "there, so ask the câmara")
     r = found.get("fr_risks")
     if r:
         bits = []

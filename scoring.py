@@ -848,8 +848,12 @@ def _surroundings(item: dict, reasons: list[str]) -> None:
     """What official maps and statistics say about the place (surroundings.py,
     crime.py): shown, not scored."""
     import crime
+    import property_tax
     import surroundings
     reasons.extend(surroundings.notes(item))
+    tax = property_tax.note(item)
+    if tax:
+        reasons.append(tax)
     found = crime.note(item)
     if found:
         reasons.append(found)
@@ -3476,7 +3480,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     _sale_history(item, reasons)
     import holiday_lets
     # Shown, not scored: demand and competition alike.
-    for lets in (holiday_lets.note(item), holiday_lets.region_note(item)):
+    for lets in (holiday_lets.note(item), holiday_lets.region_note(item), holiday_lets.dwellings_note(item)):
         if lets:
             reasons.append(lets)
     _surroundings(item, reasons)
