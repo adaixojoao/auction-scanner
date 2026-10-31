@@ -86,6 +86,7 @@ _FACTS = [
     ("Visits", lambda it, r: _first(r, "visitable", "visite")),
     ("Charges", lambda it, r: _first(r, "cargas")),
     ("Main home of the debtor", lambda it, r: _first(r, "vivienda_habitual")),
+    ("Debtor's address", lambda it, r: {True: "this house", False: "elsewhere"}.get(r.get("debtor_lives_here"))),
     ("Land registry ref.", lambda it, r: _first(r, "referencia_catastral")),
     ("Seller", lambda it, r: _first(r, "site_name", "organisatie")),
     ("Their reference", lambda it, r: _first(r, "prop_reference", "field_ul_referencia", "referencia")),
