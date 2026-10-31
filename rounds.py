@@ -112,7 +112,38 @@ def earlier_round(item: dict, idx: dict[str, list[dict]], now: datetime) -> dict
     if not found:
         return None
     ended, other = max(found, key=lambda pair: pair[0])
-    before, now_price = pay(other), pay(item)
-    cheaper = round((before - now_price) / before * 100, 1) if before and now_price and now_price < before else None
+    first_ended, first = min(found, key=lambda pair: pair[0])
+    before, now_price, start = pay(other), pay(item), pay(first)
+
+    def drop(was):
+        return round((was - now_price) / was * 100, 1) if was and now_price and now_price < was else None
+
     return {"id": other["id"], "source": other["source"], "ended": ended.date().isoformat(),
-            "price": before or None, "cheaper_pct": cheaper}
+            "price": before or None, "cheaper_pct": drop(before),
+            # Every earlier round seen, and how far the price came down from the first.
+            "rounds": len(found), "first_ended": first_ended.date().isoformat(),
+            "first_price": start or None, "cheaper_than_first_pct": drop(start)}
+
+
+_CASE_YEAR = re.compile(r"^\s*\d{1,6}/(\d{2})\.\d")           # Portugal: "3841/03.3TBBRR"
+_CASE_YEAR_IT = re.compile(r"^\s*\d{1,6}/((?:19|20)\d{2})\s*$")  # Italy: "42/2024"
+# Spain's court deposit account: court, 0000, procedure type, number, year
+# ("3465 0000 06 0191 23" is a 2023 case).
+_CASE_YEAR_ES = re.compile(r"^\s*\d{4}\s*0000\s*\d{2}\s*\d{4}\s*(\d{2})\s*$")
+
+
+def case_year(raw: dict) -> int | None:
+    """The year a court case was filed, from its number: Portugal's "3841/03.3TBBRR"
+    (2003), Italy's "42/2024", Spain's deposit account "3465 0000 06 0191 23"
+    (2023). None for any other numbering."""
+    now = datetime.now().year
+    for value, pattern in ((raw.get("processo"), _CASE_YEAR), (raw.get("proceduraNumeroAnno"), _CASE_YEAR_IT),
+                           (raw.get("expediente"), _CASE_YEAR_ES)):
+        m = pattern.match(str(value or ""))
+        if not m:
+            continue
+        year = int(m.group(1))
+        if year < 100:
+            year = 2000 + year if year <= now % 100 else 1900 + year
+        return year if 1950 <= year <= now else None
+    return None

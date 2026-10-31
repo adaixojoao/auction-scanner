@@ -838,6 +838,33 @@ def local_price(item: dict) -> tuple[float, str] | None:
                               parish=item.get("freguesia") if country == "PT" else None)
 
 
+# A case this old for its country (court sales on sale, 2026-10-31): Portugal's
+# median case is 16 years old and 20+ is its oldest tenth; Spain's median is 4
+# (10+ is its oldest 14%); Italy's is 2 (10+ is its oldest 11%).
+OLD_CASE_YEARS = {"PT": 20, "ES": 10, "IT": 10}
+
+
+def _sale_history(item: dict, reasons: list[str]) -> None:
+    """Shown, not scored: every earlier round seen, and how old the court case is.
+    Many failed rounds or a decades-old case can be a bargain or a problem house
+    (occupants, a dispute, a share), so it is said and left to the reader."""
+    import rounds
+    er = item.get("earlier_round") or {}
+    if (er.get("rounds") or 0) >= 2:
+        fell = (f", {er['cheaper_than_first_pct']:.0f}% below the first"
+                if (er.get("cheaper_than_first_pct") or 0) >= 5 else "")
+        n = er["rounds"] + 1
+        nth = {2: "2nd", 3: "3rd"}.get(n, f"{n}th")
+        reasons.append(f"{nth} time on sale: {er['rounds']} earlier rounds without a buyer "
+                       f"since {er['first_ended']}{fell}")
+    year = rounds.case_year(_raw(item))
+    now = datetime.now().year
+    old = OLD_CASE_YEARS.get((item.get("country") or "PT").upper())
+    if year and old and now - year >= old:
+        reasons.append(f"court case from {year} ({now - year} years ago) — ask why it has not sold "
+                       "(occupants, a dispute, a share)")
+
+
 def _mention_sold_move(item: dict, reasons: list[str]) -> None:
     """The published sale series moved since its previous figure. Shown only:
     the discount already uses the latest figure, so this does not change the score."""
@@ -2310,6 +2337,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         if (er.get("cheaper_pct") or 0) >= 5:
             s += curve(er["cheaper_pct"], PRICE_DROP_POINTS)
             reasons.insert(1, f"{er['cheaper_pct']:.0f}% cheaper than the last round")
+    _sale_history(item, reasons)
 
     if bid and price and price > 0:
         ratio = bid / price
@@ -2959,6 +2987,7 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
         if (er.get("cheaper_pct") or 0) >= 5:
             s += curve(er["cheaper_pct"], PRICE_DROP_POINTS)
             reasons.insert(1, f"{er['cheaper_pct']:.0f}% cheaper than the last round")
+    _sale_history(item, reasons)
     if bid and price and price > 0:
         ratio = bid / price
         s += curve(ratio, BID_RATIO_POINTS) * w("price")
@@ -3431,6 +3460,12 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append(f"{near['text']}: the local price and rent are the town's — a village there "
                        "usually sells and lets for less, so check prices in the village")
     _mention_sold_move(item, reasons)
+    _sale_history(item, reasons)
+    import holiday_lets
+    # Shown, not scored: demand and competition alike.
+    for lets in (holiday_lets.note(item), holiday_lets.region_note(item)):
+        if lets:
+            reasons.append(lets)
     # A price this far under local sales is not a rent. Drop whatever figure was
     # worked out, including when the comparison was a province average.
     if unbelievable and est:
