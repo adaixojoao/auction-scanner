@@ -533,6 +533,8 @@ HEAVY_WORK = [
     "necesita restauración", "necesita restauracion", "necesita ser restaurad*", "necesita ser reformad*",
     "restauración completa", "restauracion completa", "para restarurar", "para restarura",
     "à rénover", "a renover", "à restaurer", "travaux importants", "gros travaux", "en ruine",
+    # "Maison à rénovée" (Mézières-en-Brenne, 2026-10-31): a misspelt "à rénover", not a done job.
+    "à rénovée", "a renovee",
     "à réhabiliter", "da ristrutturare", "da ristrutturare integralmente",
     # Not bare "rénovation totale": "a fait l'objet d'une rénovation totale" is a done job.
     "nécessite une rénovation*", "rénovation totale à prévoir", "rénovation complète à prévoir",
@@ -586,6 +588,8 @@ SOME_WORK = [
     "necesita rehabilitacion", "para finalizar", "por finalizar",
     "travaux à prévoir", "à rafraîchir", "a rafraichir", "en travaux", "partiellement en travaux",
     "travaux à réaliser", "da rimodernare",
+    # "après rénovation vous apportera le confort": the comfort comes after the works.
+    "après rénovation", "apres renovation", "après travaux", "apres travaux",
     "travaux sont à prévoir", "travaux de rénovation à prévoir", "prévoir des travaux",
     "sera à prévoir", "seront à prévoir", "à refaire", "partiellement rénové*",
     # Imovirtual's state "por renovar"; "partly done" is not done.
@@ -1314,6 +1318,9 @@ def condition(item: dict) -> str:
     return state
 
 
+PHOTO_GOOD_MIN = 2   # photos the model must have seen before its "good" counts
+
+
 def photo_condition(item: dict) -> dict | None:
     """What the photos showed, when the check was sure enough to use."""
     if '"photo_check"' not in (item.get("raw_json") or ""):
@@ -1321,7 +1328,15 @@ def photo_condition(item: dict) -> dict | None:
     seen = _raw(item).get("photo_check") or {}
     if seen.get("shows_house") is not True:        # a barn's state, or an unsaid one, says nothing about the house
         return None
-    if seen.get("condition") in ("good", "some", "heavy") and seen.get("confidence") in ("high", "medium"):
+    if seen.get("confidence") not in ("high", "medium"):
+        return None
+    # One photo is usually the front: it can show damage, not that the inside is
+    # sound. Five of eight single-photo "good" answers on 2026-10-31 were a ruin,
+    # a renovation or a worn block.
+    # A check stored without a count predates the field and is kept.
+    if seen.get("condition") == "good" and seen.get("photos", PHOTO_GOOD_MIN) >= PHOTO_GOOD_MIN:
+        return seen
+    if seen.get("condition") in ("some", "heavy"):
         return seen
     return None
 

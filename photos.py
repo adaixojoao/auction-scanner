@@ -79,6 +79,8 @@ Judge the building's condition from the photos AND the description:
 - "unknown": the photos do not show the building (a map, a document, a logo, only land).
 Sellers photograph the best parts: when the description admits damage the photos
 do not show ("tejado caído", "telhado em ruína", "needs renovation"), use the worse.
+Use only what the description actually says. If it says nothing about the state,
+judge from the photos alone and do not write that the description says it.
 "shows_house": true only if at least one photo shows the dwelling itself (outside or inside);
 false when they show only land, a barn, a granary, a shed, ruins of outbuildings or the view.
 Give a one-line reason in English in "notes"."""
