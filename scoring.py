@@ -845,9 +845,14 @@ OLD_CASE_YEARS = {"PT": 20, "ES": 10, "IT": 10}
 
 
 def _surroundings(item: dict, reasons: list[str]) -> None:
-    """What official maps say about the place (surroundings.py): shown, not scored."""
+    """What official maps and statistics say about the place (surroundings.py,
+    crime.py): shown, not scored."""
+    import crime
     import surroundings
     reasons.extend(surroundings.notes(item))
+    found = crime.note(item)
+    if found:
+        reasons.append(found)
 
 
 def _sale_history(item: dict, reasons: list[str]) -> None:
