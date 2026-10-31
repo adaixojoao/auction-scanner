@@ -844,6 +844,12 @@ def local_price(item: dict) -> tuple[float, str] | None:
 OLD_CASE_YEARS = {"PT": 20, "ES": 10, "IT": 10}
 
 
+def _surroundings(item: dict, reasons: list[str]) -> None:
+    """What official maps say about the place (surroundings.py): shown, not scored."""
+    import surroundings
+    reasons.extend(surroundings.notes(item))
+
+
 def _sale_history(item: dict, reasons: list[str]) -> None:
     """Shown, not scored: every earlier round seen, and how old the court case is.
     Many failed rounds or a decades-old case can be a bargain or a problem house
@@ -2448,6 +2454,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if caps:
         s = min(s, *caps)
     s += _population_outlook_points(item, reasons)
+    _surroundings(item, reasons)
     return s, reasons
 
 
@@ -3045,6 +3052,7 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
     if caps:
         s = min(s, *caps)
     s += _population_outlook_points(item, reasons)
+    _surroundings(item, reasons)
     return s, reasons
 
 
@@ -3466,6 +3474,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     for lets in (holiday_lets.note(item), holiday_lets.region_note(item)):
         if lets:
             reasons.append(lets)
+    _surroundings(item, reasons)
     # A price this far under local sales is not a rent. Drop whatever figure was
     # worked out, including when the comparison was a province average.
     if unbelievable and est:
