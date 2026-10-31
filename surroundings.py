@@ -19,7 +19,11 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
 - French risks: clay shrink-swell (RGA), radon class and seismic zone of the
   commune, mines and cavities within 500 m (BRGM / Géorisques);
 - sold prices: France only, the houses or flats sold in the commune in the
-  last two years (DVF, the tax office's register of sales).
+  last two years (DVF, the tax office's register of sales);
+- energy ratings: France only, the energy performance certificates (DPE,
+  ADEME) issued at the address since July 2021. One whose floor area matches
+  the listing's is probably this home's. A G home cannot be let on a new lease
+  since 2025, F from 2028 and E from 2034 (loi Climat et résilience).
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -54,6 +58,10 @@ QUAKE = "https://efehr-services.ethz.ch/hazard/api/v1/maps"
 FR_COMMUNE = "https://geo.api.gouv.fr/communes"
 FR_PLU = "https://data.geopf.fr/wfs/ows"
 GEORISQUES = "https://www.georisques.gouv.fr/api/v1/"
+DPE = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines"
+DPE_RADIUS_M = 30
+LET_BAN = {"G": "cannot be let on a new lease since 2025", "F": "cannot be let on a new lease from 2028",
+           "E": "cannot be let on a new lease from 2034"}
 DVF = "https://files.data.gouv.fr/geo-dvf/latest/csv/{year}/communes/{dep}/{insee}.csv"
 PT_RESERVES = {
     "RAN": ("https://servicos.dgterritorio.pt/SDISNITWMSSRUP_RAN_PT1/WMService.aspx", "Reserva_Agricola_Nacional",
@@ -216,7 +224,7 @@ def fr_risks(session, lat: float, lon: float, item: dict, building: bool = True)
     insee = commune["insee"]
     radon = (_georisques(session, "radon", {"code_insee": insee}).get("data") or [{}])[0]
     seismic = (_georisques(session, "zonage_sismique", {"code_insee": insee}).get("data") or [{}])[0]
-    out = {"commune": commune["name"], "radon": _int(radon.get("classe_potentiel")),
+    out = {"commune": commune["name"], "insee": insee, "radon": _int(radon.get("classe_potentiel")),
            "seismic_zone": _int(seismic.get("code_zone"))}
     if building:
         latlon = f"{lon},{lat}"
@@ -297,6 +305,32 @@ def fr_sold(session, lat: float, lon: float, item: dict) -> dict | None:
     return found
 
 
+def fr_energy(session, lat: float, lon: float, item: dict) -> dict:
+    """{"certificates": [{"class", "date", "area", "m", "kind"}]}: the DPE issued
+    within DPE_RADIUS_M of the pin, nearest first (no address is kept)."""
+    resp = session.get(DPE, params={
+        "geo_distance": f"{lon},{lat},{DPE_RADIUS_M}", "size": 100,
+        "select": "etiquette_dpe,date_etablissement_dpe,surface_habitable_logement,type_batiment,_geopoint"},
+        timeout=40)
+    resp.raise_for_status()
+    out = []
+    for r in resp.json().get("results") or []:
+        if not r.get("etiquette_dpe"):
+            continue
+        out.append({"class": r["etiquette_dpe"], "date": r.get("date_etablissement_dpe"),
+                    "area": r.get("surface_habitable_logement"), "m": round(r.get("_geo_distance") or 0),
+                    "kind": r.get("type_batiment")})
+    return {"certificates": sorted(out, key=lambda c: c["m"])}
+
+
+def matching_certificate(certificates: list[dict], area: float | None) -> dict | None:
+    """The latest certificate within 15 m whose floor area is within 10% of the listing's."""
+    if not area:
+        return None
+    hits = [c for c in certificates if c["m"] <= 15 and c.get("area") and abs(c["area"] - area) <= area * 0.10]
+    return max(hits, key=lambda c: c.get("date") or "") if hits else None
+
+
 # Source: (function, countries or None for all, pins it needs, kinds it serves)
 SOURCES = {
     "noise": (noise, None, BUILDING_PINS, {"home"}),
@@ -306,6 +340,7 @@ SOURCES = {
     "pt_zoning": (pt_zoning, {"PT"}, BUILDING_PINS, {"home", "land"}),
     "fr_risks": (fr_risks, {"FR"}, None, {"home", "land"}),
     "fr_sold": (fr_sold, {"FR"}, None, {"home"}),
+    "fr_energy": (fr_energy, {"FR"}, BUILDING_PINS, {"home"}),
 }
 
 
@@ -355,6 +390,8 @@ def missing(item: dict) -> list[str]:
         return []
     found = current(item) or {}
     done, failed = found.get("found") or {}, found.get("failed") or {}
+    if isinstance(done.get("fr_risks"), dict) and "insee" not in done["fr_risks"]:
+        done = {k: v for k, v in done.items() if k != "fr_risks"}     # asked before the code was kept
     return [n for n in applicable(item, pos) if n not in done and failed.get(n, 0) < TRIES]
 
 
@@ -476,7 +513,30 @@ def notes(item: dict) -> list[str]:
         if mine:
             line += f"; this one €{mine:,.0f}/m², {(mine / s['median'] - 1) * 100:+.0f}%"
         out.append(line + " (DVF, actual sale prices)")
+    e = found.get("fr_energy")
+    if e is not None:
+        line = _energy_note(e.get("certificates") or [], item)
+        if line:
+            out.append(line)
     return out
+
+
+def _energy_note(certs: list[dict], item: dict) -> str | None:
+    try:
+        area = float(item.get("area_m2") or 0) or None
+    except (TypeError, ValueError):
+        area = None
+    mine = matching_certificate(certs, area)
+    if mine:
+        ban = f" — {LET_BAN[mine['class']]} without renovating" if mine["class"] in LET_BAN else ""
+        return (f"energy rating {mine['class']}: a certificate of {mine['date'][:7]} for {mine['area']:.0f} m² at this "
+                f"address, probably this home{ban} (DPE, ADEME)")
+    if not certs:
+        return None
+    classes = sorted(c["class"] for c in certs)
+    poor = sum(c in ("F", "G") for c in classes)
+    return (f"{len(certs)} energy certificates at or next to this address: {classes[0]} to {classes[-1]}, "
+            f"{poor} of them F or G (rentals restricted from 2025–2028); none matches this floor area (DPE, ADEME)")
 
 
 def _eur_m2(item: dict) -> float | None:

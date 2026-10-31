@@ -14,7 +14,8 @@ def _item(precision="sale", country="FR", found=None, title="Maison à Vierzon",
 
 
 def test_point_checks_need_the_building_and_the_rest_take_any_pin():
-    assert surroundings.missing(_item("sale")) == ["noise", "quake", "amenities", "fr_zoning", "fr_risks", "fr_sold"]
+    assert surroundings.missing(_item("sale")) == ["noise", "quake", "amenities", "fr_zoning", "fr_risks", "fr_sold",
+                                                   "fr_energy"]
     assert surroundings.missing(_item("village")) == ["quake", "amenities", "fr_risks", "fr_sold"]
     assert surroundings.missing(_item("municipality")) == ["quake", "fr_risks", "fr_sold"]
     assert surroundings.missing(_item("sale", country="IT", title="Casa a Napoli")) == ["noise", "quake", "amenities"]
