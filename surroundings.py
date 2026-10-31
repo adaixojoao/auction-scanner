@@ -35,7 +35,14 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
 - energy ratings: France only, the energy performance certificates (DPE,
   ADEME) issued at the address since July 2021. One whose floor area matches
   the listing's is probably this home's. A G home cannot be let on a new lease
-  since 2025, F from 2028 and E from 2034 (loi Climat et résilience).
+  since 2025, F from 2028 and E from 2034 (loi Climat et résilience);
+- heritage: France, the protections the planning servitudes register (IGN
+  Géoportail de l'urbanisme, AC1 / AC2 / AC4): a monument historique, its
+  protected surroundings (500 m or the perimeter set for it), a listed site, a
+  site patrimonial remarquable. Works there need the Architecte des Bâtiments
+  de France's agreement. Portugal, DGPC's atlas of classified heritage
+  (mainland): a classified building or ensemble and its protection zones
+  (ZGP, ZEP), where works need the heritage office's opinion.
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -88,6 +95,10 @@ DE_BORIS_LAYERS = {"20": "building land", "17": "building land (flats)", "5": "b
                    "2": "other land", "14": "commercial land", "8": "farmland", "11": "forest"}
 DE_LAND_USE = {"W": "residential", "MI": "mixed", "WS": "small-holding", "A": "arable", "GR": "grassland",
                "F": "forest", "G": "commercial", "M": "mixed"}
+FR_HERITAGE = {"ac1": "monument", "ac2": "site", "ac4": "spr"}
+PT_HERITAGE = ("https://geo.patrimoniocultural.gov.pt/arcgis/rest/services/PatrimonioClassificadoEmViasClassificacao/"
+               "Atlas_Patrimonio_Servicos/MapServer/identify")
+PT_HERITAGE_LAYERS = {"PatrimonioImovel": "inside", "ZEP": "zep", "ZGP": "zgp", "Restricoes": "zep"}
 PT_ARU = ("https://servicos.dgterritorio.pt/SDISNITWMSARU/WMService.aspx", "ARU")
 AMENITIES = {               # name: Overpass filters
     "supermarket": ('["shop"~"^(supermarket|convenience)$"]',),
@@ -359,6 +370,77 @@ def pt_zoning(session, lat: float, lon: float, item: dict) -> dict:
     return {key: _pt_reserve(session, url, layer, lat, lon) for key, (url, layer, _) in PT_RESERVES.items()}
 
 
+
+def _unmangle(text: str | None) -> str:
+    """Some names come UTF-8 encoded twice ("HÃ´tel"): undone where it was."""
+    text = (text or "").strip()
+    if "Ã" in text or "Â" in text:
+        try:
+            return text.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    return text
+
+
+def fr_heritage(session, lat: float, lon: float, item: dict) -> dict:
+    d = 0.00005
+    resp = session.get(FR_PLU, params={
+        "SERVICE": "WFS", "VERSION": "2.0.0", "REQUEST": "GetFeature", "TYPENAMES": "wfs_sup:assiette_sup_s",
+        "OUTPUTFORMAT": "application/json", "COUNT": 1000, "propertyName": "suptype,typeass,nomsuplitt",
+        "BBOX": f"{lat - d},{lon - d},{lat + d},{lon + d},urn:ogc:def:crs:EPSG::4326"}, timeout=60)
+    resp.raise_for_status()
+    return fr_protections(json.loads(resp.content.decode("utf-8", "replace")).get("features") or [])
+
+
+def fr_protections(features: list[dict]) -> dict:
+    """{"monument": [names the point is on], "near": [monuments whose surroundings it is in],
+    "site": [listed sites], "spr": [sites patrimoniaux remarquables]}."""
+    out: dict[str, list[str]] = {"monument": [], "near": [], "site": [], "spr": []}
+    for f in features:
+        p = f.get("properties") or {}
+        kind = FR_HERITAGE.get((p.get("suptype") or "").lower())
+        if not kind:
+            continue
+        name = _unmangle(p.get("nomsuplitt"))
+        if kind == "monument":
+            kind = "monument" if "monument" in (p.get("typeass") or "").lower() else "near"
+        if name not in out[kind]:
+            out[kind].append(name)
+    out["near"] = [n for n in out["near"] if n not in out["monument"]]
+    return out
+
+
+def pt_heritage(session, lat: float, lon: float, item: dict) -> dict:
+    d = 0.002
+    resp = session.get(PT_HERITAGE, params={
+        "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "sr": 4326, "layers": "all",
+        "tolerance": 1, "mapExtent": f"{lon - d},{lat - d},{lon + d},{lat + d}", "imageDisplay": "400,400,96",
+        "returnGeometry": "false", "f": "json"}, timeout=60)
+    resp.raise_for_status()
+    return pt_protections(json.loads(resp.content.decode("utf-8", "replace")).get("results") or [])
+
+
+def pt_protections(results: list[dict]) -> dict:
+    """{"inside": [[name, category, status]], "zep": [names], "zgp": [names]}: the classified
+    buildings or ensembles the point is in, and whose protection zones it is in."""
+    out: dict[str, list] = {"inside": [], "zep": [], "zgp": []}
+    for r in results:
+        key = PT_HERITAGE_LAYERS.get(r.get("layerName"))
+        a = r.get("attributes") or {}
+        name = (a.get("Designacao") or "").strip()
+        if not key or not name:
+            continue
+        if key == "inside":
+            if name not in [e[0] for e in out["inside"]]:
+                out["inside"].append([name, (a.get("Categoria") or "").strip(), (a.get("Situacao_A") or "").strip()])
+        elif name not in out[key]:
+            out[key].append(name)
+    inside = {e[0] for e in out["inside"]}
+    out["zep"] = [n for n in out["zep"] if n not in inside]
+    out["zgp"] = [n for n in out["zgp"] if n not in inside and n not in out["zep"]]
+    return out
+
+
 def _georisques(session, path: str, params: dict) -> dict:
     resp = session.get(GEORISQUES + path, params=params, timeout=40)
     resp.raise_for_status()
@@ -492,6 +574,8 @@ SOURCES = {
     "fr_sold": (fr_sold, {"FR"}, None, {"home"}),
     "fr_energy": (fr_energy, {"FR"}, BUILDING_PINS, {"home"}),
     "de_land": (de_land, {"DE"}, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "fr_heritage": (fr_heritage, {"FR"}, BUILDING_PINS, {"home", "land"}),
+    "pt_heritage": (pt_heritage, {"PT"}, BUILDING_PINS, {"home", "land"}),
 }
 
 
@@ -595,6 +679,48 @@ def _metres(m: int) -> str:
     return f"{m} m" if m < 1000 else f"{m / 1000:.1f} km"
 
 
+
+def _names(names: list[str], most: int = 2) -> str:
+    shown = ", ".join(names[:most])
+    return shown + (f" and {len(names) - most} more" if len(names) > most else "")
+
+
+def _heritage_notes(found: dict) -> list[str]:
+    out = []
+    h = found.get("fr_heritage")
+    if h:
+        abf = "outside works need the Architecte des Bâtiments de France's agreement"
+        if h.get("monument"):
+            out.append(f"on a monument historique ({_names(h['monument'])}): every work needs the state's "
+                       "permission (Géoportail de l'urbanisme, AC1)")
+        if h.get("spr"):
+            out.append(f"in a site patrimonial remarquable ({_names(h['spr'])}): {abf}, under its own rules "
+                       "(Géoportail de l'urbanisme, AC4)")
+        near = h.get("near") or []
+        if near:
+            what = "a monument historique" if len(near) == 1 else f"{len(near)} monuments historiques"
+            out.append(f"within the protected surroundings of {what} ({_names(near)}): {abf} "
+                       "(Géoportail de l'urbanisme, AC1)")
+        if h.get("site"):
+            out.append(f"in a listed site ({_names(h['site'])}): works must be declared, and demolition needs "
+                       "the ABF's agreement (Géoportail de l'urbanisme, AC2)")
+        if not any(h.get(k) for k in ("monument", "near", "site", "spr")):
+            out.append("no heritage protection registered at the point (Géoportail de l'urbanisme)")
+    h = found.get("pt_heritage")
+    if h:
+        for name, category, status in h.get("inside") or []:
+            what = category.split(" - ", 1)[-1] if category else "classified heritage"
+            pending = " (being classified)" if status and "vias" in status.lower() else ""
+            out.append(f"inside {name}, {what}{pending}: works need the heritage office's approval (DGPC atlas)")
+        zones = (h.get("zep") or []) + (h.get("zgp") or [])
+        if zones:
+            out.append(f"in the protection zone of {_names(zones)}: works need the heritage office's opinion "
+                       "(DGPC atlas)")
+        if not h.get("inside") and not zones:
+            out.append("no classified heritage or protection zone at the point (DGPC atlas, mainland)")
+    return out
+
+
 def notes(item: dict) -> list[str]:
     """One line per source that found something, with its source named."""
     found = (current(item) or {}).get("found") or {}
@@ -667,6 +793,7 @@ def notes(item: dict) -> list[str]:
         else:
             out.append("not in an urban regeneration area (ARU) on DGT's register — some towns are missing "
                        "there, so ask the câmara")
+    out.extend(_heritage_notes(found))
     r = found.get("fr_risks")
     if r:
         bits = []
