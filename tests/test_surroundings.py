@@ -19,7 +19,7 @@ def test_point_checks_need_the_building_and_the_rest_take_any_pin():
     assert surroundings.missing(_item("village")) == ["quake", "amenities", "fr_risks", "fr_sold"]
     assert surroundings.missing(_item("municipality")) == ["quake", "fr_risks", "fr_sold"]
     assert surroundings.missing(_item("sale", country="IT", title="Casa a Napoli")) == ["noise", "quake", "amenities",
-                                                                                           "power"]
+                                                                                           "power", "it_hazard"]
     land = _item("sale", country="PT", title="Terreno rústico em Pinhel")
     assert surroundings.missing(land) == ["quake", "power", "pt_zoning", "pt_heritage"]
 
