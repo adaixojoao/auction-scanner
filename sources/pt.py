@@ -564,8 +564,22 @@ def _citius_area(text: str | None) -> float | None:
     """The floor a Citius notice gives, not its land or footprint: "área total do
     terreno de 150m2 área de implantação do edifício de 47,05m2 área bruta de
     construção de 85,45m2" → 85.45 (2026-10-27: stored as 150, the land). A plot,
-    with no floor, keeps its land area."""
-    return find_floor_area(text) or find_area(text)
+    with no floor, keeps its land area.
+
+    "Casa de rés-do-chão e andar, com a área coberta de 40m2" is the ground the
+    house covers, on two storeys: 80 m² of floor (Afurada, 2026-10-31: stored as 40)."""
+    floor = find_floor_area(text)
+    if floor and _TWO_STOREYS.search(normalize(text or "")):
+        m = re.search(r"area\s+coberta\s+(?:de\s+|com\s+)?(\d{1,4}(?:[.,]\d{1,2})?)\s*m", normalize(text or ""))
+        if m and float(m.group(1).replace(",", ".")) == floor:
+            return floor * 2
+    return floor or find_area(text)
+
+
+# A house on a ground floor and one storey, not a flat on a "1.º andar".
+_TWO_STOREYS = re.compile(
+    r"\b(?:casa|moradia|edificio|predio)\b[^.;]{0,40}?\b(?:r/c|res[- ]do[- ]chao)\s+e\s+"
+    r"(?:1\.?\s*[ºo°]\s*|primeiro\s+)?andar\b")
 
 
 # "S. João" and "R. das Flores" use a period that is not the end of the phrase.
@@ -770,8 +784,9 @@ def citius_listing(f: dict, eid: str) -> dict:
 CITIUS_DETAILS = "https://www.citius.mj.pt/portal/consultas/ConsultasVenda.aspx/GetHtmlDetails"
 CITIUS_DETAILS_PER_SCAN = 150
 # Bumped when the details pass keeps more (2: Registo, Art. Matricial; 3: a later
-# scan no longer drops the full description): sales read by an older pass are read again.
-CITIUS_DETAIL_VERSION = 3
+# scan no longer drops the full description; 4: whether a debtor lives in it):
+# sales read by an older pass are read again.
+CITIUS_DETAIL_VERSION = 4
 _CITIUS_NEXT = "ctl00$ContentPlaceHolder1$Pager1$btnNextPage"
 
 
@@ -805,6 +820,42 @@ def citius_detail_text(html: str) -> str:
     people whose property is sold and their addresses)."""
     text = re.sub(r"\s+", " ", BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True))
     return text.split("Intervenientes")[0].strip()
+
+
+_CITIUS_DEBTOR = re.compile(r"Interveniente:\s*Executad[oa]\s+Nome:.*?Morada:\s*(.+?)(?=\s+Interveniente:|$)")
+
+
+def _street_and_number(address: str) -> tuple[str, str] | None:
+    """"Rua Vasco da Gama, 6, 4400-000 Vila Nova de Gaia" → ("rua vasco da gama", "6");
+    "Urbanização Quinta Nova, Lote 136 - 2ª Esq.ª, …" → ("urbanizacao quinta nova", "136")."""
+    parts = [p.strip() for p in address.split(",")]
+    if len(parts) < 2:
+        return None
+    number = re.match(r"(?:lote|n\.?[ºo°]?s?)?\s*(\d+)\b", normalize(parts[1]))
+    street = normalize(parts[0]).strip(" .")
+    if not number or len(street) < 6:
+        return None
+    return street, number.group(1)
+
+
+def citius_debtor_lives_here(html: str, description: str | None) -> bool | None:
+    """Whether a debtor's address in the "ver mais" Intervenientes is the house
+    on sale: Afurada's "Rua Vasco da Gama, nºs 6 e 10" was sold with both debtors
+    at "Rua Vasco da Gama, 6" (2026-10-31), so someone lives in it. Only this
+    answer is kept, never the names or addresses. None: no debtor address read."""
+    text = re.sub(r"\s+", " ", BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True))
+    addresses = _CITIUS_DEBTOR.findall(text.split("Intervenientes", 1)[-1]) if "Intervenientes" in text else []
+    places = [p for p in map(_street_and_number, addresses) if p]
+    if not places:
+        return None
+    desc = normalize(description or "")
+    for street, number in places:
+        for m in re.finditer(re.escape(street), desc):
+            # The numbers right after the street: "nºs 6 e 10", "n.º 6", "lote 131".
+            near = desc[m.end():m.end() + 30]
+            if number in re.findall(r"\d+", re.split(r"[;]|\bfreguesia\b", near)[0]):
+                return True
+    return False
 
 
 def citius_full_description(detail: str) -> str | None:
@@ -847,7 +898,8 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
             resp = session.post(CITIUS_DETAILS, data="{htmlId:%s}" % int(raw["html_id"]),
                                 headers={"Content-Type": "application/json; charset=utf-8"})
             resp.raise_for_status()
-            detail = citius_detail_text(resp.json().get("d"))
+            html = resp.json().get("d")
+            detail = citius_detail_text(html)
         except Exception as e:
             LOG.debug(f"Citius details {listing_id}: {e}")      # tried again next scan
             continue
@@ -860,6 +912,9 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
                 raw[key] = re.sub(r"<[^>]+>", "", m.group(1)).strip()[:120]
         sets = {}
         district = concelho = freguesia = None
+        lives = citius_debtor_lives_here(html, full)
+        if lives is not None:
+            raw["debtor_lives_here"] = lives
         if full:
             raw["descricao_completa"] = full[:3000]
             district, concelho, freguesia = _citius_extract_location(full)

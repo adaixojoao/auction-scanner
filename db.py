@@ -1212,6 +1212,16 @@ def _phrases(text: str | None) -> set[str]:
     return {" ".join(words[i:i + 3]) for i in range(len(words) - 2)}
 
 
+def _match_kind(item: dict) -> str | None:
+    """The kind a possible match must share: scoring.property_kind(), with a
+    mobile home or a caravan apart from the houses it is filed with."""
+    import scoring
+    full = f"{item.get('title') or ''} {item.get('description') or ''}"
+    if scoring.has_term(full, scoring.NOT_A_BUILDING, negations=False):
+        return "not_a_building"
+    return scoring.property_kind(item)
+
+
 def _same_house_elsewhere(a, b) -> bool:
     if not ((a["area_m2"] or 0) >= 40 and (b["area_m2"] or 0) >= 40):   # a size is needed to match
         return False
@@ -1343,6 +1353,19 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
     for el, citius in linked_pairs(db).items():
         dup_of[el] = citius
         possible.pop(el, None)
+
+    # A hint never joins two different kinds: Afurada's court house (€30,000,
+    # 40 m²) was hinted to a mobile home at €29,950, 36 m² (2026-10-31).
+    by_id = {r["id"]: r for r in rows}
+    kinds: dict[str, str | None] = {}
+
+    def kind(lid: str) -> str | None:
+        if lid not in kinds:
+            kinds[lid] = _match_kind(dict(by_id[lid])) if lid in by_id else None
+        return kinds[lid]
+
+    possible = {lid: match for lid, match in possible.items()
+                if not (kind(lid) and kind(match) and kind(lid) != kind(match))}
 
     db.execute("UPDATE listings SET duplicate_of = NULL WHERE duplicate_of IS NOT NULL")
     db.execute("UPDATE listings SET possible_match = NULL WHERE possible_match IS NOT NULL")

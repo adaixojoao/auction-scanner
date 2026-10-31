@@ -1230,8 +1230,24 @@ def _occupation(item: dict) -> str | None:
         stated = possession(raw.get("situacion_posesoria")) or auction_occupation(raw.get("disponibilita"))
     if stated:
         return stated
-    if _debtor_main_home(item):
+    if _debtor_main_home(item) or _debtor_lives_here(item):
         return "occupied"
+    return None
+
+
+def _debtor_lives_here(item: dict) -> bool:
+    """A Portuguese court sale whose debtor's address is the house on sale
+    (sources.pt.citius_debtor_lives_here)."""
+    return _raw(item).get("debtor_lives_here") is True
+
+
+def _main_home_note(item: dict) -> str | None:
+    if _debtor_main_home(item):
+        return ("the court marks this as the debtor's main home — normally still lived in, "
+                "and a main home has stricter bid rules (check the notice)")
+    if _debtor_lives_here(item):
+        return ("the debtor's address in the court record is this house — someone lives in it, "
+                "and getting the keys goes through the court")
     return None
 
 
@@ -2219,9 +2235,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append("mainland Portugal")
 
     occupation = _occupation(item)   # read from the sale's detail page (ES, FR)
-    if _debtor_main_home(item):
-        reasons.append("the court marks this as the debtor's main home — normally still lived in, "
-                       "and a main home has stricter bid rules (check the notice)")
+    note = _main_home_note(item)
+    if note:
+        reasons.append(note)
     if occupation == "occupied" or (occupation is None and has_term(full, OCCUPANCY_PATTERNS)):
         s -= 25
         reasons.append("occupied/tenanted")
@@ -3308,6 +3324,11 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if item.get("price_unusable"):
         caps.append(NO_PRICE_CAP)
         reasons.append(item["price_unusable"])
+    elif not pay:
+        # Sacavém's court flat (2026-10-31) had no base value and still read as a
+        # plain 55 with no word on why: no return can be worked out from nothing.
+        caps.append(NO_PRICE_CAP)
+        reasons.append("no price published — no return can be worked out until there is a figure")
     _doubts(item, kind, pay, area, full, reasons, caps)
     if item.get("unlocated"):
         caps.append(UNCHECKED_CAP)
@@ -3381,9 +3402,9 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         est["rent"] = None
     rent = (est or {}).get("rent")
     state = condition(item)
-    if _debtor_main_home(item):
-        reasons.append("the court marks this as the debtor's main home — normally still lived in, "
-                       "and a main home has stricter bid rules (check the notice)")
+    note = _main_home_note(item)
+    if note:
+        reasons.append(note)
     occupied = _occupied(item, full)
     if rent and state == "heavy":
         reasons.append("the rent is not counted — it needs a full rebuild before it can be let")
