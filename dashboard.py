@@ -1528,12 +1528,23 @@ def _sale_label(item: dict, raw: dict) -> str:
 def _contact(item: dict, raw: dict) -> dict:
     """Who handles the sale, when the detail page said: agente de execução (PT),
     the court or agency (ES), the seller's lawyer (FR)."""
+    from courts import court_email
+    court = court_email({**item, "raw_json": raw}) if item.get("source") == "citius" else None
     for role, keys in (("Agente de execução", ("agente_nome", "agente_email", "agente_contacto")),
                        ("Court / authority", ("autoridad", "autoridad_email", "autoridad_telefono")),
                        ("Seller's lawyer", ("avocat_nom", "avocat_email", "avocat_tel"))):
         name, email, phone = (raw.get(k) or "" for k in keys)
         if name or email or phone:
-            return {"role": role, "name": name, "email": email, "phone": phone}
+            if role == "Agente de execução" and raw.get("agente_papel"):
+                role = raw["agente_papel"]          # a Citius "Encarregado da Venda"
+            found = {"role": role, "name": name, "email": email, "phone": phone}
+            if keys[0] == "agente_nome" and raw.get("agente_morada"):
+                found["address"] = raw["agente_morada"]
+            if court and court != email:
+                found["court_email"] = court
+            return found
+    if court:
+        return {"role": "Court", "name": raw.get("tribunal") or "", "email": court, "phone": ""}
     return {}
 
 

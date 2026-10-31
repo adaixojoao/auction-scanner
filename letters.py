@@ -1134,7 +1134,9 @@ def build_letter(item: dict, bid: str, bid_text: str | None, proponente: dict,
     elif ltype.key == "fr_info":
         to_email = raw.get("avocat_email") or ""
     else:
-        to_email = raw.get("agente_email") or raw.get("autoridad_email") or ""
+        from courts import court_email
+        to_email = (raw.get("agente_email") or raw.get("autoridad_email")
+                    or (court_email({"raw_json": raw}) if item.get("source") == "citius" else None) or "")
     return Letter(
         country=country,
         sender=sender,

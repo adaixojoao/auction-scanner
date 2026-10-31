@@ -198,7 +198,9 @@ function renderDetail() {
     ${c.description ? `<p class="small muted" style="margin-top:10px">${AS.esc(c.description)}</p>` : ""}
     ${k.role ? `<p class="small" style="margin-top:10px"><b>${AS.esc(k.role)}:</b> ${AS.esc(k.name || "")}
        ${k.phone ? ` · <a href="tel:${AS.esc(k.phone)}">${AS.esc(k.phone)}</a>` : ""}
-       ${k.email ? ` · <a href="mailto:${AS.esc(k.email)}">${AS.esc(k.email)}</a>` : ""}</p>` : ""}
+       ${k.email ? ` · <a href="mailto:${AS.esc(k.email)}">${AS.esc(k.email)}</a>` : ""}
+       ${k.address ? ` · ${AS.esc(k.address)}` : ""}
+       ${k.court_email ? `<br><b>Court:</b> <a href="mailto:${AS.esc(k.court_email)}">${AS.esc(k.court_email)}</a>` : ""}</p>` : ""}
     ${c.visit ? `<p class="small" style="margin-top:6px"><b>Visits:</b> ${AS.esc(c.visit)}</p>` : ""}
     <div class="tags" style="margin-top:10px">${(c.reasons || []).map(r => `<span class="tag">${AS.esc(r)}</span>`).join("")}</div>
     ${loc.warn}${loc.kept}
