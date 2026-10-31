@@ -612,7 +612,7 @@ def _soil_note(s: dict | None) -> list[str]:
         return []
     out = []
     if s.get("known_n"):
-        out.append(f"a site with known soil pollution within 300 m"
+        out.append("a site with known soil pollution within 300 m"
                    + (f" ({_names(s['known'])})" if s.get("known") else "") + " (Géorisques, BASOL/SIS)")
     if s.get("former"):
         n = len(s["former"])
