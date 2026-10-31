@@ -115,6 +115,29 @@ OCCUPANCY_PATTERNS = [
     "contrato de arrendamento", "contratos de arrendamento", "arrendamento em vigor",
     # Servihabitat's card: no keys means "sin posesión" in 14 of 15 pages read.
     "llaves no disponibles",
+    # German and Austrian court valuations ("zum Wertermittlungsstichtag vermietet").
+    "vermietet", "mieter", "mieterin", "mietverhältnis", "mietverhaeltnis",
+]
+
+# The debtor still lives in it, in the notice's own words. Such a sale is
+# occupied: the keys come through the court, after the sale, and can take months.
+DEBTOR_HOME_PATTERNS = [
+    "ocupado pelo executado", "ocupada pelo executado", "ocupado pelos executados",
+    "ocupada pelos executados", "ocupado pela executada", "ocupada pela executada",
+    "habitação própria permanente do executado", "habitação própria permanente dos executados",
+    "residência do executado", "reside o executado", "residem os executados",
+    "vivienda habitual de los demandados", "vivienda habitual del demandado",
+    "vivienda habitual del deudor", "vivienda habitual del ejecutado", "vivienda habitual del concursado",
+    "ocupada por el deudor", "ocupada por los deudores", "ocupada por el ejecutado",
+    "occupato dal debitore", "occupato dall'esecutato", "occupato dall’esecutato",
+    "occupato dagli esecutati", "occupata dal debitore", "occupata dall'esecutato",
+    "abitazione principale del debitore",
+    "occupé par le saisi", "occupé par la partie saisie", "occupé par le débiteur",
+    "occupé par les propriétaires", "occupé par son propriétaire", "occupée par le saisi",
+    "occupée par la partie saisie", "occupée par les propriétaires",
+    "vom schuldner bewohnt", "von der schuldnerin bewohnt", "vom eigentümer bewohnt",
+    "von der eigentümerin bewohnt", "eigengenutzt", "selbstgenutzt", "selbst genutzt",
+    "wohnung der eigentümerin", "wohnung des eigentümers", "von der verpflichteten partei bewohnt",
 ]
 
 VACANT_PATTERNS = [
@@ -122,6 +145,7 @@ VACANT_PATTERNS = [
     "livre de pessoas", "livre de ocupantes", "libre de ocupantes",
     "vacant", "libre d'occupation", "leegstaand", "libre de toute occupation",
     "vide de tout occupant", "inoccupé", "inoccupée", "sin ocupantes",
+    "leer stehend", "leerstehend", "unbewohnt", "geräumt",
 ]
 
 ACCESS_PATTERNS = [
@@ -1236,18 +1260,29 @@ def _occupation(item: dict) -> str | None:
 
 
 def _debtor_lives_here(item: dict) -> bool:
-    """A Portuguese court sale whose debtor's address is the house on sale
-    (sources.pt.citius_debtor_lives_here)."""
-    return _raw(item).get("debtor_lives_here") is True
+    """The debtor still lives in it: a Citius sale whose debtor's address is the
+    house on sale (sources.pt.citius_debtor_lives_here), or a notice anywhere
+    that says so (DEBTOR_HOME_PATTERNS)."""
+    if _raw(item).get("debtor_lives_here") is True:
+        return True
+    # A form field answered no is not the phrase: "Vivienda habitual del ejecutado: No".
+    text = _FIELD_ANSWERED_NO.sub(" ", f"{item.get('title') or ''} {item.get('description') or ''}")
+    return bool(has_term(text, DEBTOR_HOME_PATTERNS, negations=False))
+
+
+_FIELD_ANSWERED_NO = re.compile(r"vivienda\s+habitual(?:\s+del?\s+\w+)?\s*:\s*no\b", re.I)
 
 
 def _main_home_note(item: dict) -> str | None:
     if _debtor_main_home(item):
         return ("the court marks this as the debtor's main home — normally still lived in, "
                 "and a main home has stricter bid rules (check the notice)")
-    if _debtor_lives_here(item):
+    if _raw(item).get("debtor_lives_here") is True:
         return ("the debtor's address in the court record is this house — someone lives in it, "
                 "and getting the keys goes through the court")
+    if _debtor_lives_here(item):
+        return ("the notice says the debtor still lives in it — getting the keys goes through "
+                "the court, after the sale")
     return None
 
 

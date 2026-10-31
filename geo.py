@@ -102,8 +102,18 @@ def stale_lookup(item: dict, geo: dict) -> bool:
 
 
 _CONCELHO = re.compile(r"\bconcelho\s+(?:de|do|da)\s+([A-ZÀ-Ú][^,.;:()]{2,40})", re.I)
-_CONSERVATORIA_TOWN = re.compile(r"Conservat[óo]ria\s+(?:do\s+)?(?:Registo\s+Predial\s+)?(?:de|do|da)\s+"
-                                 r"([A-ZÀ-Ú][^,.;:()]{2,40}?)\s+(?:sob|com|n\.?º|$)", re.I)
+# The registry office is the municipality's: "Conservatória do Registo Predial
+# de Penacova", "conservatória de Registo Predial de Nordeste", "C.R.P do
+# Barreiro", "C. Registo Predial de Ovar", "1ªConservatória Predial da Amadora".
+_CONSERVATORIA_TOWN = re.compile(
+    r"(?:Conservat[óo]ria|\bC\.\s?R\.\s?P\b\.?|\bCRP\b|\bC\.\s?Registo\b)\s*(?:d[eo]\s+)?(?:Registo\s+)?(?:Predial\s+)?"
+    r"(?:de|do|da)\s+([A-ZÀ-Ú][^,.;:()]{2,40}?)\s*(?:\bsob|\bcom\b|\bna\b|\bn\.?\s?º|\s-\s|[,.;:(]|$)", re.I)
+# So is the tax office: "2º Serviço de Finanças da Amadora", "Finanças de Gouveia".
+_FINANCAS_TOWN = re.compile(
+    r"\bFinan[çc]as\s+(?:de|do|da)\s+([A-ZÀ-Ú][^,.;:()]{2,40}?)\s*(?:\bsob|\bcom\b|\s-|[,.;:(]|$)", re.I)
+# "sito em Redondelha, Vimioso, com…", "na Rua do Moinho, nº 14 em Trigaches - Beja":
+# the place after "sito", in pieces, the municipality usually last.
+_SITO = re.compile(r"\b(?:sit[oa]s?|situad[oa]s?)\s+(?:em|na|no|nas|nos)\s+([^.;:()]{2,140})", re.I)
 _POSTCODE_TOWN = re.compile(r"\b\d{4}\s*-\s*\d{3}\s+([A-ZÀ-Ú][^,.;:()\d]{2,40})")
 _FREGUESIA = re.compile(r"\bfreguesia\s+(?:de|do|da|dos|das)\s+([A-ZÀ-Ú][^,.;:()]{2,50})", re.I)
 # Citius land: "localização : Rojanda, Freixedas, Pinhel" — the places, smallest first.
@@ -167,7 +177,7 @@ def municipality(item: dict) -> str | None:
     town = _real_municipality(item.get("concelho"), country)
     if not town and country == "PT":
         text = _address_text(item)
-        for pattern in (_CONCELHO, _CONSERVATORIA_TOWN, _POSTCODE_TOWN):
+        for pattern in (_CONCELHO, _CONSERVATORIA_TOWN, _FINANCAS_TOWN, _POSTCODE_TOWN):
             for m in pattern.finditer(text):
                 town = _real_municipality(m.group(1), country)
                 if town:
@@ -175,10 +185,22 @@ def municipality(item: dict) -> str | None:
             if town:
                 break
         for m in ([] if town else _LOCALIZACAO.finditer(text)):
-            for part in reversed(m.group(1).split(",")):
+            # "Trigaches - Beja", "Falagueira- Amadora"; "Albergaria-a-Velha" stays whole.
+            for part in reversed(re.split(r",|\s-\s?|\s?-\s", m.group(1))):
                 words = part.split()                 # "Pinhel ano de inscrição…": the text runs on
                 town = next((t for k in range(1, min(4, len(words)) + 1)
                              if (t := _real_municipality(" ".join(words[:k]), country))), None)
+                if town:
+                    break
+            if town:
+                break
+        import prices
+        # Free text after "sito" is never trusted without the list of the 308.
+        for m in ([] if town or not prices.pt_table() else _SITO.finditer(text)):
+            # Only a whole piece: "situado em Porto Composição…" is a place
+            # called Porto in Oliveira do Bairro, not the city.
+            for part in reversed(re.split(r",|\s-\s?|\s?-\s", m.group(1))):
+                town = _real_municipality(part.strip(), country) if part.strip() else None
                 if town:
                     break
             if town:

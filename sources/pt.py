@@ -784,7 +784,8 @@ def citius_listing(f: dict, eid: str) -> dict:
 CITIUS_DETAILS = "https://www.citius.mj.pt/portal/consultas/ConsultasVenda.aspx/GetHtmlDetails"
 CITIUS_DETAILS_PER_SCAN = 150
 # Bumped when the details pass keeps more (2: Registo, Art. Matricial; 3: a later
-# scan no longer drops the full description; 4: whether a debtor lives in it):
+# scan no longer drops the full description; 4: whether a debtor lives in it,
+# and who runs the sale):
 # sales read by an older pass are read again.
 CITIUS_DETAIL_VERSION = 4
 _CITIUS_NEXT = "ctl00$ContentPlaceHolder1$Pager1$btnNextPage"
@@ -858,6 +859,29 @@ def citius_debtor_lives_here(html: str, description: str | None) -> bool | None:
     return False
 
 
+# The professionals a court names to run a sale. The debtors, the creditor and
+# the fiel depositário (often a private person) are never kept.
+_CITIUS_AGENT_ROLES = ("Encarregado da Venda", "Agente de Execução", "Administrador de Insolvência",
+                       "Administrador Judicial", "Leiloeira")
+_CITIUS_PARTY = re.compile(r"Interveniente:\s*(.+?)\s+Nome:\s*(.+?)\s+Morada:\s*(.+?)(?=\s+Interveniente:|$)")
+
+
+def citius_sale_agent(html: str) -> dict:
+    """{"agente_papel", "agente_nome", "agente_morada"} of whoever runs the sale,
+    from the "ver mais" Intervenientes ("Encarregado da Venda Nome: … Morada: …"),
+    or {} when the court named none."""
+    text = re.sub(r"\s+", " ", BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True))
+    if "Intervenientes" not in text:
+        return {}
+    parties = _CITIUS_PARTY.findall(text.split("Intervenientes", 1)[1])
+    for wanted in _CITIUS_AGENT_ROLES:
+        for role, name, address in parties:
+            if normalize(role).startswith(normalize(wanted)):
+                return {"agente_papel": wanted, "agente_nome": name.strip()[:120],
+                        "agente_morada": address.strip()[:200]}
+    return {}
+
+
 def citius_full_description(detail: str) -> str | None:
     m = re.search(r"Descrição do Bem:\s*(.+?)(?:\s+Art\.\s*Matricial:|\s+Registo:|\s+Entidade de Registo:|$)", detail)
     return m.group(1).strip() if m else None
@@ -915,6 +939,9 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
         lives = citius_debtor_lives_here(html, full)
         if lives is not None:
             raw["debtor_lives_here"] = lives
+        for key, value in citius_sale_agent(html).items():
+            if not raw.get(key):
+                raw[key] = value
         if full:
             raw["descricao_completa"] = full[:3000]
             district, concelho, freguesia = _citius_extract_location(full)
