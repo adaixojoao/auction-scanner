@@ -2046,7 +2046,7 @@ _SCORE_DBS: dict = {}
 # these decide the number a listing gets.
 _SCORE_CODE = ("scoring.py", "costs.py", "forestry.py", "land_prices.py", "common.py",
                "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py", "guesses.py", "outline.py",
-               "surroundings.py", "holiday_lets.py", "crime.py", "property_tax.py", os.path.join("data", "crime.csv"), os.path.join("data", "dwellings_2021.csv"),
+               "surroundings.py", "holiday_lets.py", "crime.py", "property_tax.py", "rent_rules.py", os.path.join("data", "fr_rent_rules.csv"), os.path.join("data", "crime.csv"), os.path.join("data", "dwellings_2021.csv"), os.path.join("data", "hospitals.csv"),
                os.path.join("data", "polluters.csv"),   # a refreshed polluter list scores again
                os.path.join("data", "eprtr.csv"))
 
@@ -2326,6 +2326,7 @@ def _score_one(item: dict, now, filters, first_price, cases, towns, closes, land
     item["beach"] = geo.nearest_beach(item, towns=towns)
     item["airport"] = geo.nearest_hub(item, "airport", towns=towns)
     item["station"] = geo.nearest_hub(item, "station", towns=towns)
+    item["hospital"] = geo.nearest_hospital(item, towns=towns)
     item["pollution"] = geo.pollution(item, towns=towns)
     item["guarda"] = geo.distance_to_place(item, *GUARDA, "Guarda", towns=towns)
     item["climate"] = climate.stored(item)       # read by the scan (climate.assess_pending)

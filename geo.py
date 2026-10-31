@@ -746,6 +746,44 @@ def nearest_hub(item: dict, kind: str, path: str | None = None, towns: dict | No
     return _found(pos, best, _HUB_WORDS[kind]) if best else None
 
 
+
+HOSPITAL_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "hospitals.csv")
+# The hospitals each EU health ministry lists (Eurostat GISCO, scripts/update_hospitals.py);
+# "emergency" where the record names an emergency department. Germany is not in it.
+MAX_HOSPITAL_KM = 60
+
+
+def _hospital_countries(path: str) -> set[str]:
+    try:
+        return _countries_in(path, _os.path.getmtime(path))
+    except OSError:
+        return set()
+
+
+@_functools.lru_cache(maxsize=4)
+def _countries_in(path: str, mtime: float) -> set[str]:
+    with open(path, encoding="utf-8", newline="") as f:
+        return {row["country"] for row in _csv.DictReader(f)}
+
+
+def nearest_hospital(item: dict, path: str | None = None, towns: dict | None = None) -> dict | None:
+    """The nearest hospital, and the nearest with an emergency department where
+    the record says so, like nearest_beach: {"km", "name", "approx", "text",
+    "emergency": the same for the emergency department, or None}."""
+    path = path or HOSPITAL_FILE
+    # Germany has none in the file: its homes would be sent to Poland's
+    if (item.get("country") or "PT").upper() not in _hospital_countries(path):
+        return None
+    pos = _place(item, towns)
+    grid = _points(path) if pos else None
+    best = _nearest(pos, grid, MAX_HOSPITAL_KM) if grid else None
+    if not best:
+        return None
+    found = _found(pos, best, "a hospital")
+    urgent = _nearest(pos, _points(path, "emergency"), MAX_HOSPITAL_KM)
+    found["emergency"] = _found(pos, urgent, "an emergency department") if urgent else None
+    return found
+
 POLLUTION_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "polluters.csv")
 # How near a polluter has to be to count (scripts/update_polluters.py says what
 # "heavy" and "light" are). Heavy industry close to the house hides it; farther

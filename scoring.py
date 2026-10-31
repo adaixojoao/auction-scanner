@@ -849,14 +849,26 @@ def _surroundings(item: dict, reasons: list[str]) -> None:
     crime.py): shown, not scored."""
     import crime
     import property_tax
+    import rent_rules
     import surroundings
     reasons.extend(surroundings.notes(item))
+    rules = rent_rules.note(item)
+    if rules:
+        reasons.append(rules)
     tax = property_tax.note(item)
     if tax:
         reasons.append(tax)
     found = crime.note(item)
     if found:
         reasons.append(found)
+    hospital = item.get("hospital")
+    if hospital:
+        urgent = hospital.get("emergency")
+        if urgent and urgent["km"] <= hospital["km"] + 0.5:
+            reasons.append(f"{urgent['text']} (straight line; GISCO)")
+        else:
+            also = f"; {urgent['text']}" if urgent else ""
+            reasons.append(f"{hospital['text']}{also} (straight line; GISCO)")
 
 
 def _sale_history(item: dict, reasons: list[str]) -> None:
