@@ -724,7 +724,8 @@ def _view_filters(args) -> dict | str:
 def _forced_sale(it: dict) -> bool:
     """A sale that must happen: a court, tax or social-security auction, or a bank selling what it repossessed."""
     import source_validation
-    return (source_validation.CATALOG.get(it.get("source")) or {}).get("kind") in ("official", "bank")
+    from scoring import forced_sale
+    return forced_sale(it) or (source_validation.CATALOG.get(it.get("source")) or {}).get("kind") == "bank"
 
 
 def _view_matched(rows: list, f: dict, mode: str, show_hidden: bool) -> list:

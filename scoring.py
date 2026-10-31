@@ -45,8 +45,12 @@ _PERCENT_SHARE = re.compile(
     r"(?:pleno dominio|plena propiedad|propiedad|pleno dominio|nuda propiedad|propriedade|dominio"
     r"|solar|inmueble|finca|terreno|piso|vivienda|parcela)\b"
     r"|\bproindiviso\b|\bpro indiviso\b|\bindiviso\b|\bparticipaci[oó]n indivisa\b"
-    r"|\b\d{1,2}/\d{1,2}\s+(?:de(?:l| la| los| las)?|do|da)\s+"
-    r"(?:indiviso|propiedad|inmueble|finca|terreno|piso|vivienda|parcela|solar)\b"
+    r"|\b\d{1,2}/\d{1,2}\s+(?:partes?\s+(?:indivisas?\s+)?)?(?:de(?:l| la| los| las)?|do|da)\s+"
+    r"(?:indiviso|propiedad|pleno dominio|inmueble|finca|terreno|piso|vivienda|parcela|solar)\b"
+    # Seguridad Social, 2026-10-31: "1/5 parte del pleno dominio", "1/48 ava parte
+    # indivisa", "una cincuenta y dos ava parte indivisa", "25% P.D" (not "100% P.D").
+    r"|\bavas? partes? indivisas?\b|\bparte indivisa\b"
+    r"|(?<![\d.,])\d{1,2}(?:[.,]\d+)?\s*%\s*p\.\s?d\b"
     # "venda de 50% do direito da propriedade", "apenas 50% do imóvel".
     # Not "50% do valor base": that is an auction's opening bid.
     r"|\b\d{1,2}(?:[.,]\d+)?\s*%\s+(?:do|da|de|del|de la|della|des)\s+"
@@ -179,7 +183,9 @@ _TIMESHARE_RE = re.compile(
     # "semana 22 de cada añño" (BOE, a typo): any run of n/ñ
     r"(?:a[nñ]{1,2}o|annee|année|anno|year)\b"
     r"|\bdurante (?:a|la|as|las) semanas?\s+(?:n\.?\s*[ºo°]\s*)?\d+"
-    r"|\(\s*semanas?\s+\d+\s*\)",
+    r"|\(\s*semanas?\s+\d+\s*\)"
+    # "uso exclusivo de la semana nº 18", "durante el periodo semanal num 24" (Seguridad Social)
+    r"|\buso exclusivo (?:de|durante) (?:la|el) (?:semana|per[ií]odo semanal)\b|\bper[ií]odo semanal\b",
     re.I)
 
 
@@ -211,6 +217,15 @@ FORCED_SOURCES = {
     "citius", "financas", "zvg", "anaf", "aeat",
     "pvp_giustizia", "poland", "greece", "cyprus",
     "france", "encheres_publiques",   # French judicial auctions (licitor / encheres-publiques)
+    # Missing until 2026-10-31, so a list of forced sales was 83% Italian with no
+    # Spain: BOE court and Social Security sales, insolvency auctions, Italian
+    # court and bankruptcy portals, Portuguese court e-auctions, Austrian and
+    # Croatian court sales. Not the state selling its own buildings (hacienda,
+    # boe_public, ran, etad, placsp, agorastore): nobody makes it sell. Nor the
+    # private auctioneers (leilosoc, centroleiloes, bidleiloeira), who sell
+    # banks' and owners' homes too.
+    "spain", "tgss", "eactivos", "subastasactivas", "astalegale", "fallcoaste", "italy",
+    "eleiloes", "edikte", "fina", "croatia", "zvg_de",
 }
 
 
@@ -1062,7 +1077,10 @@ _DESC_OPENS_AS_OTHER = re.compile(
     r"|^\W*(?:[a-z]\W+)?superficie accessoria\b"
     # "Se vende local de 54 m2 … es un almacén", "Local comercial de 76 m2 con posibilidad de vivienda"
     r"|^\W*(?:se vende |vendo |venta de )?(?:un |el )?(?:local|almacen|nave)\b"
-    r"|^\W*local commercial\b")
+    r"|^\W*local commercial\b"
+    # A Spanish registry entry: "NÚMERO DOSCIENTOS CINCUENTA Y DOS.- PLAZA DE APARCAMIENTO" (BOE, Zaragoza)
+    r"|^\W*(?:urbana\W+)?(?:(?:numero|entidad)\b[^.]{0,60}\.\W*)?"
+    r"(?:plaza de (?:garaje|aparcamiento|estacionamiento)|trastero)\b")
 # Fotocasa's shop template: "situado a pie de calle, 1 escaparates, actividad comercial: almacén".
 _SHOP_TEMPLATE = re.compile(r"\bactividad comercial\s*:")
 
@@ -3419,9 +3437,13 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
 
     import source_validation
     kind_of_source = (source_validation.CATALOG.get(item.get("source")) or {}).get("kind")
-    if kind_of_source == "official":
+    if forced_sale(item):
         s += INVEST_FORCED_SALE * w("sale")
         reasons.append("forced sale (court, tax or social security)")
+    elif kind_of_source == "official":
+        # The state selling its own building, or an auctioneer's mixed catalogue: official, not forced.
+        s += INVEST_BANK_SALE * w("sale")
+        reasons.append("official seller, not a forced sale")
     elif kind_of_source == "bank":
         s += INVEST_BANK_SALE * w("sale")
         reasons.append("bank sale")
