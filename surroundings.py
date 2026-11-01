@@ -81,7 +81,15 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   surface water within 3 km, against the EU drinking-water limit of 0.1 µg/l
   for 20 PFAS (EEA, WISE monitoring);
 - altitude and slope (EU-DEM 25 m, Copernicus): the height, how steep the
-  ground is and which way it faces.
+  ground is and which way it faces;
+- the trip from home (Amsterdam Centraal): by train, coach and ferry, the
+  fastest journey found leaving on the next Tuesday morning or evening
+  (Transitous, the open journey planner built on the operators' timetables;
+  where no stop is close, the last 45 min by taxi); and by plane, through the
+  nearest airports Schiphol flies to directly (Eurostat route statistics):
+  2 h to the gate, the flight (estimated from the distance), 30 min out of the
+  airport and the faster of public transport or a taxi from there. Over 20
+  hours either way is flagged as too far.
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -93,9 +101,11 @@ a map is an estimate of a place, not a survey of the house.
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import json
 import math
+import os
 import statistics
 import time
 
@@ -164,6 +174,19 @@ PFAS_KM = 3
 PFAS_LIMIT = 0.1                  # µg/l, sum of 20 PFAS (Directive 2020/2184, from 2026)
 DEM = "https://api.opentopodata.org/v1/eudem25m"
 DEM_STEP_M = 30
+TRANSITOUS = "https://api.transitous.org/api/v1/plan"
+HOME = ("Amsterdam", 52.3791, 4.9003)            # Amsterdam Centraal
+TRAVEL_MAX_H = 20
+TRAVEL_DEPARTURES = ("06:00", "17:00")          # UTC: a morning start and an evening one (night trains)
+TAXI_S = 2700
+FLIGHTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "flights_from_ams.csv")
+TO_GATE_H, FROM_PLANE_H = 2.0, 0.5            # train to Schiphol and check-in; leaving the airport
+FLIGHT_KMH, FLIGHT_EXTRA_H = 750, 0.5          # cruise and taxi/climb/descent, for the flight's length
+AIRPORT_KM = 400
+TRAVEL_MODES = {"HIGHSPEED_RAIL": "high-speed train", "LONG_DISTANCE": "train", "NIGHT_RAIL": "night train",
+                "REGIONAL_FAST_RAIL": "regional train", "REGIONAL_RAIL": "regional train", "RAIL": "train",
+                "COACH": "coach", "BUS": "bus", "FERRY": "ferry", "SUBWAY": "metro", "METRO": "metro",
+                "TRAM": "tram", "SUBURBAN": "suburban train"}
 IT_IDROGEO = "https://idrogeo.isprambiente.it/geoserver/ows"
 IT_LANDSLIDE = {1: "moderate (P1)", 2: "medium (P2)", 3: "high (P3)", 4: "very high (P4)", 5: "an attention area"}
 IT_FLOOD = {"scenariop1": (1, "low (P1, rare floods)"), "scenariop2": (2, "medium (P2, every 100–200 years)"),
@@ -1041,6 +1064,122 @@ def _terrain_note(t: dict | None) -> str | None:
     return f"altitude {t['m']:,} m, {ground} (EU-DEM 25 m, Copernicus)"
 
 
+def _next_tuesday(today=None) -> str:
+    import datetime as dt
+    today = today or dt.date.today()
+    return (today + dt.timedelta(days=(1 - today.weekday()) % 7 or 7)).isoformat()
+
+
+def _journeys(session, lat: float, lon: float, taxi: bool) -> list[dict]:
+    day = _next_tuesday()
+    found = []
+    for start in TRAVEL_DEPARTURES:
+        params = {"fromPlace": f"{HOME[1]},{HOME[2]}", "toPlace": f"{lat},{lon}", "time": f"{day}T{start}:00Z",
+                  "maxTravelTime": 2880}
+        if taxi:
+            params.update({"postTransitModes": "CAR", "maxPostTransitTime": TAXI_S})
+        resp = session.get(TRANSITOUS, params=params, timeout=180)
+        resp.raise_for_status()
+        found += resp.json().get("itineraries") or []
+    return found
+
+
+def travel(session, lat: float, lon: float, item: dict) -> dict:
+    found = _journeys(session, lat, lon, taxi=False)
+    taxi = not found
+    ground = travel_found(found or _journeys(session, lat, lon, taxi=True), taxi)
+    flights = []
+    for airport in served_airports(lat, lon)[:2]:
+        on = _from_airport(session, airport, lat, lon)
+        if on is not None:
+            flights.append(flight_found(airport, on, lat, lon))
+    return {**ground, "flight": min(flights, key=lambda f: f["hours"], default=None)}
+
+
+@functools.lru_cache(maxsize=2)
+def _airports(path: str = FLIGHTS_FILE) -> tuple[dict, ...]:
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            return tuple({**r, "lat": float(r["lat"]), "lon": float(r["lon"])} for r in csv.DictReader(f))
+    except (OSError, KeyError, ValueError):
+        return ()
+
+
+def served_airports(lat: float, lon: float, path: str = FLIGHTS_FILE) -> list[dict]:
+    """The airports Schiphol flies to directly within AIRPORT_KM, nearest first."""
+    near = [(_distance_m(lat, lon, a["lat"], a["lon"]) / 1000, a) for a in _airports(path)]
+    return [{**a, "km": round(km)} for km, a in sorted(near, key=lambda x: x[0]) if km <= AIRPORT_KM]
+
+
+def _from_airport(session, airport: dict, lat: float, lon: float) -> dict | None:
+    """{"hours", "taxi"}: the faster of public transport (taxi for the last 45 min) or a taxi all the way."""
+    resp = session.get(TRANSITOUS, params={
+        "fromPlace": f"{airport['lat']},{airport['lon']}", "toPlace": f"{lat},{lon}",
+        "time": f"{_next_tuesday()}T12:00:00Z", "postTransitModes": "CAR", "maxPostTransitTime": TAXI_S,
+        "directModes": "CAR", "maxDirectTime": 4 * 3600}, timeout=180)
+    resp.raise_for_status()
+    data = resp.json()
+    options = [(it["duration"], False) for it in data.get("itineraries") or []]
+    options += [(it["duration"], True) for it in data.get("direct") or []]
+    if not options:
+        return None
+    seconds, taxi = min(options)
+    return {"hours": round(seconds / 3600, 1), "taxi": taxi}
+
+
+def flight_found(airport: dict, on: dict, lat: float, lon: float) -> dict:
+    km = _distance_m(52.3105, 4.7683, airport["lat"], airport["lon"]) / 1000      # from Schiphol
+    flight = FLIGHT_EXTRA_H + km / FLIGHT_KMH
+    return {"airport": airport["name"], "iata": airport.get("iata") or airport["icao"],
+            "flight_h": round(flight, 1), "on_h": on["hours"], "on_taxi": on["taxi"],
+            "hours": round(TO_GATE_H + flight + FROM_PLANE_H + on["hours"], 1)}
+
+
+def travel_found(itineraries: list[dict], taxi: bool) -> dict:
+    """{"hours", "changes", "by": [the main services], "taxi_min"} for the fastest journey, or {"hours": None}."""
+    best = min(itineraries, key=lambda it: it.get("duration") or 1e9, default=None)
+    if not best:
+        return {"hours": None, "taxi": taxi}
+    legs = best.get("legs") or []
+    rides = sorted((leg for leg in legs if leg.get("mode") in TRAVEL_MODES), key=lambda leg: -(leg.get("duration") or 0))
+    by = []
+    for leg in rides:
+        if TRAVEL_MODES[leg["mode"]] not in by:
+            by.append(TRAVEL_MODES[leg["mode"]])
+    car = sum(leg.get("duration") or 0 for leg in legs if leg.get("mode") == "CAR")
+    return {"hours": round(best["duration"] / 3600, 1), "changes": best.get("transfers", 0), "by": by,
+            "taxi_min": round(car / 60) if car else 0, "taxi": taxi}
+
+
+def _flight_text(f: dict) -> str:
+    on = "by taxi" if f["on_taxi"] else "by public transport"
+    return (f"about {f['hours']:.1f} h by plane via {f['iata']} ({TO_GATE_H:.0f} h to the gate, "
+            f"{f['flight_h']:.1f} h flight, then {f['on_h']:.1f} h {on})")
+
+
+def _travel_note(t: dict | None) -> str | None:
+    if not t:
+        return None
+    f = t.get("flight")
+    best = min([h for h in (t.get("hours"), (f or {}).get("hours")) if h is not None], default=None)
+    judged = f" — over {TRAVEL_MAX_H} h even at best, too far" if best is not None and best > TRAVEL_MAX_H else ""
+    if t.get("hours") is None:
+        ground = "no train, coach or ferry journey found within 48 h"
+    else:
+        ground = _ground_text(t)
+    plane = f"{_flight_text(f)}; " if f else ""
+    return (f"from {HOME[0]}: {plane}{ground}{judged} (Transitous, operators' timetables; flights Schiphol serves "
+            "directly, Eurostat)")
+
+
+def _ground_text(t: dict) -> str:
+    n = t.get("changes") or 0
+    by = f": {', '.join(t['by'][:3])}" if t.get("by") else ""
+    taxi = f"; the last {t['taxi_min']} min by taxi" if t.get("taxi_min") else ""
+    changes = "direct" if not n else f"{n} change{'s' if n > 1 else ''}"
+    return f"{t['hours']:.1f} h by train or coach ({changes}{by}{taxi})"
+
+
 def _georisques(session, path: str, params: dict) -> dict:
     resp = session.get(GEORISQUES + path, params=params, timeout=40)
     resp.raise_for_status()
@@ -1235,6 +1374,7 @@ SOURCES = {
     "winter_sun": (winter_sun, None, BUILDING_PINS | {"street"}, {"home", "land"}),
     "pfas": (pfas, None, BUILDING_PINS | {"street"}, {"home", "land"}),
     "terrain": (terrain, None, BUILDING_PINS, {"home", "land"}),
+    "travel": (travel, None, NEAR_PINS, {"home", "land"}),
 }
 NEEDS_PARCEL = {"fr_parcel"}          # asked once the outline has found the parcel
 
@@ -1520,7 +1660,8 @@ def notes(item: dict) -> list[str]:
     out.extend(_nature_note(found.get("nature")))
     for line in (_pt_coast_note(found.get("pt_coast")), _land_use_note(found.get("land_use")),
                  _bathing_note(found.get("bathing")), _winter_sun_note(found.get("winter_sun")),
-                 _pfas_note(found.get("pfas")), _terrain_note(found.get("terrain"))):
+                 _pfas_note(found.get("pfas")), _terrain_note(found.get("terrain")),
+                 _travel_note(found.get("travel"))):
         if line:
             out.append(line)
     line = _parcel_note(found.get("fr_parcel"), item)

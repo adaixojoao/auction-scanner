@@ -2046,7 +2046,7 @@ _SCORE_DBS: dict = {}
 # these decide the number a listing gets.
 _SCORE_CODE = ("scoring.py", "costs.py", "forestry.py", "land_prices.py", "common.py",
                "climate.py", "geo.py", "outcomes.py", "rounds.py", "prices.py", "guesses.py", "outline.py",
-               "surroundings.py", "holiday_lets.py", "crime.py", "property_tax.py", "rent_rules.py", os.path.join("data", "fr_rent_rules.csv"), "coast_retreat.py", os.path.join("data", "fr_coast_retreat.csv"), "building_age.py", os.path.join("data", "building_age_2021.csv"), "incomes.py", os.path.join("data", "incomes.csv"), "population_change.py", os.path.join("data", "population_change.csv"), os.path.join("data", "crime.csv"), os.path.join("data", "dwellings_2021.csv"), os.path.join("data", "hospitals.csv"),
+               "surroundings.py", "holiday_lets.py", "crime.py", "property_tax.py", "rent_rules.py", os.path.join("data", "fr_rent_rules.csv"), "coast_retreat.py", os.path.join("data", "fr_coast_retreat.csv"), "building_age.py", os.path.join("data", "building_age_2021.csv"), "markets.py", os.path.join("data", "mortgage_rates.csv"), os.path.join("data", "house_prices.csv"), "short_lets.py", os.path.join("data", "short_let_rules.csv"), os.path.join("data", "flights_from_ams.csv"), "incomes.py", os.path.join("data", "incomes.csv"), "population_change.py", os.path.join("data", "population_change.csv"), os.path.join("data", "crime.csv"), os.path.join("data", "dwellings_2021.csv"), os.path.join("data", "hospitals.csv"),
                os.path.join("data", "polluters.csv"),   # a refreshed polluter list scores again
                os.path.join("data", "eprtr.csv"))
 
