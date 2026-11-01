@@ -77,5 +77,7 @@ def test_a_citius_title_opens_its_details_and_leaves_the_shortlist_alone(app, ad
     assert tr.locator('[data-role="star"]').get_attribute("aria-pressed") == "false"
     app.page.keyboard.press("Escape")                          # closing gives focus back to the title
     app.page.wait_for_function("() => !document.getElementById('property-drawer').open")
+    # The triggers and the focus settle on the close event, a task after the drawer shuts.
+    app.page.wait_for_function("""() => document.querySelector('#rows tr[data-id="citius:c1"] [data-role="details"]')
+        .getAttribute('aria-expanded') === 'false'""")
     assert app.page.evaluate("document.activeElement.dataset.role") == "title"
-    assert tr.locator('[data-role="details"]').get_attribute("aria-expanded") == "false"
