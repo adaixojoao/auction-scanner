@@ -48,3 +48,49 @@ def test_coastline_retreat_communes(tmp_path):
     assert coast_retreat.note({"country": "FR", "concelho": "Vierzon"}, str(path)) is None
     assert coast_retreat.note({"country": "PT", "concelho": "Antibes"}, str(path)) is None
     rent_rules._table.cache_clear()
+
+
+def test_land_use_at_the_point_and_nuisances_near_it():
+    found = surroundings.land_use_found({"112"}, {"112", "121"}, {"112", "121", "124", "211"})
+    assert found == {"at": "112", "near": ["121", "124"]}
+    assert surroundings._land_use_note(found) == ("land here: town or village; an industrial or commercial area "
+                                                  "within 300 m, an airport within 1 km (CORINE Land Cover 2018, EEA)")
+    airport = surroundings.land_use_found({"124"}, {"124"}, {"124", "121"})
+    assert surroundings._land_use_note(airport) == "land here: airport (CORINE Land Cover 2018, EEA)"
+    assert surroundings._land_use_note(surroundings.land_use_found(set(), set(), set())) is None
+
+
+def test_the_nearest_bathing_water_and_its_class():
+    sites = [{"bathingWaterName": "AREINHO", "bwWaterCategory": "Transitional", "latitude": 40.84583,
+              "longitude": -8.66194, "qualityStatus": "Good", "qualityStatus_minus1": "Good",
+              "qualityStatus_minus2": "Excellent"},
+             {"bathingWaterName": "FURADOURO", "bwWaterCategory": "Coastal", "latitude": 40.87371,
+              "longitude": -8.67755, "qualityStatus": "Excellent",
+              **{f"qualityStatus_minus{i}": "Excellent" for i in range(1, 11)}}]
+    found = surroundings.bathing_found(sites, 40.875, -8.674, 2025)
+    assert found["nearest"]["name"] == "Furadouro" and found["nearest"]["km"] == 0.3
+    assert surroundings._bathing_note(found) == ("nearest official bathing water: Furadouro (sea, 0.3 km), Excellent "
+                                                 "in 2025, Excellent every season since 2020 (EEA, Bathing Water "
+                                                 "Directive)")
+    estuary = surroundings.bathing_found(sites[:1], 40.875, -8.674, 2025)
+    assert surroundings._bathing_note(estuary).endswith("(estuary, 3.4 km), Good in 2025 (before: Good, Excellent) "
+                                                        "(EEA, Bathing Water Directive)")
+    assert surroundings._bathing_note(surroundings.bathing_found([], 40.0, -8.0, 2025)) is None
+
+
+def test_building_age_against_the_country(tmp_path, monkeypatch):
+    import building_age
+    import prices
+    path = tmp_path / "age.csv"
+    path.write_text("geo,before_1946,y1946_1980,y1981_2000,since_2001\nDEA11,21,57,13,9\nDE,15,51,19,15\n",
+                    encoding="utf-8")
+    monkeypatch.setattr(prices, "population_outlook", lambda c, p: {"nuts3": "DEA11", "name": "Düsseldorf"})
+    building_age._table.cache_clear()
+    assert building_age.note({"country": "DE", "concelho": "Düsseldorf"}, str(path)) == (
+        "homes in Düsseldorf built 21% before 1946, 57% 1946–80, 13% 1981–2000, 9% since 2001 (78% before 1981; "
+        "country 66%) (Census 2021, Eurostat)")
+    path.write_text("geo,before_1946,y1946_1980,y1981_2000,since_2001\nDEA11,40,50,5,5\nDE,10,40,25,25\n",
+                    encoding="utf-8")
+    building_age._table.cache_clear()
+    assert "an older stock than the country's" in building_age.note({"country": "DE"}, str(path))
+    building_age._table.cache_clear()

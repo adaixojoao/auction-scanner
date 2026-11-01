@@ -3502,9 +3502,11 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                        "usually sells and lets for less, so check prices in the village")
     _mention_sold_move(item, reasons)
     _sale_history(item, reasons)
+    import building_age
     import holiday_lets
     # Shown, not scored: demand and competition alike.
-    for lets in (holiday_lets.note(item), holiday_lets.region_note(item), holiday_lets.dwellings_note(item)):
+    for lets in (holiday_lets.note(item), holiday_lets.region_note(item), holiday_lets.dwellings_note(item),
+                 building_age.note(item)):
         if lets:
             reasons.append(lets)
     _surroundings(item, reasons)
