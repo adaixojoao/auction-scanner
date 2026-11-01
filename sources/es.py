@@ -10,7 +10,7 @@ from html import unescape
 from bs4 import BeautifulSoup
 
 from common import (LOG, find_area, find_price, has_term, land_max_price, make_listing, make_session, normalize,
-                    parse_date_dmy, parse_price, possession, prefer_stated_area, safe_url, stable_id, to_number)
+                    parse_date_dmy, parse_price, possession, prefer_stated_area, safe_url, stable_id, to_number, utcnow_iso)
 from db import upsert_listing
 from sources import ScanCount, SourceUnavailable, register
 from sources._cards import CardSite, scrape_cards
@@ -984,8 +984,13 @@ def scrape_boe_public(db, max_price: float = 50000, **_):
             LOG.info(f"boe_public {day}: {type(e).__name__}")
             continue
         for notice in notices:
-            if db.execute("SELECT 1 FROM listings WHERE id LIKE ? LIMIT 1", (f"boe_public:{notice['id']}-%",)).fetchone():
-                continue                         # an announcement does not change once published
+            # An announcement does not change once published: its lots are only marked seen again,
+            # and counted, so the source does not look empty and the lots do not look gone.
+            seen = db.execute("UPDATE listings SET last_seen = ? WHERE id LIKE ?",
+                              (utcnow_iso(), f"boe_public:{notice['id']}-%")).rowcount
+            if seen:
+                total += seen
+                continue
             try:
                 page = BeautifulSoup(session.get(notice["url"]).text, "html.parser")
             except Exception as e:  # noqa: BLE001

@@ -1535,6 +1535,9 @@ def test_ippatrimonio_reads_the_sales_layer():
     assert row["id"] == "ippatrimonio:412" and row["price"] == 18500 and row["area_m2"] == 640
     assert row["concelho"] == "Aljustrel" and row["date_end"] == "2026-11-19" and '"lat": 37.94' in row["raw_json"]
     assert ippatrimonio_listing({"attributes": {**point["attributes"], "data_remocao": 1}}) is None
+    for code in ("02", "03"):                  # the layer's codes: being prepared, removed
+        assert ippatrimonio_listing({"attributes": {**point["attributes"], "estado": code}}) is None
+    assert ippatrimonio_listing({"attributes": {**point["attributes"], "estado": "01"}}) is not None
 
 
 def test_casea1euro_keeps_recent_town_schemes():
