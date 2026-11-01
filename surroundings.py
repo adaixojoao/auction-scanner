@@ -57,7 +57,13 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   country found at risk, not every stream;
 - French polluted ground and dangerous plants: former industrial sites
   within 100 m (CASIAS), sites with known pollution within 300 m (BASOL,
-  SIS) and Seveso plants within 3 km (Géorisques).
+  SIS) and Seveso plants within 3 km (Géorisques);
+- protected nature, EU-wide: the Natura 2000 sites (habitats and birds
+  directives) and each country's own parks and reserves with their IUCN
+  category (EEA, CDDA/NatDA);
+- Portugal's coastal programmes (APA, POC): the safeguard strips against
+  erosion, overtopping and cliff falls, the critical areas, the 500 m
+  land protection zone and the public maritime domain's margin.
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -120,6 +126,10 @@ ES_FLOOD_LAYERS = {"NZ.Flood.FluvialT10": ("river", 10), "NZ.Flood.FluvialT100":
                    "NZ.Flood.MarinaT500": ("sea", 500)}
 PT_FLOOD = "https://sniambgeoogc.apambiente.pt/getogc/rest/services/SNIAmb/{}/MapServer/identify"
 SEVESO_KM = {"Seveso seuil haut": 3.0, "Seveso seuil bas": 1.0}
+EEA_SITES = "https://bio.discomap.eea.europa.eu/arcgis/rest/services/ProtectedSites/{}/MapServer/{}/query"
+NATURA_TYPES = {"A": "birds", "B": "habitats", "C": "habitats and birds"}
+PT_COAST = "https://sniambgeoogc.apambiente.pt/getogc/rest/services/SNIAmb/POC/MapServer/identify"
+PT_COAST_LAYERS = {8: "margin", 10: "flooding", 11: "erosion", 12: "cliff", 15: "critical", 16: "zone"}
 IT_IDROGEO = "https://idrogeo.isprambiente.it/geoserver/ows"
 IT_LANDSLIDE = {1: "moderate (P1)", 2: "medium (P2)", 3: "high (P3)", 4: "very high (P4)", 5: "an attention area"}
 IT_FLOOD = {"scenariop1": (1, "low (P1, rare floods)"), "scenariop2": (2, "medium (P2, every 100–200 years)"),
@@ -629,6 +639,96 @@ def _soil_note(s: dict | None) -> list[str]:
     return out
 
 
+def _eea_sites(session, service: str, layer: int, lat: float, lon: float) -> list[dict]:
+    resp = session.get(EEA_SITES.format(service, layer), params={
+        "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects", "outFields": "*", "returnGeometry": "false", "f": "json"},
+        timeout=60)
+    resp.raise_for_status()
+    data = json.loads(resp.content.decode("utf-8", "replace"))
+    if "error" in data:
+        raise RuntimeError(str(data["error"])[:200])
+    return [f.get("attributes") or {} for f in data.get("features") or []]
+
+
+def nature(session, lat: float, lon: float, item: dict) -> dict:
+    natura = _eea_sites(session, "Natura2000_Dyna_WM", 4, lat, lon) + _eea_sites(session, "Natura2000_Dyna_WM", 8,
+                                                                                 lat, lon)
+    return nature_found(natura, _eea_sites(session, "NatDAv24_Dyna_WM", 4, lat, lon))
+
+
+def nature_found(natura: list[dict], national: list[dict]) -> dict:
+    """{"natura": [[code, name, "habitats"|"birds"|...]], "national": [[name, IUCN label]]}."""
+    out: dict[str, list] = {"natura": [], "national": []}
+    for a in natura:
+        code = a.get("SITECODE") or ""
+        if code and code not in [n[0] for n in out["natura"]]:
+            out["natura"].append([code, (a.get("SITENAME") or "").strip(), NATURA_TYPES.get(a.get("SITETYPE"), "")])
+    codes = {n[0] for n in out["natura"]}
+    for a in national:
+        name = (a.get("siteName") or "").strip()
+        if not name or a.get("nationalId") in codes:    # the Natura site itself, listed again
+            continue
+        iucn = a.get("iucnDescri") or ""
+        iucn = "" if iucn.startswith("Other") else iucn
+        if [name, iucn] not in out["national"]:
+            out["national"].append([name, iucn])
+    return out
+
+
+def _nature_note(n: dict | None) -> list[str]:
+    if not n:
+        return []
+    out = []
+    if n["natura"]:
+        sites = [f"{name or code} ({code}, {kind})" if kind else f"{name or code} ({code})"
+                 for code, name, kind in n["natura"]]
+        out.append(f"inside Natura 2000 site {_names(sites)}: works or a change of use that could harm it need "
+                   "an environmental assessment and may be refused (EEA; Habitats Directive art. 6)")
+    if n["national"]:
+        parks = [f"{name} — {iucn}" if iucn else name for name, iucn in n["national"]]
+        out.append(f"inside a protected area under national law ({_names(parks)}): building is restricted "
+                   "or banned by its own rules (EEA, CDDA)")
+    return out
+
+
+def pt_coast(session, lat: float, lon: float, item: dict) -> dict:
+    layers = "all:0," + ",".join(str(k) for k in PT_COAST_LAYERS)
+    return pt_coast_found(_arcgis_identify(session, PT_COAST, lat, lon, layers))
+
+
+def pt_coast_found(results: list[dict]) -> dict:
+    """{"poc": the programme, kind: level or True} for the strips the point is in."""
+    out: dict = {"poc": None}
+    for r in results:
+        a = r.get("attributes") or {}
+        out["poc"] = out["poc"] or (a.get("poc") or None)
+        kind = PT_COAST_LAYERS.get(r.get("layerId"))
+        if kind:
+            level = (a.get("legenda_4") or "").replace("Nível", "level").strip()
+            out[kind] = level if level and level != "Null" else out.get(kind, True)
+    return out
+
+
+_PT_COAST_WORDS = {"erosion": "the coastal erosion safeguard strip", "flooding": "the overtopping and coastal "
+                   "flooding safeguard strip", "cliff": "a cliff safeguard strip", "critical": "a critical area",
+                   "margin": "the margin of the public maritime domain (DPM)",
+                   "zone": "the 500 m land protection zone"}
+
+
+def _pt_coast_note(c: dict | None) -> str | None:
+    if not c or not c.get("poc"):
+        return None
+    inside = [_PT_COAST_WORDS[k] + (f" ({c[k]})" if isinstance(c[k], str) else "")
+              for k in ("erosion", "flooding", "cliff", "critical", "margin", "zone") if c.get(k)]
+    if not inside:
+        return f"inside the {c['poc']} area but outside its safeguard strips (APA, POC)"
+    strips = any(c.get(k) for k in ("erosion", "flooding", "cliff", "critical", "margin"))
+    rule = (": new building and enlarging are banned or restricted there" if strips
+            else ": new building is limited and must follow the programme")
+    return f"in {', '.join(inside)}{rule} (APA, {c['poc']})"
+
+
 def _georisques(session, path: str, params: dict) -> dict:
     resp = session.get(GEORISQUES + path, params=params, timeout=40)
     resp.raise_for_status()
@@ -816,6 +916,8 @@ SOURCES = {
     "es_flood": (es_flood, {"ES"}, BUILDING_PINS | {"street"}, {"home", "land"}),
     "pt_flood": (pt_flood, {"PT"}, BUILDING_PINS | {"street"}, {"home", "land"}),
     "fr_soil": (fr_soil, {"FR"}, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "nature": (nature, None, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "pt_coast": (pt_coast, {"PT"}, BUILDING_PINS | {"street"}, {"home", "land"}),
 }
 NEEDS_PARCEL = {"fr_parcel"}          # asked once the outline has found the parcel
 
@@ -1098,6 +1200,10 @@ def notes(item: dict) -> list[str]:
         if line:
             out.append(line)
     out.extend(_soil_note(found.get("fr_soil")))
+    out.extend(_nature_note(found.get("nature")))
+    line = _pt_coast_note(found.get("pt_coast"))
+    if line:
+        out.append(line)
     line = _parcel_note(found.get("fr_parcel"), item)
     if line:
         out.append(line)

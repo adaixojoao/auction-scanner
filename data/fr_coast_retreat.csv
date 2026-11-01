@@ -1,0 +1,372 @@
+insee,name,since,decree,url
+06004,Antibes,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+06059,Eze,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+11145,Fleury,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+11170,Gruissan,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+13004,Arles,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+13022,Cassis,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+13028,Ciotat,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+13055,Marseille,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+13077,Port De Bouc,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+13104,Sausset Les Pins,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14022,Asnelles,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14066,Bernieres Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14165,Colleville Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14191,Courseulles Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14312,Grandcamp Maisy,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14318,Graye Sur Mer,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14430,Meuvaines,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14565,Saint Come De Fresne,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14605,Saint Laurent Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14709,Tracy Sur Mer,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14739,Ver Sur Mer,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+14745,Vierville Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17004,Ile D Aix,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17010,Angoulins,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17015,Arces,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17028,Aytre,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17093,Chateau D Oleron,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17094,Chatelaillon Plage,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17153,Esnandes,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17168,Fouras,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17190,Houmeau,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17225,Mathes,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17230,Meschers Sur Gironde,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17237,Moeze,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17264,Nieul Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17300,Rochelle,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17323,Saint Denis D Oleron,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17329,Saint Froult,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17337,Saint Georges D Oleron,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17380,Saint Palais Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17411,Saint Trojan Les Bains,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17437,Talmont Sur Gironde,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17452,Tremblade,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17461,Vaux Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17483,Yves,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17484,Port Des Barques,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17485,Grand Village Plage,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+17486,Bree Les Bains,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22016,Ile De Brehat,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22054,Erquy,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22055,Binic Etables Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22085,Kerbors,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22094,Lancieux,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22106,Langueux,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22111,Lanmodez,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22113,Lannion,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22134,Louannec,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22166,Penvenan,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22168,Perros Guirec,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22187,Plerin,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22194,Plestin Les Greves,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22195,Pleubian,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22197,Pleudihen Sur Rance,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22198,Pleumeur Bodou,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22218,Plougrescant,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22221,Plouguiel,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22222,Plouha,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22224,Ploulec H,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22226,Ploumilliau,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22251,Pordic,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22278,Saint Brieuc,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22319,Saint Michel En Greve,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22325,Saint Quay Portrieux,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22343,Trebeurden,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22349,Tredrez Locquemeau,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22350,Treduder,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22353,Tregastel,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22363,Trelevern,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22379,Trevou Treguignec,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+22389,Yffiniac,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29006,Benodet,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29017,Breles,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29021,Plouneour Brignogan Plages,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29022,Camaret Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29023,Carantec,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29031,Clohars Carnoet,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29032,Clohars Fouesnant,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29037,Combrit,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29039,Concarneau,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29040,Conquet,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29042,Crozon,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29046,Douarnenez,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29057,Foret Fouesnant,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29058,Fouesnant,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29064,Goulven,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29072,Guilvinec,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29073,Guimaec,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29077,Guisseny,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29079,Henvic,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29084,Ile Molene,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29085,Ile Tudy,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29090,Kerlaz,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29091,Kerlouan,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29098,Lampaul Plouarzel,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29099,Lampaul Ploudalmezeau,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29101,Landeda,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29109,Landunvez,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29112,Lanildut,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29117,Lannilis,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29130,Locmaria Plouzane,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29132,Locquenole,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29133,Locquirec,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29135,Loctudy,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29150,Moelan Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29151,Morlaix,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29153,Nevez,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29158,Penmarch,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29165,Plobannalec Lesconil,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29171,Plomeur,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29177,Plouarzel,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29178,Ploudalmezeau,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29184,Plouenan,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29185,Plouescat,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29186,Plouezoc H,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29188,Plougasnou,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29190,Plougonvelin,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29192,Plougoulm,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29195,Plouguerneau,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29196,Plouguin,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29198,Plouider,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29201,Ploumoguer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29214,Plovan,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29215,Plozevet,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29217,Pont Aven,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29220,Pont L Abbe,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29221,Porspoder,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29225,Pouldreuzic,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29226,Poullan Sur Mer,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29239,Roscoff,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29251,Saint Jean Du Doigt,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29252,Saint Jean Trolimon,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29254,Saint Martin Des Champs,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29257,Saint Pabu,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29259,Saint Pol De Leon,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29279,Taule,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29282,Trebabu,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29284,Treffiagat,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29287,Treflez,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29290,Treglonou,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29292,Treguennec,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29293,Tregunc,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+29298,Treogat,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B009,Aleria,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B033,Bastia,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B037,Biguglia,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B042,Borgo,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B077,Castellare Di Casinca,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B087,Cervione,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B148,Lucciana,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B307,Santa Lucia Di Moriani,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B311,Santa Maria Poggio,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B320,Tallone,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+2B335,Valle Di Campoloro,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33009,Arcachon,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33097,Carcans,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33214,Lacanau,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33236,Lege Cap Ferret,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33514,Soulac Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33529,Teste De Buch,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33540,Vendays Montalivet,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+33544,Verdon Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+34108,Frontignan,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+34154,Mauguio,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+34299,Serignan,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+34301,Sete,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+34332,Vias,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+34337,Villeneuve Les Maguelone,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35049,Cancale,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35093,Dinard,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35132,Hirel,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35181,Minihic Sur Rance,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35241,Richardais,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35247,Roz Sur Couesnon,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35256,Saint Briac Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35284,Saint Jouan Des Guerets,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35287,Saint Lunaire,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35288,Saint Malo,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35306,Saint Pere Marc En Poulet,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35314,Saint Suliac,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+35358,Ville Es Nonais,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+40046,Biscarrosse,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+40065,Capbreton,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+40184,Mimizan,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+40209,Ondres,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+40296,Seignosse,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+40304,Soorts Hossegor,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+44006,Asserac,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+44012,Bernerie En Retz,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+44055,Baule Escoublac,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+44132,Pornichet,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+44154,Saint Brevin Les Pins,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+44184,Saint Nazaire,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50003,Agon Coutainville,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50030,Barfleur,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50031,Barneville Carteret,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50041,Hague,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50058,Blainville Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50066,Jullouville,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50076,Brehal,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50077,Bretteville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50078,Bretteville Sur Ay,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50081,Breville Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50085,Bricqueville Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50102,Carolles,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50108,Ceaux,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50117,Champeaux,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50129,Cherbourg En Cotentin,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50142,Vicq Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50143,Coudeville Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50162,Digosville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50165,Donville Les Bains,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50167,Dragey Ronthon,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50178,Fermanville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50184,Flamanville,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50190,Fontenay Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50196,Gatteville Le Phare,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50199,Genets,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50215,Gouville Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50218,Granville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50238,Heauville,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50268,Lestre,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50272,Lingreville,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50296,Maupertus Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50332,Moitiers D Allonne,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50342,Montfarville,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50349,Montmartin Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50402,Pieux,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50412,Port Bail Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50417,Quettehou,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50421,Quineville,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50433,Reville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50442,Rozel,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50471,Saint Georges De La Riviere,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50490,Saint Jean De La Riviere,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50496,Saint Jean Le Thomas,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50507,Saint Marcouf,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50532,Saint Pair Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50576,Siouville Hague,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50585,Surtainville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+50604,Treauville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56005,Arzon,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56018,Billiers,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56062,Gavres,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56069,Groix,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56078,Guidel,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56084,Hezo,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56088,Ile D Arz,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56116,Locmariaquer,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56118,Locmiquelic,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56152,Palais,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56186,Quiberon,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56193,Riantec,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56205,Saint Armel,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56233,Saint Philibert,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56234,Saint Pierre Quiberon,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56240,Sarzeau,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56243,Sene,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56248,Surzur,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+56252,Tour Du Parc,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+62025,Ambleteuse,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+62054,Audinghen,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+62056,Audresselles,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+62806,Tardinghen,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+62899,Wissant,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+64024,Anglet,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+64122,Biarritz,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+64125,Bidart,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+64189,Ciboure,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+64249,Guethary,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+64483,Saint Jean De Luz,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+66053,Collioure,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+66148,Port Vendres,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+66212,Torreilles,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+76192,Criel Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+76217,Dieppe,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+76515,Quiberville,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+76605,Sainte Marguerite Sur Mer,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+80039,Ault,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+80303,Favieres,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+80333,Fort Mahon Plage,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+80533,Mers Les Bains,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+80649,Quend,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+80713,Saint Quentin En Tourmont,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83009,Bandol,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83019,Bormes Les Mimosas,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83036,Cavalaire Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83042,Cogolin,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83048,Croix Valmer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83065,Gassin,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83068,Grimaud,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83069,Hyeres,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83070,Lavandou,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83071,Londe Les Maures,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83098,Pradet,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83101,Ramatuelle,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83112,Saint Cyr Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83115,Sainte Maxime,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83119,Saint Tropez,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83123,Sanary Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83129,Six Fours Les Plages,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83152,Rayol Canadel Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+83153,Saint Mandrier Sur Mer,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85001,Aiguillon La Presqu Ile,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85106,Gueriniere,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85114,Jard Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85127,Longeville Sur Mer,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85163,Noirmoutier En L Ile,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85278,Saint Vincent Sur Jard,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85288,Talmont Saint Hilaire,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+85294,Tranche Sur Mer,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97104,Baillif,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97105,Basse Terre,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97106,Bouillante,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97107,Capesterre Belle Eau,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97108,Capesterre De Marie Galante,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97111,Deshaies,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97112,Grand Bourg,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97114,Goyave,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97117,Moule,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97121,Pointe Noire,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97122,Port Louis,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97125,Saint Francois,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97126,Saint Louis,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97128,Sainte Anne,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97131,Terre De Haut,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97203,Basse Pointe,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97204,Carbet,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97205,Case Pilote,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97206,Diamant,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97211,Grand Riviere,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97214,Lorrain,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97215,Macouba,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97216,Marigot,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97219,Precheur,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97222,Robert,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97225,Saint Pierre,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97226,Sainte Anne,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97227,Sainte Luce,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97228,Sainte Marie,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97229,Schoelcher,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97230,Trinite,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97231,Trois Ilets,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97234,Bellefontaine,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97302,Cayenne,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97304,Kourou,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97305,Macouria,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97309,Remire Montjoly,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97361,Awala Yalimapo,2022-05-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97407,Port,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97409,Saint Andre,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97411,Saint Denis,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97416,Saint Pierre,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97418,Sainte Marie,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97601,Acoua,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97602,Bandraboua,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97604,Boueni,2023-08-01,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97610,Koungou,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97612,Mtsamboro,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97613,M Tsangamouji,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97615,Pamandzi,2024-06-11,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
+97616,Sada,2026-02-14,2026-95,https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000053493953
