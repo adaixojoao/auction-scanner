@@ -847,6 +847,7 @@ OLD_CASE_YEARS = {"PT": 20, "ES": 10, "IT": 10}
 def _surroundings(item: dict, reasons: list[str]) -> None:
     """What official maps and statistics say about the place (surroundings.py,
     crime.py): shown, not scored."""
+    import coast_retreat
     import crime
     import incomes
     import population_change
@@ -857,6 +858,9 @@ def _surroundings(item: dict, reasons: list[str]) -> None:
     rules = rent_rules.note(item)
     if rules:
         reasons.append(rules)
+    coast = coast_retreat.note(item)
+    if coast:
+        reasons.append(coast)
     tax = property_tax.note(item)
     if tax:
         reasons.append(tax)
