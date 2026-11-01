@@ -1,0 +1,186 @@
+icao,iata,name,country,lat,lon,passengers,year
+BIKF,KEF,Keflavik International Airport,IS,63.985001,-22.6056,370666,2024
+CYEG,YEG,Edmonton International Airport,CA,53.3097,-113.580002,111159,2024
+CYUL,YUL,Montreal / Pierre Elliott Trudeau International Airport,CA,45.467837,-73.742294,246354,2024
+CYVR,YVR,Vancouver International Airport,CA,49.193901,-123.183998,178810,2024
+CYYC,YYC,Calgary International Airport,CA,51.118822,-114.009933,211078,2024
+CYYZ,YYZ,Toronto Pearson International Airport,CA,43.675935,-79.629421,548808,2024
+DGAA,ACC,Kotoka International Airport,GH,5.605189800262451,-0.16678600013256073,240126,2024
+DNMM,LOS,Murtala Muhammed International Airport,NG,6.57737,3.32116,149280,2024
+EBBR,BRU,Brussels Airport,BE,50.901402,4.48444,194685,2024
+EDDB,BER,Berlin Brandenburg Airport,DE,52.361738,13.502341,827957,2024
+EDDF,FRA,Frankfurt Main Airport,DE,50.026706,8.55835,658604,2024
+EDDH,HAM,Hamburg Helmut Schmidt Airport,DE,53.630402,9.98823,357234,2024
+EDDL,DUS,Düsseldorf Airport,DE,51.289501,6.76678,245498,2024
+EDDM,MUC,Munich Airport,DE,48.353802,11.7861,808852,2024
+EDDN,NUE,Nuremberg Airport,DE,49.498699,11.078056,213703,2024
+EDDS,STR,Stuttgart Airport,DE,48.689899,9.22196,282629,2024
+EDDV,HAJ,Hannover Airport,DE,52.461102,9.68508,183741,2024
+EDDW,BRE,Bremen Airport,DE,53.046786,8.78932,171630,2024
+EETN,TLL,Lennart Meri Tallinn Airport,EE,59.413246,24.83264,95099,2024
+EFHK,HEL,Helsinki Vantaa Airport,FI,60.318363,24.963341,606505,2024
+EGBB,BHX,Birmingham Airport,GB,52.453899,-1.74803,592522,2024
+EGCC,MAN,Manchester Airport,GB,53.349375,-2.279521,1083040,2024
+EGFF,CWL,Cardiff International Airport,GB,51.396702,-3.34333,104267,2024
+EGGD,BRS,Bristol Airport,GB,51.382326,-2.716453,502722,2024
+EGGP,LPL,Liverpool John Lennon Airport,GB,53.334863,-2.849637,126164,2024
+EGGW,LTN,London Luton Airport,GB,51.874699,-0.368333,568697,2024
+EGHI,SOU,Southampton Airport,GB,50.950298,-1.3568,103871,2024
+EGKK,LGW,London Gatwick Airport,GB,51.148744,-0.185739,729604,2024
+EGLC,LCY,London City Airport,GB,51.505299,0.055278,566258,2024
+EGLL,LHR,London Heathrow Airport,GB,51.470748,-0.459909,1460366,2024
+EGNJ,HUY,Humberside Airport,GB,53.576152,-0.34954,105446,2024
+EGNM,LBA,Leeds Bradford Airport,GB,53.865898,-1.66057,168179,2024
+EGNT,NCL,Newcastle International Airport,GB,55.037958,-1.689577,375186,2024
+EGNV,MME,Teesside International Airport,GB,54.509201,-1.42941,99470,2024
+EGPD,ABZ,Aberdeen International Airport,GB,57.2019,-2.19778,300581,2024
+EGPE,INV,Inverness Airport,GB,57.5425,-4.0475,100085,2024
+EGPF,GLA,Glasgow Airport,GB,55.871899,-4.43306,435889,2024
+EGPH,EDI,Edinburgh Airport,GB,55.950145,-3.372288,685566,2024
+EGSH,NWI,Norwich Airport,GB,52.6758,1.28278,122001,2024
+EGSS,STN,London Stansted Airport,GB,51.884998,0.235,174236,2024
+EICK,ORK,Cork International Airport,IE,51.841301,-8.49111,239176,2024
+EIDW,DUB,Dublin Airport,IE,53.428713,-6.262121,1297434,2024
+EKBI,BLL,Billund Airport,DK,55.740335,9.157019,439910,2024
+EKCH,CPH,Copenhagen Kastrup Airport,DK,55.617900848389,12.656000137329,1159300,2024
+EKYT,AAL,Aalborg Airport,DK,57.094763,9.84993,205568,2024
+ELLX,LUX,Luxembourg-Findel International Airport,LU,49.626845,6.212134,183802,2024
+ENAL,AES,Ålesund Airport,NO,62.560443,6.110845,81790,2024
+ENBR,BGO,"Bergen Airport, Flesland",NO,60.2934,5.21814,382338,2024
+ENCN,KRS,Kristiansand Airport,NO,58.204201,8.08537,127033,2024
+ENGM,OSL,Oslo-Gardermoen International Airport,NO,60.193901,11.1004,742457,2024
+ENVA,TRD,"Trondheim Airport, Værnes",NO,63.457802,10.924,161023,2024
+ENZV,SVG,"Stavanger Airport, Sola",NO,58.876701,5.63778,279803,2024
+EPGD,GDN,Gdańsk Lech Wałęsa Airport,PL,54.377602,18.4662,218826,2024
+EPKK,KRK,Kraków John Paul II International Airport,PL,50.077702,19.7848,293391,2024
+EPWA,WAW,Warsaw Chopin Airport,PL,52.165699,20.9671,599184,2024
+EPWR,WRO,Copernicus Wrocław Airport,PL,51.103719,16.882096,121436,2024
+ESGG,GOT,Göteborg Landvetter Airport,SE,57.6628,12.2798,329152,2024
+ESSA,ARN,Stockholm-Arlanda Airport,SE,59.64849,17.928829,893987,2024
+ESSL,LPI,Linköping City Airport,SE,58.404909,15.684499,127234,2024
+EVRA,RIX,Riga International Airport,LV,56.920752,23.970711,204877,2024
+EYVI,VNO,Vilnius International Airport,LT,54.634102,25.285801,89138,2024
+FACT,CPT,Cape Town International Airport,ZA,-33.97403,18.604333,247154,2024
+FAOR,JNB,O.R. Tambo International Airport,ZA,-26.140081,28.246801,237220,2024
+GCFV,FUE,Fuerteventura Airport,ES,28.4527,-13.8638,97213,2024
+GCLP,LPA,Gran Canaria Airport,ES,27.9319,-15.3866,363001,2024
+GCRR,ACE,César Manrique-Lanzarote Airport,ES,28.945499,-13.6052,113330,2024
+GCTS,TFS,Tenerife Sur Airport,ES,28.0445,-16.5725,275346,2024
+GMMN,CMN,Mohammed V International Airport,MA,33.3675,-7.58997,140567,2024
+GMMX,RAK,Marrakesh Menara Airport,MA,31.604807,-8.035788,192450,2024
+GMTT,TNG,Tangier Ibn Battuta Airport,MA,35.731741,-5.921459,84759,2024
+HECA,CAI,Cairo International Airport,EG,30.111534,31.396694,112686,2024
+HEGN,HRG,Hurghada International Airport,EG,27.176776,33.796692,166504,2024
+HKJK,NBO,Jomo Kenyatta International Airport,KE,-1.318886,36.928233,358604,2024
+HTKJ,JRO,Kilimanjaro International Airport,TZ,-3.427049,37.07353,98279,2024
+HUEN,EBB,Entebbe International Airport,UG,0.042386,32.443501,78178,2024
+KATL,ATL,Hartsfield Jackson Atlanta International Airport,US,33.6367,-84.428101,777968,2024
+KBOS,BOS,Boston Logan International Airport,US,42.36197,-71.0079,420380,2024
+KDTW,DTW,Detroit Metropolitan Wayne County Airport,US,42.21377,-83.353786,537242,2024
+KEWR,EWR,Newark Liberty International Airport,US,40.6894,-74.170545,150918,2024
+KIAD,IAD,Washington Dulles International Airport,US,38.9445,-77.455803,280015,2024
+KIAH,IAH,George Bush Intercontinental Airport,US,29.9844,-95.3414,299213,2024
+KJFK,JFK,John F. Kennedy International Airport,US,40.639447,-73.779317,905043,2024
+KLAS,LAS,Harry Reid International Airport,US,36.083361,-115.151817,118943,2024
+KLAX,LAX,Los Angeles International Airport,US,33.942501,-118.407997,325110,2024
+KMCO,MCO,Orlando International Airport,US,28.429399490356445,-81.30899810791016,75499,2024
+KMSP,MSP,Minneapolis–Saint Paul International Airport / Wold–Chamberlain Field,US,44.880081,-93.221741,546677,2024
+KORD,ORD,Chicago O'Hare International Airport,US,41.9786,-87.9048,299349,2024
+KPDX,PDX,Portland International Airport,US,45.588699,-122.598,146016,2024
+KPHL,PHL,Philadelphia International Airport,US,39.871899,-75.241096,130462,2024
+KSEA,SEA,Seattle–Tacoma International Airport,US,47.447943,-122.310276,288120,2024
+KSFO,SFO,San Francisco International Airport,US,37.619806,-122.374821,273602,2024
+KSLC,SLC,Salt Lake City International Airport,US,40.78886,-111.979866,228163,2024
+LBSF,SOF,Sofia Airport,BG,42.696357,23.417671,77939,2024
+LDSP,SPU,Split Saint Jerome Airport,HR,43.538898,16.298,197028,2024
+LDZA,ZAG,Zagreb Franjo Tuđman International Airport,HR,45.742901,16.0688,234086,2024
+LEAL,ALC,Alicante-Elche Miguel Hernández Airport,ES,38.2822,-0.558156,580405,2024
+LEBB,BIO,Bilbao Airport,ES,43.301102,-2.91061,287774,2024
+LEBL,BCN,Josep Tarradellas Barcelona-El Prat Airport,ES,41.2971,2.07846,1559616,2024
+LEIB,IBZ,Ibiza Airport,ES,38.872898,1.37312,313067,2024
+LEMD,MAD,Adolfo Suárez Madrid–Barajas Airport,ES,40.493407,-3.572249,1228527,2024
+LEMG,AGP,Málaga-Costa del Sol Airport,ES,36.678234,-4.500208,912593,2024
+LEPA,PMI,Palma de Mallorca Airport,ES,39.551701,2.73881,397421,2024
+LEVC,VLC,Valencia Airport,ES,39.489162,-0.480961,481618,2024
+LEZL,SVQ,Seville Airport,ES,37.417999,-5.89311,173606,2024
+LFBD,BOD,Bordeaux–Mérignac Airport,FR,44.82865,-0.715356,241989,2024
+LFBO,TLS,Toulouse-Blagnac Airport,FR,43.629101,1.36382,249428,2024
+LFLL,LYS,Lyon Saint-Exupéry Airport,FR,45.725996,5.090139,272887,2024
+LFML,MRS,Marseille Provence Airport,FR,43.438088,5.2125,259018,2024
+LFMN,NCE,Nice-Côte d'Azur Airport,FR,43.658401,7.21587,453688,2024
+LFPG,CDG,Charles de Gaulle International Airport,FR,49.00896,2.554117,1125321,2024
+LFRS,NTE,Nantes Atlantique Airport,FR,47.153198,-1.61073,221045,2024
+LFSB,BSL,EuroAirport Basel–Mulhouse–Freiburg,FR,47.60068,7.521117,363899,2024
+LGAV,ATH,Athens Eleftherios Venizelos International Airport,GR,37.936401,23.9445,606587,2024
+LGIR,HER,Heraklion International Nikos Kazantzakis Airport,GR,35.339699,25.1803,258472,2024
+LGKO,KGS,"Kos International Airport ""Ippokratis""",GR,36.794523,27.09115,139546,2024
+LGPZ,PVK,Aktion National Airport,GR,38.925499,20.765301,84759,2024
+LGRP,RHO,"Rhodes International Airport ""Diagoras""",GR,36.405399,28.086201,137447,2024
+LGTS,SKG,Thessaloniki Macedonia International Airport,GR,40.51928,22.970009,144049,2024
+LGZA,ZTH,"Zakynthos International Airport ""Dionysios Solomos""",GR,37.7509,20.8843,193364,2024
+LHBP,BUD,Budapest Liszt Ferenc International Airport,HU,47.43018,19.262393,443100,2024
+LIBD,BRI,Bari Karol Wojtyła International Airport,IT,41.138901,16.760599,100884,2024
+LICC,CTA,Catania-Fontanarossa Airport,IT,37.466801,15.0664,122131,2024
+LIEO,OLB,Olbia Costa Smeralda Airport,IT,40.898953,9.518457,79552,2024
+LIMC,MXP,Milan Malpensa International Airport,IT,45.6306,8.72811,538161,2024
+LIMF,TRN,Turin Airport,IT,45.200802,7.64963,110749,2024
+LIMJ,GOA,Genoa Cristoforo Colombo Airport,IT,44.412039,8.840732,88767,2024
+LIML,LIN,Milano Linate Airport,IT,45.445099,9.27674,630291,2024
+LIPE,BLQ,Bologna Guglielmo Marconi Airport,IT,44.5354,11.2887,231466,2024
+LIPX,VRN,Verona Villafranca Valerio Catullo Airport,IT,45.394955,10.887303,78627,2024
+LIPZ,VCE,Venice Marco Polo Airport,IT,45.505299,12.3519,457192,2024
+LIRF,FCO,Rome–Fiumicino Leonardo da Vinci International Airport,IT,41.804532,12.251998,759526,2024
+LIRN,NAP,Naples International Airport,IT,40.886002,14.2908,267722,2024
+LIRP,PSA,Pisa International Airport,IT,43.683899,10.3927,125390,2024
+LIRQ,FLR,"Florence Airport, Peretola",IT,43.808558,11.202822,338864,2024
+LKPR,PRG,Václav Havel Airport Prague,CZ,50.100874,14.259911,652228,2024
+LLBG,TLV,Ben Gurion International Airport,IL,32.011398,34.8867,285812,2024
+LMML,MLA,Malta International Airport,MT,35.845932,14.491546,130012,2024
+LOWW,VIE,Vienna International Airport,AT,48.110298,16.5697,779610,2024
+LPFR,FAO,Faro - Gago Coutinho International Airport,PT,37.015909,-7.970939,276759,2024
+LPMA,FNC,Cristiano Ronaldo International Airport,PT,32.697812,-16.774613,128690,2024
+LPPR,OPO,Francisco de Sá Carneiro Airport,PT,41.2481002808,-8.68138980865,419799,2024
+LPPT,LIS,Lisbon Humberto Delgado Airport,PT,38.7813,-9.13592,1044889,2024
+LROP,OTP,Bucharest Henri Coandă International Airport,RO,44.571792,26.103285,470960,2024
+LSGG,GVA,Geneva International Airport,CH,46.238098,6.10895,641328,2024
+LSZH,ZRH,Zürich Airport,CH,47.458056,8.548056,816734,2024
+LTAI,AYT,Antalya International Airport,TR,36.898701,30.800501,310708,2024
+LTBJ,ADB,Adnan Menderes International Airport,TR,38.2924,27.157,147958,2024
+LTFJ,SAW,Istanbul Sabiha Gökçen International Airport,TR,40.898602,29.3092,627464,2024
+LTFM,IST,İstanbul Airport,TR,41.274874,28.732136,866371,2024
+LYBE,BEG,Belgrade Nikola Tesla Airport,RS,44.818401,20.309099,229776,2024
+MMMX,MEX,Mexico City Benito Juárez International Airport,MX,19.435822,-99.07033,352043,2024
+MMUN,CUN,Cancún International Airport,MX,21.040817,-86.87347,90386,2024
+MPTO,PTY,Tocumen International Airport,PA,9.07136,-79.383499,221579,2024
+OEJN,JED,King Abdulaziz International Airport,SA,21.680241,39.157436,101763,2024
+OMAA,AUH,Zayed International Airport,AE,24.440966,54.649237,214777,2024
+OMDB,DXB,Dubai International Airport,AE,25.24979,55.370992,991087,2024
+OTHH,DOH,Hamad International Airport,QA,25.273056,51.608056,384105,2024
+RCTP,TPE,Taiwan Taoyuan International Airport,TW,25.0777,121.233002,164587,2024
+RJAA,NRT,Narita International Airport,JP,35.76858,140.388714,194895,2024
+RJBB,KIX,Kansai International Airport,JP,34.427299,135.244003,76050,2024
+RKSI,ICN,Incheon International Airport,KR,37.469101,126.450996,299068,2024
+SAEZ,EZE,Ezeiza International Airport - Ministro Pistarini,AR,-34.8222,-58.5358,131976,2024
+SBGL,GIG,Rio de Janeiro Galeão – Tom Jobim International Airport,BR,-22.809999,-43.250557,187851,2024
+SBGR,GRU,São Paulo/Guarulhos–Governor André Franco Montoro International Airport,BR,-23.431274,-46.469954,251551,2024
+SEQM,UIO,Mariscal Sucre International Airport,EC,-0.125399,-78.354306,83045,2024
+SKBO,BOG,El Dorado International Airport,CO,4.70159,-74.1469,124802,2024
+SMJP,PBM,Johan Adolf Pengel International Airport,SR,5.45283,-55.187801,294380,2024
+SPJC,LIM,Jorge Chávez International Airport,PE,-12.0219,-77.114305,210706,2024
+TNCA,AUA,Queen Beatrix International Airport,AW,12.501056,-70.014281,128023,2024
+TNCB,BON,Flamingo International Airport,BQ,12.131,-68.268501,189936,2024
+TNCC,CUR,Hato International Airport,CW,12.1889,-68.959801,720627,2024
+VABB,BOM,Chhatrapati Shivaji Maharaj International Airport,IN,19.088699,72.867897,188262,2024
+VHHH,HKG,Hong Kong International Airport,HK,22.31184,113.914862,312449,2024
+VIDP,DEL,Indira Gandhi International Airport,IN,28.55563,77.09519,354848,2024
+VOBL,BLR,Kempegowda International Airport Bengaluru,IN,13.1979,77.706299,130328,2024
+VTBS,BKK,Suvarnabhumi Airport,TH,13.6811,100.747002,331437,2024
+WADD,DPS,Denpasar I Gusti Ngurah Rai International Airport,ID,-8.748409,115.167123,135074,2024
+WIII,CGK,Soekarno-Hatta International Airport,ID,-6.12557,106.655998,91570,2024
+WMKK,KUL,Kuala Lumpur International Airport,MY,2.74558,101.709999,102314,2024
+WSSS,SIN,Singapore Changi Airport,SG,1.35019,103.994003,292333,2024
+ZBAA,PEK,Beijing Capital International Airport,CN,40.077349,116.596702,160988,2024
+ZBAD,PKX,Beijing Daxing International Airport,CN,39.501289,116.413967,145221,2024
+ZGGG,CAN,Guangzhou Baiyun International Airport,CN,23.392401,113.299004,156877,2024
+ZSAM,XMN,Xiamen Gaoqi International Airport,CN,24.543889,118.127454,133809,2024
+ZSPD,PVG,Shanghai Pudong International Airport,CN,31.1434,121.805,368871,2024
