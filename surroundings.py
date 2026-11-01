@@ -63,7 +63,15 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   category (EEA, CDDA/NatDA);
 - Portugal's coastal programmes (APA, POC): the safeguard strips against
   erosion, overtopping and cliff falls, the critical areas, the 500 m
-  land protection zone and the public maritime domain's margin.
+  land protection zone and the public maritime domain's margin;
+- land use, EU-wide (CORINE Land Cover 2018, EEA): what the land at the
+  point is (town, farmland, forest, wetland) and the nuisances near it: an
+  industrial or commercial area or a road or rail yard within 300 m, a port,
+  an airport, a quarry or a dump within 1 km. CORINE maps patches of 25 ha
+  and more, so a small workshop or field is not in it;
+- bathing water, EU-wide: the nearest official bathing site within 10 km
+  and its class under the Bathing Water Directive (Excellent, Good,
+  Sufficient, Poor) for the latest season and the ones before (EEA).
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -130,6 +138,15 @@ EEA_SITES = "https://bio.discomap.eea.europa.eu/arcgis/rest/services/ProtectedSi
 NATURA_TYPES = {"A": "birds", "B": "habitats", "C": "habitats and birds"}
 PT_COAST = "https://sniambgeoogc.apambiente.pt/getogc/rest/services/SNIAmb/POC/MapServer/identify"
 PT_COAST_LAYERS = {8: "margin", 10: "flooding", 11: "erosion", 12: "cliff", 15: "critical", 16: "zone"}
+CORINE = "https://image.discomap.eea.europa.eu/arcgis/rest/services/Corine/CLC2018_WM/MapServer/0/query"
+CORINE_NEAR = {"121": (300, "an industrial or commercial area"), "122": (300, "a road or rail yard"),
+               "123": (1000, "a port"), "124": (1000, "an airport"), "131": (1000, "a quarry or mine"),
+               "132": (1000, "a dump"), "133": (300, "a construction site")}
+CORINE_AT = {"111": "dense town centre", "112": "town or village", "123": "port", "124": "airport", "12": "industrial, commercial or transport land",
+             "13": "quarry, dump or building site", "14": "urban green or sports area", "2": "farmland",
+             "31": "forest", "32": "scrub or grassland", "33": "bare or burnt land", "4": "wetland", "5": "water"}
+BATHING = "https://water.discomap.eea.europa.eu/arcgis/rest/services/BathingWater"
+BATHING_KM = 10
 IT_IDROGEO = "https://idrogeo.isprambiente.it/geoserver/ows"
 IT_LANDSLIDE = {1: "moderate (P1)", 2: "medium (P2)", 3: "high (P3)", 4: "very high (P4)", 5: "an attention area"}
 IT_FLOOD = {"scenariop1": (1, "low (P1, rare floods)"), "scenariop2": (2, "medium (P2, every 100–200 years)"),
@@ -729,6 +746,102 @@ def _pt_coast_note(c: dict | None) -> str | None:
     return f"in {', '.join(inside)}{rule} (APA, {c['poc']})"
 
 
+def _corine(session, lat: float, lon: float, metres: int) -> set[str]:
+    resp = session.get(CORINE, params={
+        "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects", "distance": metres, "units": "esriSRUnit_Meter",
+        "outFields": "Code_18", "returnGeometry": "false", "f": "json"}, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(str(data["error"])[:200])
+    return {str((f.get("attributes") or {}).get("Code_18") or "") for f in data.get("features") or []}
+
+
+def land_use(session, lat: float, lon: float, item: dict) -> dict:
+    return land_use_found(_corine(session, lat, lon, 1), _corine(session, lat, lon, 300),
+                          _corine(session, lat, lon, 1000))
+
+
+def land_use_found(at: set[str], near: set[str], far: set[str]) -> dict:
+    """{"at": CORINE code at the point, "near": [codes of nuisances within their distance]}."""
+    point = sorted(at)[0] if at else None
+    found = [c for c, (m, _) in CORINE_NEAR.items() if c in (near if m <= 300 else far) and c != point]
+    return {"at": point, "near": found}
+
+
+def _land_use_note(u: dict | None) -> str | None:
+    if not u or not (u.get("at") or u.get("near")):
+        return None
+    code = u.get("at") or ""
+    what = next((CORINE_AT[k] for k in sorted(CORINE_AT, key=len, reverse=True) if code.startswith(k)), None)
+    bits = [f"land here: {what}"] if what else []
+    near = [f"{CORINE_NEAR[c][1]} within " + (f"{CORINE_NEAR[c][0]} m" if CORINE_NEAR[c][0] < 1000 else "1 km")
+            for c in u.get("near") or []]
+    if near:
+        bits.append(", ".join(near))
+    return "; ".join(bits) + " (CORINE Land Cover 2018, EEA)" if bits else None
+
+
+_bathing_service: list[str] = []
+
+
+def _bathing_url(session) -> str:
+    """The newest season's map (one service per year; the undated one lags)."""
+    if not _bathing_service:
+        resp = session.get(BATHING, params={"f": "json"}, timeout=60)
+        resp.raise_for_status()
+        years = [x["name"] for x in resp.json().get("services") or [] if x["name"][-4:].isdigit()]
+        _bathing_service.append(f"{BATHING}/{max(years, key=lambda n: n[-4:]).split('/')[-1]}/MapServer/3/query")
+    return _bathing_service[0]
+
+
+def bathing(session, lat: float, lon: float, item: dict) -> dict:
+    url = _bathing_url(session)
+    resp = session.get(url, params={
+        "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects", "distance": BATHING_KM * 1000, "units": "esriSRUnit_Meter",
+        "outFields": "*", "returnGeometry": "false", "f": "json"}, timeout=60)
+    resp.raise_for_status()
+    data = json.loads(resp.content.decode("utf-8", "replace"))
+    if "error" in data:
+        raise RuntimeError(str(data["error"])[:200])
+    return bathing_found([f.get("attributes") or {} for f in data.get("features") or []], lat, lon,
+                         int(url.split("_WM_")[1][:4]))
+
+
+def bathing_found(sites: list[dict], lat: float, lon: float, season: int) -> dict:
+    """{"season", "nearest": {"name", "kind", "km", "class", "past": [classes before]}}."""
+    best = None
+    for a in sites:
+        if a.get("latitude") is None or not a.get("qualityStatus"):
+            continue
+        km = _distance_m(lat, lon, float(a["latitude"]), float(a["longitude"])) / 1000
+        if best is None or km < best["km"]:
+            past = [a.get(f"qualityStatus_minus{i}") for i in range(1, 6)]
+            best = {"name": (a.get("bathingWaterName") or "").strip().title(),
+                    "kind": (a.get("bwWaterCategory") or "").lower(), "km": round(km, 1),
+                    "class": a["qualityStatus"], "past": [p for p in past if p and p != "Not classified"]}
+    return {"season": season, "nearest": best}
+
+
+def _bathing_note(b: dict | None) -> str | None:
+    if not b or not b.get("nearest"):
+        return None
+    n = b["nearest"]
+    past = n.get("past") or []
+    if past and all(p == n["class"] for p in past):
+        history = f", {n['class']} every season since {b['season'] - len(past)}"
+    elif past:
+        history = f" (before: {', '.join(past[:3])})"
+    else:
+        history = ""
+    kind = {"coastal": "sea, ", "transitional": "estuary, "}.get(n.get("kind"), "inland, " if n.get("kind") else "")
+    rated = ("not classified yet" if n["class"] == "Not classified" else n["class"]) + f" in {b['season']}"
+    return (f"nearest official bathing water: {n['name']} ({kind}{n['km']:.1f} km), {rated}{history} "
+            "(EEA, Bathing Water Directive)")
+
+
 def _georisques(session, path: str, params: dict) -> dict:
     resp = session.get(GEORISQUES + path, params=params, timeout=40)
     resp.raise_for_status()
@@ -918,6 +1031,8 @@ SOURCES = {
     "fr_soil": (fr_soil, {"FR"}, BUILDING_PINS | {"street"}, {"home", "land"}),
     "nature": (nature, None, BUILDING_PINS | {"street"}, {"home", "land"}),
     "pt_coast": (pt_coast, {"PT"}, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "land_use": (land_use, None, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "bathing": (bathing, None, NEAR_PINS, {"home"}),
 }
 NEEDS_PARCEL = {"fr_parcel"}          # asked once the outline has found the parcel
 
@@ -1201,9 +1316,10 @@ def notes(item: dict) -> list[str]:
             out.append(line)
     out.extend(_soil_note(found.get("fr_soil")))
     out.extend(_nature_note(found.get("nature")))
-    line = _pt_coast_note(found.get("pt_coast"))
-    if line:
-        out.append(line)
+    for line in (_pt_coast_note(found.get("pt_coast")), _land_use_note(found.get("land_use")),
+                 _bathing_note(found.get("bathing"))):
+        if line:
+            out.append(line)
     line = _parcel_note(found.get("fr_parcel"), item)
     if line:
         out.append(line)
