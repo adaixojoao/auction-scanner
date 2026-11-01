@@ -16,15 +16,16 @@ def _item(precision="sale", country="FR", found=None, title="Maison à Vierzon",
 def test_point_checks_need_the_building_and_the_rest_take_any_pin():
     assert surroundings.missing(_item("sale")) == ["noise", "quake", "amenities", "power", "fr_zoning", "fr_risks",
                                                    "fr_sold", "fr_energy", "fr_heritage", "fr_soil", "nature", "land_use",
-                                                   "bathing"]
+                                                   "bathing", "winter_sun", "pfas", "terrain"]
     assert surroundings.missing(_item("village")) == ["quake", "amenities", "fr_risks", "fr_sold", "bathing"]
     assert surroundings.missing(_item("municipality")) == ["quake", "fr_risks", "fr_sold"]
     assert surroundings.missing(_item("sale", country="IT", title="Casa a Napoli")) == ["noise", "quake", "amenities",
                                                                                            "power", "it_hazard", "nature",
-                                                                                           "land_use", "bathing"]
+                                                                                           "land_use", "bathing", "winter_sun", "pfas", "terrain"]
     land = _item("sale", country="PT", title="Terreno rústico em Pinhel")
     assert surroundings.missing(land) == ["quake", "power", "pt_zoning", "pt_heritage", "pt_flood",
-                                      "nature", "pt_coast", "land_use"]
+                                      "nature", "pt_coast", "land_use",
+                                      "winter_sun", "pfas", "terrain"]
 
 
 def test_an_answer_is_kept_for_its_pin_only():

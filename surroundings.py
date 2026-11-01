@@ -71,7 +71,17 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   and more, so a small workshop or field is not in it;
 - bathing water, EU-wide: the nearest official bathing site within 10 km
   and its class under the Bathing Water Directive (Excellent, Good,
-  Sufficient, Poor) for the latest season and the ones before (EEA).
+  Sufficient, Poor) for the latest season and the ones before (EEA);
+- winter sun, EU-wide (PVGIS, JRC): the hours the sun clears the hills and
+  mountains on 21 December (the terrain's horizon, not buildings or trees),
+  and how much of December's direct sun the clouds let through (SARAH-3
+  satellite, 2005 onwards), so roughly how many hours of sun an average
+  December day gets;
+- PFAS ("forever chemicals"), EU-wide: the highest sum measured in ground or
+  surface water within 3 km, against the EU drinking-water limit of 0.1 µg/l
+  for 20 PFAS (EEA, WISE monitoring);
+- altitude and slope (EU-DEM 25 m, Copernicus): the height, how steep the
+  ground is and which way it faces.
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -147,6 +157,13 @@ CORINE_AT = {"111": "dense town centre", "112": "town or village", "123": "port"
              "31": "forest", "32": "scrub or grassland", "33": "bare or burnt land", "4": "wetland", "5": "water"}
 BATHING = "https://water.discomap.eea.europa.eu/arcgis/rest/services/BathingWater"
 BATHING_KM = 10
+PVGIS = "https://re.jrc.ec.europa.eu/api/v5_3/"
+SUN_HOURS_MIN = 6                 # the winter sun a buyer can count on
+PFAS = "https://water.discomap.eea.europa.eu/arcgis/rest/services/PFAS/PFAS_all/MapServer/0/query"
+PFAS_KM = 3
+PFAS_LIMIT = 0.1                  # µg/l, sum of 20 PFAS (Directive 2020/2184, from 2026)
+DEM = "https://api.opentopodata.org/v1/eudem25m"
+DEM_STEP_M = 30
 IT_IDROGEO = "https://idrogeo.isprambiente.it/geoserver/ows"
 IT_LANDSLIDE = {1: "moderate (P1)", 2: "medium (P2)", 3: "high (P3)", 4: "very high (P4)", 5: "an attention area"}
 IT_FLOOD = {"scenariop1": (1, "low (P1, rare floods)"), "scenariop2": (2, "medium (P2, every 100–200 years)"),
@@ -842,6 +859,188 @@ def _bathing_note(b: dict | None) -> str | None:
             "(EEA, Bathing Water Directive)")
 
 
+def _sun(lat: float, lon: float, minute: float) -> tuple[float, float]:
+    """The sun's elevation and azimuth (degrees; azimuth from the south, west
+    positive, as PVGIS counts) on 21 December, `minute` after midnight UTC."""
+    decl = math.radians(-23.44)
+    eq_time = 1.7                                   # minutes, near the solstice
+    hour = math.radians((minute + eq_time + 4 * lon) / 4 - 180)
+    phi = math.radians(lat)
+    sin_el = math.sin(phi) * math.sin(decl) + math.cos(phi) * math.cos(decl) * math.cos(hour)
+    el = math.asin(max(-1.0, min(1.0, sin_el)))
+    az = math.atan2(math.sin(hour), math.cos(hour) * math.sin(phi) - math.tan(decl) * math.cos(phi))
+    return math.degrees(el), math.degrees(az)
+
+
+def _horizon_at(horizon: list[tuple[float, float]], az: float) -> float:
+    """The terrain's height (degrees) toward azimuth `az`, between profile points."""
+    for (a1, h1), (a2, h2) in zip(horizon, horizon[1:]):
+        if a1 <= az <= a2:
+            return h1 + (h2 - h1) * (az - a1) / (a2 - a1) if a2 > a1 else h1
+    return horizon[0][1] if horizon else 0.0
+
+
+def winter_sun_hours(lat: float, lon: float, horizon: list[tuple[float, float]]) -> dict:
+    """{"day": hours of daylight, "sun": hours the sun is above the terrain, "clear_dni": kWh/m²
+    of direct sun a clear 21 December would bring}, minute by minute."""
+    day = sun = 0
+    dni = 0.0
+    for minute in range(0, 1440, 2):
+        el, az = _sun(lat, lon, minute)
+        if el <= -0.833:
+            continue
+        day += 2
+        if el > max(_horizon_at(horizon, az), 0.0):
+            sun += 2
+            air_mass = 1 / (math.sin(math.radians(el)) + 0.50572 * (el + 6.07995) ** -1.6364)
+            dni += 1.353 * 0.7 ** (air_mass ** 0.678) * 2 / 60     # kW/m² × hours (Meinel)
+    return {"day": round(day / 60, 1), "sun": round(sun / 60, 1), "clear_dni": round(dni, 3)}
+
+
+def winter_sun(session, lat: float, lon: float, item: dict) -> dict:
+    resp = session.get(PVGIS + "printhorizon", params={"lat": lat, "lon": lon, "outputformat": "json"}, timeout=60)
+    resp.raise_for_status()
+    horizon = [(float(p["A"]), float(p["H_hor"])) for p in resp.json()["outputs"]["horizon_profile"]]
+    resp = session.get(PVGIS + "MRcalc", params={"lat": lat, "lon": lon, "mr_dni": 1, "outputformat": "json"},
+                       timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    december = [m["Hb(n)_m"] for m in data["outputs"]["monthly"] if m["month"] == 12 and "Hb(n)_m" in m]
+    years = [m["year"] for m in data["outputs"]["monthly"]]
+    return winter_sun_found(winter_sun_hours(lat, lon, horizon), december, min(years), max(years))
+
+
+def winter_sun_found(hours: dict, december: list[float], first: int, last: int) -> dict:
+    """Adds "share": December's measured direct sun over a clear sky's (the clouds),
+    and "hours": roughly the sun an average December day gets."""
+    out = {**hours, "years": [first, last]}
+    if december and hours["clear_dni"] > 0:
+        share = min(1.0, sum(december) / len(december) / 31 / hours["clear_dni"])
+        out["share"] = round(share, 2)
+        out["hours"] = round(hours["sun"] * share, 1)
+    elif december:
+        out["share"], out["hours"] = 0.0, 0.0
+    return out
+
+
+def _winter_sun_note(w: dict | None) -> str | None:
+    if not w or not w.get("day"):
+        return None
+    hidden = w["day"] - w["sun"]
+    hills = f", the hills hide it {hidden:.1f} h" if hidden >= 0.5 else ""
+    line = f"on 21 December the sun is up {w['day']:.1f} h{hills}: {w['sun']:.1f} h of direct sun on a clear day"
+    if "share" in w and w["sun"] > 0:
+        line += (f"; December's clouds let through {w['share'] * 100:.0f}% of the direct sun, so about "
+                 f"{w['hours']:.1f} h on an average day")
+    if w["sun"] < SUN_HOURS_MIN:
+        line += f" — under {SUN_HOURS_MIN} h even on clear winter days"
+    years = w.get("years") or []
+    when = f", {years[0]}–{years[1]}" if len(years) == 2 else ""
+    return line + f" (PVGIS, JRC: terrain horizon and SARAH-3 satellite{when}; buildings and trees not counted)"
+
+
+def pfas(session, lat: float, lon: float, item: dict) -> dict:
+    resp = session.get(PFAS, params={
+        "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects", "distance": PFAS_KM * 1000, "units": "esriSRUnit_Meter",
+        "outFields": "monitoringSiteIdentifier,lat,lon,parameterWaterBodyCategory,phenomenonTimeSamplingDate,Year,"
+                     "observedPropertyDeterminandCode,"
+                     "resultObservedValue,resultUom,resultQualityObservedValueBelowLOQ",
+        "returnGeometry": "false", "f": "json"}, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(str(data["error"])[:200])
+    return pfas_found([f.get("attributes") or {} for f in data.get("features") or []], lat, lon)
+
+
+def pfas_found(rows: list[dict], lat: float, lon: float) -> dict:
+    """{"sites": how many measured, "worst": {"sum" µg/l, "km", "water", "year"} — the highest
+    sum of PFAS found above the lab's limit in one sample}."""
+    samples: dict[tuple, dict] = {}
+    seen: dict[tuple, float] = {}                 # (sample, compound): the value counted
+    sites = set()
+    for r in rows:
+        site = r.get("monitoringSiteIdentifier")
+        if not site or r.get("lat") is None:
+            continue
+        sites.add(site)
+        key = (site, r.get("phenomenonTimeSamplingDate") or r.get("Year"))
+        got = samples.setdefault(key, {"sum": 0.0, "lat": float(r["lat"]), "lon": float(r["lon"]),
+                                       "water": "groundwater" if r.get("parameterWaterBodyCategory") == "GW"
+                                       else "river or lake water", "year": str(r.get("Year") or "")})
+        value = r.get("resultObservedValue")
+        if value is None or r.get("resultQualityObservedValueBelowLOQ") not in (0, "0", False):
+            continue
+        unit = (r.get("resultUom") or "ug/L").lower()
+        value = float(value) / (1000 if unit.startswith("ng") else 1)
+        compound = (key, r.get("observedPropertyDeterminandCode"))
+        if value > seen.get(compound, 0.0):        # a compound reported twice for one sample counts once
+            got["sum"] += value - seen.get(compound, 0.0)
+            seen[compound] = value
+    worst = max(samples.values(), key=lambda x: x["sum"], default=None)
+    if worst:
+        worst = {"sum": round(worst["sum"], 3), "water": worst["water"], "year": worst["year"],
+                 "km": round(_distance_m(lat, lon, worst["lat"], worst["lon"]) / 1000, 1)}
+    return {"sites": len(sites), "worst": worst}
+
+
+def _pfas_note(f: dict | None) -> str | None:
+    if not f or not f.get("sites"):
+        return None
+    w = f.get("worst") or {}
+    n = f["sites"]
+    where = f"{n} water monitoring site{'s' if n > 1 else ''} within {PFAS_KM} km"
+    if not w or w["sum"] < PFAS_LIMIT:
+        return (f"PFAS measured at {where}, all under the EU drinking-water limit ({PFAS_LIMIT} µg/l for 20 "
+                "PFAS) (EEA, WISE)")
+    return (f"PFAS in {w['water']} {w['km']:.1f} km away: {w['sum']:.2f} µg/l (the PFAS measured, summed) in "
+            f"{w['year']}, "
+            f"{w['sum'] / PFAS_LIMIT:.0f}× the EU drinking-water limit ({PFAS_LIMIT} µg/l for 20 PFAS) — it matters "
+            f"for a well, a borehole or a vegetable garden; tap water is treated and tested apart ({where}; EEA, "
+            "WISE)")
+
+
+def terrain(session, lat: float, lon: float, item: dict) -> dict:
+    dlat = DEM_STEP_M / 111320
+    dlon = DEM_STEP_M / (111320 * math.cos(math.radians(lat)))
+    points = [(lat, lon), (lat + dlat, lon), (lat - dlat, lon), (lat, lon + dlon), (lat, lon - dlon)]
+    resp = session.get(DEM, params={"locations": "|".join(f"{a:.6f},{b:.6f}" for a, b in points)}, timeout=60)
+    resp.raise_for_status()
+    return terrain_found([r.get("elevation") for r in resp.json().get("results") or []])
+
+
+_FACING = ("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")
+
+
+def terrain_found(heights: list) -> dict | None:
+    """{"m": height, "slope": percent, "facing": the way the ground falls} from the point and
+    the points DEM_STEP_M north, south, east and west of it."""
+    if len(heights) != 5 or any(h is None for h in heights):
+        return None
+    here, north, south, east, west = (float(h) for h in heights)
+    dz_east, dz_north = (east - west) / (2 * DEM_STEP_M), (north - south) / (2 * DEM_STEP_M)
+    slope = math.hypot(dz_east, dz_north) * 100
+    out = {"m": round(here), "slope": round(slope), "facing": None}
+    if slope >= 3:
+        downhill = math.degrees(math.atan2(-dz_east, -dz_north)) % 360     # from north, clockwise
+        out["facing"] = _FACING[int((downhill + 22.5) // 45) % 8]
+    return out
+
+
+def _terrain_note(t: dict | None) -> str | None:
+    if not t:
+        return None
+    s = t["slope"]
+    if s < 5:
+        ground = "flat ground"
+    else:
+        steep = ("gentle" if s < 15 else "steep: terraces, retaining walls and access cost more" if s < 30
+                 else "very steep: building there is hard and costly")
+        ground = f"slope {s}% facing {t['facing']} ({steep})"
+    return f"altitude {t['m']:,} m, {ground} (EU-DEM 25 m, Copernicus)"
+
+
 def _georisques(session, path: str, params: dict) -> dict:
     resp = session.get(GEORISQUES + path, params=params, timeout=40)
     resp.raise_for_status()
@@ -1033,6 +1232,9 @@ SOURCES = {
     "pt_coast": (pt_coast, {"PT"}, BUILDING_PINS | {"street"}, {"home", "land"}),
     "land_use": (land_use, None, BUILDING_PINS | {"street"}, {"home", "land"}),
     "bathing": (bathing, None, NEAR_PINS, {"home"}),
+    "winter_sun": (winter_sun, None, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "pfas": (pfas, None, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "terrain": (terrain, None, BUILDING_PINS, {"home", "land"}),
 }
 NEEDS_PARCEL = {"fr_parcel"}          # asked once the outline has found the parcel
 
@@ -1317,7 +1519,8 @@ def notes(item: dict) -> list[str]:
     out.extend(_soil_note(found.get("fr_soil")))
     out.extend(_nature_note(found.get("nature")))
     for line in (_pt_coast_note(found.get("pt_coast")), _land_use_note(found.get("land_use")),
-                 _bathing_note(found.get("bathing"))):
+                 _bathing_note(found.get("bathing")), _winter_sun_note(found.get("winter_sun")),
+                 _pfas_note(found.get("pfas")), _terrain_note(found.get("terrain"))):
         if line:
             out.append(line)
     line = _parcel_note(found.get("fr_parcel"), item)
