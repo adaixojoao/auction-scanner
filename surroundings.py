@@ -47,7 +47,17 @@ it says at that point and keeps the answer in raw_json["surroundings"]:
   (ZGP, ZEP), where works need the heritage office's opinion;
 - Italian hazards: the basin authorities' landslide (P1-P4, attention areas)
   and flood (P1-P3) zones as ISPRA's IdroGEO joins them for the whole
-  country, and whether a mapped landslide (IFFI inventory) is at the point.
+  country, and whether a mapped landslide (IFFI inventory) is at the point;
+- official flood maps (Floods Directive): Spain, the water depth of the 10,
+  100 and 500-year river floods and the 100 and 500-year sea floods
+  (MITECO, SNCZI via IDEE); Portugal, the depth of the 20, 100 and
+  1,000-year floods (APA) and the legal "zonas adjacentes" where building is
+  restricted; France, the natural and technological risk prevention plans
+  (PPR, PPRT) on the planning servitudes. The maps cover the areas each
+  country found at risk, not every stream;
+- French polluted ground and dangerous plants: former industrial sites
+  within 100 m (CASIAS), sites with known pollution within 300 m (BASOL,
+  SIS) and Seveso plants within 3 km (Géorisques).
 
 A street, village or town pin is not the building, so the point checks (noise,
 zoning, clay) need a building pin; amenities take a street or village pin too;
@@ -100,10 +110,16 @@ DE_BORIS_LAYERS = {"20": "building land", "17": "building land (flats)", "5": "b
                    "2": "other land", "14": "commercial land", "8": "farmland", "11": "forest"}
 DE_LAND_USE = {"W": "residential", "MI": "mixed", "WS": "small-holding", "A": "arable", "GR": "grassland",
                "F": "forest", "G": "commercial", "M": "mixed"}
-FR_HERITAGE = {"ac1": "monument", "ac2": "site", "ac4": "spr"}
+FR_HERITAGE = {"ac1": "monument", "ac2": "site", "ac4": "spr", "pm1": "ppr", "pm3": "pprt"}
 PT_HERITAGE = ("https://geo.patrimoniocultural.gov.pt/arcgis/rest/services/PatrimonioClassificadoEmViasClassificacao/"
                "Atlas_Patrimonio_Servicos/MapServer/identify")
 PT_HERITAGE_LAYERS = {"PatrimonioImovel": "inside", "ZEP": "zep", "ZGP": "zgp", "Restricoes": "zep"}
+ES_FLOOD = "https://servicios.idee.es/wms-inspire/riesgos-naturales/inundaciones"
+ES_FLOOD_LAYERS = {"NZ.Flood.FluvialT10": ("river", 10), "NZ.Flood.FluvialT100": ("river", 100),
+                   "NZ.Flood.FluvialT500": ("river", 500), "NZ.Flood.MarinaT100": ("sea", 100),
+                   "NZ.Flood.MarinaT500": ("sea", 500)}
+PT_FLOOD = "https://sniambgeoogc.apambiente.pt/getogc/rest/services/SNIAmb/{}/MapServer/identify"
+SEVESO_KM = {"Seveso seuil haut": 3.0, "Seveso seuil bas": 1.0}
 IT_IDROGEO = "https://idrogeo.isprambiente.it/geoserver/ows"
 IT_LANDSLIDE = {1: "moderate (P1)", 2: "medium (P2)", 3: "high (P3)", 4: "very high (P4)", 5: "an attention area"}
 IT_FLOOD = {"scenariop1": (1, "low (P1, rare floods)"), "scenariop2": (2, "medium (P2, every 100–200 years)"),
@@ -404,13 +420,13 @@ def fr_heritage(session, lat: float, lon: float, item: dict) -> dict:
 def fr_protections(features: list[dict]) -> dict:
     """{"monument": [names the point is on], "near": [monuments whose surroundings it is in],
     "site": [listed sites], "spr": [sites patrimoniaux remarquables]}."""
-    out: dict[str, list[str]] = {"monument": [], "near": [], "site": [], "spr": []}
+    out: dict[str, list[str]] = {"monument": [], "near": [], "site": [], "spr": [], "ppr": [], "pprt": []}
     for f in features:
         p = f.get("properties") or {}
         kind = FR_HERITAGE.get((p.get("suptype") or "").lower())
         if not kind:
             continue
-        name = _unmangle(p.get("nomsuplitt"))
+        name = _unmangle(p.get("nomsuplitt")) or ("unnamed plan" if kind in ("ppr", "pprt") else "")
         if kind == "monument":
             kind = "monument" if "monument" in (p.get("typeass") or "").lower() else "near"
         if name not in out[kind]:
@@ -468,12 +484,149 @@ def it_hazard(session, lat: float, lon: float, item: dict) -> dict:
 
 
 def it_hazards(landslide: list[dict], flood: list[dict], mapped: list[dict]) -> dict:
-    """{"landslide": the highest class 1-4 (5: attention area), "flood": 1-3, "mapped": landslides on the inventory}."""
+    """{"landslide": the highest class 1-4 (5: attention area), "flood": 1-3,
+    "mapped": landslides on the inventory}."""
     classes = [int(p["cod_per_it"]) for p in landslide if str(p.get("cod_per_it") or "").isdigit()]
     real = [c for c in classes if c <= 4]
     flood_classes = [IT_FLOOD[k][0] for p in flood for k in p if k in IT_FLOOD and p[k]]
     return {"landslide": max(real) if real else (5 if 5 in classes else None),
             "flood": max(flood_classes) if flood_classes else None, "mapped": len(mapped)}
+
+
+def es_flood(session, lat: float, lon: float, item: dict) -> dict:
+    """{"river": {years: depth m}, "sea": {...}}: where each mapped flood reaches the point."""
+    d = 0.0005
+    out: dict[str, dict] = {"river": {}, "sea": {}}
+    for layer, (kind, years) in ES_FLOOD_LAYERS.items():
+        resp = session.get(ES_FLOOD, params={
+            "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetFeatureInfo", "LAYERS": layer,
+            "QUERY_LAYERS": layer, "STYLES": "", "CRS": "EPSG:4326",
+            "BBOX": f"{lat - d},{lon - d},{lat + d},{lon + d}", "WIDTH": 101, "HEIGHT": 101, "I": 50, "J": 50, "INFO_FORMAT": "text/plain"}, timeout=60)
+        resp.raise_for_status()
+        depth = flood_depth_text(resp.text)
+        if depth:
+            out[kind][str(years)] = depth
+    return out
+
+
+def flood_depth_text(text: str) -> float | None:
+    """The water depth in a GetFeatureInfo answer ("GRAY_INDEX = 1.25"). The
+    map's other values (0, 999, -3, -9999, 3.4E38) mean dry or not studied."""
+    import re
+    m = re.search(r"GRAY_INDEX\s*=\s*(-?[\d.]+(?:E-?\d+)?)", text)
+    try:
+        v = float(m.group(1)) if m else 0.0
+    except ValueError:
+        return None
+    return round(v, 2) if 0 < v < 100 else None
+
+
+def _arcgis_identify(session, url: str, lat: float, lon: float, layers: str) -> list[dict]:
+    d = 0.002
+    resp = session.get(url, params={
+        "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "sr": 4326, "layers": layers,
+        "tolerance": 1, "mapExtent": f"{lon - d},{lat - d},{lon + d},{lat + d}", "imageDisplay": "400,400,96",
+        "returnGeometry": "false", "f": "json"}, timeout=60)
+    resp.raise_for_status()
+    data = json.loads(resp.content.decode("utf-8", "replace"))
+    if "error" in data:
+        raise RuntimeError(str(data["error"])[:200])
+    return data.get("results") or []
+
+
+def pt_flood(session, lat: float, lon: float, item: dict) -> dict:
+    depths = _arcgis_identify(session, PT_FLOOD.format("Diretiva200760CE_2c"), lat, lon, "all:2")
+    adjacent = _arcgis_identify(session, PT_FLOOD.format("ZonasAdjacentes_PubDR"), lat, lon, "all:0")
+    return pt_floods(depths, adjacent)
+
+
+def pt_floods(depths: list[dict], adjacent: list[dict]) -> dict:
+    """{"river": {years: depth m}, "place": the mapped area, "adjacent": in a legal zona adjacente}."""
+    out: dict = {"river": {}, "place": None, "adjacent": bool(adjacent)}
+    for r in depths:
+        a = r.get("attributes") or {}
+        years = str(a.get("pretorno") or "").lstrip("T0")
+        try:
+            depth = float(str(a.get("Profundidade") or "").replace(",", "."))
+        except ValueError:
+            continue
+        if years.isdigit() and depth > 0:
+            out["river"][years] = max(round(depth, 2), out["river"].get(years, 0))
+            out["place"] = out["place"] or a.get("Local")
+    return out
+
+
+def _flood_note(f: dict | None, source: str) -> str | None:
+    if not f:
+        return None
+    bits = []
+    for kind in ("river", "sea"):
+        reach = f.get(kind) or {}
+        if reach:
+            first = min(reach, key=int)
+            more = "; ".join(f"{reach[y]:.1f} m in a {int(y):,}-year one" for y in sorted(reach, key=int)[1:])
+            bits.append(f"in the {int(first):,}-year {kind} flood zone, water up to {reach[first]:.1f} m"
+                        + (f" ({more})" if more else ""))
+    if f.get("adjacent"):
+        bits.append("in a legal flood zone (zona adjacente): building there is restricted")
+    if not bits:
+        return f"not in a mapped flood zone ({source}; the maps cover the areas found at risk, not every stream)"
+    return "; ".join(bits) + f" ({source})"
+
+
+def fr_soil(session, lat: float, lon: float, item: dict) -> dict:
+    latlon = f"{lon},{lat}"
+    former = _georisques(session, "ssp/casias", {"latlon": latlon, "rayon": 100}).get("data") or []
+    known = []
+    for path in ("ssp/instructions", "ssp/conclusions_sis"):
+        known += _georisques(session, path, {"latlon": latlon, "rayon": 300}).get("data") or []
+    plants = []
+    for page in (1, 2, 3):
+        got = _georisques(session, "installations_classees", {"latlon": latlon, "rayon": 3000,
+                                                               "page": page, "page_size": 100})
+        plants += got.get("data") or []
+        if page >= (got.get("total_pages") or 1):
+            break
+    return soil_found(former, known, plants, lat, lon)
+
+
+def soil_found(former: list[dict], known: list[dict], plants: list[dict], lat: float, lon: float) -> dict:
+    """{"former": [activities], "known": [names], "seveso": [{"name", "level", "km"}]}."""
+    seveso = []
+    for p in plants:
+        level = p.get("statutSeveso")
+        if level not in SEVESO_KM or p.get("latitude") is None:
+            continue
+        km = _distance_m(lat, lon, float(p["latitude"]), float(p["longitude"])) / 1000
+        if km <= SEVESO_KM[level]:
+            seveso.append({"name": p.get("raisonSociale") or "", "level": "high" if "haut" in level else "low",
+                           "km": round(km, 1)})
+    names = [x.get("nom_etablissement") or x.get("nom_site") or x.get("nom") or "" for x in known]
+    return {"former": [(x.get("nom_etablissement") or "").strip() for x in former],
+            "known": [n for n in names if n], "known_n": len(known),
+            "seveso": sorted(seveso, key=lambda x: x["km"])}
+
+
+def _soil_note(s: dict | None) -> list[str]:
+    if not s:
+        return []
+    out = []
+    if s.get("known_n"):
+        out.append("a site with known soil pollution within 300 m"
+                   + (f" ({_names(s['known'])})" if s.get("known") else "") + " (Géorisques, BASOL/SIS)")
+    if s.get("former"):
+        n = len(s["former"])
+        out.append(f"{n} former industrial or service site{'s' if n > 1 else ''} within 100 m "
+                   f"({_names([x for x in s['former'] if x] or ['unnamed'])}): the ground may be polluted "
+                   "(Géorisques, CASIAS)")
+    plants = s.get("seveso") or []
+    if plants:
+        near = plants[0]
+        more = (f"; {len(plants)} Seveso plants within {max(SEVESO_KM.values()):.0f} km"
+                if len(plants) > 1 else "")
+        out.append(f"Seveso {near['level']}-threshold plant {near['km']:.1f} km away ({near['name']}){more}: "
+                   "an accident plan and possibly a PPRT apply (Géorisques)")
+    return out
 
 
 def _georisques(session, path: str, params: dict) -> dict:
@@ -660,6 +813,9 @@ SOURCES = {
     "pt_heritage": (pt_heritage, {"PT"}, BUILDING_PINS, {"home", "land"}),
     "fr_parcel": (fr_parcel, {"FR"}, BUILDING_PINS, {"home", "land"}),
     "it_hazard": (it_hazard, {"IT"}, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "es_flood": (es_flood, {"ES"}, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "pt_flood": (pt_flood, {"PT"}, BUILDING_PINS | {"street"}, {"home", "land"}),
+    "fr_soil": (fr_soil, {"FR"}, BUILDING_PINS | {"street"}, {"home", "land"}),
 }
 NEEDS_PARCEL = {"fr_parcel"}          # asked once the outline has found the parcel
 
@@ -712,6 +868,8 @@ def missing(item: dict) -> list[str]:
         return []
     found = current(item) or {}
     done, failed = found.get("found") or {}, found.get("failed") or {}
+    if isinstance(done.get("fr_heritage"), dict) and "ppr" not in done["fr_heritage"]:
+        done = {k: v for k, v in done.items() if k != "fr_heritage"}  # asked before the plans were kept
     if isinstance(done.get("fr_risks"), dict) and "insee" not in done["fr_risks"]:
         done = {k: v for k, v in done.items() if k != "fr_risks"}     # asked before the code was kept
     return [n for n in applicable(item, pos) if n not in done and failed.get(n, 0) < TRIES]
@@ -836,6 +994,12 @@ def _heritage_notes(found: dict) -> list[str]:
         if h.get("site"):
             out.append(f"in a listed site ({_names(h['site'])}): works must be declared, and demolition needs "
                        "the ABF's agreement (Géoportail de l'urbanisme, AC2)")
+        if h.get("ppr"):
+            out.append(f"inside the perimeter of a natural risk prevention plan ({_names(h['ppr'])}): "
+                       "building rules or bans apply by zone — read the plan's map (Géoportail de l'urbanisme, PM1)")
+        if h.get("pprt"):
+            out.append(f"inside the perimeter of a technological risk prevention plan ({_names(h['pprt'])}), "
+                       "around a dangerous plant: works may be required or banned (Géoportail de l'urbanisme, PM3)")
         if not any(h.get(k) for k in ("monument", "near", "site", "spr")):
             out.append("no heritage protection registered at the point (Géoportail de l'urbanisme)")
     h = found.get("pt_heritage")
@@ -929,6 +1093,11 @@ def notes(item: dict) -> list[str]:
     line = _it_hazard_note(found.get("it_hazard"))
     if line:
         out.append(line)
+    for line in (_flood_note(found.get("es_flood"), "MITECO flood maps"),
+                 _flood_note(found.get("pt_flood"), "APA flood maps")):
+        if line:
+            out.append(line)
+    out.extend(_soil_note(found.get("fr_soil")))
     line = _parcel_note(found.get("fr_parcel"), item)
     if line:
         out.append(line)

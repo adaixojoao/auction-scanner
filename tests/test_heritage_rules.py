@@ -23,7 +23,7 @@ def test_french_protections_from_the_servitudes():
         _sup("pm1", "Enveloppe", "PPRi"),
     ])
     assert found == {"monument": ["Cathédrale Notre-Dame"], "near": ["Hôtel de Ville"],
-                     "site": ["Ensemble urbain à Paris"], "spr": ["SPR d'Avignon"]}
+                     "site": ["Ensemble urbain à Paris"], "spr": ["SPR d'Avignon"], "ppr": ["PPRi"], "pprt": []}
     lines = surroundings._heritage_notes({"fr_heritage": found})
     assert lines[0].startswith("on a monument historique (Cathédrale Notre-Dame)")
     assert any(x.startswith("within the protected surroundings of a monument historique (Hôtel de Ville): "
