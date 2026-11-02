@@ -108,6 +108,7 @@ import math
 import os
 import statistics
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from common import LOG, utcnow_iso
 
@@ -1377,6 +1378,16 @@ SOURCES = {
     "travel": (travel, None, NEAR_PINS, {"home", "land"}),
 }
 NEEDS_PARCEL = {"fr_parcel"}          # asked once the outline has found the parcel
+# A listing's sources are asked at the same time, except those of one provider:
+# they go one after the other, so a listing never hits a service with several at once.
+AT_ONCE = 8
+SERVICES = {"amenities": "overpass", "power": "overpass",
+            "noise": "eea", "nature": "eea", "land_use": "eea", "bathing": "eea", "pfas": "eea",
+            "fr_zoning": "geopf", "fr_heritage": "geopf",
+            "fr_risks": "georisques", "fr_soil": "georisques",
+            "fr_sold": "dvf", "fr_parcel": "dvf",
+            "pt_zoning": "dgterritorio", "pt_aru": "dgterritorio",
+            "pt_flood": "sniamb", "pt_coast": "sniamb"}
 
 
 # ─── Which listings, and storing what was found ──────────────────────────
@@ -1440,17 +1451,36 @@ def look_up(session, item: dict, names: list[str]) -> dict:
     pos = geo.position(item)
     lat, lon = float(pos["lat"]), float(pos["lon"])
     stored = current(item) or {"v": VERSION, "pin": _pin_key(pos), "found": {}, "failed": {}}
+
+    def ask_service(group: list[str]) -> dict:
+        answers = {}
+        for name in group:
+            fn = SOURCES[name][0]
+            try:
+                if name == "fr_risks":
+                    answers[name] = (fn(session, lat, lon, item, building=pos.get("precision") in BUILDING_PINS), None)
+                else:
+                    answers[name] = (fn(session, lat, lon, item), None)
+            except Exception as e:  # noqa: BLE001 — a busy service: next scan
+                answers[name] = (None, e)
+        return answers
+
+    groups: dict[str, list[str]] = {}
     for name in names:
-        fn = SOURCES[name][0]
-        try:
-            if name == "fr_risks":
-                stored["found"][name] = fn(session, lat, lon, item, building=pos.get("precision") in BUILDING_PINS)
-            else:
-                stored["found"][name] = fn(session, lat, lon, item)
+        groups.setdefault(SERVICES.get(name, name), []).append(name)
+    answers: dict = {}
+    if groups:
+        with ThreadPoolExecutor(max_workers=min(AT_ONCE, len(groups))) as pool:
+            for got in pool.map(ask_service, groups.values()):
+                answers.update(got)
+    for name in names:
+        value, error = answers[name]
+        if error is None:
+            stored["found"][name] = value
             stored["failed"].pop(name, None)
-        except Exception as e:  # noqa: BLE001 — a busy service: next scan
+        else:
             stored["failed"][name] = stored["failed"].get(name, 0) + 1
-            LOG.info(f"Surroundings: {name} failed ({type(e).__name__})")
+            LOG.info(f"Surroundings: {name} failed ({type(error).__name__})")
     stored["at"] = utcnow_iso()
     return stored
 
