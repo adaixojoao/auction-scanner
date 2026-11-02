@@ -45,3 +45,20 @@ def test_boe_public_returns_a_count(db, fake_http):
     from sources.es import scrape_boe_public
     fake_http(lambda m, url, kw: FakeResponse("", status=404))     # no BOE those days
     assert scrape_boe_public(db) == 0
+
+
+def test_boe_public_counts_the_lots_it_already_has(db, fake_http):
+    """An announcement already read is not read again, but its lots are seen
+    and counted: a scan with nothing new is not an empty source."""
+    from db import upsert_listing
+    from common import make_listing
+    from sources.es import scrape_boe_public
+    upsert_listing(db, make_listing("boe_public", "BOE-B-2026-1-1", "ES", title="Solar", price=9000))
+    db.execute("UPDATE listings SET last_seen = '2026-10-01T00:00:00+00:00' WHERE source = 'boe_public'")
+    summary = {"data": {"sumario": {"diario": {"seccion": {"codigo": "5B", "departamento": {
+        "nombre": "MINISTERIO DE TRABAJO", "item": {"identificador": "BOE-B-2026-1", "url_html": "https://x/1",
+                                                    "titulo": "Anuncio de subasta pública de inmueble"}}}}}}}
+    fake_http(lambda m, url, kw: FakeResponse(json_data=summary) if "sumario" in url else FakeResponse("", status=404))
+    assert scrape_boe_public(db) >= 1
+    seen = db.execute("SELECT last_seen FROM listings WHERE source = 'boe_public'").fetchone()[0]
+    assert seen > "2026-10-01T00:00:00+00:00"

@@ -1953,7 +1953,9 @@ def _ms_day(value) -> str | None:
 def ippatrimonio_listing(feature: dict) -> dict | None:
     """One point of the sales layer as a listing, or None once it is closed or removed."""
     a = feature.get("attributes") or {}
-    if a.get("data_remocao") or (a.get("estado") or "").strip().lower() in {"concluído", "concluido", "vendido", "fechado"}:
+    state = (a.get("estado") or "").strip().lower()
+    # The layer codes its state: 01 published, 02 being prepared, 03 removed.
+    if a.get("data_remocao") or state in {"02", "03", "concluído", "concluido", "vendido", "fechado"}:
         return None
     title = (a.get("titulo") or "").strip()
     if not title:
