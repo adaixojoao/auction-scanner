@@ -276,6 +276,24 @@ LISTING_FIELDS = (
 _NUMERIC_FIELDS = {"area_m2", "price", "current_bid", "min_price"}
 
 
+def patch_raw(db, listing_id: str, changes: dict) -> str | None:
+    """Write these keys of a listing's raw_json over what is on disk now, and
+    return the result. A copy loaded earlier in a scan can be old or trimmed:
+    written whole it threw away what another step had found since (2026-11-02:
+    30 listings' surroundings looked up, 19 still there at the end of the scan)."""
+    row = db.execute("SELECT raw_json FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if row is None:
+        return None
+    try:
+        raw = json.loads(row[0] or "{}")
+    except ValueError:
+        raw = {}
+    raw = {**(raw if isinstance(raw, dict) else {}), **changes}
+    text = json.dumps(raw, ensure_ascii=False)
+    db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (text, listing_id))
+    return text
+
+
 def stable_id(*parts) -> str:
     """Deterministic short ID. Never use hash(): it changes on every run."""
     raw = "|".join("" if p is None else str(p) for p in parts)

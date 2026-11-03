@@ -22,7 +22,7 @@ import re
 import time
 import urllib.parse
 
-from common import LOG, normalize, uf_parish
+from common import LOG, normalize, patch_raw, uf_parish
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "auction-scanner (+https://github.com/adaixojoao/auction-scanner)"
@@ -80,14 +80,22 @@ def position(item: dict) -> dict | None:
 
 def source_position(raw: dict, item: dict) -> dict | None:
     """The position the scanner found by itself, without yours."""
+    pin = sale_pin(raw)
+    if pin and pin != raw.get("bad_sale_pin"):
+        return {"lat": pin[0], "lon": pin[1], "precision": "sale"}
+    geo = raw.get("geo")
+    if isinstance(geo, dict) and geo.get("lat") and geo.get("lon") and not stale_lookup(item, geo):
+        return geo
+    return None
+
+
+def sale_pin(raw: dict) -> list[float] | None:
+    """[lat, lon] the sale itself gives, or None."""
     for lat_key, lon_key in (("lat", "lon"), ("prop_latitude", "prop_longitude"), ("lat", "lng"),
                              ("coordenadasLAT", "coordenadasLON")):
         lat, lon = _num(raw.get(lat_key)), _num(raw.get(lon_key))
         if lat and lon and -90 <= lat <= 90 and -180 <= lon <= 180:
-            return {"lat": lat, "lon": lon, "precision": "sale"}
-    geo = raw.get("geo")
-    if isinstance(geo, dict) and geo.get("lat") and geo.get("lon") and not stale_lookup(item, geo):
-        return geo
+            return [lat, lon]
     return None
 
 
@@ -404,19 +412,59 @@ def geocode_pending(db, session, items: list[dict], limit: int | None = None,
         except Exception as e:  # noqa: BLE001 — offline or refused: try next scan
             LOG.info(f"OpenStreetMap lookup failed ({type(e).__name__}); trying next scan")
             break
-        raw["geo_checked"] = True
-        raw["geo_tried"] = queries(item)
+        changes = {"geo_checked": True, "geo_tried": queries(item)}
         upgrade = street_query(item)
         if upgrade:
-            raw["geo_street_tried"] = upgrade
+            changes["geo_street_tried"] = upgrade
         if geo:
-            raw["geo"] = geo
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+            changes["geo"] = geo
+        patch_raw(db, item["id"], changes)
         db.commit()
         done += 1
     if done:
         LOG.info(f"OpenStreetMap: located {done} listings")
     return done
+
+
+SALE_PIN_KM = 15             # wider than most Italian municipalities; closer is not questioned
+SALE_PINS_PER_SCAN = 30
+
+
+def check_sale_pins(db, session, items: list[dict], towns: dict, limit: int = SALE_PINS_PER_SCAN) -> int:
+    """A sale's own coordinates far from its town are checked against its address.
+
+    Via Cavour in Bianco came with a pin in Reggio Calabria, 44 km away, so every
+    lookup described the wrong town (2026-11-02). Distance alone proves nothing,
+    since the town can be the wrong one of two namesakes (Paternò), so the pin is
+    only set aside when an address in the listing's town, not the town's name
+    alone, lands far from it as well. Each pin is asked about once. Returns how
+    many were set aside."""
+    asked = wrong = 0
+    for item in items:
+        if asked >= limit:
+            break
+        raw = _raw(item)
+        pin = sale_pin(raw)
+        name = municipality(item)
+        town = towns.get(town_key((item.get("country") or "PT").upper(), name)) if pin and name else None
+        if (not town or raw.get("verified_geo") or pin in (raw.get("sale_pin_checked"), raw.get("bad_sale_pin"))
+                or distance_km(pin[0], pin[1], town["lat"], town["lon"]) <= SALE_PIN_KM):
+            continue
+        try:
+            found = geocode(session, item, towns)
+        except Exception as e:  # noqa: BLE001 — offline or refused: try next scan
+            LOG.info(f"Sale pin check failed ({type(e).__name__}); trying next scan")
+            break
+        asked += 1
+        changes = {"sale_pin_checked": pin}
+        if (found and found["precision"] != "municipality"
+                and distance_km(pin[0], pin[1], found["lat"], found["lon"]) > SALE_PIN_KM):
+            changes.update(bad_sale_pin=pin, geo=found, geo_checked=True)
+            wrong += 1
+            LOG.info(f"Sale pin of {item['id']} is far from its address ({found['query']}): set aside")
+        item["raw_json"] = patch_raw(db, item["id"], changes) or item.get("raw_json")
+        db.commit()
+    return wrong
 
 
 def street_view_url(pos: dict) -> str:
@@ -958,8 +1006,7 @@ def check_water_pending(db, session, items: list[dict], limit: int = WATER_PER_S
         except Exception as e:  # noqa: BLE001 — offline or busy: next scan
             LOG.info(f"Water lookup failed ({type(e).__name__}); trying next scan")
             break
-        raw["water_check"] = {"radius_m": radius, "found": found, "approx": radius != WATER_RADIUS_M}
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        patch_raw(db, item["id"], {"water_check": {"radius_m": radius, "found": found, "approx": radius != WATER_RADIUS_M}})
         db.commit()
         done += 1
         time.sleep(1.1)

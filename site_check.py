@@ -461,9 +461,8 @@ def check_pending(db, items: list[dict], limit: int = SHORTLIST) -> int:
     Walks past rows that are already checked or have no position, so a shortlist
     of 20 already-checked plots does not block the rest of the land tab.
     """
-    import json
     import geo
-    from common import LOG
+    from common import LOG, patch_raw
     done = 0
     for item in items:
         if done >= limit:
@@ -481,8 +480,7 @@ def check_pending(db, items: list[dict], limit: int = SHORTLIST) -> int:
         except Exception as e:  # noqa: BLE001 — a service down: try at the next scan
             LOG.info(f"Site check {item['id']}: {type(e).__name__}")
             continue
-        raw["site_check"] = {**summary(result), "at": at}
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        patch_raw(db, item["id"], {"site_check": {**summary(result), "at": at}})
         db.commit()
         done += 1
     if done:

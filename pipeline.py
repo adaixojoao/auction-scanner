@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from datetime import timedelta
+from itertools import islice
 
 import locks
 from common import LOG, configure_http, make_session, utcnow_iso
@@ -247,6 +248,22 @@ def locate_seaside(db, cfg: dict, session, rows: list[dict] | None = None) -> in
     return len(seaside)
 
 
+# Lookups go to scores of 85 and more first (enrich_order). Live and invest's scale
+# tops out near 65, so its best homes were never reached (2026-11-02: none of its
+# top 20 had any). Its best homes still without them go first, up to this many.
+BOTH_LOOKUPS_FIRST = 15
+
+
+def both_first(db, cfg: dict, order: list[dict]) -> list[dict]:
+    """`order`, with the best of Live and invest still to be looked up ahead of it."""
+    import surroundings
+    from db import load_listings
+    top = sorted(load_listings(db, filters=cfg.get("filters"), mode="both"), key=lambda it: -(it.get("rank") or 0))
+    first = list(islice((it for it in top if surroundings.missing(it)), BOTH_LOOKUPS_FIRST))
+    ids = {it["id"] for it in first}
+    return first + [it for it in order if it["id"] not in ids]
+
+
 def _plots_for_site_check(db, cfg: dict) -> list[dict]:
     """The top forestry plots, then the top other plots. A habitat check of
     every plot is what made a scan slow; the ones you might buy are enough."""
@@ -349,6 +366,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                             best = enrich_order(db, cfg)
                             session = make_session()
                             geo.locate_towns(db, session, best)
+                            geo.check_sale_pins(db, session, best, geo.town_index(db))
                             geo.geocode_pending(db, session, best, towns=geo.town_index(db))
                             import cadastre
                             cadastre.locate_pending(db, session, best, geo.town_index(db))
@@ -356,7 +374,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                             import outline                    # the house and its plot on the map
                             outline.check_pending(db, session, best)
                             import surroundings              # noise, quakes, amenities, zoning, sold prices
-                            surroundings.check_pending(db, session, best)
+                            surroundings.check_pending(db, session, both_first(db, cfg, best))
                             import climate                   # heat by 2090, water, fire, flood: local files
                             climate.assess_pending(db, best, geo.town_index(db), seaside_first=True)
                         except Exception:  # noqa: BLE001 — a map position must never fail the scan
@@ -364,6 +382,10 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         both = None                  # Live and invest, loaded once for two checks
                         try:
                             both = both_rows(db, cfg)
+                            from sources.pt import read_imovirtual_details
+                            read_imovirtual_details(db, make_session(timeout=30),
+                                                    sorted((it for it in both if not it.get("hidden_reason")),
+                                                           key=lambda it: -(it.get("rank") or 0)))
                             locate_seaside(db, cfg, make_session(), rows=both)
                         except Exception:  # noqa: BLE001
                             LOG.exception("Locating seaside homes failed")

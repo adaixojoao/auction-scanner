@@ -29,7 +29,7 @@ import json
 import math
 import time
 
-from common import LOG, has_term, utcnow_iso
+from common import LOG, has_term, patch_raw, utcnow_iso
 
 VERSION = 1
 PER_SCAN = 30
@@ -377,7 +377,6 @@ def look_up(session, item: dict) -> dict:
 def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
     """Outline the best homes with a building pin, once each (a failed lookup
     is tried again next scan)."""
-    import geo
     done = 0
     for item in items:
         if done >= limit:
@@ -389,9 +388,7 @@ def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
         except Exception as e:  # noqa: BLE001 — offline or busy: next scan
             LOG.info(f"Outline lookup failed ({type(e).__name__}); trying next scan")
             break
-        raw = geo._raw(item)
-        raw["outline"] = found
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        patch_raw(db, item["id"], {"outline": found})
         db.commit()
         done += 1
         time.sleep(1.1)                 # OpenStreetMap asks for one request a second

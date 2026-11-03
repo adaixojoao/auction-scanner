@@ -190,6 +190,9 @@ NOT_A_BUILDING = ["casa movel", "casa móvel", "casa prefabricada móvil", "mobi
 USUFRUCT_PATTERNS = [
     "usufruto", "usufructo", "usufruct", "nue-propri*", "nuda proprietà",
     "nuda propiedad", "direito de uso", "direito de habitação",
+    # Spadafora, 2026-11-02: "Usufrutto per 1/1" still ranked as a home to buy.
+    "usufrutto", "usufruit", "diritto di abitazione", "nießbrauch", "niessbrauch", "vruchtgebruik",
+    "blote eigendom",
 ]
 
 # Timeshares: the use of a flat for some weeks a year, not the flat. Court sales
@@ -560,6 +563,9 @@ HEAVY_WORK = [
     "ruin*", "arruinad*", "em ruínas", "para recuperar", "para reconstruir", "reconstrução",
     "para recuperação", "recuperação total", "necessita de recuperação", "a necessitar de recuperação",
     "carece de recuperação", "para reabilitação", "para reabilitar",
+    # Graciosa, 2026-11-02: "não tem condições de habitabilidade". The negation is part of the phrase.
+    "não tem condições de habitabilidade", "sem condições de habitabilidade", "sem condições de habitação",
+    "inagibile", "pessime condizioni", "stato di abbandono", "fatiscente",
     "obras profundas", "reabilitação total", "reabilitação integral", "inabitável",     "sem telhado", "tejado caído",     "tejado caido", "tejado hundido", "cubierta hundida", "cubierta caída",
     "cubierta caida", "tejado derrumbado", "derruid*", "derrumbe",
     "telhado caído", "muito degradad*", "mau estado", "mal estado", "en mal estado", "para demolir", "demolição",
@@ -1317,7 +1323,8 @@ def _occupation(item: dict) -> str | None:
     if raw.get("occupation") in ("occupied", "vacant"):
         stated = raw["occupation"]
     else:
-        stated = possession(raw.get("situacion_posesoria")) or auction_occupation(raw.get("disponibilita"))
+        stated = (possession(raw.get("situacion_posesoria")) or auction_occupation(raw.get("disponibilita"))
+                  or (raw.get("perizia") or {}).get("page_occupation"))
     if stated:
         return stated
     if _debtor_main_home(item) or _debtor_lives_here(item):
@@ -3189,6 +3196,11 @@ def categorize(item: dict) -> str:
     if has_term(title, VEHICLE_KW, negations=False) and not property_sale:
         return "outros"
     if property_sale:
+        return "imoveis"
+    # The portal's own word for a home that no list above knows ("abitazione di
+    # tipo civile", "Einfamilienhaus", "woning"): 4,900 homes and plots were filed
+    # as "outros" and got no repair plan, discount or cash check (2026-11-02).
+    if property_kind(item) in ("home", "urban_plot", "rural_plot"):
         return "imoveis"
     return "outros"
 

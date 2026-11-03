@@ -110,7 +110,7 @@ import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from common import LOG, utcnow_iso
+from common import LOG, patch_raw, utcnow_iso
 
 VERSION = 1
 PER_SCAN = 30
@@ -1487,7 +1487,6 @@ def look_up(session, item: dict, names: list[str]) -> dict:
 
 def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
     """Look up the surroundings of the best listings, once per pin."""
-    import geo
     done = 0
     for item in items:
         if done >= limit:
@@ -1496,10 +1495,7 @@ def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
         if not names:
             continue
         found = look_up(session, item, names)
-        raw = geo._raw(item)
-        raw["surroundings"] = found
-        item["raw_json"] = json.dumps(raw, ensure_ascii=False)
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (item["raw_json"], item["id"]))
+        item["raw_json"] = patch_raw(db, item["id"], {"surroundings": found}) or item.get("raw_json")
         db.commit()
         done += 1
         time.sleep(1.1)                 # OpenStreetMap asks for one request a second
