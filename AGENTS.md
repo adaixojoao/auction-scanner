@@ -159,6 +159,9 @@ congruent — one way to do each thing:
   producer-owned evidence goes through `evidence_store.write_owned` (table
   `evidence_current`, append-only `evidence_observations`). Exclusions over
   nullable columns use `NOT EXISTS`, never `NOT IN (SELECT ...)`.
+- **`raw_json` is patched, not rewritten:** a step saving what it found calls
+  `common.patch_raw` with its own keys, and a key a scraper does not send goes in
+  `db.LEARNED_RAW_KEYS`, or the next rescrape or an older loaded copy wipes it.
 - **One place for user choices:** shortlist/dismiss in `listing_status`,
   offers in `carta_log`, settings in `config.json` via the Settings page.
 

@@ -886,7 +886,10 @@ def _is_cut_copy(new: str | None, old: str | None) -> bool:
 # raw data does not know it, so it is carried over.
 LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "outside_check", "kept_photos", "eleiloes_id",
                     "water_check", "cadastre_checked", "fr_cadastre", "fr_commune_miss", "department",
-                    "climate", "verified_geo")
+                    "climate", "verified_geo", "geo_tried", "geo_street_tried", "bad_sale_pin", "sale_pin_checked",
+                    # Without these a scraper's fresh row wiped them, so the same lookups were
+                    # paid for again every scan and the best homes showed none (2026-11-02).
+                    "surroundings", "perizia", "outline", "site_check")
 
 
 def _keep_learned(new: str | None, old: str | None) -> str | None:
@@ -1236,6 +1239,52 @@ def _same_house_elsewhere(a, b) -> bool:
     return len(_phrases(a["description"]) & _phrases(b["description"])) >= 3
 
 
+def _italian_lot(court, case, lot, minimum) -> tuple | None:
+    """Court, case number, lot and minimum offer: together they name one lot of
+    one sale. "Tribunale di LOCRI" / "Locri", "55" / "55/2015", "LOTTO UNICO" / "Unico"."""
+    court = re.sub(r"^tribunale\s+(?:ordinario\s+)?di\s+", "", normalize(str(court or ""))).strip()
+    case = str(case or "").split("/")[0].strip()
+    lot = re.sub(r"^lotto\s+", "", normalize(str(lot or ""))).strip()
+    if not (court and case and lot and minimum):
+        return None
+    return court, case, "1" if lot == "unico" else lot, minimum
+
+
+def _row_raw(row) -> dict:
+    try:
+        raw = json.loads(row["raw_json"] or "{}")
+    except ValueError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _pvp_copies(rows) -> dict[str, str]:
+    """{Astalegale row: its PVP row}. Astalegale's "P" lots carry the PVP's own id;
+    the others match on _italian_lot, when exactly one PVP row does."""
+    official, lots = set(), defaultdict(list)
+    for r in rows:
+        if r["source"] == "pvp_giustizia":
+            official.add(r["id"])
+            raw = _row_raw(r)
+            key = _italian_lot(raw.get("tribunale"), raw.get("procedura"), raw.get("numeroLotto"), r["min_price"])
+            if key:
+                lots[key].append(r["id"])
+    out = {}
+    for r in rows:
+        if r["source"] != "astalegale":
+            continue
+        same = f"pvp:{r['id'].split(':P')[1]}" if ":P" in r["id"] else None
+        if same in official:
+            out[r["id"]] = same
+            continue
+        raw = _row_raw(r)
+        found = lots.get(_italian_lot(raw.get("tribunale"), raw.get("proceduraNumeroAnno"), raw.get("codiceLotto"),
+                                      r["min_price"]), [])
+        if len(found) == 1:
+            out[r["id"]] = found[0]
+    return out
+
+
 def mark_duplicates(db: sqlite3.Connection) -> int:
     """Identify duplicate and near-duplicate listings.
 
@@ -1347,6 +1396,11 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
                         and abs(other["price"] - keeper["price"]) <= 500):
                     dup_of[other["id"]] = keeper["id"]
                     possible.pop(other["id"], None)
+
+    # An Italian lot on the PVP and on Astalegale is one sale (2026-11-02: 2,386 + 906 copies).
+    for copy, official in _pvp_copies(rows).items():
+        dup_of[copy] = dup_of.get(official, official)
+        possible.pop(copy, None)
 
     # A Citius sale joined to its e-leilões auction (links.py) is one sale.
     from links import linked_pairs

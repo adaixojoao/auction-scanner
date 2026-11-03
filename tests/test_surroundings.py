@@ -2,6 +2,7 @@
 earthquakes, amenities, zoning, French risks and sold prices. Offline: the
 answers are stored ones, the way a scan leaves them."""
 import json
+import time
 
 import surroundings
 
@@ -45,6 +46,61 @@ def test_a_source_that_keeps_failing_is_left():
                            "failed": {"noise": surroundings.TRIES}}
     item["raw_json"] = json.dumps(raw)
     assert "noise" not in surroundings.missing(item)
+
+
+def _slow_sources(monkeypatch, log, fail=()):
+    """Every source takes a moment and notes when it ran; those in `fail` raise."""
+    def source(name):
+        def ask(session, lat, lon, item, **kw):
+            log.append((name, "start", time.monotonic()))
+            time.sleep(0.05)
+            log.append((name, "end", time.monotonic()))
+            if name in fail:
+                raise RuntimeError("busy")
+            return {"from": name}
+        return ask
+    monkeypatch.setattr(surroundings, "SOURCES", {n: (source(n), *rest[1:])
+                                                  for n, rest in surroundings.SOURCES.items()})
+
+
+def test_sources_of_different_providers_are_asked_at_the_same_time(monkeypatch):
+    log = []
+    _slow_sources(monkeypatch, log)
+    names = ["quake", "terrain", "travel", "winter_sun"]
+    began = time.monotonic()
+    got = surroundings.look_up(None, _item(), names)
+    assert time.monotonic() - began < 0.05 * len(names) * 0.75
+    assert got["found"] == {n: {"from": n} for n in names}
+
+
+def test_sources_of_one_provider_go_one_after_the_other(monkeypatch):
+    log = []
+    _slow_sources(monkeypatch, log)
+    surroundings.look_up(None, _item(), ["amenities", "power", "noise", "pfas"])
+    at = {(name, what): t for name, what, t in log}
+    assert at["amenities", "end"] <= at["power", "start"]
+    assert at["noise", "end"] <= at["pfas", "start"]
+
+
+def test_one_failure_is_counted_and_the_other_answers_are_kept(monkeypatch):
+    log = []
+    _slow_sources(monkeypatch, log, fail={"amenities"})
+    got = surroundings.look_up(None, _item(), ["amenities", "power", "quake"])
+    assert got["failed"] == {"amenities": 1}
+    assert set(got["found"]) == {"power", "quake"}
+    item = _item()
+    raw = json.loads(item["raw_json"])
+    raw["surroundings"] = got
+    item["raw_json"] = json.dumps(raw)
+    assert surroundings.look_up(None, item, ["amenities"])["failed"] == {"amenities": 2}
+
+
+def test_nothing_to_ask_is_not_an_error():
+    assert surroundings.look_up(None, _item(), [])["found"] == {}
+
+
+def test_services_only_names_real_sources():
+    assert set(surroundings.SERVICES) <= set(surroundings.SOURCES)
 
 
 def test_noise_is_held_to_the_who_limit_of_its_source():

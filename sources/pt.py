@@ -1773,6 +1773,41 @@ def with_imovirtual_detail(row: dict, detail: dict) -> dict:
     return {**row, "description": text[:3000], "raw_json": json.dumps(raw, ensure_ascii=False)}
 
 
+IMOVIRTUAL_BEST_DETAILS = 40
+
+
+def read_imovirtual_details(db, session, items: list[dict], limit: int = IMOVIRTUAL_BEST_DETAILS) -> int:
+    """The listing pages of the best homes (`items`, best first) still unread. The
+    scrape reads a few hundred in the order it finds them, and 3,179 of 4,652 were
+    still a bare card: a ruin in Santa Maria ranked third in Live and invest with
+    its condition "not stated" (2026-11-02)."""
+    done = 0
+    for item in items:
+        if done >= limit:
+            break
+        if item.get("source") != "imovirtual" or not item.get("url"):
+            continue
+        row = db.execute("SELECT description, raw_json FROM listings WHERE id = ?", (item["id"],)).fetchone()
+        if not row or '"detail_checked"' in (row[1] or ""):
+            continue
+        done += 1
+        try:
+            got = session.get(item["url"])
+            detail = imovirtual_detail(got.text) if got.status_code < 400 else {}
+        except Exception as e:  # noqa: BLE001 — the card alone is still worth keeping
+            LOG.info(f"Imovirtual page of {item['id']}: {type(e).__name__}")
+            continue
+        if detail.get("description"):
+            new = with_imovirtual_detail({"description": row[0], "raw_json": row[1]}, detail)
+            db.execute("UPDATE listings SET description = ?, raw_json = ? WHERE id = ?",
+                       (new["description"], new["raw_json"], item["id"]))
+            db.commit()
+        time.sleep(0.4)
+    if done:
+        LOG.info(f"Imovirtual: {done} pages of the best homes read")
+    return done
+
+
 def imovirtual_page(html: str) -> tuple[list[dict], int]:
     """(ads, total pages) from a results page."""
     m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)

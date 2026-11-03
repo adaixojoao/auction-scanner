@@ -21,11 +21,11 @@ import json
 import re
 import sys
 
-from common import LOG, find_terms
+from common import LOG, find_terms, normalize
 
-VERSION = 5                       # 2: a share only when the passage is about what is sold; 3: checklists; 4: reports under other codes, summaries for scans; 5: owners still living there
+VERSION = 6                       # 2: a share only when the passage is about what is sold; 3: checklists; 4: reports under other codes, summaries for scans; 5: owners still living there; 6: "free" from a question or form box is not a finding, the sale page's own fields
 PER_SCAN = 40                     # reports read per scan, the best homes first
-MAX_BYTES = 25_000_000
+MAX_BYTES = 60_000_000            # Bianco's report, 42 MB, was left unread at 25 MB (2026-11-02)
 MAX_TRIES = 3                     # candidate reports read for one listing (a scan gives way to the next)
 SOURCES = ("pvp_giustizia", "astalegale")
 PVP_API = "https://pvp.giustizia.it/ve-3f723b85-986a1b71/ve-ms/vendite/{}/restricted"
@@ -106,18 +106,101 @@ def report_urls(session, item: dict) -> tuple[list[str], str]:
     if pvp_id:
         resp = session.get(PVP_API.format(pvp_id), timeout=30)
         resp.raise_for_status()
-        links = pvp_reports((resp.json().get("body") or {}).get("allegati") or [])
+        body = resp.json().get("body") or {}
+        links = pvp_reports(body.get("allegati") or [])
+        copy = astalegale_copy(body)
+        if not links and copy:                     # Casal Velino: on Astalegale, not among the PVP's attachments
+            resp = session.get(copy, timeout=30)
+            resp.raise_for_status()
+            links = _astalegale_reports(resp.text)
         return (links, "pvp") if links else ([], "no report among the PVP attachments")
     if code:
         resp = session.get(url, timeout=30)
         resp.raise_for_status()
-        for m in _ASTALEGALE_LINK.finditer(resp.text):
-            before = re.sub(r"<[^>]*>", " ", resp.text[max(0, m.start() - 600):m.start()])
-            labels = _ASTALEGALE_LABEL.findall(before)
-            if labels and "perizia" in labels[-1].lower():
-                return [m.group(1)], "astalegale"
-        return [], "no report linked on the astalegale page"
+        links = _astalegale_reports(resp.text)
+        return (links, "astalegale") if links else ([], "no report linked on the astalegale page")
     return [], "not a PVP or astalegale page"
+
+
+def _astalegale_reports(html: str) -> list[str]:
+    for m in _ASTALEGALE_LINK.finditer(html):
+        before = re.sub(r"<[^>]*>", " ", html[max(0, m.start() - 600):m.start()])
+        labels = _ASTALEGALE_LABEL.findall(before)
+        if labels and "perizia" in labels[-1].lower():
+            return [m.group(1)]
+    return []
+
+
+_ASTALEGALE_COPY = re.compile(r"^https://www\.astalegale\.net/Aste/\w+/([PB]\d+)")
+
+
+def astalegale_copy(body: dict) -> str | None:
+    """The page of this PVP sale on Astalegale, from the sites the PVP says carry it."""
+    for site in body.get("siti") or []:
+        m = _ASTALEGALE_COPY.match(site.get("urlInserizione") or "")
+        if m:
+            return f"https://www.astalegale.net/Aste/Detail/{m.group(1)}"
+    return None
+
+
+_PAGE_OCCUPATION = re.compile(r"Stato di occupazione:[\s|]*([^|]{3,60}?)\s*\|")
+_PAGE_AREA = re.compile(r"Superficie:[\s|]*(\d[\d.,]*)\s*\|")
+
+
+def page_facts(html: str) -> dict:
+    """What an Astalegale sale page states in its own fields: occupied or free,
+    and the floor. The search results never say either (Bianco: "Occupato da
+    debitore/famiglia" on the page, 165 m²; Casal Velino: 32 m², guessed at 73)."""
+    plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " | ", html or ""))
+    out: dict = {}
+    m = _PAGE_OCCUPATION.search(plain)
+    if m:
+        said = normalize(m.group(1))
+        state = ("occupied" if said.startswith("occupat") or "liberazione" in said
+                 else "vacant" if said.startswith("liber") else None)
+        if state:
+            out.update(page_occupation=state, page_occupation_said=m.group(1).strip())
+    m = _PAGE_AREA.search(plain)
+    if m:
+        try:
+            area = float(m.group(1).replace(",", "."))
+        except ValueError:
+            area = 0
+        if area > 0:
+            out["page_area"] = area
+    return out
+
+
+def sale_facts(session, item: dict) -> dict:
+    """page_facts of this sale's Astalegale page, or {} when it has none or it
+    cannot be read: a report is still worth keeping."""
+    url = item.get("url") or ""
+    try:
+        pvp = _PVP_ID.search(url)
+        if pvp:
+            resp = session.get(PVP_API.format(pvp.group(1)), timeout=30)
+            resp.raise_for_status()
+            url = astalegale_copy(resp.json().get("body") or {})
+        elif not _ASTALEGALE_CODE.search(url):
+            return {}
+        if not url:
+            return {}
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        return page_facts(resp.text)
+    except Exception as e:  # noqa: BLE001
+        LOG.info(f"Sale page of {item.get('id')}: {type(e).__name__}")
+        return {}
+
+
+def _with_facts(found: dict, facts: dict) -> dict:
+    """The report's reading with the page's. The page's own "occupied" outranks a
+    report that says free: it is the later and the plainer statement."""
+    out = {**found, **facts}
+    if facts.get("page_occupation") == "occupied":
+        out["occupied"] = f"sale page: {facts['page_occupation_said']}"
+        out.pop("free", None)
+    return out
 
 
 def pdf_text(data: bytes) -> str:
@@ -139,7 +222,7 @@ def _body(text: str) -> str:
 
 # Words of the expert's instructions, not of the findings: "in caso di opere
 # abusive, controlli ...", "se trattasi di quota indivisa indichi ...".
-_INSTRUCTION = re.compile(r"\b(in caso di|se trattasi|qualora|controlli|verifichi|indichi|determini|dica se|"
+_INSTRUCTION = re.compile(r"\b(accerti|accertare|accertando|se l.immobile|in caso di|se trattasi|qualora|controlli|verifichi|indichi|determini|dica se|"
                           r"precisando|eventuali|eventuale|esprima|esponga|predisponendo|ai fini della|"
                           r"nel caso di|in questo caso|se fosse|deve contenere|seguenti indicazioni|"
                           r"esistenza di)\b", re.I)
@@ -152,11 +235,17 @@ _SOLD = re.compile(r"\b(pignorat\w*|in vendita|posto in vendita|oggetto della ve
 _HISTORY = re.compile(r"\b(pervenut\w*|donazione|successione|a favore|contro:|trascritt\w*|iscritt\w*)", re.I)
 
 
-def _snippet(text: str, terms: list[str], about_sale: bool = False) -> str:
+# A form's choices, not its answer: "Stato dell'immobile Libero X Locato Altro",
+# "è libero o occupato" (Bianco and Reggio Calabria, 2026-11-02).
+_CHOICES = re.compile(r"^\W*(?:x\W+)?(?:o\s+|oppure\s+)?(?:occupat|locat|affittat|comodato)", re.I)
+
+
+def _snippet(text: str, terms: list[str], about_sale: bool = False, one_answer: bool = False) -> str:
     """The first passage stating one of `terms` as a finding, or "".
 
     With `about_sale` the passage must also be about what is sold, not the
-    title's history."""
+    title's history. With `one_answer` the term must not be one of a form's
+    choices."""
     low = text.lower()
     for term in terms:
         start = 0
@@ -171,6 +260,8 @@ def _snippet(text: str, terms: list[str], about_sale: bool = False) -> str:
                 continue
             if about_sale and (not _SOLD.search(passage) or _HISTORY.search(near)):
                 continue
+            if one_answer and _CHOICES.match(text[i + len(term): i + len(term) + 30]):
+                continue
             return passage.strip()
     return ""
 
@@ -184,7 +275,7 @@ def read(text: str) -> dict:
     out = {"scanned": False, "lots": len(lots) or 1}
     for key, terms in (("share", SHARE), ("not_legal", NOT_LEGAL), ("leased", LEASED), ("occupied", OCCUPIED),
                        ("free", FREE), ("fixable", FIXABLE), ("damp", DAMP), ("stripped", STRIPPED)):
-        found = _snippet(body, terms, about_sale=key == "share")
+        found = _snippet(body, terms, about_sale=key == "share", one_answer=key == "free")
         if found:
             out[key] = found[:220]
     m = _MARKET.search(body)
@@ -237,8 +328,9 @@ def check(session, item: dict) -> dict:
     too large gives way to the next (the expert's summary); when none can be
     read, the first one's state is kept."""
     links, why = report_urls(session, item)
+    facts = sale_facts(session, item)
     if not links:
-        return {"found": False, "why": why}
+        return _with_facts({"found": False, "why": why}, facts)
     first = None
     for link in links[:MAX_TRIES]:
         resp = session.get(link, timeout=60)
@@ -248,9 +340,9 @@ def check(session, item: dict) -> dict:
         else:
             got = {"found": True, "url": link, **read(pdf_text(resp.content))}
         if not got.get("scanned") and "why" not in got:
-            return got
+            return _with_facts(got, facts)
         first = first or got
-    return first
+    return _with_facts(first, facts)
 
 
 def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
@@ -277,6 +369,9 @@ def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
         raw["perizia"] = {**result, "v": VERSION}
         db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
                    (json.dumps(raw, ensure_ascii=False), item["id"]))
+        if result.get("page_area"):                # a scrape's own figure stays
+            db.execute("UPDATE listings SET area_m2 = ? WHERE id = ? AND area_m2 IS NULL",
+                       (result["page_area"], item["id"]))
         db.commit()
         done += 1
     if done:

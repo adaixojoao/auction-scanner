@@ -26,7 +26,7 @@ import math
 import os
 import urllib.parse
 
-from common import LOG, utcnow_iso
+from common import LOG, patch_raw, utcnow_iso
 
 MODEL = "claude-haiku-4-5"          # the same model as the AI check (analysis.py)
 OLLAMA_URL = "http://127.0.0.1:11434"
@@ -766,8 +766,7 @@ def keep_one(db, session, item: dict) -> bool:
     if not names or not changed:
         return False
     raw["kept_photos"] = names
-    db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
-               (json.dumps(raw, ensure_ascii=False), item["id"]))
+    patch_raw(db, item["id"], {"kept_photos": names})
     from db import record_evidence_revision
     record_evidence_revision(db, item["id"], "kept_photos", names)
     # Track gallery URL list so callers can detect when new photos arrive (F10).
@@ -856,12 +855,7 @@ def check_pending(db, cfg: dict, items: list[dict], limit: int | None = None, lo
         failed = 0
         if not found:
             continue
-        try:
-            raw = json.loads(item.get("raw_json") or "{}")
-        except ValueError:
-            raw = {}
-        raw[field] = found
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        patch_raw(db, item["id"], {field: found})
         from db import record_evidence_revision
         record_evidence_revision(db, item["id"], field, found)
         db.commit()

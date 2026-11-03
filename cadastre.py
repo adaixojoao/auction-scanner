@@ -29,7 +29,7 @@ import json
 import re
 import time
 
-from common import LOG, normalize
+from common import LOG, normalize, patch_raw
 
 CATASTRO = ("https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCoordenadas.svc/json/"
             "Consulta_CPMRC")
@@ -490,6 +490,7 @@ def locate_pending(db, session, items: list[dict], towns: dict, limit: int = PER
         if done >= limit:
             break
         raw = geo._raw(item)
+        before = dict(raw)
         country = (item.get("country") or "PT").upper()
         if country == "FR":
             try:
@@ -502,8 +503,7 @@ def locate_pending(db, session, items: list[dict], towns: dict, limit: int = PER
             done += 1
             if outcome == "placed":
                 found += 1
-            db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
-                       (json.dumps(raw, ensure_ascii=False), item["id"]))
+            patch_raw(db, item["id"], {k: v for k, v in raw.items() if k not in before or before[k] != v})
             db.commit()
             time.sleep(1)
             continue
@@ -535,7 +535,7 @@ def locate_pending(db, session, items: list[dict], towns: dict, limit: int = PER
             # The old reading, if any, was not this parcel.
             raw["climate"] = None
             raw["water_check"] = None
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        patch_raw(db, item["id"], {k: v for k, v in raw.items() if k not in before or before[k] != v})
         db.commit()
         time.sleep(1)
     if done:
