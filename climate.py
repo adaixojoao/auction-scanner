@@ -754,7 +754,7 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
     if not available():
         return 0
     import geo
-    from common import LOG
+    from common import LOG, patch_raw
     if seaside_first:
         items = _seaside_ahead(db, items, towns)
     loaded_before = maps_loaded()
@@ -783,9 +783,8 @@ def assess_pending(db, items: list[dict], towns: dict, limit: int = 3000, *,
                 break
             continue
         result = {**result, "approx": pos.get("precision") not in geo.EXACT_ENOUGH} if result else None
-        raw["climate"] = {"at": _place_key(pos), "spot": _spot(pos), "v": VERSION, "layers": stamp,
-                          "result": result}
-        db.execute("UPDATE listings SET raw_json = ? WHERE id = ?", (json.dumps(raw, ensure_ascii=False), item["id"]))
+        patch_raw(db, item["id"], {"climate": {"at": _place_key(pos), "spot": _spot(pos), "v": VERSION,
+                                               "layers": stamp, "result": result}})
         done += 1
         if done % 200 == 0:
             db.commit()

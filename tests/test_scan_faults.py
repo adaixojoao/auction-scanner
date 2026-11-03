@@ -215,3 +215,25 @@ def test_the_best_homes_unread_page_is_read_once(db, monkeypatch):
     stored = dict(db.execute("SELECT * FROM listings WHERE id = ?", (row["id"],)).fetchone())
     assert has_term(stored["description"], HEAVY_WORK) and pages.asked == [row["url"]]
     assert pt.read_imovirtual_details(db, pages, [row]) == 0
+
+
+def test_a_climate_read_during_a_load_leaves_newer_findings(db, add):
+    from db import _save_climates
+    row = add(source="pvp_giustizia", external_id="9", country="IT", id_prefix="pvp", title="Casa", price=1000,
+              raw_json={"procedura": "9"})
+    patch_raw(db, row["id"], {"surroundings": {"found": {"noise": 1}}})    # found after the copy was loaded
+    _save_climates(db, [(row["id"], {"result": {"hot_days": 2}})])
+    raw = _raw(db, row["id"])
+    assert raw["surroundings"] == {"found": {"noise": 1}} and raw["climate"]["result"]["hot_days"] == 2
+
+
+def test_a_pin_no_namesake_can_explain_is_set_aside(db, add, monkeypatch):
+    row = add(source="imobancos", external_id="1", country="PT", id_prefix="imobancos", title="Moradia", price=1000,
+              concelho="Penafiel", raw_json={"lat": -30.0, "lon": 60.0})
+    item = dict(db.execute("SELECT * FROM listings WHERE id = ?", (row["id"],)).fetchone())
+    monkeypatch.setattr(geo, "geocode", lambda session, it, towns: None)
+    towns = {geo.town_key("PT", geo.municipality(item)): {"lat": 41.2, "lon": -8.28}}
+    assert geo.check_sale_pins(db, None, [item], towns) == 1
+    raw = _raw(db, row["id"])
+    assert raw["bad_sale_pin"] == [-30.0, 60.0] and "geo" not in raw
+    assert geo.source_position(raw, item) is None

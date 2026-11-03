@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 from common import (
-    LOG, effective_end, find_terms, has_term, normalize, parse_dt, safe_url, utcnow, utcnow_iso,
+    LOG, effective_end, find_terms, has_term, normalize, parse_dt, patch_raw, safe_url, utcnow, utcnow_iso,
 )
 
 DB_PATH = os.environ.get("AUCTION_SCANNER_DB") or os.path.join(
@@ -2646,6 +2646,19 @@ def reuse_lists():
         _REUSE[0] = outer
 
 
+def _save_climates(db, writes: list[tuple]) -> None:
+    """Only the climate: these copies were loaded before a load that can last an
+    hour, and written whole they took back what other steps found meanwhile."""
+    for lid, climate_payload in writes:
+        patch_raw(db, lid, {"climate": climate_payload})
+        try:
+            if climate_payload is not None:
+                record_evidence_revision(db, lid, "climate", climate_payload)
+        except (ValueError, TypeError):
+            pass
+    db.commit()
+
+
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
                   where: str = "", params=(), apply_min_score: bool = True, mode: str = "home",
@@ -2899,7 +2912,7 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 _save_kept(db, mode, new_scores)
                 new_scores = []
             if item.get("_climate_write"):
-                climate_writes.append((item["raw_json"], item["id"]))
+                climate_writes.append((item["id"], json.loads(item["raw_json"]).get("climate")))
                 item.pop("_climate_write", None)
 
         # Heavy industry next to the house (geo.pollution), or badly polluted
@@ -2965,15 +2978,7 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         items = _normalize_both(db, items, full=not where, min_score=min_score,
                                 include_hidden=include_hidden, slim_hidden=slim_hidden)
     if climate_writes:
-        db.executemany("UPDATE listings SET raw_json = ? WHERE id = ?", climate_writes)
-        for rj, lid in climate_writes:
-            try:
-                climate_payload = json.loads(rj).get("climate")
-                if climate_payload is not None:
-                    record_evidence_revision(db, lid, "climate", climate_payload)
-            except (ValueError, TypeError):
-                pass
-        db.commit()
+        _save_climates(db, climate_writes)
     _save_kept(db, mode, new_scores)
     if not _kept_in_memory(mode):
         _release(mode)               # the items hold what they need; the scores file keeps the rest
