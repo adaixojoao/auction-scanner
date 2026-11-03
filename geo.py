@@ -428,6 +428,7 @@ def geocode_pending(db, session, items: list[dict], limit: int | None = None,
 
 SALE_PIN_KM = 15             # wider than most Italian municipalities; closer is not questioned
 SALE_PINS_PER_SCAN = 30
+SALE_PIN_IMPOSSIBLE_KM = 3000     # Penafiel at 9,160 km; the Azores and the Canaries are nearer than this
 
 
 def check_sale_pins(db, session, items: list[dict], towns: dict, limit: int = SALE_PINS_PER_SCAN) -> int:
@@ -437,8 +438,8 @@ def check_sale_pins(db, session, items: list[dict], towns: dict, limit: int = SA
     lookup described the wrong town (2026-11-02). Distance alone proves nothing,
     since the town can be the wrong one of two namesakes (Paternò), so the pin is
     only set aside when an address in the listing's town, not the town's name
-    alone, lands far from it as well. Each pin is asked about once. Returns how
-    many were set aside."""
+    alone, lands far from it as well, or when no namesake can explain the distance.
+    Each pin is asked about once. Returns how many were set aside."""
     asked = wrong = 0
     for item in items:
         if asked >= limit:
@@ -457,11 +458,16 @@ def check_sale_pins(db, session, items: list[dict], towns: dict, limit: int = SA
             break
         asked += 1
         changes = {"sale_pin_checked": pin}
-        if (found and found["precision"] != "municipality"
-                and distance_km(pin[0], pin[1], found["lat"], found["lon"]) > SALE_PIN_KM):
-            changes.update(bad_sale_pin=pin, geo=found, geo_checked=True)
+        # France has towns overseas, so a namesake can be half a world away.
+        impossible = (item.get("country") or "PT").upper() != "FR" and (
+            distance_km(pin[0], pin[1], town["lat"], town["lon"]) > SALE_PIN_IMPOSSIBLE_KM)
+        if impossible or (found and found["precision"] != "municipality"
+                          and distance_km(pin[0], pin[1], found["lat"], found["lon"]) > SALE_PIN_KM):
+            changes.update(bad_sale_pin=pin, geo_checked=True)
+            if found:
+                changes["geo"] = found
             wrong += 1
-            LOG.info(f"Sale pin of {item['id']} is far from its address ({found['query']}): set aside")
+            LOG.info(f"Sale pin of {item['id']} is far from its address: set aside")
         item["raw_json"] = patch_raw(db, item["id"], changes) or item.get("raw_json")
         db.commit()
     return wrong
