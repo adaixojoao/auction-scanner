@@ -345,6 +345,58 @@ function costsHtml(c) {
     <p class="small muted">${AS.esc(c.note)}</p>${rent}</div>`;
 }
 
+// Your verified condition: scoring and the cost estimate use this instead of the ad.
+const OWNER_CONDITION_OPTIONS = [
+  ["", "From the ad / photos"],
+  ["good", "Good condition (you checked)"],
+  ["some", "Needs some work (you checked)"],
+  ["heavy", "Needs rebuilding (you checked)"],
+  ["unknown", "Condition unknown (you checked)"],
+];
+
+function ownerConditionHtml(d) {
+  if (d.kind && d.kind !== "home") return "";
+  const cur = d.owner_condition || "";
+  const opts = OWNER_CONDITION_OPTIONS.map(([v, label]) =>
+    `<option value="${AS.esc(v)}"${v === cur ? " selected" : ""}>${AS.esc(label)}</option>`).join("");
+  const when = d.owner_condition_at
+    ? `<span class="small muted"> · recorded ${(d.owner_condition_at || "").slice(0, 16).replace("T", " ")} UTC</span>`
+    : "";
+  const note = AS.esc(d.owner_condition_note || "");
+  return `<div class="guide owner-condition" data-id="${AS.esc(d.id)}">
+    <b>Condition you verified</b>${when}
+    <p class="small muted">Overrides the ad for scores and the repair estimate. Survives rescrape and rescoring.</p>
+    <label class="small">State
+      <select class="owner-condition-select" data-role="owner-condition">${opts}</select>
+    </label>
+    <label class="small">Note (optional)
+      <input type="text" class="owner-condition-note" maxlength="500" value="${note}"
+             placeholder="e.g. kitchen and baths need redo">
+    </label>
+    <button type="button" class="btn btn-sm" data-role="save-owner-condition">Save</button>
+    <span class="small muted owner-condition-status" hidden></span>
+  </div>`;
+}
+
+async function saveOwnerCondition(box) {
+  const id = box.dataset.id;
+  const condition = box.querySelector(".owner-condition-select").value;
+  const note = box.querySelector(".owner-condition-note").value;
+  const status = box.querySelector(".owner-condition-status");
+  status.hidden = false;
+  status.textContent = "Saving…";
+  try {
+    const out = await AS.api("/api/listing/condition", {
+      method: "POST",
+      body: {id, condition, note},
+    });
+    status.textContent = out.owner_condition ? "Saved — reopen details to refresh costs." : "Cleared — reopen details to refresh costs.";
+    AS.toast(out.owner_condition ? "Condition recorded" : "Condition cleared");
+  } catch (err) {
+    status.textContent = err.message || "Could not save";
+  }
+}
+
 function projectHtml(d) {
   const p = d.project;
   if (!p) return "";
@@ -560,7 +612,8 @@ function detailsHtml(d) {
       <p class="small muted">Why this score: ${AS.esc(d.reasons.join(", "))}</p>`)}
     ${detailsSection("investigation", "Investigation",
       typeof Investigation === "undefined" ? "" : Investigation.sectionHtml(d.investigation))}
-    ${detailsSection("costs", "Costs and planning", `${costsHtml(d.costs)}${AS.bidCapHtml(d.bid_cap)}`)}
+    ${detailsSection("costs", "Costs and planning",
+      `${ownerConditionHtml(d)}${costsHtml(d.costs)}${AS.bidCapHtml(d.bid_cap)}`)}
     ${detailsSection("location", "Location and climate",
       `${locationHtml(d)}${streetView}${outlineHtml(d.outline)}${AS.climateHtml(d.climate)}`)}
     ${detailsSection("records", "Official records and sale procedure", `${guide}${official}`)}

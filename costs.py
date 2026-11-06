@@ -31,7 +31,7 @@ import re
 from common import (counted_flats, find_floor_area, footprint_figure, land_figure, normalize,
                     parse_price, price_to_pay)
 from scoring import (INVEST_VALUE_MAX_M2, TOWN_KM_VALUE, categorize, condition, curve, market_value_estimate,
-                     property_kind)
+                     owner_condition, property_kind)
 
 IMT_YEAR = 2025
 
@@ -299,6 +299,12 @@ CONDITION_NOTE = {
     "good": "described as in good condition",
     "unknown": "condition not stated — assume a full renovation",
 }
+OWNER_CONDITION_NOTE = {
+    "heavy": "you recorded that it needs rebuilding",
+    "some": "you recorded that it needs work",
+    "good": "you recorded that it is in good condition",
+    "unknown": "you recorded that the condition is not known — assume a full renovation",
+}
 MAX_HOME_M2 = 1000          # above this the area is the plot, not the building
 
 # Court and tax sales hand over a title instead of a notarial deed: no escritura.
@@ -501,9 +507,11 @@ def renovation(item: dict, cfg: dict | None = None) -> dict | None:
         return None
     state = condition(item)
     # The court expert saw the inside: stripped or abandoned is a rebuild,
-    # damp is work, whatever the ad says.
+    # damp is work, whatever the ad says. Your recorded condition already won
+    # in condition(); perizia can still raise it further.
     perizia = _item_raw(item).get("perizia") or {}
     seen = ""
+    owned = owner_condition(item)
     if (perizia.get("lots") or 1) == 1:
         if perizia.get("stripped") and state != "heavy":
             state, seen = "heavy", " (the perizia finds it abandoned or stripped)"
@@ -517,8 +525,9 @@ def renovation(item: dict, cfg: dict | None = None) -> dict | None:
         where += " (Catastro's dwelling, not a size written in the notice)"
     elif source == "capped":
         where += " of building — a larger area is the plot, not floor space"
+    basis = OWNER_CONDITION_NOTE[state] if owned and not seen else CONDITION_NOTE[state]
     return {"low": round(area * low), "high": round(area * high), "eur_m2": (low, high),
-            "note": f"{CONDITION_NOTE[state]}{seen}; €{low}–{high}/m² over {where}"}
+            "note": f"{basis}{seen}; €{low}–{high}/m² over {where}"}
 
 
 def bands_text(cfg: dict | None = None) -> str:

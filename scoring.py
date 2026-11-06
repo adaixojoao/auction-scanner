@@ -1442,10 +1442,25 @@ def portal_condition(item: dict) -> str | None:
     return PORTAL_CONDITION.get(raw.get("conservation")) or PORTAL_CONDITION.get(raw.get("construction_status"))
 
 
+OWNER_CONDITIONS = frozenset({"good", "some", "heavy", "unknown"})
+
+
+def owner_condition(item: dict) -> str | None:
+    """Your verified condition on the listing (listings.owner_condition), or None.
+
+    Survives rescrape and rescoring. When set, condition() uses it instead of
+    the ad, the portal field or the photos."""
+    v = (item.get("owner_condition") or "").strip().lower()
+    return v if v in OWNER_CONDITIONS else None
+
+
 def condition(item: dict) -> str:
     """"heavy", "some", "good" or "unknown": how much work the listing admits
     to, else the portal's own state field, else what its photos show
     (photos.py) when neither says anything.
+
+    Your recorded condition (owner_condition) wins over the ad and the photos:
+    you checked Pinhel and it needs work even when Whitestar says "Novo".
 
     A fallen roof or fibre-cement sheets in the photos raise the estimate even
     when the ad says the house is sound. An obvious ruin in an open aerial or
@@ -1453,6 +1468,9 @@ def condition(item: dict) -> str:
     sound: the inside was not in that picture. A barn photo that does not say so
     still says nothing about the house. A portal that files the home as "a
     reformar" outranks an agent's "lista para entrar a vivir"."""
+    owned = owner_condition(item)
+    if owned:
+        return owned
     text = f"{item.get('title') or ''} {item.get('description') or ''}"
     portal = portal_condition(item)
     if has_term(text, HEAVY_WORK):
@@ -2811,10 +2829,13 @@ def _home_points(item: dict, full: str, area: float, pay: float, reasons: list[s
     s = 0.0
     state = condition(item)
     said = has_term(full, HEAVY_WORK + SOME_WORK) or (has_term(full, GOOD_CONDITION) and _whole_house_good(full))
-    seen = ("" if state == "unknown" or said
-            else " (the portal's own field)" if portal_condition(item) else " (from the photos)")
-    if state == "heavy" and outside_view(item) == "heavy" and not has_term(full, HEAVY_WORK):
-        seen = " (from an open aerial or street photo)"
+    if owner_condition(item):
+        seen = " (you recorded)"
+    else:
+        seen = ("" if state == "unknown" or said
+                else " (the portal's own field)" if portal_condition(item) else " (from the photos)")
+        if state == "heavy" and outside_view(item) == "heavy" and not has_term(full, HEAVY_WORK):
+            seen = " (from an open aerial or street photo)"
     if state == "heavy":
         s -= 25
         caps.append(40)   # a cheap ruin must not outrank a house you can live in
@@ -3648,7 +3669,9 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     s += {"good": 5, "some": -5, "heavy": -15}.get(state, -3)
     label = {"good": "good condition", "some": "needs some work", "heavy": "needs heavy work"}.get(
         state, "condition not stated")
-    if state == "heavy" and outside_view(item) == "heavy" and not has_term(full, HEAVY_WORK):
+    if owner_condition(item):
+        label += " (you recorded)"
+    elif state == "heavy" and outside_view(item) == "heavy" and not has_term(full, HEAVY_WORK):
         label += " (from an open aerial or street photo)"
     elif state == "unknown" and outside_view(item) == "standing":
         label = "the outside is standing (open aerial or street photo); the inside was not seen"

@@ -44,7 +44,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 34
+SCHEMA_VERSION = 35
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -729,6 +729,15 @@ def _migrate_v34(db: sqlite3.Connection):
     evidence_store.install_schema(db)
 
 
+def _migrate_v35(db: sqlite3.Connection):
+    """Your verified condition on a listing (good / some / heavy / unknown).
+    Survives rescrape and rescoring; scoring.condition and costs.renovation
+    prefer it over the ad. Cleared when NULL."""
+    _add_column(db, "listings", "owner_condition", "TEXT")
+    _add_column(db, "listings", "owner_condition_note", "TEXT")
+    _add_column(db, "listings", "owner_condition_at", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
@@ -737,7 +746,7 @@ _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
                27: _migrate_v27, 28: _migrate_v28, 29: _migrate_v29,
                30: _migrate_v30, 31: _migrate_v31, 32: _migrate_v32,
-               33: _migrate_v33, 34: _migrate_v34}
+               33: _migrate_v33, 34: _migrate_v34, 35: _migrate_v35}
 
 
 def init_db(db: sqlite3.Connection):
@@ -1525,6 +1534,34 @@ def set_job_last_run(db: sqlite3.Connection, job: str, when: datetime | None = N
     db.execute("INSERT OR REPLACE INTO job_runs (job, last_run) VALUES (?, ?)",
                (job, (when or utcnow()).isoformat()))
     db.commit()
+
+
+OWNER_CONDITIONS = frozenset({"good", "some", "heavy", "unknown"})
+
+
+def set_owner_condition(db: sqlite3.Connection, listing_id: str,
+                        condition: str | None, note: str | None = None) -> bool:
+    """Record or clear your verified condition on a listing. Returns False when
+    the listing is missing. Busts the score cache via the listings column and
+    an evidence revision."""
+    from common import utcnow_iso
+    state = (condition or "").strip().lower() or None
+    if state is not None and state not in OWNER_CONDITIONS:
+        raise ValueError(f"condition must be one of {sorted(OWNER_CONDITIONS)}, or empty to clear")
+    note = (note or "").strip() or None
+    if state is None:
+        note = None
+        when = None
+    else:
+        when = utcnow_iso()
+    cur = db.execute(
+        "UPDATE listings SET owner_condition=?, owner_condition_note=?, owner_condition_at=? WHERE id=?",
+        (state, note, when, listing_id))
+    if cur.rowcount == 0:
+        return False
+    record_evidence_revision(db, listing_id, "owner_condition",
+                             {"condition": state, "note": note, "at": when})
+    return True
 
 
 def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | None,

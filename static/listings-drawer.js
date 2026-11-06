@@ -242,6 +242,11 @@ const propertyDrawer = (() => {
   panel.addEventListener("click", event => {
     const trigger = event.target.closest && event.target.closest('[data-role="enlarge-photo"]');
     if (trigger && body.contains(trigger)) showImage(trigger);
+    const saveCond = event.target.closest && event.target.closest('[data-role="save-owner-condition"]');
+    if (saveCond && body.contains(saveCond)) {
+      const box = saveCond.closest(".owner-condition");
+      if (box && typeof saveOwnerCondition === "function") saveOwnerCondition(box);
+    }
   });
 
   return {open, close, reconcile, markStale, restoreURL, panel, selected: () => selected};

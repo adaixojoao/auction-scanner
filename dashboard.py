@@ -949,6 +949,9 @@ def api_listing_detail():
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
         "outline": listing_info.outline_panel(it),
         "user_note": user_note,
+        "owner_condition": it.get("owner_condition"),
+        "owner_condition_note": it.get("owner_condition_note"),
+        "owner_condition_at": it.get("owner_condition_at"),
         "contact_log": contact_log,
         "status_history": status_history,
         "research": research,
@@ -1184,6 +1187,45 @@ def api_listing_note():
     finally:
         db.close()
     return jsonify({"ok": True, "id": listing_id, "length": length})
+
+
+@app.route("/api/listing/condition", methods=["POST"])
+def api_listing_condition():
+    """Record or clear your verified condition on a listing (good / some /
+    heavy / unknown). Scoring and the cost estimate use it instead of the ad.
+    An empty condition clears the override. Survives rescrape and rescoring."""
+    from db import OWNER_CONDITIONS, set_owner_condition
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    listing_id = data.get("id")
+    if not isinstance(listing_id, str) or not listing_id:
+        return jsonify({"error": "id required"}), 400
+    condition = data.get("condition")
+    if condition is not None and not isinstance(condition, str):
+        return jsonify({"error": "condition must be text"}), 400
+    note = data.get("note")
+    if note is not None and not isinstance(note, str):
+        return jsonify({"error": "note must be text"}), 400
+    if note is not None and _utf16_length(note) > NOTE_MAX:
+        return jsonify({"error": f"A note holds at most {NOTE_MAX:,} characters."}), 400
+    state = (condition or "").strip().lower() or None
+    if state is not None and state not in OWNER_CONDITIONS:
+        return jsonify({"error": f"condition must be one of {', '.join(sorted(OWNER_CONDITIONS))}, or empty to clear"}), 400
+    db = get_db()
+    try:
+        if not set_owner_condition(db, listing_id, state, note):
+            return jsonify({"error": "no such listing"}), 404
+        db.commit()
+        row = db.execute(
+            "SELECT owner_condition, owner_condition_note, owner_condition_at FROM listings WHERE id=?",
+            (listing_id,)).fetchone()
+    finally:
+        db.close()
+    return jsonify({"ok": True, "id": listing_id,
+                    "owner_condition": row["owner_condition"],
+                    "owner_condition_note": row["owner_condition_note"],
+                    "owner_condition_at": row["owner_condition_at"]})
 
 
 @app.route("/api/kept-photo")
