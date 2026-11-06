@@ -144,10 +144,11 @@ def _eleiloes_to_listing(item: dict) -> dict:
 # Fields the detail pass adds to raw_json. The next search-page scrape replaces
 # raw_json with the thin list item, so these are carried over (_keep_details).
 # Bumped when the detail pass reads more: sales read by an older pass are read again.
-DETAIL_VERSION = 5
+DETAIL_VERSION = 6          # prefer Área Privativa over Área Total; flag conflicts
 ELEILOES_DETAIL_KEYS = ("processo", "tribunal", "agente_nome", "agente_email",
                         "valor_abertura", "morada", "lat", "lon", "reg_district", "reg_concelho",
-                        "reg_freguesia", "registo_predial", "detail_checked")
+                        "reg_freguesia", "registo_predial", "detail_checked",
+                        "area_total_m2", "area_privativa_m2", "area_conflict")
 _NOT_PROPERTY = ("outro", "direitos", "veiculo", "equipamento", "mobiliario")
 
 
@@ -195,14 +196,37 @@ def land_register_entries(item: dict) -> list[dict]:
     return out
 
 
+def _eleiloes_areas(item: dict) -> tuple[float | None, dict]:
+    """(floor m² to store, raw area notes). Prefer Área Privativa over Área Total:
+    e-leilões often stores the plot or gross as areaTotal (203473: total 80,
+    private 50). When both exist and disagree, the private figure is the floor
+    and the conflict is kept for the investigation panel."""
+    total = to_number(item.get("areaTotal"))
+    private = (to_number(item.get("areaUtilPrivativa"))
+               or to_number(item.get("areaPrivativa"))
+               or to_number(item.get("areaUtil")))
+    notes: dict = {}
+    if total is not None:
+        notes["area_total_m2"] = total
+    if private is not None:
+        notes["area_privativa_m2"] = private
+    if private and total and abs(private - total) > max(1.0, 0.05 * max(private, total)):
+        notes["area_conflict"] = (
+            f"Área Total {total:g} m² vs Área Privativa {private:g} m² — using the private floor")
+        return private, notes
+    if private:
+        return private, notes
+    return total, notes
+
+
 def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
     """GET /api/Eventos/<referencia> → (listing fields, extra raw_json keys).
     Leaves out the executados: the people whose property is sold."""
     place = _registry_place(item)
     description = (item.get("descricao") or "").strip() or None
     notes = (item.get("observacoes") or "").strip()
-    area = to_number(item.get("areaTotal")) or to_number(item.get("areaUtilPrivativa")) or None
-    written = find_area(description)
+    area, area_notes = _eleiloes_areas(item)
+    written = find_floor_area(description) or find_area(description)
     # The area field is sometimes off by a factor of 100 ("1 695 000 m²" for a plot
     # described as "cerca de 16.950m2"): when the two disagree that much, the
     # description wins.
@@ -231,6 +255,7 @@ def eleiloes_detail_fields(item: dict) -> tuple[dict, dict]:
         "reg_freguesia": place["freguesia"],
         "registo_predial": land_register_entries(item) or None,
         "detail_checked": DETAIL_VERSION,
+        **area_notes,
     }
     return fields, {k: v for k, v in extra.items() if v is not None}
 
@@ -714,11 +739,7 @@ def parse_citius_item(item_text: str, trib_name: str) -> dict:
     if morada and intervenientes:
         intervenientes[-1]["morada"] = morada
 
-    date_end = None
-    end_m = re.search(
-        r"(?:Data(?:\s+da)?(?:\s+venda)?|Até|Prazo)[^:]{0,30}:\s*(\d{2}/\d{2}/\d{4})", item_text, re.I)
-    if end_m:
-        date_end = parse_date_dmy(end_m.group(1))
+    date_end = _citius_date(item_text)
 
     return {
         "price": price,
@@ -739,6 +760,32 @@ def parse_citius_item(item_text: str, trib_name: str) -> dict:
         "date_end": date_end,
         "tribunal": trib_name,
     }
+
+
+def _citius_date(text: str | None) -> str | None:
+    """A real Citius deadline, or None. The site fills '01/01/9999' (and other
+    9999-… placeholders) when no date is published — that is not a deadline."""
+    if not text:
+        return None
+    end_m = re.search(
+        r"(?:Data(?:\s+da)?(?:\s+venda)?|Até|Prazo|Data\s*/\s*hora|"
+        r"limite(?:\s+para\s+(?:apresenta[cç][aã]o|aceita[cç][aã]o))?)"
+        r"[^:]{0,40}:\s*(\d{2}/\d{2}/\d{4})", text, re.I)
+    if not end_m:
+        return None
+    date_end = parse_date_dmy(end_m.group(1))
+    if not date_end or str(date_end).startswith("9999"):
+        return None
+    return date_end
+
+
+def citius_reference_url(processo: str | None) -> str:
+    """A per-listing reference the owner can search with. Citius has no page per
+    sale; the case number is the durable handle (listing_info.open_guide)."""
+    proc = (processo or "").split(",")[0].strip()
+    if not proc:
+        return CITIUS_URL
+    return f"{CITIUS_URL}?ref={urllib.parse.quote(proc)}"
 
 
 def citius_listing(f: dict, eid: str) -> dict:
@@ -774,8 +821,8 @@ def citius_listing(f: dict, eid: str) -> dict:
         price=f["price"],
         min_price=f["price"],
         district=district, concelho=concelho, freguesia=freguesia,
-        # Citius has no per-sale page; the search page is the best link there is.
-        url=CITIUS_URL,
+        # Citius has no per-sale page; the case number is the durable reference.
+        url=citius_reference_url(f.get("processo")),
         date_end=f["date_end"],
         raw_json=raw,
     )
@@ -787,7 +834,7 @@ CITIUS_DETAILS_PER_SCAN = 150
 # scan no longer drops the full description; 4: whether a debtor lives in it,
 # and who runs the sale):
 # sales read by an older pass are read again.
-CITIUS_DETAIL_VERSION = 4
+CITIUS_DETAIL_VERSION = 5          # drop 9999 sentinel dates; keep processo as the link reference
 _CITIUS_NEXT = "ctl00$ContentPlaceHolder1$Pager1$btnNextPage"
 
 
@@ -942,15 +989,27 @@ def fetch_citius_details(db, session, limit: int = CITIUS_DETAILS_PER_SCAN) -> i
         for key, value in citius_sale_agent(html).items():
             if not raw.get(key):
                 raw[key] = value
+        detail_date = _citius_date(detail) or _citius_date(html)
+        if detail_date:
+            sets["date_end"] = detail_date
+        else:
+            # A stored 9999-… sentinel is not a deadline: clear it so the UI
+            # shows "date unknown" instead of a fake far-future day.
+            old_end = db.execute("SELECT date_end FROM listings WHERE id = ?", (listing_id,)).fetchone()
+            if old_end and old_end[0] and str(old_end[0]).startswith("9999"):
+                sets["date_end"] = None
         if full:
             raw["descricao_completa"] = full[:3000]
             district, concelho, freguesia = _citius_extract_location(full)
-            sets = {"title": full[:120], "area_m2": _citius_area(full),
-                    "district": district, "concelho": concelho, "freguesia": freguesia}
+            sets.update({"title": full[:120], "area_m2": _citius_area(full),
+                         "district": district, "concelho": concelho, "freguesia": freguesia})
             old_desc = db.execute("SELECT description FROM listings WHERE id = ?", (listing_id,)).fetchone()[0] or ""
             rest = old_desc.split(". Modalidade:", 1)
             sets["description"] = full[:3000] + (". Modalidade:" + rest[1] if len(rest) > 1 else "")
-        sets = {k: v for k, v in sets.items() if v}
+        if raw.get("processo"):
+            sets["url"] = citius_reference_url(raw["processo"])
+        # Keep explicit None (cleared 9999 date); drop other empty values.
+        sets = {k: v for k, v in sets.items() if k == "date_end" or v}
         sets["raw_json"] = json.dumps(raw, ensure_ascii=False)
         db.execute(f"UPDATE listings SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?",
                    (*sets.values(), listing_id))
@@ -1155,12 +1214,15 @@ def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **
         raw = raw or {}
         raw.update(venda=sale["venda"], modalidade=sale["modalidade"], numero=sale["numero"])
         desc = raw.get("descricao") or ""
+        # Finanças lists the plot as "área total do terreno"; the house is the
+        # gross / private construction figure (1228.2026.16: plot 202, house 96).
         upsert_listing(db, make_listing(
             "financas", sale["numero"], "PT",
             title=(desc[:120] or f"Imóvel — venda {sale['numero']}"),
             description=". ".join(x for x in (desc, f"Modalidade: {sale['modalidade']}",
                                               "Venda em execução fiscal (Portal das Finanças)") if x),
-            tipo="imovel", area_m2=find_area(desc), price=sale["valor_base"], min_price=sale["valor_base"],
+            tipo="imovel", area_m2=find_floor_area(desc) or find_area(desc),
+            price=sale["valor_base"], min_price=sale["valor_base"],
             current_bid=sale["ultima"], district=raw.get("distrito"), concelho=raw.get("concelho"),
             freguesia=raw.get("freguesia"), url=accounts.FINANCAS_SALES,   # detalhe?venda=… changes with every sign-in
             image_url=sale["image"], date_end=raw.get("date_end") or sale["date_end"],

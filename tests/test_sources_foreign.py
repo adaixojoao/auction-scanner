@@ -126,21 +126,27 @@ OV_DETAIL = """<html><body><h1>Kerkstraat 18, OUD GASTEL</h1><p>Kerkstraat 18, O
 def test_openbareverkoop_list_and_each_lots_page_once(db, fake_http):
     lot = {"id": 4490, "kavelNaam": "Kerkstraat 18, OUD GASTEL", "woningtype": "Woonhuis", "url": "/kavel/4490/k",
            "lat": 51.58, "lng": 4.45, "zittingdatum": "/Date(1791459000000)/", "inzet": "", "afslag": "",
-           "veilingwijze": "Internet-only Live", "image": "/img/4490.jpg"}
+           "veilingwijze": "Internet-only Live", "internetonly": True, "image": "/img/4490.jpg"}
+    hybrid = {"id": 4491, "kavelNaam": "Zaalstraat 1, BREDA", "woningtype": "Appartement", "url": "/kavel/4491/k",
+              "veilingwijze": "Hybride (zaal en internet)", "internetonly": False, "zittingdatum": "/Date(1791459000000)/"}
     pages = []
 
     def handler(method, url, kw):
         pages.append(url)
         if url.endswith("/kavels/searchresults"):
-            return FakeResponse(json_data={"results": [{"objectenPerRegio": [{"objects": [lot]}]}]})
-        return FakeResponse(OV_DETAIL if url.endswith("/kavel/4490/k") else "")
+            return FakeResponse(json_data={"results": [{"objectenPerRegio": [{"objects": [lot, hybrid]}]}]})
+        return FakeResponse(OV_DETAIL if "/kavel/4490/" in url else "")
     fake_http(handler)
-    assert REGISTRY["netherlands"].func(db, max_price=30000) == 1
+    assert REGISTRY["netherlands"].func(db, max_price=30000) == 2
     row = db.execute("SELECT * FROM listings WHERE id='netherlands:4490'").fetchone()
     assert row["concelho"] == "Oud Gastel" and row["area_m2"] == 228 and row["date_end"] == "2026-10-08T13:30:00"
     assert row["description"].startswith("woonpand met ondergrond") and "Gebruik: Verhuurd" in row["description"]
     raw = json.loads(row["raw_json"])
     assert raw["lat"] == 51.58 and raw["ano_construcao"] == "1860"
+    assert raw["bieden_via_internet"] is True and raw["internetonly"] is True
+    assert "bieden via internet" in row["description"]
+    hyb = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='netherlands:4491'").fetchone()[0])
+    assert hyb["bieden_via_internet"] is True and hyb["internetonly"] is False   # hybride still bids online
     from scoring import score_detail
     assert "rejected: occupied" in score_detail(dict(row))[1]           # "verhuurd" is let
     REGISTRY["netherlands"].func(db, max_price=30000)
@@ -154,30 +160,63 @@ VGV_PAGE = """<html><script id="__NEXT_DATA__" type="application/json">{"props":
    "gebruikssituatie": "huurbeding_is_niet_ingeroepen", "eindtijd": "2026-10-01T07:35:00+00:00",
    "thumb": "https://cdn.example/1.webp", "latitude": 52.37, "longitude": 4.61, "type_verkoop": "executieveiling",
    "kavelbeschrijving": "Het woonhuis met ondergrond en verder toebehoren te Haarlem"},
-  {"id": 2646, "name": "31 appartementen Markneukirchen", "plaats": "Markneukirchen", "land": "de", "status": "open"},
+  {"id": 2646, "name": "31 appartementen Markneukirchen", "plaats": "Markneukirchen", "land": "de", "status": "open",
+   "type_verkoop": "vrijwillige_veiling", "object_type": "Appartement"},
   {"id": 2700, "name": "Iets in Roemenië", "land": "ro", "status": "open"}]}}}</script></html>"""
 
 
-def test_veilingnotaris_and_vastgoedveiling_are_one_platform(db, fake_http):
+def test_veilingnotaris_reads_its_own_list_only(db, fake_http):
     vn_list = ('<a href="https://veilingnotaris.nl/veilingen/2314/haarlem_kijkduinstraat_43/">Tussenwoning</a>'
                '<a href="https://veilingnotaris.nl/veilingen/2580/kerkrade_schifferheidestraat_1_3/">Woonhuis</a>')
 
     def handler(method, url, kw):
-        if url == "https://vastgoedveiling.nl/veilingen":
-            return FakeResponse(VGV_PAGE)
         if url == "https://veilingnotaris.nl/veilingen/":
             return FakeResponse(vn_list if not kw.get("params") else "")
         return FakeResponse("<p>Over het object Type Woonhuis Gebruikssituatie Leeg Bezichtigingen</p>")
     fake_http(handler)
-    assert REGISTRY["veilingnotaris"].func(db, max_price=30000) == 3       # 2314 once, 2580, the German one
+    assert REGISTRY["veilingnotaris"].func(db, max_price=30000) == 2
     rows = {r["id"]: r for r in db.execute("SELECT * FROM listings")}
-    assert set(rows) == {"veilingnotaris:2314", "veilingnotaris:2580", "veilingnotaris:2646"}
-    haarlem = rows["veilingnotaris:2314"]
-    assert haarlem["area_m2"] == 114 and haarlem["price"] is None          # "startbod" is the Dutch-auction start
+    assert set(rows) == {"veilingnotaris:2314", "veilingnotaris:2580"}
+    assert rows["veilingnotaris:2580"]["title"] == "Kerkrade, Schifferheidestraat 1 3 (Woonhuis)"
+
+
+def test_vastgoedveiling_is_its_own_source_with_auction_kind(db, fake_http):
+    fake_http(lambda method, url, kw: FakeResponse(VGV_PAGE))
+    assert REGISTRY["vastgoedveiling"].func(db, max_price=30000) == 2     # RO land skipped
+    rows = {r["id"]: dict(r) for r in db.execute("SELECT * FROM listings")}
+    assert set(rows) == {"vastgoedveiling:2314", "vastgoedveiling:2646"}
+    haarlem = rows["vastgoedveiling:2314"]
+    assert haarlem["area_m2"] == 114 and haarlem["price"] is None         # startbod is not a price
     assert haarlem["url"] == "https://vastgoedveiling.nl/veiling/2314/haarlem-kijkduinstraat-43"
     assert haarlem["date_end"] == "2026-10-01T07:35:00" and "Bouwjaar 1940" in haarlem["description"]
-    assert rows["veilingnotaris:2646"]["country"] == "DE"
-    assert rows["veilingnotaris:2580"]["title"] == "Kerkrade, Schifferheidestraat 1 3 (Woonhuis)"
+    raw = json.loads(haarlem["raw_json"])
+    assert raw["type_verkoop"] == "executieveiling" and raw["bieden_via_internet"] is True
+    assert json.loads(rows["vastgoedveiling:2646"]["raw_json"])["type_verkoop"] == "vrijwillige veiling"
+    assert rows["vastgoedveiling:2646"]["country"] == "DE"
+
+
+def test_vastgoedveiling_keeps_veilingnotaris_id_when_already_listed(db, fake_http, add):
+    add("veilingnotaris", "2314", country="NL", title="Haarlem, Kijkduinstraat 43",
+        concelho="Haarlem", url="https://veilingnotaris.nl/veilingen/2314/x/")
+    fake_http(lambda method, url, kw: FakeResponse(VGV_PAGE))
+    assert REGISTRY["vastgoedveiling"].func(db, max_price=30000) == 2
+    rows = {r["id"]: dict(r) for r in db.execute("SELECT * FROM listings")}
+    assert "vastgoedveiling:2314" not in rows                              # no new id
+    assert rows["veilingnotaris:2314"]["area_m2"] == 114
+    assert json.loads(rows["veilingnotaris:2314"]["raw_json"])["vastgoedveiling_url"].endswith(
+        "/veiling/2314/haarlem-kijkduinstraat-43")
+    assert "vastgoedveiling:2646" in rows                                  # DE-only lot is new
+
+
+def test_vastgoedveiling_copy_is_marked_duplicate_of_veilingnotaris(db, add):
+    add("veilingnotaris", "2314", country="NL", title="Haarlem, Kijkduinstraat 43",
+        concelho="Haarlem", price=None)
+    add("vastgoedveiling", "2314", country="NL", title="Haarlem, Kijkduinstraat 43",
+        concelho="Haarlem", price=None)
+    from db import mark_duplicates
+    assert mark_duplicates(db) >= 1
+    assert db.execute("SELECT duplicate_of FROM listings WHERE id='vastgoedveiling:2314'").fetchone()[0] \
+        == "veilingnotaris:2314"
 
 
 STORIA_HOUSE = {

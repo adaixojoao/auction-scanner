@@ -107,7 +107,7 @@ function calendarDate(isoDate) {
 }
 
 function deadlineSummaryHtml(d) {
-  if (!d || d.precision === "unknown") return '<span class="small muted">Not published</span>';
+  if (!d || d.precision === "unknown") return '<span class="small muted">date unknown</span>';
   if (d.precision === "invalid" || !d.date) return '<span class="small muted">Deadline unavailable</span>';
   const zone = d.timezone ? AS.esc(d.timezone) : "time zone not known";
   if (d.precision === "date") {
@@ -163,7 +163,7 @@ function checksSummaryText(checks) {
 }
 
 function deadlineSummaryText(d) {
-  if (!d || d.precision === "unknown") return "Not published";
+  if (!d || d.precision === "unknown") return "date unknown";
   if (d.precision === "invalid" || !d.date) return "Deadline unavailable";
   const zone = d.timezone || "time zone not known";
   if (d.precision === "date") return `${calendarDate(d.date)} — closing time not published; date only (${zone})`;

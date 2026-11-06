@@ -376,31 +376,44 @@ def test_live_and_invest_is_the_average_of_both_against_the_best(db):
     """Owner's choice (2026-10-26): each raw score is divided by the best shown
     candidate's, so the best home to live in and the best investment are each
     100; the score is their average times the listing's charges. A list of one
-    listing is scaled against the best kept from the full list."""
+    listing is scaled against the best kept from the full list.
+
+    Ranks must clear the display spread (raw ≤ 50 → live/invest 0); otherwise
+    the pair is scored 0 and never normalised up (see live0/invest0 test)."""
     from db import _normalize_both
-    a = {"id": "a", "live_rank": 80.0, "invest_rank": 20.0, "both_factor": 1.0, "hidden_reason": None}
-    b = {"id": "b", "live_rank": 40.0, "invest_rank": 40.0, "both_factor": 0.5, "hidden_reason": None}
+    a = {"id": "a", "live_rank": 80.0, "invest_rank": 60.0, "both_factor": 1.0, "hidden_reason": None}
+    b = {"id": "b", "live_rank": 60.0, "invest_rank": 80.0, "both_factor": 0.5, "hidden_reason": None}
     gone = {"id": "c", "live_rank": 500.0, "invest_rank": 500.0, "both_factor": 1.0, "hidden_reason": "stale"}
     out = _normalize_both(db, [a, b, gone], full=True, min_score=0, include_hidden=True)
-    assert a["rank"] == 75.0                                   # (80/80 + 20/40) / 2
-    assert a["score"] == 75.0                                  # shown as is, not squeezed again
-    assert b["rank"] == 37.5                                   # (40/80 + 40/40) / 2 × 0.5
+    assert a["rank"] == 87.5                                   # (80/80 + 60/80) / 2
+    assert a["score"] == 87.5                                  # shown as is, not squeezed again
+    assert b["rank"] == 43.75                                  # (60/80 + 80/80) / 2 × 0.5
     assert len(out) == 3                                       # a hidden one does not set the scale
-    one = {"id": "a", "live_rank": 80.0, "invest_rank": 20.0, "both_factor": 1.0, "hidden_reason": None}
+    one = {"id": "a", "live_rank": 80.0, "invest_rank": 60.0, "both_factor": 1.0, "hidden_reason": None}
     _normalize_both(db, [one], full=False, min_score=0, include_hidden=False)
-    assert one["rank"] == 75.0                                 # the same scale, not its own
-    low = _normalize_both(db, [dict(b)], full=False, min_score=40, include_hidden=False)
+    assert one["rank"] == 87.5                                 # the same scale, not its own
+    low = _normalize_both(db, [dict(b)], full=False, min_score=50, include_hidden=False)
     assert low == []                                           # under the minimum once scaled
 
 
 def test_a_near_miss_stays_flagged_and_does_not_set_the_scale(db):
     from db import _normalize_both
-    a = {"id": "a", "live_rank": 50.0, "invest_rank": 50.0, "both_factor": 1.0, "hidden_reason": None}
+    a = {"id": "a", "live_rank": 60.0, "invest_rank": 60.0, "both_factor": 1.0, "hidden_reason": None}
     near = {"id": "n", "live_rank": 200.0, "invest_rank": 200.0, "both_factor": 1.0, "hidden_reason": None,
             "near_miss": "cash €70,000 all-in is over the €60,000 you can lose"}
     _normalize_both(db, [a, near], full=True, min_score=0, include_hidden=False)
     assert a["rank"] == 100.0                                  # the near miss is not the best
     assert near["rank"] == 100.0                               # capped at the scale, still shown
+
+
+def test_both_mode_does_not_rank_live0_invest0_high(db):
+    """Raw scores below the display spread (≤50 → live/invest 0) must not
+    normalise to 100 just because they are the best of a weak set."""
+    from db import _normalize_both
+    weak = {"id": "vigo", "live_rank": 40.0, "invest_rank": 35.0, "both_factor": 1.0, "hidden_reason": None}
+    also = {"id": "honfleur", "live_rank": 45.0, "invest_rank": 42.0, "both_factor": 1.0, "hidden_reason": None}
+    _normalize_both(db, [weak, also], full=True, min_score=0, include_hidden=False)
+    assert weak["score"] == 0.0 and also["score"] == 0.0
 
 
 def test_a_long_load_logs_how_far_it_is(caplog, monkeypatch):

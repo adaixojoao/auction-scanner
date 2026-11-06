@@ -122,6 +122,32 @@ def test_one_lot_on_the_pvp_and_astalegale_is_one_sale(db, add):
     assert dup[pvp["id"]] is None and dup[other_lot["id"]] is None
 
 
+def test_reggio_calabria_astalegale_copies_merge_with_pvp(db, add):
+    """B2438025 = pvp:4646790 and B2434425 = pvp:4634168: 'Reggio di Calabria'
+    on Astalegale is the same court as 'Tribunale di REGGIO CALABRIA'."""
+    botteghelle = add(source="pvp_giustizia", external_id="4646790", country="IT", id_prefix="pvp",
+                      title="Via Botteghelle", price=22500, min_price=20000, concelho="Reggio di Calabria",
+                      raw_json={"tribunale": "Tribunale di REGGIO CALABRIA", "procedura": "32",
+                                "numeroLotto": "1"})
+    copy_b = add(source="astalegale", external_id="B2438025", country="IT", title="Via Botteghelle",
+                 price=22500, min_price=20000, concelho="Reggio di Calabria",
+                 raw_json={"tribunale": "Reggio di Calabria", "proceduraNumeroAnno": "32/2020",
+                           "codiceLotto": "1"})
+    san_biagio = add(source="pvp_giustizia", external_id="4634168", country="IT", id_prefix="pvp",
+                     title="Piazzetta San Biagio", price=35830, min_price=26873, concelho="Reggio di Calabria",
+                     raw_json={"tribunale": "Tribunale di REGGIO CALABRIA", "procedura": "43",
+                               "numeroLotto": "1"})
+    copy_s = add(source="astalegale", external_id="B2434425", country="IT", title="Piazzetta San Biagio",
+                 price=35830, min_price=26873, concelho="Reggio di Calabria",
+                 raw_json={"tribunale": "Reggio di Calabria", "proceduraNumeroAnno": "43/2025",
+                           "codiceLotto": "1"})
+    mark_duplicates(db)
+    dup = dict(db.execute("SELECT id, duplicate_of FROM listings").fetchall())
+    assert dup[copy_b["id"]] == botteghelle["id"]
+    assert dup[copy_s["id"]] == san_biagio["id"]
+    assert dup[botteghelle["id"]] is None and dup[san_biagio["id"]] is None
+
+
 # ─── A pin the address contradicts ──────────────────────────────────────
 REGGIO = {"lat": 38.1064508, "lon": 15.6411356}
 TOWNS = {geo.town_key("IT", "Bianco"): {"name": "Bianco", "lat": 38.09, "lon": 16.15}}

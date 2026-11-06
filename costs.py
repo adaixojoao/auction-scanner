@@ -283,11 +283,13 @@ def purchase_share(item: dict) -> tuple[float, str]:
     return rate + extra, f"{tax_name}; {extra_name}"
 
 # What a home needs, in €/m² of floor area: (low, high).
+# "unknown" assumes a full renovation (published bands ~€700–1,100/m²), not a
+# light touch-up: a forced-sale notice rarely states the condition.
 RENOVATION_EUR_M2 = {
     "heavy": (700, 1200),
-    "some": (300, 600),
+    "some": (400, 800),
     "good": (0, 150),
-    "unknown": (200, 500),
+    "unknown": (700, 1100),
 }
 CONDITION_LABEL = {"heavy": "a ruin", "some": "it needs work", "good": "it is in good condition",
                    "unknown": "the condition is not stated"}
@@ -295,7 +297,7 @@ CONDITION_NOTE = {
     "heavy": "described as a ruin or as needing rebuilding",
     "some": "described as needing work",
     "good": "described as in good condition",
-    "unknown": "condition not stated — assume it needs some work",
+    "unknown": "condition not stated — assume a full renovation",
 }
 MAX_HOME_M2 = 1000          # above this the area is the plot, not the building
 
@@ -303,7 +305,8 @@ MAX_HOME_M2 = 1000          # above this the area is the plot, not the building
 JUDICIAL_SOURCES = {"citius", "eleiloes", "financas", "leilosoc", "centroleiloes", "bidleiloeira",
                     "spain", "aeat", "subastasactivas", "france", "encheres_publiques", "zvg",
                     "zvg_de", "justiz_auktion", "italy", "pvp_giustizia", "astalegale", "gobidreal",
-                    "netherlands", "veilingnotaris", "veilingbiljet", "croatia", "fina"}
+                    "netherlands", "veilingnotaris", "vastgoedveiling", "veilingbiljet",
+                    "croatia", "fina"}
 
 
 def imt(value: float, kind: str | None, *, own_home: bool = False) -> tuple[float, str]:
@@ -412,7 +415,7 @@ def selected_acquisition(item: dict) -> dict:
                 "reference_amount": None}
     return {"amount": pay, "kind": current_kind, "estimate": False, "label": {
         "current_bid": "the current bid",
-        "minimum": "the minimum accepted",
+        "minimum": "the minimum offer (not the base value)",
         "asking": "the asking or base price",
     }[current_kind], "text": "", "current_amount": pay, "current_kind": current_kind,
             "reference_amount": None}
@@ -469,7 +472,27 @@ def building_m2(item: dict) -> tuple[float, str]:
     return float(raw), source
 
 
-def renovation(item: dict) -> dict | None:
+def renovation_bands(cfg: dict | None = None) -> dict[str, tuple[float, float]]:
+    """€/m² (low, high) by condition. Settings → costs.renovation_eur_m2 overrides
+    the defaults without editing the code."""
+    bands = {k: (float(v[0]), float(v[1])) for k, v in RENOVATION_EUR_M2.items()}
+    if cfg is None:
+        try:
+            import config
+            cfg = config.load_config()
+        except Exception:  # noqa: BLE001 — offline tests may have no config file
+            cfg = {}
+    override = (cfg or {}).get("costs", {}).get("renovation_eur_m2") or {}
+    for state, pair in override.items():
+        if state in bands and isinstance(pair, (list, tuple)) and len(pair) == 2:
+            try:
+                bands[state] = (float(pair[0]), float(pair[1]))
+            except (TypeError, ValueError):
+                pass
+    return bands
+
+
+def renovation(item: dict, cfg: dict | None = None) -> dict | None:
     """{"low", "high", "eur_m2", "note"} for a home whose floor area is known, else None."""
     if (item.get("kind") or property_kind(item)) != "home":
         return None
@@ -486,7 +509,7 @@ def renovation(item: dict) -> dict | None:
             state, seen = "heavy", " (the perizia finds it abandoned or stripped)"
         elif perizia.get("damp") and state in ("good", "unknown"):
             state, seen = "some", " (the perizia finds damp or mould)"
-    low, high = RENOVATION_EUR_M2[state]
+    low, high = renovation_bands(cfg)[state]
     where = f"{area:,.0f} m²".replace(",", " ")
     if source == "notice":
         where += " (the size in the notice)"
@@ -498,10 +521,10 @@ def renovation(item: dict) -> dict | None:
             "note": f"{CONDITION_NOTE[state]}{seen}; €{low}–{high}/m² over {where}"}
 
 
-def bands_text() -> str:
+def bands_text(cfg: dict | None = None) -> str:
     """The renovation bands in one line, so the AI check is told the same numbers."""
-    return ", ".join(f"\u20ac{low}\u2013{high}/m\u00b2 when {CONDITION_LABEL[state]}"
-                     for state, (low, high) in RENOVATION_EUR_M2.items())
+    return ", ".join(f"\u20ac{low:g}\u2013{high:g}/m\u00b2 when {CONDITION_LABEL[state]}"
+                     for state, (low, high) in renovation_bands(cfg).items())
 
 
 def _pt_lines(value: float, kind: str | None, judicial: bool, own_home: bool) -> list[dict]:
@@ -1021,9 +1044,13 @@ def estimate(item: dict, *, bid: float | None = None, own_home: bool = False,
     elif item.get("current_bid") and item["current_bid"] >= (item.get("min_price") or 0):
         basis = "the current bid"
     elif item.get("current_bid"):
-        basis = "the minimum accepted (the current bid is below it)"
+        basis = "the minimum offer (the current bid is below it)"
     elif item.get("min_price") and item["min_price"] != item.get("price"):
-        basis = "the minimum accepted"
+        # Forced sales often price from the minimum accepted offer, not the
+        # advertised base; say so explicitly so the all-in is not read as base.
+        basis = "the minimum offer (not the base value)"
+    elif item.get("min_price") and not item.get("current_bid"):
+        basis = "the minimum offer"
     else:
         basis = "the base value"
 

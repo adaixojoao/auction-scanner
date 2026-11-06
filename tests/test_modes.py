@@ -635,6 +635,21 @@ def test_map_and_climate_lookups_take_the_best_of_every_tab_in_turn(monkeypatch)
     # 85 or more in any goal is taken first; f1 is 85, so it jumps the lower ones.
 
 
+def test_enrich_order_puts_portugal_and_spain_ahead_within_each_band(monkeypatch):
+    import db
+    import pipeline
+    lists = {
+        "both": [{"id": "it_hi", "score": 90, "country": "IT"},
+                 {"id": "pt_hi", "score": 88, "country": "PT"}],
+        "home": [{"id": "es_lo", "score": 70, "country": "ES"},
+                 {"id": "fr_lo", "score": 72, "country": "FR"}],
+        "invest": [], "land": [], "forest": [],
+    }
+    monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home", **kw: lists[mode])
+    assert [it["id"] for it in pipeline.enrich_order(None, {})] == [
+        "pt_hi", "it_hi", "es_lo", "fr_lo"]
+
+
 def test_site_check_queue_puts_forestry_ahead_of_other_land(monkeypatch):
     import db
     import pipeline

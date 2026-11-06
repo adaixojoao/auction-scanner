@@ -1,9 +1,11 @@
-"""Netherlands: openbareverkoop.nl, veilingnotaris.nl, veilingbiljet.nl and RE/MAX."""
+"""Netherlands: openbareverkoop.nl, veilingnotaris.nl, vastgoedveiling.nl,
+veilingbiljet.nl and RE/MAX."""
 from __future__ import annotations
 
 import html
 import json
 import re
+import unicodedata
 
 import time
 from datetime import datetime, timedelta, timezone
@@ -40,6 +42,11 @@ def _field(text: str, label: str, stop: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+_AUCTION_KIND = re.compile(
+    r"\b(Executieveiling(?:\s+\w+)?|Vrijwillige\s+veiling|Beslagveiling|Internetbieden|"
+    r"Internet-only(?:\s+(?:Live|Timed))?|Hybride(?:\s*\([^)]*\))?)\b", re.I)
+
+
 def nl_details(html: str) -> dict:
     """What a Dutch auction page says about the property: the deed's
     description, type, use (rented?), year built, living and plot area, date."""
@@ -49,9 +56,17 @@ def nl_details(html: str) -> dict:
             "Bezichtiging|Over de veiling|Soort|Datum|Organisator|Informatie|$")
     for key, label in (("type", "Type registergoed"), ("type", "Type"), ("gebruik", "Gebruik"),
                        ("gebruik", "Gebruikssituatie"), ("bouwjaar", "Bouwjaar")):
-        value = _field(text, label, stop)
+        # Stop at another "Type …" label so registergoed does not swallow the sale kind.
+        value = _field(text, label, stop if label != "Type registergoed" else stop + "|Type")
         if value and key not in out and len(value) < 60:
             out[key] = value
+    # Sale kind (executie / vrijwillig / …), not the building type. A bare
+    # "Type" field on OV is often the sale kind; registergoed already filled type.
+    kind = _AUCTION_KIND.search(text)
+    if kind:
+        out["type_verkoop"] = kind.group(0)
+    if out.get("type") and _AUCTION_KIND.fullmatch(out["type"].strip()):
+        out["type_verkoop"] = out.pop("type")
     wonen = re.search(r"Oppervlakte wonen\s+([\d.,]+)\s*m\s?2", text)
     perceel = re.search(r"Oppervlakte perceel\s+([\d.,]+)\s*m\s?2", text)
     if wonen:
@@ -71,6 +86,8 @@ def nl_details(html: str) -> dict:
         out["datum"] = dutch_date(when.group(1))
     if re.search(r"\bUitgesteld\b|\bIngetrokken\b", text):
         out["uitgesteld"] = True
+    if re.search(r"\bbieden via internet\b|\binternet-?only\b|\binternetbieden\b", text, re.I):
+        out["bieden_via_internet"] = True
     return out
 
 
@@ -78,12 +95,19 @@ def _with_details(row: dict, details: dict) -> dict:
     """The listing, filled in from its page."""
     raw = json.loads(row.get("raw_json") or "{}")
     raw.update(details, detail_checked=1)
+    if details.get("bieden_via_internet"):
+        raw["bieden_via_internet"] = True
+    if details.get("type_verkoop"):
+        raw["type_verkoop"] = details["type_verkoop"]
     if str(details.get("bouwjaar", "")).isdigit():
         raw["ano_construcao"] = details["bouwjaar"]              # scoring.built_year reads this
+    sale = details.get("type_verkoop") or raw.get("type_verkoop")
     parts = [details.get("omschrijving"), f"Type: {details['type']}" if details.get("type") else None,
+             f"Veiling: {sale}" if sale else None,
              f"Gebruik: {details['gebruik']}" if details.get("gebruik") else None,
              f"Bouwjaar {details['bouwjaar']}" if details.get("bouwjaar") else None,
              f"Perceel {details['perceel_m2']:.0f} m2" if details.get("perceel_m2") else None,
+             "bieden via internet" if raw.get("bieden_via_internet") else None,
              "Veiling uitgesteld" if details.get("uitgesteld") else None, row.get("description")]
     row["description"] = ". ".join(p for p in parts if p)[:3000]
     # Only the living area: the deed's "groot 498 m2" is the plot, or a flat's whole building.
@@ -167,6 +191,18 @@ def fetch_nl_results(db, session, now: datetime | None = None) -> int:
     return len(results)
 
 
+def bieden_via_internet(obj: dict) -> bool:
+    """Whether the lot can be bid on online (no visit to the notary's room).
+
+    openbareverkoop sets ``internetonly`` for Internet-only Live/Timed; Hybride
+    (zaal en internet) still takes internet bids even when that flag is false.
+    """
+    if obj.get("internetonly") in (True, "true", "True", 1, "1"):
+        return True
+    wijze = str(obj.get("veilingwijze") or "")
+    return bool(re.search(r"internet", wijze, re.I))
+
+
 def netherlands_listing(obj: dict, base: str = "https://www.openbareverkoop.nl") -> dict | None:
     eid = str(obj.get("id", "") or "")
     if not eid:
@@ -185,13 +221,18 @@ def netherlands_listing(obj: dict, base: str = "https://www.openbareverkoop.nl")
         title = f"{title} ({wtype})"
     vtype = obj.get("veilingwijze", "")
     town = (obj.get("kavelNaam") or "").rsplit(",", 1)
+    online = bieden_via_internet(obj)
     raw = {k: obj.get(k) for k in ("id", "woningtype", "veilingwijze", "status", "organisatie", "zittingId")}
+    raw["internetonly"] = bool(obj.get("internetonly"))
+    raw["bieden_via_internet"] = online
     if obj.get("lat") and obj.get("lng"):
         raw.update(lat=obj["lat"], lon=obj["lng"])                  # geo.position reads these
+    parts = [f"Executieveiling ({vtype})" if vtype else "Executieveiling",
+             "bieden via internet" if online else None]
     return make_listing(
         "netherlands", eid, "NL",
         title=title,
-        description=f"Executieveiling ({vtype})" if vtype else "Executieveiling",
+        description=". ".join(p for p in parts if p),
         tipo="vastgoed", price=price,
         concelho=town[1].strip().title() if len(town) == 2 else None,
         url=obj.get("url", ""), image_url=obj.get("image", ""), base_url=base,
@@ -226,7 +267,7 @@ def scrape_netherlands(db, max_price: float = 50000, **_):
 
 @register("veilingnotaris", "NL")
 def scrape_veilingnotaris(db, max_price: float = 50000, **_):
-    """veilingnotaris.nl and vastgoedveiling.nl — Dutch execution auctions (one platform)."""
+    """veilingnotaris.nl — Dutch notarial execution auctions."""
     session = make_session(timeout=15)
     base = "https://veilingnotaris.nl"
     rows, seen = [], set()
@@ -259,12 +300,6 @@ def scrape_veilingnotaris(db, max_price: float = 50000, **_):
         if not new:
             break
         time.sleep(0.3)
-    try:
-        richer = {row["id"]: row for row in vastgoedveiling_rows(session)}
-    except Exception as e:  # noqa: BLE001: veilingnotaris.nl alone is still worth it
-        LOG.warning(f"vastgoedveiling.nl failed ({type(e).__name__}); veilingnotaris.nl only")
-        richer = {}
-    rows = [richer.pop(row["id"], row) for row in rows] + list(richer.values())
     _read_details(db, session, [r for r in rows if '"detail_checked"' not in (r.get("raw_json") or "")],
                   [NL_DETAILS_PER_SCAN])
     for row in rows:
@@ -273,14 +308,22 @@ def scrape_veilingnotaris(db, max_price: float = 50000, **_):
     return len(rows)
 
 
-# vastgoedveiling.nl runs on the same auction platform as veilingnotaris.nl (the
-# same auction numbers) and lists more of it: 85 open auctions against 42, with
-# size, year built, use and position in its page data. Both are read into one
-# source, so an auction on both sites is one listing.
+# vastgoedveiling.nl (Hekkelman) shares auction numbers with veilingnotaris.nl
+# and often the same house as openbareverkoop.nl. Own source, but a lot already
+# stored under veilingnotaris:{id} or matched on openbareverkoop keeps that ID
+# (AGENTS.md: IDs must be stable) and is marked a duplicate instead of a new one.
 VASTGOEDVEILING = "https://vastgoedveiling.nl"
 _COUNTRIES = {"nl": "NL", "de": "DE", "be": "BE", "fr": "FR", "es": "ES", "pt": "PT"}
 _USE = {"huurbeding_is_niet_ingeroepen": "bewoond (huurbeding niet ingeroepen)", "verhuurd": "verhuurd",
         "leeg": "leeg opgeleverd", "eigen_gebruik": "bewoond/in eigen gebruik"}
+_TYPE_VERKOOP = {
+    "executieveiling": "executieveiling",
+    "vrijwillige_veiling": "vrijwillige veiling",
+    "beslagveiling": "beslagveiling",
+    "partnerveiling": "partnerveiling",
+    "te_koop": "te koop",
+    "inschrijving": "inschrijving",
+}
 
 
 def _slug(text: str) -> str:
@@ -292,6 +335,18 @@ def _bag_number(value) -> float | None:
     return parse_price(re.sub(r"^\s*BAG:\s*", "", str(value or ""))) or None
 
 
+def nl_place_key(title: str | None, town: str | None = None) -> str | None:
+    """Street + town tokens, order-free, so OV and VGV titles of one house match."""
+    blob = f"{title or ''} {town or ''}"
+    blob = unicodedata.normalize("NFKD", blob)
+    blob = "".join(ch for ch in blob if not unicodedata.combining(ch)).casefold()
+    blob = re.sub(r"\([^)]*\)", " ", blob)
+    drop = ("woonhuis", "appartement", "tussenwoning", "hoekwoning", "bovenwoning",
+            "recreatiewoning", "bedrijfspand", "winkel", "kantoor", "massa", "en")
+    parts = [p for p in re.findall(r"[a-z0-9]+", blob) if p not in drop and len(p) > 1]
+    return " ".join(sorted(set(parts))) if len(parts) >= 2 else None
+
+
 def vastgoedveiling_listing(a: dict) -> dict | None:
     lid = a.get("id")
     country = _COUNTRIES.get((a.get("land") or "nl").lower())
@@ -299,14 +354,18 @@ def vastgoedveiling_listing(a: dict) -> dict | None:
         return None
     use = a.get("gebruikssituatie") or ""
     year = re.sub(r"^\s*BAG:\s*", "", str(a.get("bouwjaar") or "")).strip()
+    sale = _TYPE_VERKOOP.get(a.get("type_verkoop") or "", (a.get("type_verkoop") or "").replace("_", " "))
+    # startbod is the Dutch-auction start (often €1 / a million), not a sale price.
+    bid = _bag_number(a.get("huidig_bod")) or None
     parts = [re.sub(r"\s+", " ", a.get("kavelbeschrijving") or a.get("kadastrale_gegevens") or "").strip()[:1500],
              f"Type: {a['object_type']}" if a.get("object_type") else None,
+             f"Veiling: {sale}" if sale else None,
              f"Gebruik: {_USE.get(use, use.replace('_', ' '))}" if use else None,
              f"Bouwjaar {year}" if year else None,
-             f"Perceel {a['oppervlakte_perceel']} m2" if a.get("oppervlakte_perceel") else None,
-             (a.get("type_verkoop") or "").capitalize() or None]
+             f"Perceel {a['oppervlakte_perceel']} m2" if a.get("oppervlakte_perceel") else None]
     raw = {"detail_checked": 1, "object_type": a.get("object_type"), "categorie": a.get("object_type_categorie"),
-           "type_verkoop": a.get("type_verkoop"), "gebruikssituatie": use, "provincie": a.get("provincie")}
+           "type_verkoop": sale or a.get("type_verkoop"), "gebruikssituatie": use, "provincie": a.get("provincie"),
+           "vgv_id": lid, "bieden_via_internet": True}
     if year.isdigit():
         raw["ano_construcao"] = year
     lat = a.get("latitude_custom") or a.get("latitude")
@@ -316,26 +375,82 @@ def vastgoedveiling_listing(a: dict) -> dict | None:
     name = a.get("name") or f"{a.get('plaats') or ''}, {a.get('straat') or ''}"
     wtype = a.get("object_type")
     return make_listing(
-        "veilingnotaris", str(lid), country,
+        "vastgoedveiling", str(lid), country,
         title=f"{name} ({wtype})" if wtype else name,
         description=". ".join(p for p in parts if p)[:3000] or None, tipo="vastgoed",
-        area_m2=_bag_number(a.get("oppervlakte_object")), district=a.get("provincie"),
-        concelho=a.get("plaats"), url=f"{VASTGOEDVEILING}/veiling/{lid}/{_slug(name)}",
+        area_m2=_bag_number(a.get("oppervlakte_object")), current_bid=bid,
+        district=a.get("provincie"), concelho=a.get("plaats"),
+        url=f"{VASTGOEDVEILING}/veiling/{lid}/{_slug(name)}",
         image_url=a.get("thumb"), date_end=(a.get("eindtijd") or a.get("starttijd") or "")[:19] or None,
         raw_json=raw,
     )
+
+
+def vastgoedveiling_auctions(html: str) -> list[dict]:
+    """Open auctions from vastgoedveiling.nl's Next.js payload."""
+    m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return []
+    auctions = ((json.loads(m.group(1)).get("props") or {}).get("pageProps") or {}).get("auctions") or []
+    return [a for a in auctions if (a.get("status") or "open") == "open"]
 
 
 def vastgoedveiling_rows(session) -> list[dict]:
     """The open auctions on vastgoedveiling.nl (the page's Next.js data)."""
     resp = session.get(f"{VASTGOEDVEILING}/veilingen")
     resp.raise_for_status()
-    m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', resp.text, re.S)
-    if not m:
-        return []
-    auctions = ((json.loads(m.group(1)).get("props") or {}).get("pageProps") or {}).get("auctions") or []
-    return [row for row in (vastgoedveiling_listing(a) for a in auctions
-                            if (a.get("status") or "open") == "open") if row]
+    return [row for row in (vastgoedveiling_listing(a) for a in vastgoedveiling_auctions(resp.text)) if row]
+
+
+def _nl_twin_id(db, auction_id: str, title: str | None, town: str | None) -> str | None:
+    """An openbareverkoop or veilingnotaris row that is the same lot, if any.
+
+    Same auction number on veilingnotaris always wins (shared platform). Else a
+    unique address match on either Dutch notarial source.
+    """
+    vn = f"veilingnotaris:{auction_id}"
+    if db.execute("SELECT 1 FROM listings WHERE id = ?", (vn,)).fetchone():
+        return vn
+    key = nl_place_key(title, town)
+    if not key:
+        return None
+    found = []
+    for r in db.execute(
+        "SELECT id, title, concelho FROM listings "
+        "WHERE source IN ('netherlands', 'veilingnotaris') AND country IN ('NL', 'DE', 'BE')"
+    ):
+        if nl_place_key(r["title"], r["concelho"]) == key:
+            found.append(r["id"])
+    return found[0] if len(found) == 1 else None
+
+
+def _retarget(row: dict, existing_id: str) -> dict:
+    """Keep the twin's stable id/source; hang the VGV URL on raw_json."""
+    source, eid = existing_id.split(":", 1)
+    raw = json.loads(row.get("raw_json") or "{}")
+    raw["vastgoedveiling_url"] = row.get("url")
+    raw["vgv_id"] = raw.get("vgv_id") or row.get("external_id")
+    return {**row, "id": existing_id, "source": source, "external_id": eid,
+            "raw_json": json.dumps(raw, ensure_ascii=False, default=str)}
+
+
+@register("vastgoedveiling", "NL")
+def scrape_vastgoedveiling(db, max_price: float = 50000, **_):
+    """vastgoedveiling.nl (Hekkelman) — Dutch executie / vrijwillig auctions."""
+    session = make_session(timeout=15)
+    rows = vastgoedveiling_rows(session)
+    kept, adopted = 0, 0
+    for row in rows:
+        twin = _nl_twin_id(db, row["external_id"], row.get("title"), row.get("concelho"))
+        if twin:
+            row = _retarget(row, twin)
+            adopted += 1
+        else:
+            kept += 1
+        upsert_listing(db, row)
+    db.commit()
+    LOG.info(f"vastgoedveiling.nl: {len(rows)} open ({kept} own ids, {adopted} already on OV/VN)")
+    return len(rows)
 
 
 # The same site software as openbareverkoop.nl, and the same lots: kept out of

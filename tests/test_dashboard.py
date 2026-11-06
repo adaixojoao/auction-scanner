@@ -81,6 +81,21 @@ def test_listings_by_kind_follow_the_settings(client, add):
     assert client.get("/api/settings").get_json()["filters"]["rural_min_m2"] == 5000
 
 
+def test_each_goal_defaults_to_its_own_kinds(client, add):
+    """Forestry and land do not list shortlisted homes; home goals do not list plots."""
+    add("eleiloes", "plot", title="Prédio rústico com olival", tipo="terreno_rustico",
+        area_m2=120000, price=20000)
+    add("eleiloes", "house", title="Moradia T2 em bom estado", tipo="moradia",
+        area_m2=90, price=20000)
+    client.post("/api/listings/status", json={"id": "eleiloes:house", "status": "shortlisted"})
+    forest_ids = [it["id"] for it in client.get("/api/listings?mode=forest&min_score=0").get_json()["items"]]
+    land_ids = [it["id"] for it in client.get("/api/listings?mode=land&min_score=0").get_json()["items"]]
+    home_ids = [it["id"] for it in client.get("/api/listings?mode=home&min_score=0").get_json()["items"]]
+    assert "eleiloes:house" not in forest_ids and "eleiloes:house" not in land_ids
+    assert "eleiloes:plot" not in home_ids
+    assert "eleiloes:house" in home_ids
+
+
 def test_shortlist_and_dismiss(client, add):
     add(external_id="a", title="Moradia", price=20000)
     add(external_id="b", title="Moradia", price=20000)

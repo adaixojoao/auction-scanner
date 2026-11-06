@@ -160,6 +160,18 @@ def send_alerts(db, cfg: dict):
     alert_last_calls(db, cfg)
 
 
+# Portugal and Spain forced sales are sparse next to Italian PVP; within each
+# enrichment band, look them up first so pins and climate can catch up.
+_ENRICH_FIRST_COUNTRIES = frozenset({"PT", "ES"})
+
+
+def _ptes_first(rows: list[dict]) -> list[dict]:
+    """Stable: PT/ES rows ahead of the rest, order inside each group unchanged."""
+    head = [it for it in rows if (it.get("country") or "").upper() in _ENRICH_FIRST_COUNTRIES]
+    tail = [it for it in rows if (it.get("country") or "").upper() not in _ENRICH_FIRST_COUNTRIES]
+    return head + tail
+
+
 def enrich_order(db, cfg: dict) -> list[dict]:
     """The listings to locate and assess first: the best of each tab in turn
     (scoring.MODES), so land is not left until last behind the homes."""
@@ -189,7 +201,7 @@ def enrich_order(db, cfg: dict) -> list[dict]:
     rest = [it for it in rest if it["id"] not in research_ids]
     for it in high + research + rest:
         it["best_rank"] = best.get(it["id"], it.get("rank") or it.get("score") or 0)
-    return high + research + rest
+    return _ptes_first(high) + _ptes_first(research) + _ptes_first(rest)
 
 
 def _research_rows(db, cfg: dict) -> list[dict]:
@@ -209,8 +221,9 @@ def _research_rows(db, cfg: dict) -> list[dict]:
 
 # Live and invest's homes by the sea that its gates leave out only because the
 # pin is the town, not the house (2026-10-26: 68 of 222 visible seaside homes).
-# They are looked up every scan, beyond geo.GEOCODE_PER_SCAN, up to this many.
-SEASIDE_LOCATE_MAX = 400
+# Looked up every scan, beyond geo.GEOCODE_PER_SCAN. Cap stays small: 400 at
+# Nominatim's 1 req/s burned ~25 minutes a scan and starved the rest of enrichment.
+SEASIDE_LOCATE_MAX = 40
 _TOWN_PIN = "position is the town, not the house"
 
 
@@ -226,9 +239,10 @@ def seaside_unplaced(db, cfg: dict, limit: int = SEASIDE_LOCATE_MAX,
                      rows: list[dict] | None = None) -> list[dict]:
     """Shown homes that Live and invest would judge once their pin is the house."""
     rows = both_rows(db, cfg) if rows is None else rows
-    out = [it for it in rows if not it.get("hidden_reason") and it.get("kind") == "home"
+    out = [it for it in rows if not it.get("hidden_reason") and not it.get("near_miss")
+           and it.get("kind") == "home"
            and (it.get("reasons") or [""])[0].startswith(_TOWN_PIN)]
-    return out[:limit]
+    return _ptes_first(out)[:limit]
 
 
 def locate_seaside(db, cfg: dict, session, rows: list[dict] | None = None) -> int:
@@ -258,7 +272,10 @@ def both_first(db, cfg: dict, order: list[dict]) -> list[dict]:
     """`order`, with the best of Live and invest still to be looked up ahead of it."""
     import surroundings
     from db import load_listings
-    top = sorted(load_listings(db, filters=cfg.get("filters"), mode="both"), key=lambda it: -(it.get("rank") or 0))
+    top = _ptes_first(sorted(load_listings(db, filters=cfg.get("filters"), mode="both"),
+                             key=lambda it: -(it.get("rank") or 0)))
+    # Skip near misses: enrichment budget goes to homes within cash first.
+    top = [it for it in top if not it.get("near_miss")]
     first = list(islice((it for it in top if surroundings.missing(it)), BOTH_LOOKUPS_FIRST))
     ids = {it["id"] for it in first}
     return first + [it for it in order if it["id"] not in ids]

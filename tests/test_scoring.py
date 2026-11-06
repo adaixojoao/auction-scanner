@@ -106,10 +106,13 @@ def test_dates_in_titles_are_not_fractions():
 
 
 def test_any_share_is_a_fraction_but_not_dates_or_case_numbers():
-    from scoring import is_fractional_share as share
+    from scoring import is_fractional_share as share, is_percent_share, score_detail
     assert share("29/84 DE IMOVEL EM GASIELAS, TOURIM")
     assert share("Venda de parte de bem(4986/100000)-prédio urbano")
     assert share("Direito de 3/32 em três prédios")
+    assert share("1/10 do prédio urbano")
+    assert share("quota de 9/16")
+    assert share("1/112 avos do imóvel")
     assert not share("Moradia penhorada em 01/2025")
     assert not share("Online Auction Loja · Rio de Mouro, Sintra - 115.000,00 € Portugal DMI-1039/2026")
     assert not share("Citius judicial sale 1436/19.9T8VRL.1")
@@ -117,6 +120,15 @@ def test_any_share_is_a_fraction_but_not_dates_or_case_numbers():
     assert not share("Moradia T3 no nº 12/14 da Rua Direita")          # house numbers
     assert not share("Loja na Rua do Sol, n.º 3/5")
     assert share("1 / 2 (Um Meio) Prédio Urbano")
+    # Body-only share wording goes through the one scorer.
+    for desc in ("Vende-se o quinhão hereditário do imóvel",
+                 "Direito e ação sobre a fracção autónoma",
+                 "Trata-se de metade da habitação do 2º andar"):
+        sc, reasons = score_detail(item(title="Prédio urbano em Moura", price=20000, area_m2=90,
+                                        description=desc))
+        assert sc == 0 and "fractional" in reasons[0], desc
+    assert is_percent_share("quinhão hereditário da herança")
+    assert is_percent_share("direito e ação sobre o prédio")
 
 
 def test_percent_share_of_solar_or_inmueble_is_caught():
@@ -845,7 +857,7 @@ def test_a_bid_below_the_minimum_accepted_is_judged_at_the_minimum():
     assert score_detail(house)[0] == at_floor            # the low bid earns nothing extra
     assert not any("50%" in r for r in reasons)
     est = costs.estimate(house)
-    assert est["base"] == 19975 and est["basis"].startswith("the minimum accepted")
+    assert est["base"] == 19975 and est["basis"].startswith("the minimum offer")
 
 
 def test_years_on_sale_cost_points():

@@ -24,10 +24,12 @@ from prices import place_key as _place_key
 
 FRAC_PATTERNS = [
     "1/2", "1/3", "1/4", "1/5", "1/6", "1/7", "1/8", "1/9",
-    "1/10", "1/11", "1/12", "1/14", "1/16", "1/20", "1/24",
-    "2/3", "3/4",
+    "1/10", "1/11", "1/12", "1/14", "1/16", "1/20", "1/24", "1/112",
+    "2/3", "3/4", "3/32", "9/16",
     "um meio", "metade", "mitad indivisa",
     "avos", "quota", "quota-parte", "quinhão", "quinhao",
+    "quinhão hereditário", "quinhao hereditario",
+    "direito e ação", "direito e acao", "direitos e ações", "direitos e acoes",
     "fração ideal", "fracao ideal", "parte indivisa", "compropriedade",
     "meação", "quote-part", "cuota indivisa",
 ]
@@ -62,8 +64,14 @@ _PERCENT_SHARE = re.compile(
 SHARE_WORDS = ["spoluvlastnícky podiel", "spoluvlastnický podíl", "spoluvlastníckeho podielu",
                "suvlasnički dio", "suvlasnički udio", "идеална част", "идеални части",
                # "Trata-se de uma metade e vende-se em conjunto com a outra metade
-               # pelo valor total de 275.000€" (whitestar, 2026-10-29). Not bare "metade".
+               # pelo valor total de 275.000€" (whitestar, 2026-10-29). Not bare
+               # "metade da área" (half the plot's trees).
                "trata-se de uma metade", "trata-se de metade", "a outra metade", "com a outra metade",
+               "metade da fracção", "metade da fracao", "metade do imóvel", "metade do imovel",
+               "metade da habitação", "metade da habitacao", "metade da propriedade",
+               "vende-se a metade", "venda de metade", "apenas metade", "só metade", "so metade",
+               "quinhão hereditário", "quinhao hereditario",
+               "direito e ação", "direito e acao", "direitos e ações", "direitos e acoes",
                "se trata de la mitad", "la otra mitad", "mitad indivisa", "la moitié indivise",
                # "Somos proprietários de 171m2 e a totalidade do imóvel é de 232m2 ... em
                # simultâneo com o proprietário do remanescente" (Torres Novas, 2026-10-31).
@@ -2111,7 +2119,11 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
         return "fractional share (proindiviso) — skip"
     if _raw(item).get("nuda_propiedad"):
         return "usufruct — skip (bare ownership: usufructuary keeps living there)"
-    if is_fractional_share(title) or is_percent_share(f"{title} {item.get('description') or ''}"):
+    # Title and description both go through the fraction matcher: "1/10",
+    # "3/32", "9/16", "1/112" and "direito e ação" / "quinhão hereditário" /
+    # "metade da fracção" live in the body as often as in the title.
+    if (is_fractional_share(title) or is_fractional_share(full)
+            or is_percent_share(full)):
         return "fractional share — skip"
     if no_possession(item, full):
         return "occupied without possession (okupa) — skip"
