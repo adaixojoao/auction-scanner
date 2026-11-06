@@ -42,6 +42,7 @@ _HOUSE_NUMBER_RE = re.compile(r"(?:\bn\.?\s*[ºo°]|\bn[uú]mero|\bporta)\s*$", 
 
 
 # A share stated as a percentage, usually only in the description.
+# `\d{1,2}` keeps "100% …" out (three digits): whole ownership is not a share.
 _PERCENT_SHARE = re.compile(
     r"(?:\b(?:el|un|o|uma?)\s+)?\b\d{1,2}(?:[.,]\d+)?\s*%?\s+(?:del|de la|do|da|de)\s+"
     r"(?:pleno dominio|plena propiedad|propiedad|pleno dominio|nuda propiedad|propriedade|dominio"
@@ -53,11 +54,15 @@ _PERCENT_SHARE = re.compile(
     # indivisa", "una cincuenta y dos ava parte indivisa", "25% P.D" (not "100% P.D").
     r"|\bavas? partes? indivisas?\b|\bparte indivisa\b"
     r"|(?<![\d.,])\d{1,2}(?:[.,]\d+)?\s*%\s*p\.\s?d\b"
-    # "venda de 50% do direito da propriedade", "apenas 50% do imóvel".
-    # Not "50% do valor base": that is an auction's opening bid.
-    r"|\b\d{1,2}(?:[.,]\d+)?\s*%\s+(?:do|da|de|del|de la|della|des)\s+"
-    r"(?:direito(?:\s+d[ae]\s+propriedade)?|direitos|propriedade|propiedad|propriete|"
-    r"imovel|moradia|habitacao|fracao|vivienda|inmueble|finca|parcela)\b")
+    # TGSS truncates: "8,333333% NUDA PROP.", "33,33% PLENO DOMINIO VIVIENDA"
+    # (no "de/del" between the % and the estate).
+    r"|(?<![\d.,])\d{1,2}(?:[.,]\d+)?\s*%\s*nuda\s*prop(?:iedad|\.|iedade)?"
+    r"|(?<![\d.,])\d{1,2}(?:[.,]\d+)?\s*%\s*pleno\s*dominio\b"
+    # "venda de 50% do direito da propriedade", "apenas 50% do imóvel",
+    # eActivos "Subasta del 50% sobre vivienda". Not "50% do valor base".
+    r"|\b\d{1,2}(?:[.,]\d+)?\s*%\s+(?:do|da|de|del|de la|della|des|sobre)\s+"
+    r"(?:(?:una?\s+)?(?:direito(?:\s+d[ae]\s+propriedade)?|direitos|propriedade|propiedad|propriete|"
+    r"imovel|moradia|habitacao|fracao|vivienda|inmueble|finca|parcela|casa))\b")
 
 
 # A share named in words in the text: Slovak/Czech, Croatian, Bulgarian court sales.
@@ -76,7 +81,15 @@ SHARE_WORDS = ["spoluvlastnícky podiel", "spoluvlastnický podíl", "spoluvlast
                # "Somos proprietários de 171m2 e a totalidade do imóvel é de 232m2 ... em
                # simultâneo com o proprietário do remanescente" (Torres Novas, 2026-10-31).
                "proprietário do remanescente", "proprietários do remanescente",
-               "em simultâneo com o proprietário", "em simultaneo com o proprietario"]
+               "em simultâneo com o proprietário", "em simultaneo com o proprietario",
+               # leilosoc, 2026-11-06: "Proporção de Terreno … não constitui uma
+               # propriedade plena, apenas uma parte do mesmo".
+               "proporção de terreno", "proporcao de terreno",
+               "proporção do terreno", "proporcao do terreno",
+               "proporção de imóvel", "proporcao de imovel",
+               "proporção do imóvel", "proporcao do imovel",
+               "não constitui uma propriedade plena", "nao constitui uma propriedade plena",
+               "apenas uma parte do mesmo"]
 
 
 # Co-ownership sold as a holiday home: "compartes el inmueble con otros 5 socios".
@@ -197,7 +210,7 @@ NOT_A_BUILDING = ["casa movel", "casa móvel", "casa prefabricada móvil", "mobi
 
 USUFRUCT_PATTERNS = [
     "usufruto", "usufructo", "usufruct", "nue-propri*", "nuda proprietà",
-    "nuda propiedad", "direito de uso", "direito de habitação",
+    "nuda propiedad", "nuda prop*", "direito de uso", "direito de habitação",
     # Spadafora, 2026-11-02: "Usufrutto per 1/1" still ranked as a home to buy.
     "usufrutto", "usufruit", "diritto di abitazione", "nießbrauch", "niessbrauch", "vruchtgebruik",
     "blote eigendom",
