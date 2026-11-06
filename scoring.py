@@ -261,6 +261,8 @@ FORCED_SOURCES = {
     # banks' and owners' homes too.
     "spain", "tgss", "eactivos", "subastasactivas", "astalegale", "fallcoaste", "italy",
     "eleiloes", "edikte", "fina", "croatia", "zvg_de",
+    # Dutch notarial execution auctions (openbareverkoop / veilingnotaris / Hekkelman).
+    "netherlands", "veilingnotaris", "vastgoedveiling", "veilingbiljet",
 }
 
 
@@ -290,8 +292,13 @@ GUARDA_POINTS = [(10, 20), (25, 16), (50, 10), (80, 5), (120, 0)]   # no longer 
 # Central/Eastern Europe (HR, PL, …) sit a flat −20 below an otherwise equal listing.
 WESTERN_CONTINENTAL_COUNTRIES = frozenset(
     {"PT", "ES", "FR", "DE", "BE", "NL", "LU", "AT", "CH", "IT"})
-OFF_WESTERN_CONTINENTAL = -20
+# Islands and non-western countries: −20 used to leave Azores homes at the top
+# of Live and invest once climate/geo enrichment piled on (Madalena, Graciosa).
+OFF_WESTERN_CONTINENTAL = -40
 MAINLAND_PORTUGAL = 10   # the owner's home country: language, paperwork, near Guarda (2026-10-04)
+# Soft ceiling when the place is off western continental Europe: enrichment
+# (mild Azores climate, beaches) must not push past mid-board (display ~50).
+OFF_WESTERN_CAP = 75
 # Rough boxes for Atlantic/Mediterranean islands that share those country codes.
 _ISLAND_BOXES = (
     (36.5, 40.0, -32.0, -24.5, "Azores"),
@@ -387,6 +394,10 @@ HR_COAST_COUNTIES = {"istarska", "primorsko-goranska", "ličko-senjska", "zadars
 SALE_PORTALS = {"fotocasa", "imovirtual", "bienici", "greenacres", "servihabitat", "aliseda", "altamira", "pisos", "thinkspain", "solvia", "imot", "indexoglasi", "nehnutelnosti", "sslv", "safer"}
 DOUBTFUL_LAND_EUR_M2 = 0.05   # land cheaper than this per m² has a wrong price or area
 NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
+# Forced/sealed sales with no published price: a lead (display ~60), not a top.
+NO_PRICE_OFFER_CAP = 80
+# Court/offer homes with no established floor: under mid-board until sized.
+MISSING_FLOOR_CAP = 75
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
 # all year round, no fires, no floods. Heat is the mean daily maximum of the
@@ -1245,8 +1256,9 @@ def property_kind(item: dict) -> str | None:
         norm = normalize(text)
         # A shop sold as the property. "casa número 9" is the building it sits
         # in, not a house. A moradia that also has a shop stays a house.
+        # Typology codes alone (T0…T6) do not make a "Loja T0" a home.
         if has_term(text, _SHOP_SUBJECT, negations=False):
-            homes = [w for w in find_terms(text, DWELLING_WORDS, negations=False)
+            homes = [w for w in find_terms(text, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False)
                      if w != "casa" or not _CASA_ADDRESS.search(norm)]
             if not homes:
                 return "other"
@@ -1300,6 +1312,10 @@ def property_kind(item: dict) -> str | None:
         if has_term(f"{title} {desc}", RURAL_WORDS, negations=False) or area >= 5000:
             return "rural_plot"
         return "urban_plot"
+    # Portal type before the title: Whitestar "Loja T0" is tipo=loja; the T0
+    # in the title must not turn a shop into a home.
+    if tipo in OTHER_TYPES:
+        return "other"
     found = kind_of(title)
     if found:
         return found
@@ -1309,8 +1325,6 @@ def property_kind(item: dict) -> str | None:
         return "rural_plot"
     if tipo in URBAN_PLOT_TYPES:
         return "urban_plot"
-    if tipo in OTHER_TYPES:
-        return "other"
     return kind_of(desc)
 
 
@@ -2308,6 +2322,11 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         elif floor_source not in SCORED_FLOORS:
             area = 0
             reasons.append("floor area not established — no size claim uses a land or footprint figure")
+            # Climate enrichment used to push court homes with only a plot size
+            # into the top; without a climate blob the soft rank is enough.
+            if item.get("climate") and (
+                    forced_sale(item) or has_term(full, SEALED_BID_PATTERNS, negations=False)):
+                caps.append(MISSING_FLOOR_CAP)
 
     if kind in ("home", "urban_plot", "rural_plot") and item.get("climate"):
         s += _climate_points(item["climate"], kind, reasons, caps)
@@ -2349,6 +2368,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     away = off_western_continental(item)
     if away:
         s += OFF_WESTERN_CONTINENTAL
+        caps.append(OFF_WESTERN_CAP)
         reasons.append(f"not western continental Europe ({away})")
     elif (item.get("country") or "PT").upper() == "PT":
         s += MAINLAND_PORTUGAL
@@ -2457,6 +2477,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if not pay and offer_sale:
         s += 18 * w("sale")
         reasons.append("no price — you set your offer")
+        # A lead worth opening, not a top: BOE rows with no figure used to sit
+        # above priced mainland homes once climate and forced-sale stacked.
+        caps.append(NO_PRICE_OFFER_CAP)
     elif not pay:
         # Climate and location alone used to push Dutch/German cards with no
         # figure into the top 20; without a price the cheapness goal cannot be
@@ -3081,6 +3104,7 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
     if not pay and offer_sale:
         s += 18 * w("sale")
         reasons.append("no price — you set your offer")
+        caps.append(NO_PRICE_OFFER_CAP)
         hint = tender_bid_hint(item, area)
         if hint:
             reasons.append(hint)
@@ -3442,6 +3466,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     area, floor_source = building_m2(item)
     if not area:
         reasons.append("floor area not established — the investment is not priced on a land figure")
+        caps.append(MISSING_FLOOR_CAP)
     elif floor_source == "notice":
         reasons.append(f"floor {area:.0f} m² from the notice, not a land area stored on the listing")
     pay = _pay(item)
@@ -3458,6 +3483,14 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
         # plain 55 with no word on why: no return can be worked out from nothing.
         caps.append(NO_PRICE_CAP)
         reasons.append("no price published — no return can be worked out until there is a figure")
+    away = off_western_continental(item)
+    if away:
+        s += OFF_WESTERN_CONTINENTAL
+        caps.append(OFF_WESTERN_CAP)
+        reasons.append(f"not western continental Europe ({away})")
+    elif (item.get("country") or "PT").upper() == "PT":
+        s += MAINLAND_PORTUGAL
+        reasons.append("mainland Portugal")
     _doubts(item, kind, pay, area, full, reasons, caps)
     if item.get("unlocated"):
         caps.append(UNCHECKED_CAP)

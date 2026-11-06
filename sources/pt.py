@@ -1186,8 +1186,9 @@ def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **
     import accounts
     session = accounts.account_session(db, config or {}, "financas")
     if session is None:
-        LOG.info("Portal das Finanças: no account in Settings → Accounts (or signing in is paused)")
-        return 0
+        # Empty looked like "0 sales today"; blocked tells Sources to set an account.
+        raise SourceUnavailable(
+            "Portal das Finanças needs your account in Settings → Accounts (or signing in is paused)")
     resp = session.get(accounts.FINANCAS_SALES)
     resp.raise_for_status()
     if "acesso.gov.pt" in resp.url:

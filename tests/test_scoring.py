@@ -190,21 +190,56 @@ def test_no_price_on_an_offer_sale_is_a_chance():
 
 
 def test_no_price_without_an_offer_sale_is_capped():
-    """Dutch/German cards often publish no figure; climate used to put them in
-    the top 20 ahead of priced Portuguese homes."""
-    from scoring import NO_PRICE_CAP, property_kind, condition
+    """Cards that are not forced sales and publish no figure stay under the board."""
+    from scoring import NO_PRICE_CAP, NO_PRICE_OFFER_CAP, property_kind, condition
     bare, r_bare = score(item(title="Historische eengezinswoning in Barby",
-                              source="veilingnotaris", country="DE", price=None,
+                              source="fotocasa", country="DE", price=None,
                               concelho="Barby"))
     assert "price unknown — cannot judge cheapness" in r_bare
     assert "no price — you set your offer" not in r_bare
     assert bare <= NO_PRICE_CAP
+    # Dutch notarial lots are forced sales with no asking price: a lead, capped.
+    nl, r_nl = score(item(title="Woonhuis in Barby", source="veilingnotaris", country="NL",
+                          price=None, concelho="Barby"))
+    assert "no price — you set your offer" in r_nl and nl <= NO_PRICE_OFFER_CAP
     # Commercial space is not a home, even when the platform lists it as vastgoed.
     assert property_kind(item(title="Warffum, Noorderstraat 11 (Bedrijfsruimte)",
                               description="Type: Bedrijfsruimte")) == "other"
     assert property_kind(item(title="Huis te koop in Trazegnies", country="BE")) == "home"
     assert property_kind(item(title="Bungalow 3 chambres à Huy", country="BE")) == "home"
     assert condition(item(title="Vlaardingen, Diepenbrockstraat 5 (Kluswoning)")) == "some"
+
+
+def test_a_loja_t0_is_a_shop_not_a_home():
+    """Whitestar's Loja T0 used to classify as home because T0 is a typology."""
+    from scoring import property_kind, score_detail
+    shop = item(title="Loja T0, Valença, Cristelo Covo E Arão", tipo="loja",
+                price=67000, area_m2=196, source="whitestar")
+    assert property_kind(shop) == "other"
+    assert score_detail(shop, mode="invest")[0] == 0
+    assert property_kind(item(title="Moradia T3 com loja no rés-do-chão", tipo="moradia",
+                              price=50000, area_m2=120)) == "home"
+
+
+def test_no_price_and_no_floor_court_homes_are_capped():
+    from scoring import (MISSING_FLOOR_CAP, NO_PRICE_OFFER_CAP, OFF_WESTERN_CAP,
+                         display_score, score_detail)
+    court = item(title="Vivienda en Pontevedra", source="spain", country="ES",
+                 price=None, area_m2=None, description="Finca urbana vivienda")
+    sc, why = score_detail(court, mode="home")
+    assert "no price — you set your offer" in why and sc <= NO_PRICE_OFFER_CAP
+    assert display_score(sc) <= 60
+    mild = {"heat": {"ssp245_2081-2100": 28}, "hot_days": {"rcp45_2071-2100": 0},
+            "water_km": 2.0, "fire": {}, "flood": {}}
+    no_floor = item(title="Maison à Hennebont", source="france", country="FR",
+                    price=58000, area_m2=None, description="Une maison d'habitation",
+                    climate=mild)
+    sc2, why2 = score_detail(no_floor, mode="home")
+    assert any("floor area not established" in r for r in why2) and sc2 <= MISSING_FLOOR_CAP
+    azores = item(title="Moradia T2", price=20000, area_m2=80,
+                  description="Casa em bom estado. Comarca dos Açores, código postal 9680-011")
+    sc3, _ = score_detail(azores, mode="home")
+    assert sc3 <= OFF_WESTERN_CAP
 
 
 def test_price_outweighs_how_the_court_sells():
