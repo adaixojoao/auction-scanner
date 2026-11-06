@@ -13,22 +13,15 @@ SEEN_GOALS = ("home", "invest")
 
 
 def looked_at(item: dict) -> bool:
-    """True when a photo check has been stored AND the photos actually show the house.
+    """True when the photo check is strong enough to set condition().
 
-    Key presence alone is not enough: a check that concluded shows_house=False
-    (only documents, maps, or a logo was provided) is not useful evidence about
-    the building's condition.
+    A single front photo that says "good" (photos=1) is not enough for
+    scoring.condition — and must not take a top slot on My home / Investment
+    either (2026-11-05: Solvia one-photo "goods" outranked better France lots
+    while still scoring as unknown condition).
     """
-    import json
-    rj = item.get("raw_json") or ""
-    if '"photo_check"' not in rj:
-        return False
-    try:
-        pc = json.loads(rj).get("photo_check") or {}
-    except (ValueError, TypeError):
-        return False
-    # A low-confidence (or unrated) "yes" is a guess, not evidence (F09).
-    return bool(pc.get("shows_house")) and pc.get("confidence") in ("medium", "high")
+    from scoring import photo_condition
+    return photo_condition(item) is not None
 
 
 def place_unseen_homes_after(items: list[dict], mode: str) -> list[dict]:

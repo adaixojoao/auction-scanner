@@ -2,6 +2,8 @@
 Fixtures are trimmed copies of the pages' shape, with invented data."""
 import json
 
+import pytest
+
 import accounts
 from conftest import FakeResponse
 from sources import REGISTRY, load_all
@@ -62,6 +64,11 @@ def test_financas_reads_the_property_sales_within_budget(db, fake_http, monkeypa
     assert sum(1 for u, _ in calls if u.endswith("/vendasat/detalhe")) == 1
 
 
-def test_without_an_account_financas_is_quiet(db, monkeypatch):
+def test_without_an_account_financas_is_blocked(db, monkeypatch):
+    from sources import SourceUnavailable, run_source
     monkeypatch.setattr(accounts, "account_session", lambda db, cfg, site, **k: None)
-    assert REGISTRY["financas"].func(db, max_price=30000, config={}) == 0
+    with pytest.raises(SourceUnavailable, match="Settings → Accounts"):
+        REGISTRY["financas"].func(db, max_price=30000, config={})
+    out = run_source(db, REGISTRY["financas"], max_price=30000, config={})
+    assert out["status"] == "blocked" and out["count"] == 0
+    assert "Accounts" in (out.get("message") or "")

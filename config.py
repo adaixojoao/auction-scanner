@@ -147,7 +147,7 @@ DEFAULTS = {
         "pt_every_hours": 168,        # once a week
         "eu_every_hours": 336,        # every other country, once a fortnight
         "retry_every_hours": 2,       # sources whose last scrape failed
-        "fotocasa_every_hours": 168,  # fotocasa, in full, every week
+        "fotocasa_every_hours": 0,    # agency portal; 0 = off the timetable (run by name)
         "backup_every_hours": 24,
         "check_times": ["08:00", "20:00"],
         "weekly_report": "mon 08:00",
@@ -187,6 +187,18 @@ DEFAULTS = {
         "adviser_reserve_eur": 1500,     # lawyer / adviser buffer (default for every country)
         "adviser_reserve_by_country": {  # overrides for countries that need their own lawyer
             "FR": 3000, "DE": 2500, "IT": 2000, "NL": 2000,
+        },
+    },
+
+    # Buying-cost estimates (costs.py). Renovation €/m² bands are planning
+    # figures; override here when a published band for the region is better.
+    # Totals that use the minimum offer (not the base value) say so explicitly.
+    "costs": {
+        "renovation_eur_m2": {
+            "heavy": [700, 1200],
+            "some": [400, 800],
+            "good": [0, 150],
+            "unknown": [700, 1100],   # full renovation when the notice is silent
         },
     },
 

@@ -54,7 +54,10 @@ DEFAULT_SCHEDULE = {
     "pt_every_hours": 168,
     "eu_every_hours": 336,
     "retry_every_hours": 2,          # a source that failed, on the next short scan
-    "fotocasa_every_hours": 168,     # the largest source, in full, every week
+    # 0: fotocasa is an agency portal, not a forced sale — listings are hidden
+    # from ordinary scoring (db._switched_off_sources). Keep the job callable
+    # with `scheduler.py run fotocasa` when you want a full private-market pass.
+    "fotocasa_every_hours": 0,
     "backup_every_hours": 24,
     "check_times": ["08:00", "20:00"],
     "weekly_report": "mon 08:00",
@@ -167,13 +170,19 @@ PARTIAL_RETRY_AFTER_H = 12
 
 def retry_names(health, registry, countries, now) -> list[str]:
     """The sources the retry job runs: failed ones, and partial ones after
-    PARTIAL_RETRY_AFTER_H, in the countries on Settings ([] is all)."""
+    PARTIAL_RETRY_AFTER_H, in the countries on Settings ([] is all).
+
+    Only ordinary-scan sources (Source.default / DEFAULT_SOURCES): a failed
+    portal left over from an older full scrape must not burn the timetable.
+    """
     from common import parse_dt
     wanted = {c.upper() for c in countries or []}
     names = []
     for h in health:
         source = registry.get(h["source"])
-        if source is None or (wanted and source.country not in wanted):
+        if source is None or not source.default:
+            continue
+        if wanted and source.country not in wanted:
             continue
         if h["state"] in ("error", "broken", "blocked"):
             names.append(h["source"])

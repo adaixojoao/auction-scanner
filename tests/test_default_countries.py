@@ -32,9 +32,9 @@ def test_a_shortlisted_listing_abroad_stays(db, add):
 def test_a_scan_covers_only_the_chosen_countries(db, monkeypatch):
     ran = []
     monkeypatch.setattr("sources.run_source", lambda db, s, **kw: ran.append(s.country) or {"count": 0, "status": "empty"})
-    cfg = {**config.DEFAULTS, "filters": {"countries": ["PT", "DE"]}}
+    cfg = {**config.DEFAULTS, "filters": {"countries": ["PT", "IT"]}}
     pipeline.run_scan(cfg=cfg, report=False, alerts=False, db=db)
-    assert ran and set(ran) <= {"PT", "DE", "EU"} and "EU" in ran     # Green-Acres covers PT and DE too
+    assert set(ran) == {"PT", "IT"}
     ran.clear()
-    pipeline.run_scan(["HR", "DE"], cfg=cfg, report=False, alerts=False, db=db)
-    assert set(ran) == {"DE"}
+    pipeline.run_scan(["HR", "IT"], cfg=cfg, report=False, alerts=False, db=db)
+    assert set(ran) == {"IT"}

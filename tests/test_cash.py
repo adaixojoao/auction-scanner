@@ -63,7 +63,7 @@ def test_the_low_end_of_repairs_counts_toward_the_cash():
     house = {"title": "Moradia T3", "kind": "home", "country": "PT", "source": "citius",
              "price": 20000, "area_m2": 100}
     out = costs.money_out(house)
-    assert out["amount"] == 40610          # 20,000 + 610 of tax and fees + €200/m²
+    assert out["amount"] == 90610          # 20,000 + 610 of tax and fees + €700/m² full reno
     assert costs.over_cash(house, 40000)
     assert costs.over_cash(house, 0) is None
     sound = {**house, "description": "em bom estado", "price": 8000, "area_m2": 50}
@@ -103,8 +103,10 @@ def test_unset_cash_hides_nothing_and_blocks_an_offer(client, db, add):
 
 
 def test_an_offer_over_the_cash_needs_a_reason(client, db, add):
+    # Unknown condition prices a full renovation (€700/m²): keep the house small
+    # so a low sealed bid can still sit under the cash while a full bid does not.
     config.update_config({"cash_on_hand": 40000})
-    add("citius", "p1", title="Moradia", price=20000, area_m2=100,
+    add("citius", "p1", title="Moradia", price=20000, area_m2=40,
         raw_json=json.dumps({"processo": "1/20.0TBMRA", "modalidade": "carta fechada",
                              "agente_email": "ae@solic.pt"}))
     letter = client.get("/api/offers/letter?id=citius:p1&bid=20.000,00").get_json()

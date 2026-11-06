@@ -9,7 +9,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_price, land_max_price, make_listing, make_session, normalize, parse_price
+from common import LOG, find_floor_area, find_price, land_max_price, make_listing, make_session, normalize, parse_price
 from db import upsert_listing
 from sources import register
 from sources._cards import CardSite, scrape_cards
@@ -117,6 +117,7 @@ def scrape_france(db, max_price: float = 50000, **_):
                 continue
             upsert_listing(db, make_listing(
                 "france", eid, "FR", title=title, tipo="immobilier", price=price,
+                area_m2=find_floor_area(title),
                 concelho=town, url=href, base_url=LICITOR_BASE,
             ))
             if town:
@@ -307,6 +308,9 @@ def enrich_france_details(db, session, limit: int = 160):
         if town:
             fields["title"] = title
             fields["concelho"] = fields.get("concelho") or town
+        # List pages often have no m²; the annonce text usually does ("maison de 50,03 m²").
+        fields["area_m2"] = fields.get("area_m2") or find_floor_area(
+            f"{fields.get('title') or ''} {fields.get('description') or ''}")
         fields["raw_json"] = json.dumps(raw, ensure_ascii=False)
         upsert_listing(db, make_listing("france", item["external_id"], "FR", **fields))
         db.commit()

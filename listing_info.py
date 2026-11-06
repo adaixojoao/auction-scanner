@@ -65,7 +65,8 @@ def case_number(item: dict) -> str | None:
 _FACTS = [
     ("Case", lambda it, r: case_number(it)),
     ("Court", lambda it, r: _first(r, "tribunal", "autoridad", "court")),
-    ("Sale type", lambda it, r: _first(r, "modalidade", "tipo_subasta", "veilingwijze")),
+    ("Sale type", lambda it, r: _first(r, "modalidade", "tipo_subasta", "type_verkoop", "veilingwijze")),
+    ("Bid online", lambda it, r: "yes — no visit to the notary" if r.get("bieden_via_internet") else None),
     ("Status", lambda it, r: _first(r, "estado")),
     ("Base value", lambda it, r: _money(it.get("price"))),
     ("Minimum accepted", lambda it, r: _money(it.get("min_price")) if it.get("min_price") != it.get("price") else None),
@@ -73,7 +74,9 @@ _FACTS = [
     ("Current bid", lambda it, r: _money(it.get("current_bid"))),
     ("Deposit", lambda it, r: _money(r.get("deposito"))),
     ("Mise à prix", lambda it, r: _money(r.get("mise_a_prix"))),
-    ("Ends", lambda it, r: (it.get("date_end") or "").replace("T", " ")[:16] or None),
+    ("Ends", lambda it, r: (
+        "date unknown" if not it.get("date_end") or str(it.get("date_end")).startswith("9999")
+        else str(it.get("date_end")).replace("T", " ")[:16])),
     ("Hearing", lambda it, r: (r.get("audience") or "").replace("T", " ")[:16] or None),
     ("Area", lambda it, r: f"{it['area_m2']:,.0f} m²".replace(",", " ") if it.get("area_m2") else None),
     ("Bedrooms", lambda it, r: _first(r, "prop_bedrooms", "field_nr_quartos")),

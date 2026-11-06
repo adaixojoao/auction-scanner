@@ -638,13 +638,16 @@ def _iter_areas(text) -> list[tuple[int, float]]:
     for start, value in _written_areas(text):
         if not any(abs(prev - start) < 5 for prev, _ in found):
             found.append((start, value))
-    if not found:
-        # Italian court texts put the unit first: "di MQ. 90", "metri quadri 9".
-        m = _AREA_UNIT_FIRST_RE.search(text)
-        if m:
+    # Italian court texts put the unit first: "di MQ. 90", "metri quadri 9",
+    # "superficie catastale mq 99". Always collect these; an "80 mq del terreno"
+    # later must not be the only figure found.
+    for m in _AREA_UNIT_FIRST_RE.finditer(text):
+        try:
             value = float(m.group(1).replace(".", "").replace(",", "."))
-            if value > 0:
-                found.append((m.start(1), value))
+        except ValueError:
+            continue
+        if value > 0 and not any(abs(prev - m.start(1)) < 5 for prev, _ in found):
+            found.append((m.start(1), value))
     found.sort()
     return found
 
@@ -697,11 +700,24 @@ def auction_occupation(flags) -> str | None:
 _LAND_BEFORE_AREA = re.compile(
     r"\b(?:terrain|terreno|terrenos|parcela|parcelle|jardin|jard[ií]n|garden|plot|lote|solar|finca|"
     r"quintal|logradouro|land|grundst\w*|giardino|cour|courette|patio)\b[^.;,\d]{0,32}$", re.I)
+# Land named after the figure: "80 mq del terreno", "202 m2 de terreno".
+_LAND_AFTER_AREA = re.compile(
+    r"^\s*(?:del?|da|do|de la|de|di|des?|du)?\s*"
+    r"(?:terrain|terreno|terrenos|parcela|parcelle|plot|lote|solar|finca|quintal|logradouro|"
+    r"land|giardino)\b", re.I)
 # {0,32}: "terreno pertinenziale di circa 324 mq" (Sanremo, 2026-10-31) is 24
 # characters from the land word to the figure, and the house had no size of its own.
 # The footprint on the ground, not the floor: "área de implantação do edifício de 47 m²".
 _FOOTPRINT_BEFORE_AREA = re.compile(
     r"\b(?:implanta\w*|emprise|footprint)\b[^.;,\d]{0,24}$", re.I)
+# Italian notices put the commercial / cadastral floor after "superficie …".
+_FLOOR_LABEL_BEFORE = re.compile(
+    r"\bsuperficie\s+(?:commerciale|catastale|calpestabile|utile|lorda|"
+    r"escluse?\s+aree\s+scoperte|totale\s+esclus[oa])\b[^.;,\d]{0,40}$", re.I)
+# Portuguese private / gross construction floor (not the plot).
+_PT_FLOOR_LABEL_BEFORE = re.compile(
+    r"\b(?:[aá]rea\s+bruta\s+(?:de\s+constru[cç][aã]o|privativa)|[aá]rea\s+(?:util\s+)?privativa|"
+    r"[aá]rea\s+[uú]til|area\s+util)\b[^.;,\d]{0,40}$", re.I)
 
 
 def _area_introduced_by(text: str, area: float, pattern: re.Pattern) -> bool:
@@ -788,26 +804,71 @@ def counted_flats(text) -> tuple[dict[str, int], int]:
     return typed, untyped
 
 
+def _after_area_unit(text: str, start: int) -> str:
+    """Text just after a size's number (and its unit, if the unit follows).
+
+    For "80 mq del terreno" the unit is after the number; for unit-first
+    "mq 124" only the digits sit at `start`, so a later "mq" must not be
+    treated as this size's unit (that made 124 look like land)."""
+    rest = text[start:]
+    m = re.match(r"\d{1,6}(?:[.,]\d{1,2})?\s*(?:m(?:²|2|q)?|metri\s+quadri)\b", rest, re.I)
+    if m:
+        return rest[m.end():m.end() + 40]
+    m = re.match(r"\d{1,6}(?:[.,]\d{1,2})?\b", rest)
+    return rest[m.end():m.end() + 40] if m else rest[:40]
+
+
+def _is_land_or_footprint(text: str, start: int) -> bool:
+    before = text[max(0, start - 64):start]
+    if _LAND_BEFORE_AREA.search(before) or _FOOTPRINT_BEFORE_AREA.search(before):
+        return True
+    return bool(_LAND_AFTER_AREA.search(_after_area_unit(text, start)))
+
+
 def find_floor_area(text) -> float | None:
     """The first size in a text that is not the land's or the footprint: the
     floor area a rent or a value can be worked on. A plot sold as "Maison"
     with only "terrain 1034 m²", or only "área de implantação", has none,
-    which is better than a rent on the land or on the ground it covers."""
+    which is better than a rent on the land or on the ground it covers.
+
+    A labelled commercial / cadastral / private floor wins over a bare size
+    that happens to appear first (Italian "80 mq del terreno … superficie
+    catastale mq 84"; Portuguese "área total do terreno … área bruta …")."""
     text = str(text or "")
+    first = None
     for start, value in _iter_areas(text):
-        before = text[max(0, start - 48):start]
-        if _LAND_BEFORE_AREA.search(before) or _FOOTPRINT_BEFORE_AREA.search(before):
+        if _is_land_or_footprint(text, start):
             continue
-        return value
-    return None
+        before = text[max(0, start - 64):start]
+        if _FLOOR_LABEL_BEFORE.search(before) or _PT_FLOOR_LABEL_BEFORE.search(before):
+            return value
+        if first is None:
+            first = value
+    return first
 
 
 def land_figure(text, area: float) -> bool:
     """True when `area` is written in `text` and a land word introduces every time.
 
     The same window as find_floor_area. A size that is also given as floor
-    ("casa de 90 m², terreno de 90 m²") is not only land."""
-    return _area_introduced_by(str(text or ""), area, _LAND_BEFORE_AREA)
+    ("casa de 90 m², terreno de 90 m²") is not only land. "80 mq del terreno"
+    (land after the figure) counts as land too."""
+    text = str(text or "")
+    try:
+        area = float(area)
+    except (TypeError, ValueError):
+        return False
+    if area <= 0:
+        return False
+    hits = marked = 0
+    for start, value in _iter_areas(text):
+        if abs(value - area) > 0.05:
+            continue
+        hits += 1
+        before = text[max(0, start - 48):start]
+        if _LAND_BEFORE_AREA.search(before) or _LAND_AFTER_AREA.search(_after_area_unit(text, start)):
+            marked += 1
+    return hits > 0 and marked == hits
 
 
 def footprint_figure(text, area: float) -> bool:

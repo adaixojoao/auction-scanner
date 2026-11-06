@@ -13,7 +13,8 @@ def _sale(source, text, title="Finca Urbana", country="ES"):
 
 
 def test_court_and_social_security_sales_are_forced():
-    for source in ("spain", "tgss", "eactivos", "astalegale", "eleiloes", "edikte", "fina"):
+    for source in ("spain", "tgss", "eactivos", "astalegale", "eleiloes", "edikte", "fina",
+                   "netherlands", "veilingnotaris", "vastgoedveiling"):
         assert scoring.forced_sale(_sale(source, "Vivienda")), source
 
 

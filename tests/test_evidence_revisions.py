@@ -100,16 +100,21 @@ def test_looked_at_false_when_shows_house_missing():
     assert not looked_at({"raw_json": rj})
 
 
-def test_looked_at_true_when_shows_house_true():
+def test_looked_at_true_when_photo_condition_is_usable():
     from tops import looked_at
-    rj = json.dumps({"photo_check": {"condition": "good", "shows_house": True, "confidence": "high", "notes": "fine"}})
-    assert looked_at({"raw_json": rj})
+    # "good" needs enough photos (scoring.PHOTO_GOOD_MIN); one front shot is not enough.
+    weak = json.dumps({"photo_check": {"condition": "good", "shows_house": True,
+                                       "confidence": "high", "notes": "fine", "photos": 1}})
+    strong = json.dumps({"photo_check": {"condition": "good", "shows_house": True,
+                                         "confidence": "high", "notes": "fine", "photos": 2}})
+    assert not looked_at({"raw_json": weak})
+    assert looked_at({"raw_json": strong})
 
 
 @pytest.mark.parametrize("confidence", ["low", None])
 def test_looked_at_false_when_shows_house_true_but_not_confident(confidence):
     from tops import looked_at
-    pc = {"condition": "good", "shows_house": True, "notes": "blurry"}
+    pc = {"condition": "good", "shows_house": True, "notes": "blurry", "photos": 2}
     if confidence:
         pc["confidence"] = confidence
     assert not looked_at({"raw_json": json.dumps({"photo_check": pc})})

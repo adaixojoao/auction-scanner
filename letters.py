@@ -39,7 +39,7 @@ ES_SERVICER_SOURCES = {"sareb", "haya", "servihabitat"}
 FR_COURT_SOURCES = {"france", "encheres_publiques"}
 DE_COURT_SOURCES = {"zvg", "zvg_de"}
 IT_COURT_SOURCES = {"italy", "pvp_giustizia", "gobidreal", "astalegale"}
-NL_NOTARY_SOURCES = {"netherlands", "veilingnotaris", "veilingbiljet"}
+NL_NOTARY_SOURCES = {"netherlands", "veilingnotaris", "vastgoedveiling", "veilingbiljet"}
 HR_SOURCES = {"croatia", "fina"}
 ONLINE_SOURCES = {"eleiloes", "financas", "leilosoc", "centroleiloes", "bidleiloeira",
                   "spain", "aeat", "subastasactivas", "biddit", "justiz_auktion", "greece",
@@ -123,11 +123,20 @@ def nl_sale_kind(veilingwijze: str | None) -> str:
         "online veiling": "leilao_eletronico",
         "internetveiling": "leilao_eletronico",
         "internet only live": "leilao_eletronico",
+        "internet only timed": "leilao_eletronico",
+        "internet-only live": "leilao_eletronico",
+        "internet-only timed": "leilao_eletronico",
         "zaal": "leilao_presencial",
         "zaalveiling": "leilao_presencial",
         "in de zaal": "leilao_presencial",
     }
-    return labels.get(_label_text(veilingwijze), "unknown")
+    text = _label_text(veilingwijze)
+    if text in labels:
+        return labels[text]
+    # "Internet-only Live" / "Internet-only Timed" after punctuation stripping
+    if text.startswith("internet only") or text.startswith("internet-only"):
+        return "leilao_eletronico"
+    return "unknown"
 
 
 def stated_sale_kind(raw: dict) -> str:

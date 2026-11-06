@@ -64,6 +64,18 @@ SORT_KEYS = {
     "title": lambda x: (x.get("title") or "").lower(),
 }
 
+# When the page does not pick a kind, each goal only shows what it is for:
+# homes on Live / invest / My home; plots on land and forestry. Wrong-kind
+# rows (score 0 "not land", or the flat "a home, not land" 40) used to fill
+# the forestry and land tops — including shortlisted homes.
+_MODE_KINDS = {
+    "both": frozenset({"home"}),
+    "home": frozenset({"home"}),
+    "invest": frozenset({"home"}),
+    "land": frozenset({"rural_plot", "urban_plot"}),
+    "forest": frozenset({"rural_plot", "urban_plot"}),
+}
+
 
 def get_db():
     return connect()
@@ -742,13 +754,18 @@ def _view_matched(rows: list, f: dict, mode: str, show_hidden: bool) -> list:
         max_price = min(max_price, budget) if max_price else budget
     yesterday = (_now() - timedelta(days=1)).date().isoformat()
     status, kind = f["status"], f["kind"]
+    allowed_kinds = None if kind else _MODE_KINDS.get(mode)
     matched = [it for it in rows
                if _matches(it, f["country"], f["source"], f["tipo"], max_price, f["search"])
                # long-ended sales are not counted among the open view's hidden ones
                and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
                and (not f["properties_only"] or it["category"] == "imoveis")
                and (not f["forced_only"] or _forced_sale(it))
-               and (not status or it["status"] == status) and (not kind or it["kind"] == kind)]
+               and (not status or it["status"] == status)
+               and (not kind or it["kind"] == kind)
+               # Wrong-kind rows stay out of the open tops; show_hidden still
+               # lists them when scoring hid them (garage on Live, home on land).
+               and (show_hidden or not allowed_kinds or it.get("kind") in allowed_kinds)]
     if f["climate"] or f["climate_exact"]:
         matched = [it for it in matched if _climate_matches(it, f["climate"], f["climate_exact"])]
     if f["sale_method"]:
@@ -809,12 +826,14 @@ def api_listings():
         found = len(items)
         cap = max(1, _num(_config().get("max_listings"), 100, int))
         from tops import place_unseen_homes_after
+        # Always rank by score first so the cap is the best N; near-miss
+        # demotion for Live and invest must run *after* that (re-sorting by
+        # score again used to put over-cash homes back at the top, 2026-11-05).
         ranked = sorted(items, key=SORT_KEYS["score"], reverse=True)
         ranked = place_unseen_homes_after(ranked, mode)
-        # Live and invest's near misses (over the cash by up to db.NEAR_MISS)
-        # come after every home within it, in their own order.
-        ranked = ([it for it in ranked if not it.get("near_miss")]
-                  + [it for it in ranked if it.get("near_miss")])
+        if mode == "both":
+            ranked = ([it for it in ranked if not it.get("near_miss")]
+                      + [it for it in ranked if it.get("near_miss")])
         if sort == "score":
             items = ranked[:cap]
             items.sort(key=SORT_KEYS["score"], reverse=(direction == "desc"))
@@ -930,6 +949,9 @@ def api_listing_detail():
         "street_view": listing_info.street_view(it, (_config().get("maps") or {}).get("google_key", "")),
         "outline": listing_info.outline_panel(it),
         "user_note": user_note,
+        "owner_condition": it.get("owner_condition"),
+        "owner_condition_note": it.get("owner_condition_note"),
+        "owner_condition_at": it.get("owner_condition_at"),
         "contact_log": contact_log,
         "status_history": status_history,
         "research": research,
@@ -1165,6 +1187,45 @@ def api_listing_note():
     finally:
         db.close()
     return jsonify({"ok": True, "id": listing_id, "length": length})
+
+
+@app.route("/api/listing/condition", methods=["POST"])
+def api_listing_condition():
+    """Record or clear your verified condition on a listing (good / some /
+    heavy / unknown). Scoring and the cost estimate use it instead of the ad.
+    An empty condition clears the override. Survives rescrape and rescoring."""
+    from db import OWNER_CONDITIONS, set_owner_condition
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    listing_id = data.get("id")
+    if not isinstance(listing_id, str) or not listing_id:
+        return jsonify({"error": "id required"}), 400
+    condition = data.get("condition")
+    if condition is not None and not isinstance(condition, str):
+        return jsonify({"error": "condition must be text"}), 400
+    note = data.get("note")
+    if note is not None and not isinstance(note, str):
+        return jsonify({"error": "note must be text"}), 400
+    if note is not None and _utf16_length(note) > NOTE_MAX:
+        return jsonify({"error": f"A note holds at most {NOTE_MAX:,} characters."}), 400
+    state = (condition or "").strip().lower() or None
+    if state is not None and state not in OWNER_CONDITIONS:
+        return jsonify({"error": f"condition must be one of {', '.join(sorted(OWNER_CONDITIONS))}, or empty to clear"}), 400
+    db = get_db()
+    try:
+        if not set_owner_condition(db, listing_id, state, note):
+            return jsonify({"error": "no such listing"}), 404
+        db.commit()
+        row = db.execute(
+            "SELECT owner_condition, owner_condition_note, owner_condition_at FROM listings WHERE id=?",
+            (listing_id,)).fetchone()
+    finally:
+        db.close()
+    return jsonify({"ok": True, "id": listing_id,
+                    "owner_condition": row["owner_condition"],
+                    "owner_condition_note": row["owner_condition_note"],
+                    "owner_condition_at": row["owner_condition_at"]})
 
 
 @app.route("/api/kept-photo")

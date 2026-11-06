@@ -142,6 +142,7 @@ def test_a_figure_that_is_not_a_purchase_price_is_not_filtered_on(client, add):
 
 @pytest.mark.parametrize("label,method", [
     ("online", "leilao_eletronico"), ("Internet-only Live", "leilao_eletronico"),
+    ("Internet-only Timed", "leilao_eletronico"),
     ("Zaal", "leilao_presencial"), ("online en zaal", "unknown"), (None, "unknown"),
 ])
 def test_dutch_sale_method_labels_are_read(client, add, label, method):

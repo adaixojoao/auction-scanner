@@ -44,7 +44,7 @@ QUIET_AFTER = timedelta(days=3)
 # "New" badge / new-today counters.
 RECENT = timedelta(hours=24)
 
-SCHEMA_VERSION = 34
+SCHEMA_VERSION = 35
 
 # What the user decided about a listing (Listings/Offers pages).
 STATUSES = ("shortlisted", "dismissed")
@@ -729,6 +729,15 @@ def _migrate_v34(db: sqlite3.Connection):
     evidence_store.install_schema(db)
 
 
+def _migrate_v35(db: sqlite3.Connection):
+    """Your verified condition on a listing (good / some / heavy / unknown).
+    Survives rescrape and rescoring; scoring.condition and costs.renovation
+    prefer it over the ad. Cleared when NULL."""
+    _add_column(db, "listings", "owner_condition", "TEXT")
+    _add_column(db, "listings", "owner_condition_note", "TEXT")
+    _add_column(db, "listings", "owner_condition_at", "TEXT")
+
+
 _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5: _migrate_v5,
                6: _migrate_v6, 7: _migrate_v7, 8: _migrate_v8, 9: _migrate_v9, 10: _migrate_v10,
                11: _migrate_v11, 12: _migrate_v12, 13: _migrate_v13, 14: _migrate_v14,
@@ -737,7 +746,7 @@ _MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2, 3: _migrate_v3, 4: _migrate_v4, 5
                23: _migrate_v23, 24: _migrate_v24, 25: _migrate_v25, 26: _migrate_v26,
                27: _migrate_v27, 28: _migrate_v28, 29: _migrate_v29,
                30: _migrate_v30, 31: _migrate_v31, 32: _migrate_v32,
-               33: _migrate_v33, 34: _migrate_v34}
+               33: _migrate_v33, 34: _migrate_v34, 35: _migrate_v35}
 
 
 def init_db(db: sqlite3.Connection):
@@ -1241,10 +1250,19 @@ def _same_house_elsewhere(a, b) -> bool:
 
 def _italian_lot(court, case, lot, minimum) -> tuple | None:
     """Court, case number, lot and minimum offer: together they name one lot of
-    one sale. "Tribunale di LOCRI" / "Locri", "55" / "55/2015", "LOTTO UNICO" / "Unico"."""
+    one sale. "Tribunale di LOCRI" / "Locri", "55" / "55/2015", "LOTTO UNICO" / "Unico".
+
+    "Tribunale di REGGIO CALABRIA" and Astalegale's "Reggio di Calabria" are the
+    same court: drop filler "di" inside the name (B2438025 = pvp:4646790)."""
     court = re.sub(r"^tribunale\s+(?:ordinario\s+)?di\s+", "", normalize(str(court or ""))).strip()
+    court = re.sub(r"\bdi\b", " ", court)
+    court = re.sub(r"\s+", " ", court).strip()
     case = str(case or "").split("/")[0].strip()
     lot = re.sub(r"^lotto\s+", "", normalize(str(lot or ""))).strip()
+    try:
+        minimum = round(float(minimum), 2) if minimum not in (None, "") else None
+    except (TypeError, ValueError):
+        minimum = None
     if not (court and case and lot and minimum):
         return None
     return court, case, "1" if lot == "unico" else lot, minimum
@@ -1280,6 +1298,34 @@ def _pvp_copies(rows) -> dict[str, str]:
         raw = _row_raw(r)
         found = lots.get(_italian_lot(raw.get("tribunale"), raw.get("proceduraNumeroAnno"), raw.get("codiceLotto"),
                                       r["min_price"]), [])
+        if len(found) == 1:
+            out[r["id"]] = found[0]
+    return out
+
+
+def _vgv_copies(rows) -> dict[str, str]:
+    """{vastgoedveiling row: its veilingnotaris or openbareverkoop twin}.
+
+    Same auction number on veilingnotaris (shared platform); else a unique
+    address match on openbareverkoop / veilingnotaris.
+    """
+    from sources.nl import nl_place_key
+    vn = {r["external_id"]: r["id"] for r in rows if r["source"] == "veilingnotaris"}
+    by_place: dict[str, list[str]] = defaultdict(list)
+    for r in rows:
+        if r["source"] not in ("netherlands", "veilingnotaris"):
+            continue
+        key = nl_place_key(r["title"], r["concelho"])
+        if key:
+            by_place[key].append(r["id"])
+    out = {}
+    for r in rows:
+        if r["source"] != "vastgoedveiling":
+            continue
+        if r["external_id"] in vn:
+            out[r["id"]] = vn[r["external_id"]]
+            continue
+        found = by_place.get(nl_place_key(r["title"], r["concelho"]) or "", [])
         if len(found) == 1:
             out[r["id"]] = found[0]
     return out
@@ -1402,6 +1448,17 @@ def mark_duplicates(db: sqlite3.Connection) -> int:
         dup_of[copy] = dup_of.get(official, official)
         possible.pop(copy, None)
 
+    # vastgoedveiling.nl (Hekkelman) shares numbers with veilingnotaris and often
+    # the same house as openbareverkoop: one sale, keep the OV/VN id. Dutch
+    # notarial lots often have no published price, so they are not in `rows`.
+    nl_rows = db.execute(
+        "SELECT * FROM listings WHERE source IN ('vastgoedveiling', 'veilingnotaris', 'netherlands') "
+        "AND concelho IS NOT NULL AND TRIM(concelho) != ''"
+    ).fetchall()
+    for copy, official in _vgv_copies(nl_rows).items():
+        dup_of[copy] = dup_of.get(official, official)
+        possible.pop(copy, None)
+
     # A Citius sale joined to its e-leilões auction (links.py) is one sale.
     from links import linked_pairs
     for el, citius in linked_pairs(db).items():
@@ -1477,6 +1534,34 @@ def set_job_last_run(db: sqlite3.Connection, job: str, when: datetime | None = N
     db.execute("INSERT OR REPLACE INTO job_runs (job, last_run) VALUES (?, ?)",
                (job, (when or utcnow()).isoformat()))
     db.commit()
+
+
+OWNER_CONDITIONS = frozenset({"good", "some", "heavy", "unknown"})
+
+
+def set_owner_condition(db: sqlite3.Connection, listing_id: str,
+                        condition: str | None, note: str | None = None) -> bool:
+    """Record or clear your verified condition on a listing. Returns False when
+    the listing is missing. Busts the score cache via the listings column and
+    an evidence revision."""
+    from common import utcnow_iso
+    state = (condition or "").strip().lower() or None
+    if state is not None and state not in OWNER_CONDITIONS:
+        raise ValueError(f"condition must be one of {sorted(OWNER_CONDITIONS)}, or empty to clear")
+    note = (note or "").strip() or None
+    if state is None:
+        note = None
+        when = None
+    else:
+        when = utcnow_iso()
+    cur = db.execute(
+        "UPDATE listings SET owner_condition=?, owner_condition_note=?, owner_condition_at=? WHERE id=?",
+        (state, note, when, listing_id))
+    if cur.rowcount == 0:
+        return False
+    record_evidence_revision(db, listing_id, "owner_condition",
+                             {"condition": state, "note": note, "at": when})
+    return True
 
 
 def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | None,
@@ -1888,6 +1973,7 @@ def _normalize_both(db, items: list[dict], *, full: bool, min_score: float,
     raw scores, each divided by the best shown candidate's so that one is 100,
     times the listing's charges (both_factor: a guessed beach, a hot climate).
     Owner's choice, 2026-10-26. The minimum score is applied to that."""
+    from scoring import display_score
     priced = [it for it in items if it.get("both_factor") is not None]
     shown = [it for it in priced if not it.get("hidden_reason") and not it.get("near_miss")]
     found = None
@@ -1900,6 +1986,13 @@ def _normalize_both(db, items: list[dict], *, full: bool, min_score: float,
     if scale:
         best_live, best_invest = scale
         for it in priced:
+            # live_score / invest_score use display_score (raw ≤ 50 → 0). A pair
+            # that shows as 0 / 0 must not normalise to 100 against itself
+            # (Vigo, Las Palmas, Honfleur). research_only rows never set both_factor.
+            if display_score(it["live_rank"]) <= 0 and display_score(it["invest_rank"]) <= 0:
+                it["rank"] = 0.0
+                it["score"] = 0.0
+                continue
             live = it["live_rank"] / best_live if best_live > 0 else 0.0
             invest = it["invest_rank"] / best_invest if best_invest > 0 else 0.0
             rank = 100 * (min(live, 1.0) + min(invest, 1.0)) / 2 * it["both_factor"]
@@ -2659,6 +2752,18 @@ def _save_climates(db, writes: list[tuple]) -> None:
     db.commit()
 
 
+_OFF_SOURCES: tuple[str, ...] | None = None
+
+
+def _switched_off_sources() -> tuple[str, ...]:
+    """Every registered source an ordinary scan no longer reads."""
+    global _OFF_SOURCES
+    if _OFF_SOURCES is None:
+        from sources import DEFAULT_SOURCES, load_all
+        _OFF_SOURCES = tuple(sorted(set(load_all()) - DEFAULT_SOURCES))
+    return _OFF_SOURCES
+
+
 def load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                   include_hidden: bool = False, now: datetime | None = None,
                   where: str = "", params=(), apply_min_score: bool = True, mode: str = "home",
@@ -2720,9 +2825,22 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                        "OR id IN (SELECT listing_id FROM listing_status WHERE status = 'shortlisted') "
                        "OR id IN (SELECT listing_id FROM carta_log WHERE is_offer = 1 AND listing_id IS NOT NULL))")
         query_params = query_params + tuple(countries)
+    # Nor are switched-off sources (sources.DEFAULT_SOURCES): nothing is deleted,
+    # and turning a source back on brings its listings back.
+    off = _switched_off_sources()
+    if off:
+        marks = ",".join("?" * len(off))
+        clauses.append(f"(source NOT IN ({marks}) "
+                       "OR id IN (SELECT listing_id FROM listing_status WHERE status = 'shortlisted') "
+                       "OR id IN (SELECT listing_id FROM carta_log WHERE is_offer = 1 AND listing_id IS NOT NULL))")
+        query_params = query_params + off
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     rows = db.execute(sql, query_params).fetchall()
+    # A copy of a listing from a switched-off source is now the one to show.
+    freed = {r[0] for r in db.execute(
+        "SELECT DISTINCT d.duplicate_of FROM listings d JOIN listings c ON c.id = d.duplicate_of "
+        f"WHERE c.source IN ({marks})", off)} if off else set()
     # A scan touches last_seen on every listing it sees; the score never reads it.
     scored_cols = [i for i, k in enumerate(rows[0].keys()) if k not in _UNSCORED] if rows else []
 
@@ -2794,6 +2912,8 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         if progress:
             progress.step()
         item = dict(r)
+        if item.get("duplicate_of") in freed:
+            item["duplicate_of"] = None
         # Rows written before safe_url() existed may still hold javascript: links.
         item["url"] = safe_url(item.get("url"))
         item["status"] = statuses.get(item["id"])

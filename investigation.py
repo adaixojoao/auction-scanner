@@ -214,7 +214,7 @@ def _intended_use(item: dict, mode: str, built: dict) -> dict:
 
 def _contradictions(item: dict, dims: dict, built: dict) -> list[str]:
     """Visible conflicts between records; nothing is reconciled here."""
-    from scoring import _occupation
+    from scoring import _occupation, _raw
     out = []
     occupancy_done = [x for x in built["items"] if x["category"] == "occupancy" and x["status"] == "verified"]
     reported = _occupation(item)
@@ -227,6 +227,9 @@ def _contradictions(item: dict, dims: dict, built: dict) -> list[str]:
     if dims["sale_availability"]["status"] == "ended" and any(
             x["key"] == "terms" and x["status"] == "verified" for x in built["items"]):
         out.append("Sale terms are checked by you, but the sale page reports the sale as ended or reserved.")
+    conflict = _raw(item).get("area_conflict")
+    if isinstance(conflict, str) and conflict.strip():
+        out.append(conflict.strip())
     return out
 
 

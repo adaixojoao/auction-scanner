@@ -168,3 +168,10 @@ def fake_http(monkeypatch):
         monkeypatch.setattr("time.sleep", lambda *_: None)
         return session
     return install
+
+
+@pytest.fixture(autouse=True)
+def _every_source_is_read(monkeypatch):
+    """Fixtures use listings from any source; test_switched_off_sources.py turns this back on."""
+    import db as db_module
+    monkeypatch.setattr(db_module, "_OFF_SOURCES", ())

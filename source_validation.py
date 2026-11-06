@@ -155,6 +155,9 @@ CATALOG: dict[str, dict] = {
                      "limitation": "Voluntary auctions (DGA/SGA/NDGA/WDGA); price is the starting limit"},
     "netherlands": {"kind": "official", "access": "public_html", "listing_type": "property"},
     "veilingnotaris": {"kind": "official", "access": "public_html", "listing_type": "property"},
+    "vastgoedveiling": {"kind": "official", "access": "public_html", "listing_type": "property",
+                        "limitation": "Hekkelman; same auction numbers as veilingnotaris.nl — "
+                                      "copies keep the existing OV/VN id"},
     "veilingbiljet": {"kind": "experimental", "access": "public_html",
                       "limitation": "Same lots as openbareverkoop.nl"},
     "croatia": {"kind": "official", "access": "public_html", "listing_type": "property"},

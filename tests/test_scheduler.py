@@ -13,7 +13,7 @@ def at(y, mo, d, h, mi=0):
 
 def test_everything_due_on_first_run():
     assert due_jobs(at(2026, 9, 28, 9), {}) == [
-        "pt", "eu", "retry", "fotocasa", "backup", "closing", "morning", "report"]  # a Monday
+        "pt", "eu", "retry", "backup", "closing", "morning", "report"]  # a Monday; fotocasa off by default
 
 
 def test_intervals_with_slack():
@@ -76,8 +76,8 @@ def test_tick_skips_short_jobs_when_the_timetable_lock_is_held(db, monkeypatch, 
     monkeypatch.setattr(scheduler, "JOB_FUNCS", {j: (lambda j=j: called.append(j)) for j in scheduler.JOBS})
     import config
     monkeypatch.setattr(config, "load_config", lambda: {"schedule": {}})
-    assert scheduler.tick() == ["pt", "eu", "retry", "fotocasa"]          # a scrape has its own lock
-    assert called == ["pt", "eu", "retry", "fotocasa"]                    # deadlines and the backup wait
+    assert scheduler.tick() == ["pt", "eu", "retry"]                      # a scrape has its own lock
+    assert called == ["pt", "eu", "retry"]                                # deadlines and the backup wait
 
 
 def test_a_scan_does_not_hold_the_timetable_lock(db, monkeypatch):

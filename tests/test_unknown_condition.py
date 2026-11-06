@@ -101,11 +101,25 @@ def test_a_silent_portal_ad_ranks_under_one_that_states_its_state():
 
 
 def test_a_silent_ad_is_not_a_bigger_bargain_than_a_stated_one():
-    """Unknown state counted the house at 75% of the local price, so a price that
-    is too far under the done-up value (works included) still read as a bargain."""
+    """Unknown condition prices a full renovation into all-in, so the same
+    asking price sits closer to local value than when the ad says good. A
+    stated-good house that is still absurd after light repairs is flagged
+    and rent is not invented on it."""
+    import costs
     silent = item(title="Casa en Siero", price=10000, area_m2=105, concelho="Siero", district="Asturias",
                   description="Casa de tres plantas con finca, agua y luz.")
-    _, why = score_detail(silent, mode="invest")
+    good = item(title="Casa en Siero", price=10000, area_m2=105, concelho="Siero", district="Asturias",
+                description="Casa de tres plantas con finca, agua y luz, en buen estado.")
+    s_est, g_est = costs.estimate(silent), costs.estimate(good)
+    s_mid = (s_est["all_in"]["low"] + s_est["all_in"]["high"]) / 2
+    g_mid = (g_est["all_in"]["low"] + g_est["all_in"]["high"]) / 2
+    assert s_mid > g_mid
+    _, why_s = score_detail(silent, mode="invest")
+    _, why_g = score_detail(good, mode="invest")
+    below = lambda rows: next(r for r in rows if "below local prices" in r)
+    assert "counted at 75%" in below(why_s) or "condition not stated" in below(why_s)
+    absurd = {**good, "price": 3000}
+    _, why = score_detail(absurd, mode="invest")
     assert any("so far below the local price" in r for r in why)
     assert not any(r.startswith("rent about") for r in why)
 

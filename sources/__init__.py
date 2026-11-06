@@ -66,6 +66,22 @@ _MODULES = ("pt", "es", "fr", "it", "nl", "hr", "de", "gr", "be", "ro", "pl", "c
             "at", "lu", "ie", "ee", "fi", "gb")
 _loaded = False
 
+# What an ordinary scan reads: forced sales (court, tax, social security,
+# insolvency, execution) in Portugal, Spain, France, the Netherlands and Italy,
+# plus bank repossessions in Portugal and Spain.
+# Every other source stays registered and can still be run by name. Belgium and
+# Luxembourg have none here: Biddit is walled off and the rest are agency portals.
+DEFAULT_SOURCES = frozenset({
+    "citius", "eleiloes", "financas", "leilosoc", "bidleiloeira",  # PT
+    "bcp", "bpi", "cgd", "santander", "whitestar",                 # PT banks
+    "centroleiloes", "imobancos",                                  # PT banks
+    "spain", "tgss", "eactivos",                                   # ES
+    "aliseda", "altamira", "solvia",                               # ES banks
+    "france", "vench",                                             # FR
+    "netherlands", "veilingnotaris", "vastgoedveiling",            # NL
+    "pvp_giustizia", "fallcoaste", "italy",                        # IT
+})
+
 
 def register(name: str, country: str, *, default: bool = True, description: str = "",
              kind: str = "", access: str = "", listing_type: str = "property",
@@ -74,7 +90,7 @@ def register(name: str, country: str, *, default: bool = True, description: str 
         if name in REGISTRY:
             raise ValueError(f"source {name!r} registered twice")
         REGISTRY[name] = Source(
-            name, country, func, default,
+            name, country, func, default and name in DEFAULT_SOURCES,
             description or (func.__doc__ or "").strip().split("\n")[0],
             kind=kind, access=access, listing_type=listing_type,
             docs_url=docs_url, limitation=limitation, parser_version=parser_version)

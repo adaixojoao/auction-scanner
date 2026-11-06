@@ -126,6 +126,17 @@ def test_good_condition_planning_uses_the_same_midpoint(db, add, monkeypatch):
     assert view["status"] == "over"
     assert view["renovation_point"] == "middle"
     assert view["all_in"]["low"] < view["planning_amount"] < view["all_in"]["high"]
+    # A cheaper within-budget home stays ahead of the near miss on the page,
+    # even when the near miss's raw rank is higher (dashboard used to re-sort
+    # by score after demoting near misses, which put them back on top).
+    add("eleiloes", "within", title="Moradia em bom estado", price=5000, area_m2=80,
+        description="moradia em bom estado")
+    dashboard._LISTS.clear()
+    dashboard.app.config["TESTING"] = True
+    page_ids = [it["id"] for it in dashboard.app.test_client()
+                .get("/api/listings?mode=both&min_score=0").get_json()["items"]]
+    assert "eleiloes:within" in page_ids and "eleiloes:midpoint" in page_ids
+    assert page_ids.index("eleiloes:within") < page_ids.index("eleiloes:midpoint")
 
 
 def test_unresolved_floor_is_not_labelled_within_budget():

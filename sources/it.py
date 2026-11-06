@@ -63,10 +63,31 @@ _DWELLING = re.compile(r"\b(?:appartament\w*|abitazion\w*|casa|villa|villett\w*|
                        r"rustico|alloggi\w*|immobile residenziale)\b", re.I)
 
 
-def _area(text: str) -> float | None:
+_SUPERFICIE = re.compile(
+    r"superficie\s+(?:commerciale|catastale|calpestabile|utile|lorda|"
+    r"escluse?\s+aree\s+scoperte)\s*(?:di\s+|di\s+circa\s+|mq\.?\s*)?"
+    r"(\d{1,4}(?:[.,]\d{1,2})?)", re.I)
+
+
+def _area(*texts: str) -> float | None:
     """The floor of a home, never its plot: "appartamento con terreno pertinenziale
     di circa 324 mq" (Sanremo, 2026-10-31) has no size of its own. A sale of land
-    alone keeps the land figure: that is its size."""
+    alone keeps the land figure: that is its size.
+
+    Title and description are both read: PVP often puts "superficie commerciale
+    di 76,64 mq" in the short title while the body is occupancy boilerplate.
+    A labelled commercial / cadastral surface wins over a bare "80 mq del terreno"
+    that appears earlier (Reggio Piazzetta San Biagio, 2026-11).
+    """
+    text = " ".join(t for t in texts if t)
+    labelled = []
+    for m in _SUPERFICIE.finditer(text or ""):
+        try:
+            labelled.append(float(m.group(1).replace(",", ".")))
+        except ValueError:
+            pass
+    if labelled:
+        return labelled[0]
     floor = find_floor_area(text)
     if floor or _DWELLING.search(text or ""):
         return floor
@@ -91,11 +112,13 @@ def pvp_listing(lot: dict) -> dict | None:
     if occ:
         raw["occupation"] = occ
     date = lot.get("dataOraVendita") or lot.get("dataVendita")
+    title = f"{(desc[:90] or 'Immobile')} · {where.get('citta') or ''}"[:200]
+    description = ". ".join(p for p in parts if p)[:3000] or None
     return make_listing(
         "pvp_giustizia", str(lid), "IT", id_prefix="pvp",
-        title=f"{(desc[:90] or 'Immobile')} · {where.get('citta') or ''}"[:200],
-        description=". ".join(p for p in parts if p)[:3000] or None, tipo="immobile",
-        area_m2=_area(desc), price=lot.get("prezzoBaseAsta"), min_price=lot.get("offertaMinima"),
+        title=title, description=description, tipo="immobile",
+        area_m2=_area(title, description or ""), price=lot.get("prezzoBaseAsta"),
+        min_price=lot.get("offertaMinima"),
         district=where.get("provincia"), concelho=where.get("citta"),
         url=f"{PVP}/pvp/it/detail_annuncio.page?idAnnuncio={lid}",
         date_end=f"{date}:00" if date and len(date) == 16 else date, raw_json=raw,

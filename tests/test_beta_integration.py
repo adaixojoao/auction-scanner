@@ -80,7 +80,7 @@ def test_v34_adds_the_evidence_tables_and_keeps_letters(tmp_path):
     conn.commit()
     conn.close()
     conn = dbmod.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == dbmod.SCHEMA_VERSION == 34
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == dbmod.SCHEMA_VERSION == 35
     assert conn.execute("SELECT letter_text FROM carta_log").fetchone()[0] == "Exact letter"
     assert conn.execute("SELECT COUNT(*) FROM evidence_current").fetchone()[0] == 0
     conn.close()

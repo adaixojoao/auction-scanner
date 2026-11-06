@@ -91,13 +91,26 @@ def test_the_price_used_is_the_one_you_would_really_pay():
 
 @pytest.mark.parametrize("title, low, high", [
     ("Moradia em ruínas", 70000, 120000),
-    ("Moradia que necessita de obras", 30000, 60000),
+    ("Moradia que necessita de obras", 40000, 80000),
     ("Moradia em bom estado", 0, 15000),
-    ("Moradia T3", 20000, 50000),              # condition not stated
+    ("Moradia T3", 70000, 110000),              # condition not stated: full renovation
 ])
 def test_renovation_is_banded_by_what_the_listing_admits_to(title, low, high):
     work = costs.estimate(home(title=title))["renovation"]
     assert (work["low"], work["high"]) == (low, high)
+
+
+def test_renovation_bands_are_configurable():
+    assert costs.renovation_bands({"costs": {"renovation_eur_m2": {"unknown": [900, 1300]}}})["unknown"] == (900.0, 1300.0)
+    work = costs.renovation(home(), cfg={"costs": {"renovation_eur_m2": {"unknown": [900, 1300]}}})
+    assert (work["low"], work["high"]) == (90000, 130000)
+
+
+def test_a_total_from_the_minimum_offer_says_so():
+    est = costs.estimate(home(price=30000, min_price=25500))
+    assert est["base"] == 25500
+    assert "minimum offer" in est["basis"]
+    assert "not the base value" in est["basis"]
 
 
 def test_renovation_only_for_a_home_whose_size_is_known():

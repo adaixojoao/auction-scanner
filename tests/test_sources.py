@@ -4,29 +4,27 @@ import urllib.parse
 import scraper
 from common import COUNTRY_NAMES
 from conftest import FakeResponse
-from sources import REGISTRY, load_all, run_source, sources_for
+from sources import DEFAULT_SOURCES, REGISTRY, load_all, run_source, sources_for
 from sources._cards import CardSite, listing_id_from_url, scrape_cards
 
 
 def test_registry_is_complete():
     load_all()
-    assert len(REGISTRY) == 112
+    assert len(REGISTRY) == 113
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
-    optional = {s.name for s in REGISTRY.values() if not s.default}
-    # closed / login-only / already covered by another source: not in default scans
-    # (and, since Sept 2026, the ones behind a bot wall or a broken certificate)
-    assert optional == {"idealista", "courtbid", "novobanco", "aeat",
-                        "sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece",
-                        "veilingbiljet", "justiz_auktion", "haya", "subastasactivas",
-                        "zvg_de", "encheres_publiques"}
-    # every country has at least one default source, except those whose only
-    # source is walled off; PT runs first
-    # Green-Acres covers FR, PT, ES and IT from one source, filed under "EU"
-    assert {s.country for s in sources_for(None)} == set(COUNTRY_NAMES) - {"CY"} | {"EU"}   # GR: ETAD
+    # An ordinary scan reads only forced sales in these countries; PT runs first.
+    # Belgium and Luxembourg have no forced-sale source that can be read.
+    assert {s.name for s in REGISTRY.values() if s.default} == DEFAULT_SOURCES
+    assert {s.country for s in sources_for(None)} == {"PT", "ES", "FR", "NL", "IT"}
     assert sources_for(None)[0].country == "PT"
-    assert [s.name for s in sources_for(["PT"])][:4] == ["eleiloes", "leilosoc", "bcp", "citius"]
+    assert {s.name for s in sources_for(["PT"])} == {"eleiloes", "leilosoc", "citius", "financas", "bidleiloeira",
+                                                     "bcp", "bpi", "cgd", "santander", "whitestar",
+                                                     "centroleiloes", "imobancos"}
+    assert sources_for(["BE", "LU"]) == []
+    # Everything else can still be run by name or listed as optional.
+    assert len(sources_for(None, include_optional=True)) == len(REGISTRY)
     # the CLI accepts every registered name
     parser = scraper.build_parser()
     for name in REGISTRY:
@@ -404,11 +402,21 @@ def test_spain_detail_parser():
 
 def test_netherlands_and_croatia_mappers():
     from sources.hr import _croatia_to_listing
-    from sources.nl import netherlands_listing
+    from sources.nl import bieden_via_internet, netherlands_listing, nl_details, nl_place_key
     nl = netherlands_listing({"id": 5, "kavelNaam": "Kerkstraat 1", "woningtype": "Woonhuis",
-                              "inzet": "€ 150.000", "url": "/kavel/5", "veilingwijze": "online"})
+                              "inzet": "€ 150.000", "url": "/kavel/5", "veilingwijze": "online",
+                              "internetonly": True})
     assert nl["price"] == 150000 and nl["url"] == "https://www.openbareverkoop.nl/kavel/5"
+    assert json.loads(nl["raw_json"])["bieden_via_internet"] is True
     assert netherlands_listing({"kavelNaam": "no id"}) is None
+    assert bieden_via_internet({"internetonly": False, "veilingwijze": "Hybride (zaal en internet)"})
+    assert not bieden_via_internet({"internetonly": False, "veilingwijze": "Zaal"})
+    assert nl_place_key("Haarlem, Kijkduinstraat 43", "Haarlem") == \
+        nl_place_key("Kijkduinstraat 43, HAARLEM (Woonhuis)", None)
+    detail = nl_details("<div>Type registergoed Woonhuis Type Executieveiling hypotheek "
+                        "Oppervlakte wonen 90 m 2 Internet-only Timed</div>")
+    assert detail["type"] == "Woonhuis" and detail["type_verkoop"] == "Executieveiling hypotheek"
+    assert detail["wonen_m2"] == 90 and detail["bieden_via_internet"] is True
     assert _croatia_to_listing({"uuid": "u1", "title": "Oglas o prodaji nekretnine"})["country"] == "HR"
     assert _croatia_to_listing({"uuid": "u2", "title": "Poziv vjerovnicima"}) is None
 
@@ -748,6 +756,30 @@ def test_eleiloes_area_field_off_by_100():
     assert fields["area_m2"] == 16950
     fields, _ = eleiloes_detail_fields({"areaTotal": 140.0, "descricao": "Moradia com 120 m2 de área útil"})
     assert fields["area_m2"] == 140                                  # close enough: the field stays
+
+
+def test_eleiloes_prefers_private_area_and_flags_a_conflict():
+    """203473: Área Total 80, Área Privativa 50 — store the private floor."""
+    from sources.pt import eleiloes_detail_fields
+    fields, extra = eleiloes_detail_fields({
+        "areaTotal": 80.0, "areaUtilPrivativa": 50.0,
+        "descricao": "Casa em Campos, Vieira do Minho",
+    })
+    assert fields["area_m2"] == 50
+    assert extra["area_total_m2"] == 80 and extra["area_privativa_m2"] == 50
+    assert "Área Total" in extra["area_conflict"] and "50" in extra["area_conflict"]
+    # Matching figures: no conflict note.
+    _, plain = eleiloes_detail_fields({"areaTotal": 80.0, "areaUtilPrivativa": 80.0, "descricao": "Casa"})
+    assert "area_conflict" not in plain
+
+
+def test_financas_uses_building_area_not_the_plot():
+    """1228.2026.16: plot 202 m², house 96 m² gross construction."""
+    from common import find_floor_area
+    text = ("Casa de R/C e 1º andar com balcão, com a área total do terreno de 202,0000m2, "
+            "área de implantação do edifício de 48,0000m2, área bruta de construção de 96,0000m2, "
+            "área bruta dependente de 48,0000m2 e área bruta privativa de 48,0000m2")
+    assert find_floor_area(text) == 96.0
 
 
 def test_eleiloes_observations_join_the_description():
