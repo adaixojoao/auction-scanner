@@ -1,13 +1,13 @@
-"""Planting grants that may apply to a forestry project: shown beside the
-model's figures, never in a score, a bid or a return.
+"""Planting grants that may apply to a forestry project.
 
 A grant pays part of planting (or, in France, replanting) and only once an
-application is approved; it never pays for the land. Each scheme is a row of
-data/forest_grants.csv with its legal text and the day it was checked. A row is
-"partial" until its per-hectare amounts have been read in the official text:
-it is then named as a possibility with what is known, and no euro figure is
-worked out. A "confirmed" row with a rate and a cost cap gives a figure in
-today's money: premiums are fixed in euros, so each later year is worth
+application is approved; it never pays for the land and it never sets a bid.
+Each scheme is a row of data/forest_grants.csv with its legal text and the day
+it was checked. A row is "partial" until its per-hectare amounts have been read
+in the official text: it is named as a possibility, and no euro figure is
+worked out or scored. A "confirmed" row with a rate and a cost cap gives a
+figure in today's money, and that figure is in the Forestry return as an
+estimate. Premiums are fixed in euros, so each later year is worth
 `forestry.INFLATION` less (forestry._npv).
 """
 from __future__ import annotations
@@ -29,6 +29,8 @@ FAVOURED = {"cork oak", "native mixed forest"}
 ORCHARDS = {"chestnut", "walnut", "carob"}
 NEVER = {"eucalyptus"}
 NOTE = "If an application is approved; not in the score or the return."
+CONFIRMED_NOTE = ("A confirmed figure is in the Forestry return as an estimate, "
+                  "and only if an application is approved. It does not set a bid.")
 
 
 def _number(value: str) -> float | None:
@@ -141,4 +143,6 @@ def for_project(country: str | None, crop: str | None, case: str | None, *, hect
         out["text"] = f"Spain's {case} grants are set by each region; none is in the table yet."
     else:
         out["text"] = f"No {case} grant for this country is in the table yet."
+    if any(g.get("eur_ha_year") for g in out["grants"]):
+        out["note"] = CONFIRMED_NOTE
     return out

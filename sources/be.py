@@ -179,8 +179,8 @@ def scrape_immovlan(db, max_price: float = 50000, **_):
     return scrape_named(db, "immovlan", max_price)
 
 
-@register("era", "BE", description="ERA — houses and flats for sale in Belgium")
+@register("era", "BE", description="ERA — houses, flats and plots for sale in Belgium")
 def scrape_era(db, max_price: float = 50000, **_):
-    """ERA — houses and flats for sale in Belgium."""
+    """ERA — houses, flats and plots for sale in Belgium, at or under the budget."""
     from sources._market import scrape_named
     return scrape_named(db, "era", max_price)

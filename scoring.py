@@ -1090,8 +1090,10 @@ _FOREST_PRIORITIES = (
     "proof that native trees would thrive. Inflation of about {inflation} a year works against "
     "the project: costs rise with it, income may not, and the return goal is after inflation. "
     "A planting grant (PEPAC in Portugal and Spain, the replanting aid in France) "
-    "pays part of new planting, never the purchase, and only if an application is approved: "
-    "mention one as a possibility to check, never as income."
+    "pays part of new planting, never the purchase, and only if an application is approved. "
+    "A confirmed published figure is in the Forestry return as an estimate if that application "
+    "is approved; it does not set a bid. An amount not yet confirmed is only a possibility, "
+    "and neither pays for the land."
 )
 
 
@@ -3933,6 +3935,25 @@ def _forest_block(item: dict, full: str, kind: str) -> str | None:
     return None
 
 
+def _confirmed_grant(country: str, crop: str, ha: float, existing, wooded: bool,
+                     site: dict | None, timber: dict | None) -> dict | None:
+    """The largest confirmed planting grant for this crop, or None.
+
+    A partial row has no figure and is not returned. The figure is an estimate
+    for the Forestry return only; it never sets a bid and it is not added when
+    the land cannot be worked."""
+    import forestry
+    import grants
+    case = grants.case_for(crop, established=crop in (existing or ()), wooded=wooded)
+    plant = forestry._plant_eur_ha(crop, ha, (site or {}).get("slope_mean"))
+    found = grants.for_project(country, crop, case, hectares=ha, plant_eur_ha=plant,
+                               timber_eur=timber.get("eur") if timber else None)
+    valued = [g for g in found["grants"] if g.get("status") == "confirmed" and g.get("eur_ha_year")]
+    if not valued:
+        return None
+    return max(valued, key=lambda g: g["eur_ha_year"])
+
+
 def _score_forest(item: dict, now: datetime | None, targets: dict | None,
                   out: dict | None = None) -> tuple[float, list[str]]:
     """Land the owner will keep as forest. A confirmed native stand ranks first;
@@ -4080,17 +4101,29 @@ def _score_forest(item: dict, now: datetime | None, targets: dict | None,
         # base-case income (Gamma), so nothing is counted
         kept = {**kept, "eur_ha_year": 0}
         reasons.append("no timber income counted: machines cannot reach most of the land")
-    roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, kept, timber,
+    grant = None
+    if kept and not unreachable:
+        grant = _confirmed_grant(item.get("country"), kept["crop"], ha, existing, wooded, site, timber)
+    scored = kept
+    if kept and grant:
+        scored = {**kept, "eur_ha_year": (kept.get("eur_ha_year") or 0) + grant["eur_ha_year"]}
+    roi = None if caps else forest_return(pay * (1 + costs) if pay else pay, ha, scored, timber,
                         # land nobody can work is not worth the regional forest price
                         land_gain=max(0.0, fair["eur_ha"] * ha - pay) if fair and pay and not unreachable else 0.0)
     if out is not None:
         out["roi"] = roi
     if roi is not None:
+        if grant:
+            grant_words = (f"a confirmed {grant['measure']} grant of about €{grant['eur_ha_year']:,.0f}/ha a year "
+                           f"is in this return as an estimate, and only if an application is approved; "
+                           f"it does not set a bid")
+        else:
+            grant_words = "planting grants not counted"
         s += curve(roi, FOREST_RETURN_POINTS) * w("price")
         reasons.append(f"return ≈ {roi:.1%} a year over {FOREST_ROI_YEARS} years after {forestry.INFLATION:.1%} "
                        f"inflation (costs rise with prices, income is not assumed to; timber now + the "
                        f"{'forest kept' if why in ('stand', 'mix') else 'earning crop'}, "
-                       f"on the price and the buying costs; planting grants not counted)"
+                       f"on the price and the buying costs; {grant_words})"
                        + (" — meets the 20% goal" if roi >= FOREST_ROI_TARGET else ""))
     elif pay and not caps:
         reasons.append("no return can be worked out — not ranked as a forestry project")

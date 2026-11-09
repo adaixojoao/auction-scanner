@@ -1,7 +1,7 @@
 # Forestry grants and inflation: still to do
 
-What shipped: `grants.py` and `data/forest_grants.csv` (named, never scored),
-and inflation at 3.5% a year counted against the project in `forestry.py`:
+What shipped: `grants.py` and `data/forest_grants.csv`, and inflation at 3.5% a
+year counted against the project in `forestry.py`:
 planting costs brought to 2026 prices, income fixed in euros and eroded every
 year, the return and the 20% goal after inflation. The items below need the
 official texts, which the cloud session could not open (its network policy
@@ -39,11 +39,17 @@ decision from the owner.
 8. **Belgium, Netherlands, Luxembourg.** Not researched.
 9. **Call deadlines.** Add a `call_closes` column so a closed call says so.
 
+## Decided
+
+10. **A confirmed grant reaches the Forestry score** (2026-11-09). A row that
+    is `confirmed` and has a per-hectare figure is in the Forestry return as an
+    estimate, and only if an application is approved. It does not set a bid and
+    it never pays for the land. A partial row is named only. The live table is
+    still partial, so scores do not move until the official amounts in items
+    1–7 are filled in.
+
 ## Needs a decision from the owner
 
-10. **Should a confirmed grant ever reach the score?** Today it never does.
-    A small weight, or a separate "with grants" ranking, is one change in
-    `scoring._score_forest`.
 11. **Inflation as a setting.** 3.5% is a constant (`forestry.INFLATION`).
     Move it to Settings (`config.DEFAULTS`) if it should be changed there.
 12. **Income that does keep pace.** Today no income rises with prices (the
@@ -54,8 +60,9 @@ decision from the owner.
 
 ## Small follow-ups
 
-14. Show a grant that may apply in the Forestry tab's reasons and the
-    investigation brief, not only in the details panel.
+14. Name a partial grant in the Forestry tab's reasons and the investigation
+    brief, not only in the details panel. A confirmed figure is already in the
+    return line.
 15. Bring the other dated costs to today's prices: the plant material in
     `forestry.PLANT_MATERIAL` and the orchard planting costs in `forestry.CROPS`
     are undated, and the 10-year land comparison (`land_prices.py`) does not

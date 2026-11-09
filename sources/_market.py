@@ -52,6 +52,12 @@ _RENT = re.compile(
     re.I)
 _UUID = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 
+# The ids the site's own search uses for a house, a flat and a plot.
+ERA_INDEX = "https://www.era.be/fr/jsonapi/index/property_index"
+ERA_TYPES = "46,44,63"
+ERA_PAGE_SIZE = 36          # the index rejects any other page size
+ERA_MAX_PAGES = 12          # past this the rest is read next scan, and the scan stays partial
+
 
 PORTALS: dict[str, Portal] = {
     "custojusto": Portal(
@@ -178,11 +184,12 @@ PORTALS: dict[str, Portal] = {
         ("https://www.immowelt.at/suche/kaufen/haus/preis--300000/osterreich/ad02at1",
          "https://www.immowelt.at/liste/oesterreich/grundstuecke/kaufen?pmi=0&pma={max}"),
         r"/expose/", _UUID, min_amount=1000),
-    # The results page mixes houses and flats. The path (town/type/slug) is the
-    # site's own id; there is no separate number on the card.
+    # The results page ignores a price limit and leads with new expensive homes.
+    # _scrape_era reads the search index the site's own filter uses. The path
+    # (town/type/slug) is the site's own id; there is no separate number on the card.
     "era": Portal(
         "era", "BE", "https://www.era.be",
-        ("https://www.era.be/fr/a-vendre",),
+        ("https://www.era.be/fr/jsonapi/index/property_index",),
         r"/fr/a-vendre/[^/]+/(?:maison|appartement|terrain)/",
         r"/a-vendre/([^?#]+)"),
     # prijs_max is the buyer's ceiling. The page is homes for sale; a card
@@ -217,6 +224,25 @@ def _amounts(text: str) -> list[float]:
             break
         rest = rest[cut + 1:]
     return found
+
+
+def _era_price(a) -> str | None:
+    """The card's own price line, or None when the card has none.
+
+    An empty string means the line is there but states no amount (price on
+    request). The reference number sits in the card text just before the euro
+    sign, and the first amount next to € would be that number."""
+    node = a
+    for _ in range(8):
+        if getattr(node, "select_one", None):
+            found = node.select_one(".field--price")
+            if found is not None:
+                return found.get_text(" ", strip=True)
+        parent = getattr(node, "parent", None)
+        if parent is None or getattr(parent, "name", None) in ("body", "html", "[document]"):
+            break
+        node = parent
+    return None
 
 
 def _card_text(a) -> str:
@@ -355,6 +381,12 @@ def parse_links(html: str, portal: Portal) -> list[dict]:
                 previous["tipo"] = _tipo(url, title)
             continue
         text = _card_text(a)
+        if portal.name == "era":
+            stated = _era_price(a)
+            if stated is not None:
+                if not find_price(stated):
+                    continue
+                text = f"{stated} {text}"
         amounts = _amounts(text)
         if not amounts:
             continue
@@ -608,6 +640,75 @@ def parse_portal(name: str, html: str) -> list[dict]:
     return PARSERS[portal.parser](html, portal)
 
 
+def _scrape_era(db, max_price: float):
+    """Houses, flats and plots at or under max_price, cheapest first.
+
+    The public results page does not honour a price limit. This is the search
+    the site's own filter uses. A later page that cannot be read, or a search
+    that runs past ERA_MAX_PAGES, leaves the scan partial so the unread
+    listings are not treated as gone."""
+    from sources import ScanCount
+
+    portal = PORTALS["era"]
+    session = make_session(timeout=25)
+    session.headers["Accept"] = "application/vnd.api+json"
+    total, pages = 0, 0
+    seen: set[str] = set()
+    finished = False
+    for page in range(ERA_MAX_PAGES):
+        try:
+            resp = session.get(ERA_INDEX, params={
+                "filter[sale_or_rent]": "sale",
+                "filter[property_type]": ERA_TYPES,
+                "filter[price]": f"(min:1;max:{int(max_price)})",
+                "sort": "price",
+                "pager[limit]": str(ERA_PAGE_SIZE),
+                "pager[offset]": str(page * ERA_PAGE_SIZE),
+            })
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            if page == 0:
+                raise
+            LOG.info("era: skipped a later page")
+            break
+        rows = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            if page == 0:
+                raise RuntimeError("ERA search did not return listings")
+            LOG.info("era: skipped a later page")
+            break
+        kept = 0
+        for row in rows:
+            teaser = ((row or {}).get("attributes") or {}).get("teaser")
+            if not isinstance(teaser, str):
+                continue
+            for item in parse_links(teaser, portal):
+                eid = item["external_id"]
+                price = item.get("price")
+                if eid in seen or not price or price > max_price:
+                    continue
+                seen.add(eid)
+                upsert_listing(db, make_listing(
+                    "era", eid, item.get("country") or portal.country,
+                    title=item["title"], description=item["description"], tipo=item["tipo"],
+                    area_m2=item["area_m2"], price=price, district=item["district"],
+                    concelho=item["concelho"], freguesia=item["freguesia"],
+                    url=item["url"], image_url=safe_url(item["image_url"]),
+                ))
+                kept += 1
+        pages += 1
+        if kept:
+            total += kept
+            db.commit()
+        if len(rows) < ERA_PAGE_SIZE:
+            finished = True
+            break
+        time.sleep(0.8)
+    LOG.info(f"era: {total} listings" + ("" if finished else ", search not finished"))
+    return ScanCount(total, "full" if finished else "partial", pages)
+
+
 def scrape_named(db, name: str, max_price: float) -> int:
     """Save listings at or under max_price. The first page's failure propagates.
 
@@ -615,6 +716,8 @@ def scrape_named(db, name: str, max_price: float) -> int:
     listings it would have shown are not marked as gone."""
     from sources import ScanCount
 
+    if name == "era":
+        return _scrape_era(db, max_price)
     portal = PORTALS[name]
     parser = PARSERS[portal.parser]
     session = make_session(timeout=25)
