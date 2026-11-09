@@ -2,6 +2,8 @@
 a trimmed copy of the live answer's shape, with invented addresses."""
 import json
 
+import pytest
+
 from conftest import FakeResponse
 from sources import REGISTRY, load_all
 
@@ -25,6 +27,9 @@ def test_astalegale_search_api_pages_and_masked_lots(db, fake_http):
 
     def handler(method, url, kw):
         assert url == "https://api.astalegale.net/Search" and kw["json"]["prezzoA"] == 30000
+        # The API refuses a request that does not name the public site.
+        assert kw["headers"]["Origin"] == "https://www.astalegale.net"
+        assert kw["headers"]["Referer"] == "https://www.astalegale.net/"
         page = kw["json"]["page"]
         return FakeResponse(json_data={"results": {"currentPage": pages.get(page, []), "pageSize": 2,
                                                    "totalResults": 6, "pageIndex": page}})
@@ -107,6 +112,34 @@ def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
     assert sum(u.endswith("/60580509") for u in calls) == 1
     again = db.execute("SELECT description FROM listings WHERE source='servihabitat'").fetchone()[0]
     assert "sin posesión" in again                          # kept on the next scan
+
+
+def test_servihabitat_a_hung_sweep_is_not_a_full_scan(db, fake_http, monkeypatch):
+    """One province answering and the rest timing out must not count as the whole site."""
+    import sources.es as es
+    monkeypatch.setattr(es, "SERVIHABITAT_PROVINCES", ("valencia", "teruel", "madrid", "sevilla"))
+
+    def handler(method, url, kw):
+        if url.rsplit("/", 1)[-1].split("?")[0] == "valencia":
+            return FakeResponse(_servi_card(60580509, "9.500"))
+        raise RuntimeError("timed out")
+
+    fake_http(handler)
+    result = REGISTRY["servihabitat"].func(db, max_price=30000)
+    assert result == 1 and result.scope == "partial" and result.pages_seen == 1
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE source='servihabitat'").fetchone()[0] == 1
+
+
+def test_servihabitat_the_first_province_failing_is_the_source_failing(db, fake_http, monkeypatch):
+    import sources.es as es
+    monkeypatch.setattr(es, "SERVIHABITAT_PROVINCES", ("valencia", "teruel"))
+
+    def handler(method, url, kw):
+        raise RuntimeError("timed out")
+
+    fake_http(handler)
+    with pytest.raises(RuntimeError, match="timed out"):
+        REGISTRY["servihabitat"].func(db, max_price=30000)
 
 
 def test_bot_walled_sources_are_out_of_the_default_scan():
