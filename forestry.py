@@ -504,8 +504,9 @@ PLAN_NOTE = (
     "usual transfer tax and notary for that country. Planting is the CAOF 2024 work plus a "
     "provisional cost for the plants. Crop income is the screening model, not a forecast. "
     f"Inflation of {INFLATION:.1%} a year is counted against you: planting costs today's prices, "
-    "income is not assumed to rise with them. A grant that may apply is "
-    "named, never counted: it depends on an approved application."
+    "income is not assumed to rise with them. A confirmed grant with a published figure is in "
+    "the Forestry return as an estimate, and only if an application is approved. It does not "
+    "set a bid and it never pays for the land. An amount not yet confirmed is named only."
 )
 
 
@@ -625,9 +626,15 @@ def project_plan(item: dict, budget: float) -> dict | None:
     if scoring.has_term(full, scoring.EUCALYPTUS_WORDS, negations=False) or (site.get("eucalyptus") or 0) >= 0.3:
         steps.append("Do not replant eucalyptus. New planting is normally restricted in Portugal (DL 96/2013); conversion to the crop above is the project.")
     if grant and grant["grants"]:
-        steps.append(f"Ask the forest service ({'ICNF' if country == 'PT' else 'the regional forest service'}) "
-                     "whether the call is open, which cap per hectare applies and whether this land counts as "
-                     f"farmland: {grant['text']}. Count it only once it is approved.")
+        who = "ICNF" if country == "PT" else "the regional forest service"
+        if any(g.get("eur_ha_year") for g in grant["grants"]):
+            steps.append(f"Ask the forest service ({who}) whether the call is open and this land is eligible: "
+                         f"{grant['text']}. The confirmed figure is in the Forestry return as an estimate, "
+                         "and only if an application is approved. It does not set a bid.")
+        else:
+            steps.append(f"Ask the forest service ({who}) "
+                         "whether the call is open, which cap per hectare applies and whether this land counts as "
+                         f"farmland: {grant['text']}. Count it only once it is approved.")
     if not steps:
         steps.append("Nothing to schedule until there is a price, a land budget and a crop the climate still supports.")
 

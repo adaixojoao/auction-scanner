@@ -1,4 +1,6 @@
 """Parsers for the public sale portals. Fixtures are the card shapes seen live."""
+import pytest
+
 from conftest import FakeResponse
 
 
@@ -237,3 +239,77 @@ def test_the_heading_wins_over_the_photo_link():
     <span>49 900 €</span>"""
     plot = parse_portal("laforet", land)[0]
     assert plot["tipo"] == "terreno" and "pouliguen" in plot["title"]
+
+
+def test_era_reads_the_price_line_not_the_reference_number():
+    from sources._market import parse_portal
+    card = """<article>
+    <a href="/fr/a-vendre/durbuy/maison/01461087">Maison</a>
+    <div class="field field--price">€ 95 000</div>
+    <span>01461087 € 95 000</span></article>"""
+    row = parse_portal("era", card)[0]
+    assert row["price"] == 95000
+    assert row["external_id"] == "durbuy/maison/01461087"
+    on_request = """<article>
+    <a href="/fr/a-vendre/huy/maison/une-maison">Maison</a>
+    <div class="field field--price on-demand">Prix sur demande</div>
+    <span>123456 € 10</span></article>"""
+    assert parse_portal("era", on_request) == []
+
+
+def test_era_asks_for_homes_under_the_budget_and_stops_at_a_short_page(db, fake_http):
+    from db import load_listings
+    from sources._market import ERA_PAGE_SIZE
+    from sources.be import scrape_era
+    cheap = """<article><a href="/fr/a-vendre/libin/maison/maison-a-renover">Maison à rénover</a>
+    <div class="field field--price">€ 80 000</div></article>"""
+    numbered = """<article><a href="/fr/a-vendre/durbuy/maison/01461087">Maison</a>
+    <div class="field field--price">€ 95 000</div><span>01461087 € 95 000</span></article>"""
+    dear = """<article><a href="/fr/a-vendre/spa/maison/villa">Villa</a>
+    <div class="field field--price">€ 450 000</div></article>"""
+
+    def handler(method, url, kw):
+        assert "property_index" in url
+        params = kw["params"]
+        assert params["filter[price]"] == "(min:1;max:100000)"
+        assert params["filter[property_type]"] == "46,44,63"
+        assert params["sort"] == "price"
+        offset = params["pager[offset]"]
+        if offset == "0":
+            cards = [cheap] * (ERA_PAGE_SIZE - 1) + [dear]
+        elif offset == "36":
+            cards = [numbered]
+        else:
+            raise AssertionError(offset)
+        return FakeResponse(json_data={"data": [{"attributes": {"teaser": c}} for c in cards]})
+
+    fake_http(handler)
+    result = scrape_era(db, max_price=100000)
+    assert result == 2 and result.scope == "full" and result.pages_seen == 2
+    rows = {r["price"]: r for r in load_listings(db, include_hidden=True)}
+    assert set(rows) == {80000, 95000}
+    assert rows[95000]["id"] == "era:durbuy/maison/01461087"
+
+
+def test_era_a_later_page_failing_is_not_a_full_scan(db, fake_http):
+    import requests
+    from sources._market import ERA_PAGE_SIZE
+    from sources.be import scrape_era
+    cheap = """<article><a href="/fr/a-vendre/libin/maison/maison-a-renover">Maison</a>
+    <div class="field field--price">€ 80 000</div></article>"""
+
+    def handler(method, url, kw):
+        if kw["params"]["pager[offset]"] == "0":
+            return FakeResponse(json_data={"data": [{"attributes": {"teaser": cheap}}] * ERA_PAGE_SIZE})
+        return FakeResponse(status=503)
+
+    fake_http(handler)
+    result = scrape_era(db, max_price=100000)
+    assert result == 1 and result.scope == "partial" and result.pages_seen == 1
+
+    def down(method, url, kw):
+        return FakeResponse(status=503)
+
+    fake_http(down)
+    with pytest.raises(requests.HTTPError):
+        scrape_era(db, max_price=100000)

@@ -1052,6 +1052,7 @@ def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
         db.execute("RELEASE SAVEPOINT listing_change_upsert")
         raise
     db.execute("RELEASE SAVEPOINT listing_change_upsert")
+    invalidate_snapshot()
     return result
 
 
@@ -1588,6 +1589,7 @@ def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | No
     db.execute("INSERT INTO listing_status_history (listing_id, status, reason, changed_at)"
                " VALUES (?,?,?,?)", (listing_id, status, reason, utcnow_iso()))
     db.commit()
+    invalidate_snapshot()
 
 
 def listing_status_history(db: sqlite3.Connection, listing_id: str) -> list[dict]:
@@ -3138,7 +3140,7 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
         if mode not in family_modes:
             continue
         budget = mode_max_price(cfg, mode, cfg.get("max_price") or 0)
-        for item in load_listings(db, mode=mode, **kw):
+        for item in publication_snapshot(db, mode=mode, **kw):
             # Each goal pays its own price: a listing over this goal's budget
             # cannot be bought for it, whatever it scores.
             if budget and (item.get("price") or 0) > budget:
@@ -3191,8 +3193,15 @@ SNAP_TTL: float = 10.0
 def publication_snapshot(db: sqlite3.Connection, *, filters: dict | None = None,
                          mode: str = "home", include_hidden: bool = False,
                          slim_hidden: bool = False, now: datetime | None = None,
-                         ttl: float | None = None) -> list[dict]:
-    """Database-scoped snapshot; consumers cannot mutate the cached copy."""
+                         where: str = "", params=(), apply_min_score: bool = True,
+                         refresh: bool = False, ttl: float | None = None) -> list[dict]:
+    """Database-scoped snapshot; consumers cannot mutate the cached copy.
+
+    The cache key includes every argument that changes which listings come back,
+    so a report and an alert that ask the same question share one read.
+    `refresh` always reads again. The Listings tab does not use this: it calls
+    load_listings so a shortlist or a dismiss is visible on the next click
+    even if this cache was not cleared."""
     import copy
 
     effective_ttl = ttl if ttl is not None else SNAP_TTL
@@ -3202,14 +3211,16 @@ def publication_snapshot(db: sqlite3.Connection, *, filters: dict | None = None,
     identity = ("file", os.path.realpath(path)) if path else ("memory", id(db))
     time_key = now.isoformat() if now is not None else None
     policy_key = json.dumps(_load_config_safe(), sort_keys=True, default=str)
-    cache_key = (identity, mode, include_hidden, slim_hidden, filters_key, time_key, policy_key)
+    cache_key = (identity, mode, include_hidden, slim_hidden, filters_key, time_key, policy_key,
+                 where, tuple(params), apply_min_score)
     with _SNAP_LOCK:
         stamp = time.monotonic()
         entry = _SNAP_CACHE.get(cache_key)
-        if entry is not None and stamp - entry[0] < effective_ttl:
+        if not refresh and entry is not None and stamp - entry[0] < effective_ttl:
             return copy.deepcopy(entry[1])
-        listings = load_listings(db, filters=filters, mode=mode,
-                                 include_hidden=include_hidden, slim_hidden=slim_hidden, now=now)
+        listings = load_listings(db, filters=filters, mode=mode, include_hidden=include_hidden,
+                                 slim_hidden=slim_hidden, now=now, where=where, params=params,
+                                 apply_min_score=apply_min_score, refresh=refresh)
         stored_copy = copy.deepcopy(listings)
         _SNAP_CACHE[cache_key] = (time.monotonic(), stored_copy)
         return copy.deepcopy(stored_copy)

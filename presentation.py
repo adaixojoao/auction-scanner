@@ -111,10 +111,10 @@ def all_in(item: dict, price_kind: str | None = None) -> dict:
     An unknown figure stays None: it is never shown as €0.
     """
     from costs import floor_resolution, repair_unresolved, selected_acquisition, selected_planning
-    from scoring import categorize, condition, property_kind
+    from scoring import categorize, condition, market_value_as_is, property_kind
     acq = selected_acquisition(item)
     empty = {"low": None, "high": None, "known_subtotal": None, "repairs_priced": False,
-             "basis_label": "", "missing": [], "excludes": []}
+             "basis_label": "", "missing": [], "excludes": [], "as_is": None}
     if (item.get("category") or categorize(item)) != "imoveis":
         return {**empty, "headline": "No cost estimate for this kind of item"}
     if acq["kind"] == "unusable":
@@ -140,11 +140,15 @@ def all_in(item: dict, price_kind: str | None = None) -> dict:
         excludes.append("IMT on a taxable value (VPT) above the price")
     low, high = _amount(range_.get("low")), _amount(range_.get("high"))
     priced = low is not None and high is not None and high >= low
+    as_is = market_value_as_is(item) if kind == "home" else None
     return {"low": round(low) if priced else None, "high": round(high) if priced else None,
             "known_subtotal": round(est["total"]) if _amount(est.get("total")) is not None else None,
             "repairs_priced": priced,
             "basis_label": f"Estimate at {(acq['kind'] != 'predicted' and _BASIS.get(price_kind)) or est.get('basis') or acq['label']}",
-            "missing": missing, "excludes": excludes, "headline": ""}
+            "missing": missing, "excludes": excludes, "headline": "",
+            "as_is": None if not as_is else {
+                "amount": round(as_is["amount"]), "after_work": round(as_is["after_work"]),
+                "note": as_is["note"]}}
 
 
 def checks(item: dict, rows: dict | None, cfg: dict | None) -> dict:
