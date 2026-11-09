@@ -277,11 +277,14 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
           AND date_end > ?
           AND tipo NOT IN ({",".join("?" * len(_NOT_PROPERTY))})
         ORDER BY CASE
+            -- Bare ownership needs the onus / area text; card titles are enough to queue.
+            WHEN LOWER(title) LIKE '%nua propriedade%'
+              OR LOWER(title) LIKE '%usufruto%' THEN 0
             WHEN LOWER(title) LIKE '%moradia%'
               OR LOWER(title) LIKE '%apartamento%'
               OR LOWER(title) LIKE '%casa%'
-              OR LOWER(title) LIKE '%vivenda%' THEN 0
-            ELSE 1
+              OR LOWER(title) LIKE '%vivenda%' THEN 1
+            ELSE 2
         END, price DESC
         LIMIT ?
     """, (DETAIL_VERSION, max_price, max_price, utcnow_iso()[:10], *_NOT_PROPERTY, limit)).fetchall()

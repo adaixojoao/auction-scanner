@@ -31,6 +31,29 @@ def test_a_percent_of_the_pd_is_a_share_but_all_of_it_is_not():
     assert scoring.is_percent_share("25% P.D VIVIENDA + ANEJO EN CABAÑAS RARAS")
     assert scoring.is_percent_share("FINCA URBANA EN MADRID 50% P. D. VIVIENDA")
     assert not scoring.is_percent_share("100% P.D. VIVIENDA EN VILLARRUBIA SANTIAGO")
+    # TGSS omits "de la": "25% NUDA PROPIEDAD …" (Aranjuez / Cádiz). Not 100%.
+    assert scoring.is_percent_share("25% NUDA PROPIEDAD LOCAL COMERCIAL EN ARANJUEZ F.R. 8243")
+    assert scoring.is_percent_share("16,6667% NUDA PROPIEDAD - PASEO MARITIMO, 23 CÁDIZ")
+    assert not scoring.is_percent_share("100% NUDA PROPIEDAD DE URBANA-CASA SITA EN MALAGON")
+
+
+def test_a_registry_folio_is_not_a_fractional_share():
+    # Benidorm TGSS: "F.R. 4/23617" used to trip is_fractional_share on the body.
+    text = ("25% NUDA PROPIEDAD VIVIENDA EN BENIDORM F.R. 4/23617 Descripción Detallada: "
+            "FINCA DE BENIDORM 4/23617 CRU: 03044000359758")
+    assert not scoring.is_fractional_share(text)
+    assert scoring.is_percent_share(text)  # the 25% is the real share signal
+
+
+def test_tgss_finca_urbana_title_with_local_comercial_body_is_not_a_home():
+    item = _sale(
+        "tgss",
+        "25% NUDA PROPIEDAD LOCAL COMERCIAL EN ARANJUEZ F.R. 8243. "
+        "FINCA DE ARANJUEZ N.º 8243. CRU 28075000033781. SUPERFICIE DE 20 M2.",
+        title="Finca Urbana en Aranjuez",
+    )
+    assert scoring.property_kind(item) == "other"
+    assert scoring.score(item, mode="bare")[0] == 0
 
 
 def test_an_ava_parte_indivisa_with_a_week_is_a_timeshare():

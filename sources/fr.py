@@ -434,8 +434,8 @@ NOTAIRES_SALE = {"VENTE": "sale", "VNI": "online auction (36h-immo)", "VAE": "no
 
 
 def parse_notaires(ad: dict) -> dict | None:
-    if not ad.get("annonceId") or ad.get("viager") == "OUI" or ad.get("bienVendu") == "OUI":
-        return None                    # a life annuity is not a purchase; sold is sold
+    if not ad.get("annonceId") or ad.get("bienVendu") == "OUI":
+        return None                    # sold is sold
     price = ad.get("prixTotal") or ad.get("prixAffiche")
     if not price:
         return None
@@ -444,15 +444,20 @@ def parse_notaires(ad: dict) -> dict | None:
     built = ad.get("surface")
     sale = NOTAIRES_SALE.get(ad.get("typeTransaction"), "sale")
     town = ad.get("communeNom") or ad.get("localiteNom")
+    is_viager = ad.get("viager") == "OUI"
     extras = [f"Terrain {land:,.0f} m²" if land else None, f"Surface {built:,.0f} m²" if built else None,
               f"Prix frais de notaire inclus: {price:,.0f} €",
-              "Vente aux enchères" if ad.get("typeTransaction") in ("VNI", "VAE") else None]
+              "Vente aux enchères" if ad.get("typeTransaction") in ("VNI", "VAE") else None,
+              # Bare ownership ranks viager occupé; other goals still skip on the word.
+              "Viager occupé" if is_viager else None]
     text = re.sub(r"\s*<br\s*/?>\s*", "\n", ad.get("descriptionFr") or "")
     text = re.sub(r"<[^>]+>", " ", text).strip()
     if re.match(r"\W*sous (?:compromis|offre)", text, re.I):
         return None                    # already promised to a buyer
     description = " · ".join(x for x in [text] + extras if x)
     raw = {"sale": sale}
+    if is_viager:
+        raw["viager"] = True
     if ad.get("origineJudiciaire") == "OUI":
         raw["judicial"] = True
     # Auction end date: notaires API uses several field names depending on sale type

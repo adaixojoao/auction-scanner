@@ -25,6 +25,8 @@ DEFAULTS = {
     "max_price": 100000,          # a home to live in
     "invest_max_price": 100000,   # a home to let or resell
     "land_max_price": 100000,     # a plot (investment land and forestry)
+    "bare_max_price": 100000,     # bare ownership / future possession
+    "bare_discount_rate": 0.06,   # annual discount for the wait estimate
     # The work spent on a listing (common.check_max_price, light_checks_from):
     # above check_max_price it is kept only so the scanner knows it, never
     # scored, checked or shown, and no budget goes above it; from

@@ -898,7 +898,9 @@ LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "outside_check", "kept_
                     "climate", "verified_geo", "geo_tried", "geo_street_tried", "bad_sale_pin", "sale_pin_checked",
                     # Without these a scraper's fresh row wiped them, so the same lookups were
                     # paid for again every scan and the best homes showed none (2026-11-02).
-                    "surroundings", "perizia", "outline", "site_check")
+                    "surroundings", "perizia", "outline", "site_check",
+                    # Detail-page body kept for Bare ownership (viager age / rente).
+                    "page_text", "era_detail_checked")
 
 
 def _keep_learned(new: str | None, old: str | None) -> str | None:
@@ -1118,6 +1120,10 @@ TWIN_UNIT_OPENING = 80    # characters of description that must match: portals t
 
 _FRACTION_RE = re.compile(r"\bfra(?:c|cc)ao\s+(?:autonoma\s+)?(?:designada\s+(?:pela\s+letra\s+)?)?\"?([a-z]{1,3})\b")
 _ARTICLE_RE = re.compile(r"\bartigo\s+(?:matricial\s+)?(?:urbano\s+|rustico\s+)?(?:n\.?\s*o?\s*)?(\d{1,6})\b")
+# Spanish Social Security / registro: "CRU 28075000033781", "CRU: 03044000359758",
+# "F.R. 8243", "F.R. 4/23617" — same unit when two TGSS cards share one.
+_CRU_RE = re.compile(r"\bcru\s*:?\s*(\d{8,20})\b", re.I)
+_FR_RE = re.compile(r"\bf\.?\s*r\.?\s*:?\s*(\d{1,6}(?:\s*/\s*\d{1,6})?)\b", re.I)
 
 
 def _unit_markers(r) -> dict:
@@ -1161,6 +1167,12 @@ def _unit_markers(r) -> dict:
         registry.add(("fracao", m.group(1)))
     for m in _ARTICLE_RE.finditer(text):
         registry.add(("artigo", m.group(1)))
+    # Prefer the raw description for CRU / F.R. (digits and slashes survive).
+    blob = f"{r['title'] or ''} {r['description'] or ''}"
+    for m in _CRU_RE.finditer(blob):
+        registry.add(("cru", m.group(1)))
+    for m in _FR_RE.finditer(blob):
+        registry.add(("fr", re.sub(r"\s+", "", m.group(1))))
     return {"address": address, "registry": frozenset(registry)}
 
 
@@ -1887,6 +1899,13 @@ def filter_reason(item: dict, filters: dict | None, mode: str = "home") -> str |
         from scoring import OCCUPANCY_PATTERNS
         keywords = [k for k in keywords
                     if not has_term(k, OCCUPANCY_PATTERNS, negations=False)]
+    if mode == "bare" and keywords:
+        # Usufruct / tenancy words are the point of this goal; shares stay excluded.
+        from scoring import OCCUPANCY_PATTERNS, USUFRUCT_PATTERNS
+        keywords = [k for k in keywords
+                    if not has_term(k, OCCUPANCY_PATTERNS, negations=False)
+                    and not has_term(k, USUFRUCT_PATTERNS, negations=False)
+                    and normalize(k) not in ("usufruct", "usufruto", "ocupado", "arrendado", "inquilino")]
     if keywords:
         hits = find_terms(f"{item.get('title') or ''} {item.get('description') or ''}", keywords)
         if hits:

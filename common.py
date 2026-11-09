@@ -53,6 +53,8 @@ FLAGS = {
 # so no goal is thrown away at scrape time; each tab then applies its own.
 LAND_MAX_PRICE = 100_000
 INVEST_MAX_PRICE = 100_000
+BARE_MAX_PRICE = 100_000
+BARE_DISCOUNT_RATE = 0.06   # annual discount for the Bare ownership wait estimate
 # The owner's rules for the work spent on a listing (2026-10-13): above
 # CHECK_MAX_PRICE (what you would pay, price_to_pay) a listing is kept only so
 # the scanner knows it, and is never scored, checked or shown; from
@@ -103,10 +105,25 @@ def invest_max_price(config: dict | None, max_price: float) -> float:
     return _budget(config, "invest_max_price", INVEST_MAX_PRICE, max_price)
 
 
+def bare_max_price(config: dict | None, max_price: float) -> float:
+    """The price limit for bare ownership / future possession."""
+    return _budget(config, "bare_max_price", BARE_MAX_PRICE, max_price)
+
+
+def bare_discount_rate(config: dict | None) -> float:
+    """Annual discount rate for the Bare ownership present-value estimate."""
+    try:
+        rate = float((config or {}).get("bare_discount_rate", BARE_DISCOUNT_RATE))
+    except (TypeError, ValueError):
+        rate = BARE_DISCOUNT_RATE
+    return max(0.0, min(0.25, rate))
+
+
 def scrape_max_price(config: dict | None, max_price: float) -> float:
-    """What a scrape must keep: the highest of the three budgets. A listing
+    """What a scrape must keep: the highest of the goal budgets. A listing
     above every budget can serve no goal, so it is not stored."""
-    return max(invest_max_price(config, max_price), land_max_price(config, max_price))
+    return max(invest_max_price(config, max_price), land_max_price(config, max_price),
+               bare_max_price(config, max_price))
 
 
 def mode_max_price(config: dict | None, mode: str, max_price: float) -> float:
@@ -121,6 +138,8 @@ def mode_max_price(config: dict | None, mode: str, max_price: float) -> float:
         return 0.0
     if mode == "invest":
         return invest_max_price(config, max_price)
+    if mode == "bare":
+        return bare_max_price(config, max_price)
     if mode in ("land", "forest"):
         return land_max_price(config, max_price)
     return _capped(config, float(max_price))

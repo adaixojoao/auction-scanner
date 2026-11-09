@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 
 from common import (LOG, find_area, find_price, make_listing, make_session,
-                    normalize, safe_url, to_number)
+                    normalize, patch_raw, safe_url, to_number)
 from db import upsert_listing
 
 
@@ -640,6 +640,61 @@ def parse_portal(name: str, html: str) -> list[dict]:
     return PARSERS[portal.parser](html, portal)
 
 
+def era_detail_text(html: str) -> str:
+    """Plain text of an ERA property page for age / bouquet / rente parsing."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag in soup(["script", "style", "noscript", "svg"]):
+        tag.decompose()
+    root = (soup.select_one("article") or soup.select_one("main")
+            or soup.select_one("[class*='property']") or soup.body or soup)
+    text = re.sub(r"\s+", " ", root.get_text(" ", strip=True) if root else "")
+    return text[:8000]
+
+
+def enrich_era_details(db, session=None, limit: int = 40) -> int:
+    """Open ERA property pages that mention viager (or still lack page_text).
+
+    Card teasers rarely state the seller's age or the monthly rente; Bare
+    ownership needs those. Stores page_text via patch_raw so a later index
+    scrape does not wipe it (LEARNED_RAW_KEYS)."""
+    from datetime import date
+
+    session = session or make_session(timeout=25)
+    rows = db.execute("""
+        SELECT id, url, title, description, raw_json FROM listings
+        WHERE source = 'era' AND url IS NOT NULL
+          AND (raw_json IS NULL OR raw_json NOT LIKE '%"era_detail_checked"%')
+          AND (
+            LOWER(COALESCE(title,'') || ' ' || COALESCE(description,'')) LIKE '%viager%'
+            OR raw_json LIKE '%"viager"%'
+          )
+        ORDER BY first_seen DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    filled = 0
+    today = date.today().isoformat()
+    for row in rows:
+        item = dict(row)
+        try:
+            resp = session.get(item["url"])
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.debug(f"era detail {item['id']}: {e}")
+            patch_raw(db, item["id"], {"era_detail_checked": today})
+            continue
+        text = era_detail_text(resp.text)
+        changes = {"era_detail_checked": today}
+        if text and len(text) > 80:
+            changes["page_text"] = text
+            filled += 1
+        patch_raw(db, item["id"], changes)
+        time.sleep(0.6)
+    if rows:
+        db.commit()
+        LOG.info(f"era details: {len(rows)} checked, page_text for {filled}")
+    return filled
+
+
 def _scrape_era(db, max_price: float):
     """Houses, flats and plots at or under max_price, cheapest first.
 
@@ -705,6 +760,11 @@ def _scrape_era(db, max_price: float):
             finished = True
             break
         time.sleep(0.8)
+    # Card text rarely has bouquet / rente / age; fill those for viager ads.
+    try:
+        enrich_era_details(db, make_session(timeout=25))
+    except Exception as e:
+        LOG.debug(f"era detail enrich: {e}")
     LOG.info(f"era: {total} listings" + ("" if finished else ", search not finished"))
     return ScanCount(total, "full" if finished else "partial", pages)
 

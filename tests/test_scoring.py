@@ -33,16 +33,19 @@ def test_raw_proindiviso_flag_scores_zero():
 
 def test_raw_nuda_propiedad_flag_scores_zero():
     # Fotocasa sets raw["nuda_propiedad"]=True for isBareOwnership listings;
-    # the scorer must skip them even when the title says nothing about usufruct.
+    # other goals still skip them; Bare ownership ranks them.
     import json
-    sc, reasons = score(item(
+    row = item(
         source="fotocasa", country="ES",
         title="Casa en Madrid, Calle Mayor",
         description="Magnífica vivienda.",
         price=45000, area_m2=90,
         raw_json=json.dumps({"nuda_propiedad": True}),
-    ))
+    )
+    sc, reasons = score(row)
     assert sc == 0 and "usufruct" in reasons[0]
+    bare, bare_why = score(row, mode="bare")
+    assert bare > 0 and any("bare ownership" in r.lower() or "nuda" in r.lower() for r in bare_why)
 
 
 def test_placeholder_price_scores_zero():

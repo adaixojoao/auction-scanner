@@ -14,15 +14,19 @@ def test_registry_is_complete():
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
-    # An ordinary scan reads only forced sales in these countries; PT runs first.
-    # Belgium and Luxembourg have no forced-sale source that can be read.
+    # An ordinary scan reads the default sources in these countries; PT runs first.
+    # Luxembourg still has no default source; Belgium's is ERA (agency, under budget).
     assert {s.name for s in REGISTRY.values() if s.default} == DEFAULT_SOURCES
-    assert {s.country for s in sources_for(None)} == {"PT", "ES", "FR", "NL", "IT"}
+    assert {s.country for s in sources_for(None)} == {"PT", "ES", "FR", "NL", "IT", "BE"}
     assert sources_for(None)[0].country == "PT"
     assert {s.name for s in sources_for(["PT"])} == {"eleiloes", "leilosoc", "citius", "financas", "bidleiloeira",
                                                      "bcp", "bpi", "cgd", "santander", "whitestar",
                                                      "centroleiloes", "imobancos"}
-    assert sources_for(["BE", "LU"]) == []
+    assert {s.name for s in sources_for(["BE"])} == {"era"}
+    assert "notaires" in {s.name for s in sources_for(["FR"])}
+    assert sources_for(["LU"]) == []
+    assert "astalegale" in {s.name for s in sources_for(["IT"])}
+    assert "servihabitat" in {s.name for s in sources_for(["ES"])}
     # Everything else can still be run by name or listed as optional.
     assert len(sources_for(None, include_optional=True)) == len(REGISTRY)
     # the CLI accepts every registered name
@@ -1128,6 +1132,22 @@ def test_immoweb_keeps_plain_sales_and_skips_annuities_and_options():
     assert parse_immoweb(_immoweb_ad(flags={"main": "under_option", "secondary": []}), "maison") is None
     assert parse_immoweb(_immoweb_ad(flags={"main": None, "secondary": ["life_annuity"]}), "maison") is None
     assert immoweb_results(":results='[{&quot;id&quot;:1}]'") == [{"id": 1}]
+
+
+def test_era_detail_text_keeps_viager_figures():
+    from sources._market import era_detail_text
+    html = """
+    <html><body><main><article>
+      <h1>Villa à Awans en viager occupé</h1>
+      <p>Bouquet 80 000 €. Rente viagère 450 € / mois. Crédirentière âgée de 78 ans.</p>
+      <script>void(0)</script>
+    </article></main></body></html>
+    """
+    text = era_detail_text(html)
+    assert "Bouquet 80 000" in text and "450" in text and "78 ans" in text
+    assert "void" not in text
+
+
 def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
     from sources.fr import parse_notaires
     ad = {"annonceId": 2082120, "prixAffiche": 10000, "prixTotal": 10600, "typeBien": "MAI", "typeTransaction": "VENTE",
@@ -1137,7 +1157,10 @@ def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
     row = parse_notaires(ad)
     assert row["id"] == "notaires:2082120" and row["price"] == 10600          # notary fees included
     assert row["area_m2"] == 30 and row["concelho"] == "Berrien" and "<br>" not in row["description"]
-    assert parse_notaires({**ad, "viager": "OUI"}) is None
+    # Viager is kept for the Bare ownership goal; other goals still skip on the word.
+    viager = parse_notaires({**ad, "viager": "OUI"})
+    assert viager and "Viager occupé" in viager["description"]
+    assert json.loads(viager["raw_json"])["viager"] is True
     assert parse_notaires({**ad, "descriptionFr": "Sous compromis : maison"}) is None
     land = parse_notaires({**ad, "typeBien": "TER"})
     assert land["tipo"] == "terrain" and land["area_m2"] == 2111
