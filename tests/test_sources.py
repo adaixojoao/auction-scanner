@@ -23,6 +23,7 @@ def test_registry_is_complete():
                                                      "bcp", "bpi", "cgd", "santander", "whitestar",
                                                      "centroleiloes", "imobancos"}
     assert {s.name for s in sources_for(["BE"])} == {"era"}
+    assert "notaires" in {s.name for s in sources_for(["FR"])}
     assert sources_for(["LU"]) == []
     assert "astalegale" in {s.name for s in sources_for(["IT"])}
     assert "servihabitat" in {s.name for s in sources_for(["ES"])}
@@ -1131,6 +1132,22 @@ def test_immoweb_keeps_plain_sales_and_skips_annuities_and_options():
     assert parse_immoweb(_immoweb_ad(flags={"main": "under_option", "secondary": []}), "maison") is None
     assert parse_immoweb(_immoweb_ad(flags={"main": None, "secondary": ["life_annuity"]}), "maison") is None
     assert immoweb_results(":results='[{&quot;id&quot;:1}]'") == [{"id": 1}]
+
+
+def test_era_detail_text_keeps_viager_figures():
+    from sources._market import era_detail_text
+    html = """
+    <html><body><main><article>
+      <h1>Villa à Awans en viager occupé</h1>
+      <p>Bouquet 80 000 €. Rente viagère 450 € / mois. Crédirentière âgée de 78 ans.</p>
+      <script>void(0)</script>
+    </article></main></body></html>
+    """
+    text = era_detail_text(html)
+    assert "Bouquet 80 000" in text and "450" in text and "78 ans" in text
+    assert "void" not in text
+
+
 def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
     from sources.fr import parse_notaires
     ad = {"annonceId": 2082120, "prixAffiche": 10000, "prixTotal": 10600, "typeBien": "MAI", "typeTransaction": "VENTE",

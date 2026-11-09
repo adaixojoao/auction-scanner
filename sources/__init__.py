@@ -77,7 +77,7 @@ DEFAULT_SOURCES = frozenset({
     "centroleiloes", "imobancos",                                  # PT banks
     "spain", "tgss", "eactivos",                                   # ES
     "aliseda", "altamira", "solvia", "servihabitat",               # ES banks
-    "france", "vench",                                             # FR
+    "france", "vench", "notaires",                                 # FR (notaires: viager / nue-propriété)
     "netherlands", "veilingnotaris", "vastgoedveiling",            # NL
     "pvp_giustizia", "fallcoaste", "italy", "astalegale",          # IT
     "era",                                                         # BE agency (price-filtered)

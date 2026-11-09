@@ -35,6 +35,34 @@ def test_classify_bare_pt_and_skip_usufruct_only():
     ))
     assert only["kind"] == "skip" and "usufruct" in only["why"].lower()
 
+    # Card title says MORADIA; the body opens as the right itself (Pombal).
+    pombal = bare_ownership.classify(_item(
+        title="MORADIA - POMBAL",
+        description=(
+            "Usufruto do prédio urbano sito na Rua da Milala nº 5, Lugar Ramos, "
+            "casa de habitação de r/c e 1º andar."
+        ),
+        source="eleiloes", price=42562, area_m2=183,
+    ))
+    assert pombal["kind"] == "skip" and "usufruct" in pombal["why"].lower()
+
+
+def test_tgss_percent_nuda_is_skipped_as_a_share():
+    row = _item(
+        country="ES", source="tgss",
+        title="Finca Urbana en Cádiz",
+        description="16,6667% NUDA PROPIEDAD - PASEO MARITIMO, 23 CÁDIZ. Usufructo vitalicio.",
+        price=22129, area_m2=71,
+    )
+    assert bare_ownership.classify(row)["kind"] == "skip"
+    assert score(row, mode="bare")[0] == 0
+
+
+def test_spanish_anos_age_is_read_after_normalize():
+    holders = bare_ownership.extract_holders(
+        "Usufructo vitalicio a favor de persona de 78 años de edad.")
+    assert any(h["age"] == 78 for h in holders)
+
 
 def test_classify_quinhao_is_not_a_candidate():
     # User case NP1271802026-style: a hereditary share is not bare ownership of the home.
@@ -221,8 +249,8 @@ def test_notaires_viager_flag_classifies_as_occupe():
 
 
 def test_fr_nue_propriete_gap_is_collection_not_classifier():
-    # Classifier recognises the French term; the DB has none because default FR
-    # scrapes (vench/france) rarely store that phrase, and notaires used to drop viager.
+    # Classifier recognises the French term; the DB was empty because vench/france
+    # cards rarely store it and notaires was off the default scan (now on).
     got = bare_ownership.classify(_item(
         country="FR",
         title="Appartement — nue-propriété",

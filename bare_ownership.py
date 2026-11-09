@@ -38,6 +38,12 @@ RIGHT_ONLY = [
     "usufruto de ruina", "usufruto de ruína", "usufruto -", "usufruto no predio",
     "usufruto no prédio", "usufruto em imovel", "usufruto em imóvel",
     "usufruto - terreno", "usufruto-terreno",
+    # eleiloes opens the card as the right itself: "Usufruto do prédio urbano…"
+    # (title may only say "MORADIA"). Not "sujeito a usufruto" / burden wording.
+    "usufruto do predio", "usufruto do prédio", "usufruto de predio", "usufruto de prédio",
+    "usufruto do imovel", "usufruto do imóvel", "usufruto da moradia",
+    "usufruto da fracao", "usufruto da fracção", "usufruto da habitacao",
+    "usufruto da habitação",
 ]
 
 # (b) Explicit purge / caducidade on forced sale — never inferred.
@@ -73,11 +79,21 @@ JOINT_TERMS = [
 VIAGER_OCCUPIED = ["viager occupe", "viager occupé", "viager avec réserve"]
 VIAGER_FREE = ["viager libre"]
 
+# Matched on normalize(text): accents stripped so "años" → "anos".
 _AGE_YEARS = re.compile(
-    r"\b(\d{2})\s*anni\b|\bedad(?:\s+de)?\s+(\d{2})\b|\bidade(?:\s+de)?\s+(\d{2})\b"
-    r"|\b(\d{2})\s*anos?\b|\b(\d{2})\s*years?\s*old\b"
-    r"|\b(?:agé|agee|âgé|âgée)\s*(?:e\s*)?(?:de\s+)?(\d{2})\s*ans\b"
-    r"|\b(\d{2})\s*ans\b",
+    r"\b(\d{2})\s*anni\b"
+    r"|\bedad(?:\s+de)?\s+(\d{2})\b"
+    r"|\bidade(?:\s+de)?\s+(\d{2})\b"
+    r"|\b(\d{2})\s*anos?\b"
+    r"|\b(\d{2})\s*years?\s*old\b"
+    r"|\bagee?\s*(?:e\s*)?(?:de\s+)?(\d{2})\s*ans\b"
+    r"|\b(\d{2})\s*ans\b"
+    r"|\busufructuari[oa]s?\s+(?:de\s+)?(\d{2})\s*anos\b"
+    r"|\b(?:de\s+)?(\d{2})\s*anos\s+de\s+edad\b"
+    r"|\beta\s+(?:di\s+)?(\d{2})\b"
+    r"|\bage\s+(?:de\s+)?(\d{2})\b"
+    r"|\bpersona\s+de\s+(\d{2})\s*anos\b"
+    r"|\bdi\s+(\d{2})\s*anni\b",
     re.I,
 )
 _BOUQUET = re.compile(
@@ -92,7 +108,8 @@ _RENTE_MONTH = re.compile(
 )
 _BIRTH = re.compile(
     r"\bnascid[oa]\s+(?:em\s+)?(\d{4})\b|\bnato\s+(?:nel\s+)?(\d{4})\b"
-    r"|\bnacido\s+(?:en\s+)?(\d{4})\b|\bné(?:e)?\s+en\s+(\d{4})\b",
+    r"|\bnacid[oa]\s+(?:en\s+)?(\d{4})\b|\bne+?\s+en\s+(\d{4})\b"
+    r"|\bnato\s+nel\s+(\d{4})\b|\bgeboren\s+(?:in\s+|am\s+)?(\d{4})\b",
     re.I,
 )
 _SEX_F = re.compile(r"\b(mulher|senhora|esposa|coniuge femminile|moglie|mujer|épouse|madame)\b", re.I)
@@ -174,23 +191,24 @@ def extract_viager(text: str, *, listed_price: float | None = None) -> dict:
 
 def extract_holders(text: str, *, now_year: int = 2026) -> list[dict]:
     """Ages (and sex when the text says) of usufructuaries / tenants named in the notice."""
+    raw = text or ""
+    blob = normalize(raw)
     holders = []
-    for m in _AGE_YEARS.finditer(text or ""):
+    for m in _AGE_YEARS.finditer(blob):
         age = next(int(g) for g in m.groups() if g)
         if 40 <= age <= 110:
             holders.append({"age": age, "sex": None, "basis": m.group(0)})
-    for m in _BIRTH.finditer(text or ""):
-        year = next(int(g) for g in m.groups() if g)
-        age = now_year - year
-        if 40 <= age <= 110:
-            holders.append({"age": age, "sex": None, "basis": m.group(0)})
-    # Sex from nearby words — best-effort, optional.
-    blob = normalize(text or "")
+    # Birth years: keep raw accents ("né en") then also the stripped form.
+    for src in (raw, blob):
+        for m in _BIRTH.finditer(src):
+            year = next(int(g) for g in m.groups() if g)
+            age = now_year - year
+            if 40 <= age <= 110:
+                holders.append({"age": age, "sex": None, "basis": m.group(0)})
     sex = "F" if _SEX_F.search(blob) and not _SEX_M.search(blob) else (
         "M" if _SEX_M.search(blob) and not _SEX_F.search(blob) else None)
     if sex and holders and holders[0].get("sex") is None:
         holders[0]["sex"] = sex
-    # Deduplicate identical ages.
     seen, out = set(), []
     for h in holders:
         key = h["age"]

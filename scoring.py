@@ -39,6 +39,16 @@ FRAC_PATTERNS = [
 # numbers ("12/18.0T8…") or door numbers ("nº 12/14").
 _SHARE_RE = re.compile(r"(?<![\d/.])(\d{1,6})\s*/\s*(\d{1,6})(?![\d/.])")
 _HOUSE_NUMBER_RE = re.compile(r"(?:\bn\.?\s*[ºo°]|\bn[uú]mero|\bporta)\s*$", re.I)
+# Spanish land-registry refs look like shares when the body is scanned:
+# "F.R. 4/23617", "FINCA DE BENIDORM 4/23617 CRU: …" — not a 4/23617 ownership share.
+_REGISTRY_REF_BEFORE = re.compile(
+    # "F.R. 4/23617", "folio 12/345", and "FINCA DE BENIDORM 4/23617" (place name
+    # between finca and the book/folio number).
+    r"(?:f\.?\s*r\.?|folio|tomo|libro|cru|"
+    r"finca(?:\s+(?:de|registral))?(?:\s+[A-Za-zÀ-ÿ'’.-]+){0,4}|"
+    r"n\.?\s*[ºo°]?)\s*$",
+    re.I,
+)
 
 
 # A share stated as a percentage, usually only in the description.
@@ -53,6 +63,9 @@ _PERCENT_SHARE = re.compile(
     # indivisa", "una cincuenta y dos ava parte indivisa", "25% P.D" (not "100% P.D").
     r"|\bavas? partes? indivisas?\b|\bparte indivisa\b"
     r"|(?<![\d.,])\d{1,2}(?:[.,]\d+)?\s*%\s*p\.\s?d\b"
+    # TGSS cards omit "de la": "25% NUDA PROPIEDAD LOCAL COMERCIAL",
+    # "16,6667% NUDA PROPIEDAD". `\d{1,2}` already refuses a leading 100%.
+    r"|(?<![\d.,])\d{1,2}(?:[.,]\d+)?\s*%\s*nuda\s+propiedad\b"
     # "venda de 50% do direito da propriedade", "apenas 50% do imóvel".
     # Not "50% do valor base": that is an auction's opening bid.
     r"|\b\d{1,2}(?:[.,]\d+)?\s*%\s+(?:do|da|de|del|de la|della|des)\s+"
@@ -101,11 +114,15 @@ def is_percent_share(text: str) -> bool:
 def is_fractional_share(title: str) -> bool:
     if has_term(title, FRAC_PATTERNS, negations=False):
         return True
-    for m in _SHARE_RE.finditer(title or ""):
+    text = title or ""
+    for m in _SHARE_RE.finditer(text):
         part, whole = int(m.group(1)), int(m.group(2))
         if 1900 <= whole <= 2100:          # "11/2023", "DMI-1014/2026": a date or a reference
             continue
-        if _HOUSE_NUMBER_RE.search(title[:m.start()]):   # "nº 12/14": door numbers
+        before = text[:m.start()]
+        if _HOUSE_NUMBER_RE.search(before):   # "nº 12/14": door numbers
+            continue
+        if _REGISTRY_REF_BEFORE.search(before):  # "F.R. 4/23617", "FINCA … 4/23617"
             continue
         if 0 < part < whole:
             return True
@@ -1360,6 +1377,14 @@ def property_kind(item: dict) -> str | None:
         return "other"
     found = kind_of(title)
     if found:
+        # TGSS titles are often "Finca Urbana en …" while the body sells a
+        # local comercial / garage. Trust the body's shop subject when it
+        # names no dwelling.
+        if found in ("home", "urban_plot") and has_term(desc, _SHOP_SUBJECT, negations=False):
+            homes = [w for w in find_terms(desc, _HOUSE_WORDS_NOT_TYPOLOGY, negations=False)
+                     if w != "casa" or not _CASA_ADDRESS.search(normalize(desc))]
+            if not homes:
+                return "other"
         return found
     if tipo in HOUSE_TYPES:
         return "home"
