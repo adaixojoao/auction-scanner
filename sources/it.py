@@ -213,9 +213,11 @@ def scrape_astalegale(db, max_price: float = 100000, **_):
     homes up to the budget, 12 a page)."""
     session = make_session(timeout=30)
     total, seen = 0, set()
+    # The search API answers the public site and refuses a request that does not name it.
+    headers = {"Origin": ASTALEGALE, "Referer": ASTALEGALE + "/", "Accept": "application/json"}
     for page in range(1, ASTALEGALE_MAX_PAGES + 1):
         resp = session.post(ASTALEGALE_API, json={"categories": ["residenziali"], "prezzoA": int(max_price),
-                                                  "page": page})
+                                                  "page": page}, headers=headers)
         resp.raise_for_status()
         results = (resp.json() or {}).get("results") or {}
         lots = results.get("currentPage") or []

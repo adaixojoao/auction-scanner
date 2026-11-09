@@ -668,17 +668,35 @@ def _servihabitat_details(db, session, rows: list[dict], budget: list[int]) -> N
 @register("servihabitat", "ES")
 def scrape_servihabitat(db, max_price: float = 100000, **_):
     """servihabitat.com — CaixaBank repossessions, the cheapest homes of each province."""
-    session = make_session(timeout=30)
+    session = make_session(timeout=20)
     total, full = 0, []
     details_left = [SERVIHABITAT_DETAILS_PER_SCAN]
     found: list[dict] = []
+    # A day the site hangs used to time out every province, swallow each error
+    # and record a full scan of the one page that answered. Unseen homes then
+    # looked as if they had left the site. The first province's failure is the
+    # source's failure; a later run of failures stops the sweep as partial.
+    started = False
+    missed = False
+    consecutive = 0
+    pages = 0
     for province in SERVIHABITAT_PROVINCES:
         try:
             resp = session.get(f"{SERVIHABITAT}/es/venta/vivienda/{province}", params={"o": 4})
             resp.raise_for_status()
-        except Exception as e:  # noqa: BLE001: one province failing is not the source failing
+        except Exception as e:  # noqa: BLE001: a later province is not the whole site
+            if not started:
+                raise
+            missed = True
+            consecutive += 1
             LOG.info(f"Servihabitat {province}: {type(e).__name__}")
+            if consecutive >= 3:
+                LOG.warning("Servihabitat: stopping after repeated failures; the rest is read next scan")
+                break
             continue
+        started = True
+        consecutive = 0
+        pages += 1
         rows = parse_servihabitat_page(resp.text, province)
         if len(rows) >= 20 and all((r["price"] or 0) <= max_price for r in rows):
             full.append(province)
@@ -696,7 +714,7 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
     if full:
         LOG.info(f"Servihabitat: more within budget than one page in {', '.join(full)}")
     LOG.info(f"Servihabitat: {total} listings")
-    return total
+    return ScanCount(total, "partial" if missed else "full", pages)
 
 
 # Blocked by this PC's firewall on every scan, same as haya.es.
