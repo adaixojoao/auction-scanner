@@ -46,7 +46,7 @@ def test_filter_labels_are_associated_with_their_controls(listings):
 def test_goal_tabs_control_one_labelled_panel(listings):
     tabs = re.findall(r'<button type="button" id="(goal-\w+)" data-mode="(\w+)" role="tab" '
                       r'aria-controls="goal-results" aria-selected="(true|false)" tabindex="(0|-1)">', listings)
-    assert [t[1] for t in tabs] == ["both", "home", "invest", "land", "forest"]
+    assert [t[1] for t in tabs] == ["both", "home", "invest", "land", "forest", "bare"]
     assert [t[0] for t in tabs] == [f"goal-{t[1]}" for t in tabs]
     assert [t[2] for t in tabs].count("true") == 1 and [t[3] for t in tabs].count("0") == 1
     assert listings.count('role="tabpanel"') == 1

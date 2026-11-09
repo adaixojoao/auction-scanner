@@ -2637,6 +2637,8 @@ EDITABLE = {
     "max_price": None,            # one budget per goal (common.py)
     "invest_max_price": None,
     "land_max_price": None,
+    "bare_max_price": None,
+    "bare_discount_rate": None,
     "cash_on_hand": None,         # price + taxes + fees + low end of repairs
     "check_max_price": None,      # the work spent on a listing (common.py)
     "light_checks_from": None,

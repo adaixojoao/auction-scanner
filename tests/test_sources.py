@@ -14,15 +14,18 @@ def test_registry_is_complete():
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
-    # An ordinary scan reads only forced sales in these countries; PT runs first.
-    # Belgium and Luxembourg have no forced-sale source that can be read.
+    # An ordinary scan reads the default sources in these countries; PT runs first.
+    # Luxembourg still has no default source; Belgium's is ERA (agency, under budget).
     assert {s.name for s in REGISTRY.values() if s.default} == DEFAULT_SOURCES
-    assert {s.country for s in sources_for(None)} == {"PT", "ES", "FR", "NL", "IT"}
+    assert {s.country for s in sources_for(None)} == {"PT", "ES", "FR", "NL", "IT", "BE"}
     assert sources_for(None)[0].country == "PT"
     assert {s.name for s in sources_for(["PT"])} == {"eleiloes", "leilosoc", "citius", "financas", "bidleiloeira",
                                                      "bcp", "bpi", "cgd", "santander", "whitestar",
                                                      "centroleiloes", "imobancos"}
-    assert sources_for(["BE", "LU"]) == []
+    assert {s.name for s in sources_for(["BE"])} == {"era"}
+    assert sources_for(["LU"]) == []
+    assert "astalegale" in {s.name for s in sources_for(["IT"])}
+    assert "servihabitat" in {s.name for s in sources_for(["ES"])}
     # Everything else can still be run by name or listed as optional.
     assert len(sources_for(None, include_optional=True)) == len(REGISTRY)
     # the CLI accepts every registered name

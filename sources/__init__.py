@@ -76,10 +76,11 @@ DEFAULT_SOURCES = frozenset({
     "bcp", "bpi", "cgd", "santander", "whitestar",                 # PT banks
     "centroleiloes", "imobancos",                                  # PT banks
     "spain", "tgss", "eactivos",                                   # ES
-    "aliseda", "altamira", "solvia",                               # ES banks
+    "aliseda", "altamira", "solvia", "servihabitat",               # ES banks
     "france", "vench",                                             # FR
     "netherlands", "veilingnotaris", "vastgoedveiling",            # NL
-    "pvp_giustizia", "fallcoaste", "italy",                        # IT
+    "pvp_giustizia", "fallcoaste", "italy", "astalegale",          # IT
+    "era",                                                         # BE agency (price-filtered)
 })
 
 

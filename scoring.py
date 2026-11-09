@@ -338,6 +338,7 @@ MODE_WEIGHTS = {
     "invest": ("price", "beach", "sale", "heat", "risks", "population"),
     "land": ("price", "water", "risks", "sale", "population"),
     "forest": ("price", "heat", "water", "risks", "amoc"),
+    "bare": ("price", "sale", "population"),
 }
 # EUROPOP2019, mentioned only as a long-hold caution. A region projected to grow
 # scores nothing: the scenario is not a reason to buy. Below -10% by 2050 costs
@@ -999,6 +1000,8 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         import forestry
         return _FOREST_PRIORITIES.format(min_ha=FOREST_MIN_M2 // 10000, roi=f"{FOREST_ROI_TARGET:.0%}",
                                          years=FOREST_ROI_YEARS, inflation=f"{forestry.INFLATION:.1%}")
+    if mode == "bare":
+        return _BARE_PRIORITIES
     return (
         "A home (a house or a flat) to live in, at a very low price — not a plot, not a shop or a "
         "garage. A MUST: by the beach, the sea within 10 km, with more points the closer it is. "
@@ -1031,6 +1034,21 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         "a home in a flood zone is a risk."
     ) + _OUTLOOK_NOTE
 
+
+_BARE_PRIORITIES = (
+    "Bare ownership / future possession: buy a home cheap today that only becomes free later. "
+    "Wanted: nua propriedade / nuda propiedad / nuda proprietà (or a home sold subject to "
+    "usufruct or habitation), or a court sale that expressly says the burden caduca / is purged "
+    "on transfer, or an old protected tenancy with a low stated rent. Target: a home worth about "
+    "€100,000 free, bought for about 20–30% of that, with an elderly usufructuary or tenant "
+    "(65+, older is better). Years of wait come from official life tables by country, age and "
+    "sex; unknown age is a conservative guess and is labelled. Value today discounts the free "
+    "value for the wait at the configured rate and adds rent until then. Purchase tax uses the "
+    "country of the property (Dutch tax residency does not change that). Viager occupé is for a "
+    "later phase; viager libre is out. Selling only the usufruct, a quinhão, or diritto di "
+    "abitazione alone is out. All money figures are estimates. Risks (remição, tanteo, "
+    "occupato, rights registered before the mortgage) are named, not hidden."
+)
 
 _INVEST_PRIORITIES = (
     "A home (a house or a flat) bought to make money on, not to live in: the gap between what it "
@@ -1989,6 +2007,8 @@ def _score_mode(item: dict, now, targets, mode: str) -> tuple[float, list[str]]:
         return _score_forest(item, now, targets)
     if mode == "both":
         return _score_both(item, now, targets)
+    if mode == "bare":
+        return _charged(item, *_score_bare(item, now, targets))
     # A place to live. Investment land used to share this scorer, so a plot
     # picked up Portugal, summer heat and a cheap total in euros.
     return _charged(item, *_score_detail(item, now, targets))
@@ -2164,16 +2184,16 @@ def no_possession(item: dict, full: str) -> bool:
 PLACEHOLDER_PRICE_EUR = 100   # any price below this is a base-bid token or a data error
 
 
-def _skip_reason(item: dict, title: str, full: str) -> str | None:
-    """Never worth buying in any mode: a share, a caravan, a usufruct, subsidised
-    housing, a timeshare, a property the seller does not possess."""
+def _skip_reason(item: dict, title: str, full: str, *, mode: str | None = None) -> str | None:
+    """Never worth buying in this mode: a share, a caravan, subsidised housing,
+    a timeshare, a property the seller does not possess. Usufruct and viager
+    skip every goal except Bare ownership, which ranks them on their own."""
+    mode = mode if mode is not None else _MODE.get()
     pay = _pay(item)
     if pay and pay < PLACEHOLDER_PRICE_EUR:
         return f"placeholder price (€{pay:g}) — no real asking price, skip"
     if _raw(item).get("proindiviso"):
         return "fractional share (proindiviso) — skip"
-    if _raw(item).get("nuda_propiedad"):
-        return "usufruct — skip (bare ownership: usufructuary keeps living there)"
     # Title and description both go through the fraction matcher: "1/10",
     # "3/32", "9/16", "1/112" and "direito e ação" / "quinhão hereditário" /
     # "metade da fracção" live in the body as often as in the title.
@@ -2188,14 +2208,18 @@ def _skip_reason(item: dict, title: str, full: str) -> str | None:
         return "seasonal only: cannot be lived in all year or let — skip"
     if has_term(full, NOT_A_BUILDING, negations=False):
         return "mobile home or caravan, not a house — skip"
-    if has_term(full, USUFRUCT_PATTERNS):
-        return "usufruct — skip"
+    if mode != "bare":
+        if _raw(item).get("nuda_propiedad"):
+            return "usufruct — skip (bare ownership: usufructuary keeps living there — see Bare ownership)"
+        if has_term(full, USUFRUCT_PATTERNS):
+            return "usufruct — skip (see Bare ownership)"
+        if has_term(full, INSTALMENT_SALE):
+            return ("viager or vente à terme: the price is only the down payment, "
+                    "monthly payments follow — skip (see Bare ownership for viager occupé)")
     if has_term(full, SUBSIDISED_HOUSING):
         return "subsidised housing (buyer must qualify, resale price capped) — skip"
     if is_timeshare(full):
         return "timeshare (some weeks a year) — skip"
-    if has_term(full, INSTALMENT_SALE):
-        return "viager or vente à terme: the price is only the down payment, monthly payments follow — skip"
     if _visit_refused(item, full):
         return "cannot be visited — skip"
     return None
@@ -3340,6 +3364,166 @@ def wishes(item: dict) -> list[dict]:
     return out
 
 
+def _score_bare(item: dict, now, targets) -> tuple[float, list[str]]:
+    """Bare ownership / future possession: buy cheap today, free later.
+
+    Other modes still skip usufruct. This goal only ranks candidates that
+    bare_ownership.classify accepts. Figures are estimates.
+    """
+    import bare_ownership
+    import guesses
+    import life_tables
+    from common import bare_discount_rate, price_to_pay
+    from config import load_config
+    from costs import usufruct_value_share
+
+    title = item.get("title") or ""
+    full = f"{title} {item.get('description') or ''}"
+    skip = _skip_reason(item, title, full, mode="bare")
+    if skip:
+        return 0.0, [skip]
+
+    classified = bare_ownership.classify(item)
+    if classified["kind"] == "skip":
+        return 0.0, [classified["why"]]
+    if classified["kind"] == "viager_occupe":
+        return 0.0, [classified["why"] + " — not scored in phase 1 (PT/ES/IT)"]
+
+    kind = property_kind(item)
+    if kind != "home" and classified["kind"] != "purge":
+        return 0.0, ["a plot or non-home — Bare ownership is for a home you will possess later"]
+
+    reasons = [classified["why"]]
+    guessed = []
+    holders = list(classified.get("holders") or [])
+    age_guess = guesses.usufructuary_age_guess(holders)
+    fallback_age = None
+    if age_guess:
+        fallback_age = age_guess["age"]
+        guessed.append(age_guess["basis"])
+    wait = life_tables.wait_years(
+        holders, country=item.get("country"),
+        joint_survivor=bool(classified.get("joint_survivor")),
+        fallback_age=fallback_age,
+    )
+    if classified["kind"] == "purge":
+        wait_y = 0.0
+        reasons.append("possession when the sale closes (burden caduca / purged — as the notice states)")
+    elif wait.get("years") is None:
+        return 0.0, [*reasons, "no age for the wait — cannot estimate years to possession"]
+    else:
+        wait_y = float(wait["years"])
+        reasons.append(
+            f"about {wait_y:.0f} years to possession ({wait['basis']}; "
+            f"{wait['source']}, {wait['year']} — estimate)"
+        )
+
+    free = market_value_estimate(item)
+    pay = price_to_pay(item)
+    rent_m = classified.get("rent_eur_month")
+    rent_y = (rent_m or 0) * 12
+    if rent_m:
+        reasons.append(f"stated rent about €{rent_m:,.2f}/month (estimate of income until free)")
+
+    cfg = load_config()
+    discount = bare_discount_rate(cfg)
+    today = None
+    if free and wait_y is not None:
+        today = bare_ownership.present_value(
+            free_value=free, wait_years=wait_y, discount=discount, rent_eur_year=rent_y)
+        reasons.append(
+            f"estimate of value today about €{today:,.0f} "
+            f"(free about €{free:,.0f} discounted {discount:.0%}/year over {wait_y:.0f} years"
+            + (", plus rent" if rent_y else "")
+            + ") — estimate, not a valuation"
+        )
+    elif free:
+        today = free
+        reasons.append(f"estimate of free value about €{free:,.0f} — estimate, not a valuation")
+
+    age_for_tax = (max((h["age"] for h in holders), default=None)
+                   or (fallback_age if fallback_age else None))
+    if age_for_tax is not None:
+        split = usufruct_value_share(item.get("country"), age_for_tax)
+        if split.get("bare") is not None:
+            reasons.append(
+                f"tax tables put bare ownership at about {split['bare']:.0%} of full value "
+                f"at age {int(age_for_tax)} ({split['source']}) — estimate for the taxable base"
+            )
+
+    irr = None
+    if today and pay and free and wait_y and wait_y > 0:
+        irr = bare_ownership.irr_estimate(
+            pay=pay, free_value=free, wait_years=wait_y, rent_eur_year=rent_y)
+        if irr is not None:
+            reasons.append(f"rough IRR about {irr:.1%} a year if free value is realised then — estimate")
+
+    # Country-specific risks (warn, do not hide).
+    country = (item.get("country") or "").upper()
+    if country == "PT":
+        reasons.append("check remição (CPC art. 842) and any tenant / co-heir preference (CC art. 2130)")
+    elif country == "ES":
+        reasons.append("check tenant tanteo/retracto; notice may say sin posesión")
+    elif country == "IT":
+        reasons.append("check occupato dal debitore vs terzo con titolo opponibile; condo arrears")
+    reasons.append("a right registered before the mortgage/attachment normally does not fall with the sale")
+    reasons.append("bids below the minimum may need acceptance; auctioneer fees apply")
+
+    # Rank: display_score hides raw ≤ 50, so a real candidate starts above that.
+    # Want pay ≈ 20–30% of free value, older holders, purge, low rent.
+    rank = 58.0
+    if classified["kind"] == "purge":
+        rank += 20
+    if classified["kind"] == "old_rent":
+        rank += 8
+    if free and pay:
+        ratio = pay / free
+        if 0.15 <= ratio <= 0.35:
+            rank += 25
+            reasons.append(f"price about {ratio:.0%} of estimated free value (target ~20–30%)")
+        elif ratio < 0.15:
+            rank += 12
+            reasons.append(f"price about {ratio:.0%} of estimated free value — check why so low")
+        elif ratio <= 0.50:
+            rank += 8
+            reasons.append(f"price about {ratio:.0%} of estimated free value")
+        else:
+            rank -= 8
+            reasons.append(f"price about {ratio:.0%} of estimated free value — dear for a wait")
+    elif pay and not free:
+        rank += 4
+        reasons.append("no municipal free-value estimate — ranked on structure only")
+
+    if age_for_tax is not None and not age_guess:
+        if age_for_tax >= 80:
+            rank += 12
+        elif age_for_tax >= 70:
+            rank += 8
+        elif age_for_tax >= 65:
+            rank += 4
+    if classified.get("joint_survivor"):
+        reasons.append("joint / successive usufruct — wait uses the last survivor")
+        rank -= 4
+
+    if guessed:
+        rank = guesses.charge(rank, guessed)
+        reasons = [guesses.reason(guessed), *reasons]
+
+    # Attach display fields for the UI (estimates only).
+    item["bare_estimate"] = {
+        "kind": classified["kind"],
+        "wait_years": wait_y,
+        "free_value": free,
+        "value_today": today,
+        "pay": pay or None,
+        "irr": irr,
+        "rent_eur_month": rent_m,
+        "discount_rate": discount,
+        "note": "All money figures are estimates, not a valuation or a bid.",
+    }
+    return max(0.0, rank), reasons
+
+
 # ─── The owner's goals, each ranked on its own (2026-10-05) ──────────
 #   home    — a place to live: a home, not a plot, by the beach, not a poor climate;
 #   invest  — a home to make money on: far below the local price after the
@@ -3349,16 +3533,15 @@ def wishes(item: dict) -> list[dict]:
 #   land    — a plot as an investment: cheap per hectare against what land
 #             sells for there, big enough, reachable. Not a forestry return;
 #   forest  — a forestry project the owner will run on that land: 10 ha or
-#             more, a climate trees will stand, timber and crops. Not a resale.
+#             more, a climate trees will stand, timber and crops. Not a resale;
+#   bare    — bare ownership / future possession: buy cheap today, free later.
 MODES = {"both": "Live and invest", "home": "My home", "invest": "Investment home",
-         "land": "Investment land", "forest": "Forestry"}
-# A home is only ever My home or Investment home. A plot is only ever
-# Investment land or Forestry. Live and invest is the intersection, shown on
-# its own tab; it does not compete here, because its score is the worse of
-# the two and would never win a higher-score tie except when they are equal.
-FAMILY_GOALS = {"home": ("home", "invest"), "land": ("land", "forest")}
-# Offers are the two investment goals. A home to live in and a forestry project
-# stay on their own tabs: their scores are a life, not a resale.
+         "land": "Investment land", "forest": "Forestry", "bare": "Bare ownership"}
+# A home is My home, Investment home, or Bare ownership. A plot is Investment
+# land or Forestry. Live and invest is the intersection, shown on its own tab.
+FAMILY_GOALS = {"home": ("home", "invest", "bare"), "land": ("land", "forest")}
+# Offers are the cash-return goals. Bare ownership is a wait for possession, not
+# a resale shortlist; it stays on its own tab.
 EARNING_MODES = ("invest", "land")
 
 
@@ -3366,7 +3549,7 @@ def goal_family(item: dict) -> str:
     """"home", "land", or "other": which pair of goals this listing can win.
 
     A ruin on a big farm is the land. A shop or a garage is neither a home
-    nor a plot, so it is not given one of the four goals.
+    nor a plot, so it is not given one of the home/land goals.
     """
     kind = property_kind(item)
     title = item.get("title") or ""

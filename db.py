@@ -1887,6 +1887,13 @@ def filter_reason(item: dict, filters: dict | None, mode: str = "home") -> str |
         from scoring import OCCUPANCY_PATTERNS
         keywords = [k for k in keywords
                     if not has_term(k, OCCUPANCY_PATTERNS, negations=False)]
+    if mode == "bare" and keywords:
+        # Usufruct / tenancy words are the point of this goal; shares stay excluded.
+        from scoring import OCCUPANCY_PATTERNS, USUFRUCT_PATTERNS
+        keywords = [k for k in keywords
+                    if not has_term(k, OCCUPANCY_PATTERNS, negations=False)
+                    and not has_term(k, USUFRUCT_PATTERNS, negations=False)
+                    and normalize(k) not in ("usufruct", "usufruto", "ocupado", "arrendado", "inquilino")]
     if keywords:
         hits = find_terms(f"{item.get('title') or ''} {item.get('description') or ''}", keywords)
         if hits:

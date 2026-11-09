@@ -62,6 +62,74 @@ STAMP_DUTY = 0.008          # imposto do selo on the transfer
 PT_REGISTRY_EUR = 250       # registo predial online, with certificates
 PT_DEED_EUR = 600           # escritura and papers, when it is not a court sale
 
+# Bare ownership / usufruct split of the full value by the usufructuary's age.
+# Used only as an estimate of the taxable base when the notice sells nua
+# propriedade / nuda propiedad / nuda proprietà. Year and source are named
+# with each table. Ages below the first row use that row; above the last, the last.
+USUFRUCT_SPLIT_YEAR = 2025
+# Portugal CIMT art. 13 (Código do IMT): usufruct as a % of the full value by age;
+# bare ownership is the complement. Source: CIMT art. 13.º (consolidado).
+PT_USUFRUCT_SHARE = [
+    (20, 0.90), (30, 0.80), (40, 0.70), (45, 0.60), (50, 0.55),
+    (55, 0.50), (60, 0.45), (65, 0.40), (70, 0.35), (75, 0.30),
+    (80, 0.25), (85, 0.20), (90, 0.15), (95, 0.10), (None, 0.05),
+]
+# Spain LISD art. 26 (usufructo vitalicio as % of pleno dominio).
+ES_USUFRUCT_SHARE = [
+    (20, 0.70), (30, 0.69), (40, 0.68), (50, 0.66), (60, 0.64),
+    (70, 0.62), (80, 0.50), (90, 0.30), (None, 0.10),
+]
+# Italy — coefficienti per la determinazione della base imponibile dell'usufrutto
+# (D.M. Economia). Bare ownership ≈ complement of the usufruct coefficient.
+IT_USUFRUCT_SHARE = [
+    (20, 0.95), (30, 0.90), (40, 0.85), (50, 0.75), (55, 0.70),
+    (60, 0.65), (65, 0.60), (70, 0.55), (75, 0.50), (80, 0.40),
+    (85, 0.30), (90, 0.20), (None, 0.10),
+]
+# France CGI art. 669 — bare ownership % of full value by age (usufruct is complement).
+FR_BARE_SHARE = [
+    (21, 0.10), (31, 0.20), (41, 0.30), (51, 0.40), (61, 0.50),
+    (71, 0.60), (81, 0.70), (91, 0.80), (None, 0.90),
+]
+
+
+def usufruct_value_share(country: str | None, age: float) -> dict:
+    """Estimate of the usufruct's share of full value by age (complement = bare).
+
+    Returns {"usufruct", "bare", "source", "year"} — estimates for tax/ranking.
+    """
+    age = max(0.0, float(age))
+    code = (country or "").upper()
+    if code == "PT":
+        rows, source = PT_USUFRUCT_SHARE, f"PT CIMT art. 13 ({USUFRUCT_SPLIT_YEAR})"
+        share = _age_share(rows, age)
+        return {"usufruct": share, "bare": round(1.0 - share, 4),
+                "source": source, "year": USUFRUCT_SPLIT_YEAR}
+    if code == "ES":
+        rows, source = ES_USUFRUCT_SHARE, f"ES LISD art. 26 ({USUFRUCT_SPLIT_YEAR})"
+        share = _age_share(rows, age)
+        return {"usufruct": share, "bare": round(1.0 - share, 4),
+                "source": source, "year": USUFRUCT_SPLIT_YEAR}
+    if code == "IT":
+        rows, source = IT_USUFRUCT_SHARE, f"IT coefficienti usufrutto ({USUFRUCT_SPLIT_YEAR})"
+        share = _age_share(rows, age)
+        return {"usufruct": share, "bare": round(1.0 - share, 4),
+                "source": source, "year": USUFRUCT_SPLIT_YEAR}
+    if code == "FR":
+        rows, source = FR_BARE_SHARE, f"FR CGI art. 669 ({USUFRUCT_SPLIT_YEAR})"
+        bare = _age_share(rows, age)
+        return {"usufruct": round(1.0 - bare, 4), "bare": bare,
+                "source": source, "year": USUFRUCT_SPLIT_YEAR}
+    # No national split table — do not invent one.
+    return {"usufruct": None, "bare": None, "source": None, "year": None}
+
+
+def _age_share(rows: list[tuple], age: float) -> float:
+    for up_to, share in rows:
+        if up_to is None or age < up_to:
+            return float(share)
+    return float(rows[-1][1])
+
 # Everywhere else: (transfer tax, other costs as a share of the price, what the
 # tax is called, what the other costs are). Spain and France replace the tax
 # rate below when the region is known; these rows are the fallback.
