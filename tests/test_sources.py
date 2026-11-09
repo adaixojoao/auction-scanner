@@ -1140,7 +1140,10 @@ def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
     row = parse_notaires(ad)
     assert row["id"] == "notaires:2082120" and row["price"] == 10600          # notary fees included
     assert row["area_m2"] == 30 and row["concelho"] == "Berrien" and "<br>" not in row["description"]
-    assert parse_notaires({**ad, "viager": "OUI"}) is None
+    # Viager is kept for the Bare ownership goal; other goals still skip on the word.
+    viager = parse_notaires({**ad, "viager": "OUI"})
+    assert viager and "Viager occupé" in viager["description"]
+    assert json.loads(viager["raw_json"])["viager"] is True
     assert parse_notaires({**ad, "descriptionFr": "Sous compromis : maison"}) is None
     land = parse_notaires({**ad, "typeBien": "TER"})
     assert land["tipo"] == "terrain" and land["area_m2"] == 2111

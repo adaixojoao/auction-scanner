@@ -1043,11 +1043,12 @@ _BARE_PRIORITIES = (
     "€100,000 free, bought for about 20–30% of that, with an elderly usufructuary or tenant "
     "(65+, older is better). Years of wait come from official life tables by country, age and "
     "sex; unknown age is a conservative guess and is labelled. Value today discounts the free "
-    "value for the wait at the configured rate and adds rent until then. Purchase tax uses the "
-    "country of the property (Dutch tax residency does not change that). Viager occupé is for a "
-    "later phase; viager libre is out. Selling only the usufruct, a quinhão, or diritto di "
-    "abitazione alone is out. All money figures are estimates. Risks (remição, tanteo, "
-    "occupato, rights registered before the mortgage) are named, not hidden."
+    "value for the wait at the configured rate and adds rent until then. For viager occupé the "
+    "total cost is the bouquet plus the expected rentes until death (longevity risk: rentes "
+    "continue if they live longer); viager libre is out. Purchase tax uses the country of the "
+    "property (Dutch tax residency does not change that). Selling only the usufruct, a quinhão, "
+    "or diritto di abitazione alone is out. All money figures are estimates. Risks (remição, "
+    "tanteo, occupato, rights registered before the mortgage) are named, not hidden."
 )
 
 _INVEST_PRIORITIES = (
@@ -3386,8 +3387,6 @@ def _score_bare(item: dict, now, targets) -> tuple[float, list[str]]:
     classified = bare_ownership.classify(item)
     if classified["kind"] == "skip":
         return 0.0, [classified["why"]]
-    if classified["kind"] == "viager_occupe":
-        return 0.0, [classified["why"] + " — not scored in phase 1 (PT/ES/IT)"]
 
     kind = property_kind(item)
     if kind != "home" and classified["kind"] != "purge":
@@ -3422,7 +3421,33 @@ def _score_bare(item: dict, now, targets) -> tuple[float, list[str]]:
     pay = price_to_pay(item)
     rent_m = classified.get("rent_eur_month")
     rent_y = (rent_m or 0) * 12
-    if rent_m:
+    viager = classified.get("viager") or {}
+    if classified["kind"] == "viager_occupe":
+        bouquet = viager.get("bouquet_eur") or pay or 0
+        rente_m = viager.get("rente_eur_month")
+        # Total cost = bouquet + expected rentes until end of life (estimate).
+        rentes_total = (rente_m or 0) * 12 * wait_y
+        pay = bouquet + rentes_total
+        if viager.get("bouquet_from_price"):
+            reasons.append(
+                f"bouquet taken as the listed price (€{bouquet:,.0f}) — estimate; confirm the deed"
+            )
+        else:
+            reasons.append(f"bouquet about €{bouquet:,.0f} (estimate from the notice)")
+        if rente_m:
+            reasons.append(
+                f"rente about €{rente_m:,.0f}/month × ~{wait_y:.0f} years ≈ €{rentes_total:,.0f} "
+                f"expected — estimate; if the seller lives longer the rentes continue"
+            )
+        else:
+            reasons.append(
+                "monthly rente not stated in the text — total cost is the bouquet only until you read the deed"
+            )
+        reasons.append(
+            "viager longevity risk: the rentes run until death — a longer life costs more (estimate)"
+        )
+        rent_y = 0.0  # buyer pays rentes; do not also credit them as income
+    elif rent_m:
         reasons.append(f"stated rent about €{rent_m:,.2f}/month (estimate of income until free)")
 
     cfg = load_config()
@@ -3466,6 +3491,8 @@ def _score_bare(item: dict, now, targets) -> tuple[float, list[str]]:
         reasons.append("check tenant tanteo/retracto; notice may say sin posesión")
     elif country == "IT":
         reasons.append("check occupato dal debitore vs terzo con titolo opponibile; condo arrears")
+    elif country in ("FR", "BE") and classified["kind"] == "viager_occupe":
+        reasons.append("check the deed for bouquet, rente indexation, and who pays major repairs")
     reasons.append("a right registered before the mortgage/attachment normally does not fall with the sale")
     reasons.append("bids below the minimum may need acceptance; auctioneer fees apply")
 
@@ -3519,6 +3546,7 @@ def _score_bare(item: dict, now, targets) -> tuple[float, list[str]]:
         "irr": irr,
         "rent_eur_month": rent_m,
         "discount_rate": discount,
+        "viager": viager or None,
         "note": "All money figures are estimates, not a valuation or a bid.",
     }
     return max(0.0, rank), reasons

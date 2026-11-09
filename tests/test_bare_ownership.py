@@ -176,3 +176,57 @@ def test_eleiloes_style_simultaneous_successive():
         source="eleiloes", price=57000,
     ))
     assert got["kind"] == "bare" and got["joint_survivor"] is True
+
+
+def test_viager_libre_is_skipped_occupe_is_scored():
+    libre = bare_ownership.classify(_item(
+        country="FR", title="Maison en viager libre",
+        description="Viager libre, bouquet 40000 €, libre de toute occupation.",
+        price=40000,
+    ))
+    assert libre["kind"] == "skip" and "libre" in libre["why"].lower()
+
+    row = _item(
+        country="BE", source="era",
+        title="Villa à Awans en viager occupé",
+        description=(
+            "Spacieuse villa en viager occupé. Bouquet 80 000 €. "
+            "Rente viagère 450 € / mois. Crédirentière âgée de 78 ans."
+        ),
+        price=80000, area_m2=158,
+    )
+    got = bare_ownership.classify(row)
+    assert got["kind"] == "viager_occupe"
+    assert got["viager"]["bouquet_eur"] == 80000
+    assert got["viager"]["rente_eur_month"] == 450
+    assert any(h["age"] == 78 for h in got["holders"])
+
+    home, _ = score(row, mode="home")
+    assert home == 0
+    bare, why = score(row, mode="bare")
+    assert bare > 0
+    assert any("longevity" in r.lower() or "rentes" in r.lower() for r in why)
+    assert any("bouquet" in r.lower() for r in why)
+
+
+def test_notaires_viager_flag_classifies_as_occupe():
+    got = bare_ownership.classify(_item(
+        country="FR", source="notaires",
+        title="Maison à Berrien",
+        description="Une ancienne maison · Viager occupé",
+        price=10600, area_m2=30,
+        raw_json=json.dumps({"viager": True, "sale": "sale"}),
+    ))
+    assert got["kind"] == "viager_occupe"
+
+
+def test_fr_nue_propriete_gap_is_collection_not_classifier():
+    # Classifier recognises the French term; the DB has none because default FR
+    # scrapes (vench/france) rarely store that phrase, and notaires used to drop viager.
+    got = bare_ownership.classify(_item(
+        country="FR",
+        title="Appartement — nue-propriété",
+        description="Vente de la nue-propriété avec usufruit viager réservé.",
+        price=35000, area_m2=55,
+    ))
+    assert got["kind"] == "bare"

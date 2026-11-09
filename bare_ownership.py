@@ -75,7 +75,19 @@ VIAGER_FREE = ["viager libre"]
 
 _AGE_YEARS = re.compile(
     r"\b(\d{2})\s*anni\b|\bedad(?:\s+de)?\s+(\d{2})\b|\bidade(?:\s+de)?\s+(\d{2})\b"
-    r"|\b(\d{2})\s*anos?\b|\b(\d{2})\s*years?\s*old\b",
+    r"|\b(\d{2})\s*anos?\b|\b(\d{2})\s*years?\s*old\b"
+    r"|\b(?:agé|agee|âgé|âgée)\s*(?:e\s*)?(?:de\s+)?(\d{2})\s*ans\b"
+    r"|\b(\d{2})\s*ans\b",
+    re.I,
+)
+_BOUQUET = re.compile(
+    r"\bbouquet\b\D{0,24}(\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{1,2})?)\s*€?",
+    re.I,
+)
+_RENTE_MONTH = re.compile(
+    r"\b(?:rente(?:\s+viagère)?|rente\s+mensuelle)\b\D{0,24}"
+    r"(\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{1,2})?)\s*€?"
+    r"(?:\s*/\s*|\s+)?(?:mois|mensuel(?:le)?)?",
     re.I,
 )
 _BIRTH = re.compile(
@@ -122,16 +134,42 @@ def listing_text(item: dict) -> str:
     return "\n".join(parts)
 
 
+def _money(group: str) -> float | None:
+    raw = group.replace(" ", "").replace("\xa0", "").replace(".", "").replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def _parse_rent(text: str) -> float | None:
     m = _RENT.search(text or "")
     if not m:
         return None
-    raw = m.group(1).replace(" ", "").replace(".", "").replace(",", ".")
-    try:
-        val = float(raw)
-    except ValueError:
-        return None
-    return val if 20 <= val <= 5000 else None
+    val = _money(m.group(1))
+    return val if val is not None and 20 <= val <= 5000 else None
+
+
+def extract_viager(text: str, *, listed_price: float | None = None) -> dict:
+    """Bouquet and monthly rente from the notice. Listed price stands in for bouquet when unnamed."""
+    bouquet = None
+    bm = _BOUQUET.search(text or "")
+    if bm:
+        bouquet = _money(bm.group(1))
+    rente = None
+    rm = _RENTE_MONTH.search(text or "")
+    if rm:
+        rente = _money(rm.group(1))
+        if rente is not None and rente > 5000:
+            # Yearly figure written without "mois".
+            rente = rente / 12.0
+    if bouquet is None and listed_price:
+        bouquet = float(listed_price)
+    return {
+        "bouquet_eur": bouquet,
+        "rente_eur_month": rente if rente is not None and 50 <= rente <= 5000 else None,
+        "bouquet_from_price": bouquet is not None and bm is None and bool(listed_price),
+    }
 
 
 def extract_holders(text: str, *, now_year: int = 2026) -> list[dict]:
@@ -219,20 +257,37 @@ def classify(item: dict, *, now_year: int = 2026) -> dict:
                 "joint_survivor": joint, "purge": False, "terms": hits_bare or hits_burden,
             }
 
-    if has_term(text, VIAGER_FREE):
+    # (a) Bare ownership / nue-propriété first: "usufruit viager" is the form of
+    # the burden, not a French viager sale with bouquet + rente.
+    if hits_bare or raw.get("nuda_propiedad"):
+        return {
+            "kind": "bare",
+            "why": f"bare ownership with use kept by another ({(hits_bare or ['nuda_propiedad'])[0]})",
+            "holders": holders, "rent_eur_month": rent, "contract_year": contract,
+            "joint_survivor": joint, "purge": False, "terms": hits_bare or ["nuda_propiedad"],
+        }
+
+    if has_term(text, VIAGER_FREE) or raw.get("viager_libre"):
         return {
             "kind": "skip", "why": "viager libre — no wait for possession",
             "holders": holders, "rent_eur_month": rent, "contract_year": contract,
             "joint_survivor": joint, "purge": False, "terms": ["viager libre"],
+            "viager": None,
         }
-    if has_term(text, VIAGER_OCCUPIED) or (
-        has_term(text, ["viager"]) and not has_term(text, VIAGER_FREE)
-    ):
+    if (has_term(text, VIAGER_OCCUPIED) or raw.get("viager")
+            or (has_term(text, ["viager"]) and not has_term(text, VIAGER_FREE))):
+        listed = None
+        try:
+            listed = float(item.get("price") or 0) or None
+        except (TypeError, ValueError):
+            listed = None
+        viager = extract_viager(text, listed_price=listed)
         return {
             "kind": "viager_occupe",
-            "why": "viager occupé — bare ownership plus a life annuity (phase 2)",
+            "why": "viager occupé — bare ownership plus a life annuity (bouquet + rente)",
             "holders": holders, "rent_eur_month": rent, "contract_year": contract,
             "joint_survivor": joint, "purge": False, "terms": ["viager"],
+            "viager": viager,
         }
 
     # (b) Explicit purge beats a continuing usufruct for possession timing.
@@ -242,15 +297,6 @@ def classify(item: dict, *, now_year: int = 2026) -> dict:
             "why": f"notice states the burden is purged / caduca on sale ({hits_purge[0]})",
             "holders": holders, "rent_eur_month": rent, "contract_year": contract,
             "joint_survivor": joint, "purge": True, "terms": hits_purge,
-        }
-
-    # (a) Bare ownership with third-party use.
-    if hits_bare or raw.get("nuda_propiedad"):
-        return {
-            "kind": "bare",
-            "why": f"bare ownership with use kept by another ({(hits_bare or ['nuda_propiedad'])[0]})",
-            "holders": holders, "rent_eur_month": rent, "contract_year": contract,
-            "joint_survivor": joint, "purge": False, "terms": hits_bare or ["nuda_propiedad"],
         }
 
     # Usufruct burden on an otherwise full sale of the home.
