@@ -48,9 +48,15 @@ def test_financas_reads_the_property_sales_within_budget(db, fake_http, monkeypa
         resp.url = url
         return resp
     signed_in = fake_http(handler)
-    assert REGISTRY["financas"].func(db, max_price=30000, config={}) == 1     # not the €43,800 one, not a car
-    row = db.execute("SELECT * FROM listings WHERE source='financas'").fetchone()
-    assert row["id"] == "financas:1465.2025.7" and row["price"] == 2507 and row["current_bid"] == 3505
+    # The €43,800 home is over budget; the car is not property. Furniture-and-property is kept.
+    assert REGISTRY["financas"].func(db, max_price=30000, config={}) == 2
+    rows = {r["id"]: r for r in db.execute("SELECT * FROM listings WHERE source='financas'")}
+    assert set(rows) == {"financas:1465.2025.7", "financas:3191.2026.1"}
+    row = rows["financas:1465.2025.7"]
+    assert row["price"] == 2507 and row["current_bid"] == 3505
+    mixed = rows["financas:3191.2026.1"]
+    assert mixed["price"] == 900 and mixed["tipo"] == "imovel"
+    assert "Móveis" in json.loads(mixed["raw_json"])["categoria"]
     assert row["concelho"] == "Pinhel" and row["freguesia"] == "Alverca Da Beira" and row["area_m2"] == 120
     assert row["date_end"] == "2099-09-26T10:00:00" and "Modalidade: Leilão" in row["description"]
     # The sale's own code changes with every sign-in: the link is the list.
@@ -61,7 +67,7 @@ def test_financas_reads_the_property_sales_within_budget(db, fake_http, monkeypa
     assert "NOME INVENTADO" not in row["description"] + row["raw_json"]         # the keeper's name is not kept
     # The page once per sale.
     REGISTRY["financas"].func(db, max_price=30000, config={})
-    assert sum(1 for u, _ in calls if u.endswith("/vendasat/detalhe")) == 1
+    assert sum(1 for u, _ in calls if u.endswith("/vendasat/detalhe")) == 2
 
 
 def test_without_an_account_financas_is_blocked(db, monkeypatch):

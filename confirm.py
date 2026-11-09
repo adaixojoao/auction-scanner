@@ -216,6 +216,8 @@ def _store(db, item: dict, state: str, why: str | None, *, requested: str | None
         raise
     if isinstance(item.get("raw_json"), str):
         item["raw_json"] = json.dumps(raw, ensure_ascii=False)
+    from db import invalidate_snapshot
+    invalidate_snapshot()
 
 
 def _due_for_recovery(db, now=None) -> list[dict]:

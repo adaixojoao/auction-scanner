@@ -1117,6 +1117,13 @@ def scrape_citius(db, max_price: float = 50000, **_):
 
 FINANCAS = "https://vendas.portaldasfinancas.gov.pt"
 FINANCAS_DETAILS_PER_SCAN = 80
+# Property sales, including lots the portal files under furniture and property.
+_FINANCAS_PROPERTY = {"imoveis", "moveis e imoveis"}
+
+
+def _financas_property(categoria: str) -> bool:
+    from common import normalize
+    return normalize((categoria or "").replace("\xa0", " ")) in _FINANCAS_PROPERTY
 
 
 def _euros(text: str | None) -> float | None:
@@ -1195,7 +1202,7 @@ def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **
         raise SourceUnavailable("Portal das Finanças sent the sign-in page back after signing in")
     total, details_left = 0, FINANCAS_DETAILS_PER_SCAN
     for sale in parse_financas_list(resp.text):
-        if sale["categoria"] != "Imóveis":
+        if not _financas_property(sale["categoria"]):
             continue
         pay = sale["ultima"] or sale["valor_base"] or 0
         if pay > max_price:
@@ -1213,7 +1220,8 @@ def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **
                 LOG.info(f"Portal das Finanças: details of {sale['numero']} failed ({type(e).__name__})")
             time.sleep(0.5)
         raw = raw or {}
-        raw.update(venda=sale["venda"], modalidade=sale["modalidade"], numero=sale["numero"])
+        raw.update(venda=sale["venda"], modalidade=sale["modalidade"], numero=sale["numero"],
+                   categoria=sale["categoria"])
         desc = raw.get("descricao") or ""
         # Finanças lists the plot as "área total do terreno"; the house is the
         # gross / private construction figure (1228.2026.16: plot 202, house 96).

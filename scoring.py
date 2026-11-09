@@ -852,6 +852,27 @@ def market_value_estimate(item: dict) -> float | None:
     return area * found[0] if found else None
 
 
+def market_value_as_is(item: dict) -> dict | None:
+    """The municipal median scaled by condition: the home as it stands.
+
+    market_value_estimate is the after-work figure (a finished home at the
+    local median). This multiplies it by CONDITION_VALUE. An estimate for
+    display. It does not set a bid; the bid cap still uses the after-work figure.
+    """
+    after = market_value_estimate(item)
+    if not after:
+        return None
+    state = condition(item)
+    factor = CONDITION_VALUE.get(state, CONDITION_VALUE["unknown"])
+    amount = after * factor
+    return {
+        "amount": amount, "after_work": after, "factor": factor, "condition": state,
+        "note": (f"Estimate of the home as it stands: about €{amount:,.0f}, "
+                 f"{factor:.0%} of the after-work municipal median (about €{after:,.0f}). "
+                 "Not a valuation and not a bid."),
+    }
+
+
 def local_price(item: dict) -> tuple[float, str] | None:
     """(€/m² of homes where the listing is, source): every Portuguese municipality
     from INE (prices.py), else the city table. In Portugal only the concelho

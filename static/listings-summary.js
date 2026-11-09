@@ -41,8 +41,10 @@ function allInSummaryHtml(estimate) {
   const excludes = Array.isArray(estimate.excludes) ? estimate.excludes : [];
   const headline = ranged ? `${displayMoney(low)}–${displayMoney(high)}`
     : subtotal !== null ? `${displayMoney(subtotal)} known subtotal` : "Range not established";
+  const asIs = estimate.as_is && amountOrNull(estimate.as_is.amount);
   return `<div class="money"><strong>${AS.esc(headline)}</strong></div>
     <div class="small muted">Estimated · ${AS.esc(estimate.basis_label || "Basis not established")}</div>
+    ${asIs !== null && asIs !== undefined ? `<div class="small muted">As-is estimate ${AS.esc(displayMoney(asIs))} · estimate, not a bid</div>` : ""}
     ${ranged ? "" : '<div class="small warn">Incomplete cost estimate: price, taxes and fees only</div>'}
     ${missing.length ? `<ul class="result-gaps">${missing.map(m => `<li>${AS.esc(m)}</li>`).join("")}</ul>` : ""}
     ${excludes.length ? `<div class="small faint">Not included: ${AS.esc(excludes.join("; "))}</div>` : ""}`;
@@ -141,7 +143,9 @@ function allInSummaryText(estimate) {
   const ranged = estimate.repairs_priced === true && low !== null && high !== null && high >= low;
   const headline = ranged ? `Estimated ${displayMoney(low)}–${displayMoney(high)}`
     : subtotal !== null ? `${displayMoney(subtotal)} known subtotal` : "Range not established";
-  return ranged ? headline : `${headline}; incomplete cost estimate: price, taxes and fees only`;
+  const asIs = estimate.as_is && amountOrNull(estimate.as_is.amount);
+  const standing = asIs !== null && asIs !== undefined ? `; as-is estimate ${displayMoney(asIs)} (estimate, not a bid)` : "";
+  return (ranged ? headline : `${headline}; incomplete cost estimate: price, taxes and fees only`) + standing;
 }
 
 function costBasisText(estimate) {

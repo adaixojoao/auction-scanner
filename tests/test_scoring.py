@@ -2,7 +2,7 @@ import pytest
 
 from datetime import datetime, timedelta, timezone
 
-from scoring import categorize, market_value_estimate, score, score_detail
+from scoring import categorize, market_value_as_is, market_value_estimate, score, score_detail
 
 
 def item(**kw):
@@ -301,6 +301,14 @@ def test_market_value_matches_place_exactly():
     assert market_value_estimate(item(area_m2=100, concelho="Setúbal")) == 220000
     assert market_value_estimate(item(area_m2=100, concelho="Lisboa (Santa Maria Maior)")) == 420000
     assert market_value_estimate(item(area_m2=100, concelho="a")) is None
+    house = item(area_m2=100, concelho="Porto", tipo="moradia", title="Moradia")
+    standing = market_value_as_is(house)
+    assert standing["after_work"] == 310000
+    assert standing["amount"] == 310000 * 0.75          # condition not stated
+    assert standing["amount"] <= standing["after_work"]
+    assert "Estimate" in standing["note"] and "not a bid" in standing["note"]
+    heavy = market_value_as_is({**house, "description": "para recuperação total, em ruína"})
+    assert heavy["amount"] < standing["amount"] <= heavy["after_work"]
 
 
 def test_categorize():

@@ -10,7 +10,7 @@ decision from the owner.
 
 ## Needs the official texts
 
-1. **Portugal, C.3.2.1 amounts.** Read Annex II of Portaria n.º 124/2025/1 (as
+1. **Portugal, C.3.2.1 amounts.** Checked 2026-11-09: the Diário da República page returned no article text. The call notice (Aviso 01/C.3.2.1/2025) was reached and says unit costs sit in its Annex I and in Portaria 124/2025/1 Annex I, but the extracted table is not readable as one cap per species and slope. Rows stay `partial`. Do not type a figure from that extract. Read Annex II of Portaria n.º 124/2025/1 (as
    amended by 313/2025/1 and 281-B/2026/1) and the call notice
    Aviso 01/C.3.2.1/2025. Fill `cost_cap_eur_ha` by slope band (needs a
    `slope_min`/`slope_max` pair of columns), `premium_eur_ha_year` for favoured
@@ -28,7 +28,7 @@ decision from the owner.
    and a native mix; the regional plans decide. Map district → PROF region.
 5. **Portugal, replanting existing forest** (not C.3.2.1). Find the measure and
    add a `replanting` row.
-6. **France, décret n° 2026-937.** Read the decree and its planting schedule
+6. **France, décret n° 2026-937.** Checked 2026-11-09: articles D156-6 to D156-11 say replanting subsidies for full planting follow a national schedule set by ministerial order. They do not state a euro amount. The row stays `partial`. Read the decree and its planting schedule
    annex. Fix the base rate (sources say 37.5–50%), the certification bonus and
    the per-hectare schedule, and check that the 2025 conditions still hold
    (timber worth under 3× the replanting cost, species mix above 4 ha).
