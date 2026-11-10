@@ -9,8 +9,7 @@ from bs4 import BeautifulSoup
 
 from common import LOG, auction_occupation, find_area, find_floor_area, find_price, make_listing, make_session, parse_price
 from db import upsert_listing
-from sources import register
-from sources._cards import CardSite, scrape_cards
+from sources import SourceUnavailable, register
 
 
 @register("italy", "IT")
@@ -157,15 +156,6 @@ def scrape_italy_pvp(db, max_price: float = 50000, **_):
     return total
 
 
-GOBIDREAL = CardSite(
-    source="gobidreal", country="IT", base="https://www.gobidreal.it", path="/en/real-estate-auctions/",
-    card_selector="div.lot-card, article.auction, div[class*='lot'], div[class*='auction']",
-    title_selector="h2,h3,.title,.lot-title",
-    location_selector=".location,.city,.comune",
-    date_selector=".date,.auction-date,.end-date",
-    params={"price_to": "{max_price}"}, max_pages=19,
-    description="Gobid Real Italian judicial auction", tipo="immobile",
-)
 ASTALEGALE = "https://www.astalegale.net"
 ASTALEGALE_API = "https://api.astalegale.net/Search"
 ASTALEGALE_MAX_PAGES = 300          # 12 a page; about 2,000 homes under €30,000
@@ -205,12 +195,14 @@ def astalegale_listing(lot: dict) -> dict | None:
     )
 
 
-# Not in the default scan (Sept 2026): Gobid Real: behind a Cloudflare challenge (403); check gobidreal.it by hand.
-# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+# Not in the default scan: Gobid Real answers a Cloudflare challenge (403) to
+# automated reads. Bot walls are not worked around; Sources shows why.
 @register("gobidreal", "IT", default=False)
 def scrape_gobidreal(db, max_price: float = 100000, **_):
     """gobidreal.it — Italian judicial property auctions."""
-    return scrape_cards(db, GOBIDREAL, max_price)
+    raise SourceUnavailable(
+        "gobidreal.it answers a Cloudflare bot check instead of listings; "
+        "Italian court sales come through italy, pvp_giustizia and astalegale")
 
 
 @register("astalegale", "IT")
