@@ -13,7 +13,6 @@ from common import (LOG, find_area, find_price, has_term, land_max_price, make_l
                     parse_date_dmy, parse_price, possession, prefer_stated_area, safe_url, stable_id, to_number, utcnow_iso)
 from db import upsert_listing
 from sources import ScanCount, SourceUnavailable, register
-from sources._cards import CardSite, scrape_cards
 
 BOE_SEARCH = "https://subastas.boe.es/subastas_ava.php"
 
@@ -529,21 +528,14 @@ def scrape_sareb(db, max_price: float = 100000, **_):
     return total
 
 
-HAYA = CardSite(
-    source="haya", country="ES", base="https://www.haya.es", path="/inmuebles/",
-    card_selector="div.property-card, article.inmueble, div[class*='property'], div[class*='inmueble']",
-    title_selector="h2,h3,.title,.property-title",
-    location_selector=".location,.localidad,.municipio",
-    area_selector=".area,.superficie,[class*='area']",
-    params={"precio_max": "{max_price}"}, max_pages=29,
-    description="Haya Real Estate (Sareb/BBVA)", tipo="inmueble", price_is_min_price=True,
-)
-# Blocked by this PC's firewall (WinError 10013) on every scan. Left runnable by
-# name; a default scan no longer waits on it.
+# Blocked by this PC's firewall (WinError 10013) on every scan. Left registered
+# by name so Sources can show why; a default scan no longer waits on it.
 @register("haya", "ES", default=False)
 def scrape_haya(db, max_price: float = 100000, **_):
     """haya.es — Sareb/BBVA repossessions."""
-    return scrape_cards(db, HAYA, max_price)
+    raise SourceUnavailable(
+        "haya.es is blocked by this PC's firewall (WinError 10013); "
+        "Sareb stock is also listed through other Spanish bank sources when they answer")
 
 
 # servihabitat.com (Liferay): one page per province, cheapest first with ?o=4,

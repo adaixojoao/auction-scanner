@@ -206,6 +206,13 @@ def test_zvg_de_blocked_points_at_the_court_portal(db, fake_http):
         REGISTRY["zvg_de"].func(db, max_price=100000)
 
 
+def test_haya_blocked_by_firewall(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="firewall"):
+        REGISTRY["haya"].func(db, max_price=100000)
+
+
 # ─── The Netherlands ────────────────────────────────────────────────
 
 OV_DETAIL = """<html><body><h1>Kerkstraat 18, OUD GASTEL</h1><p>Kerkstraat 18, OUD GASTEL woonpand met ondergrond, erf,

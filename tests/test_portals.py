@@ -30,9 +30,6 @@ Maison de village 115 m² à rénover</a><span>42 000 €</span>"""
 IAD = """<a href="/annonce/maison-vente-3-pieces-la-ciotat-79m2/r2126785">Maison 79 m²</a>
 <span>89 000 €</span>"""
 
-ETRE = """<a href="/immobilier-26976112-vente-appartement-saint-etienne">Appartement</a>
-<span>61 000 €</span>"""
-
 OPTIM = """<a href="/fr/immobilier/vente/terrain/credin/terrain-a-vendre-de-2-390-00-m2-credin-56/509927">
 Terrain 2 390 m²</a><span>28 000 €</span>"""
 
@@ -145,7 +142,6 @@ def test_each_portal_reads_the_card_it_was_built_from():
         "paruvendu": (PARUVENDU, "1295984707", 55000, None),
         "entreparticuliers": (ENTRE, "22653367", 42000, None),
         "iadfrance": (IAD, "2126785", 89000, None),
-        "etreproprio": (ETRE, "26976112", 61000, None),
         "optimhome": (OPTIM, "509927", 28000, None),
         "laforet": (LAFORET, "52970436", 64000, None),
         "kleinanzeigen": (KLEIN, "3509674879", 45000, None),
@@ -168,7 +164,7 @@ def test_each_portal_reads_the_card_it_was_built_from():
         "remaxnl": (REMAXNL, "9535", 53500, None),
         "wortimmo": (WORTIMMO, "572965", 150000, None),
     }
-    assert len(cases) == 27
+    assert len(cases) == 26
     for name, (html, eid, price, district) in cases.items():
         rows = parse_portal(name, html)
         assert rows and rows[0]["external_id"] == eid, name

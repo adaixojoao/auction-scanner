@@ -1,6 +1,7 @@
 import json
 import urllib.parse
 
+import pytest
 import scraper
 from common import COUNTRY_NAMES
 from conftest import FakeResponse
@@ -1109,6 +1110,57 @@ def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
     sent = [json.loads(c[2]["params"]["filters"]) for c in session.calls]
     assert [(f["minPrice"], f["maxPrice"]) for f in sent[:3]] == [(0, 25000), (25000, 37500), (37500, 50000)]
     assert sent[3]["propertyType"] == ["terrain"] and sent[3]["minArea"] == 10000
+
+
+ETRE_AD = {
+    "id": 27282178, "title": "Charmante maison de bourg", "niceTitle": "Charmante maison",
+    "price": 43541, "houseArea": 65, "terrainArea": 71, "roomNb": 2, "categoryCode": 1,
+    "categoryName": "Maison", "cityName": "Anneville-En-Saire", "postalCode": "50760",
+    "departmentCode": "50", "dpeGlobalLetter": "e",
+    "url": "immobilier-27282178-vente-charmante-maison-de-bourg-anneville-en-saire",
+    "mediasUrls": ["https://storage.etreproprio.com/classified/image/thumb/x.webp"],
+}
+ETRE_LAND = {
+    "id": 27000001, "title": "Parcelle boisée", "price": 22000, "houseArea": None,
+    "terrainArea": 15000, "categoryCode": 3, "categoryName": "Terrain",
+    "cityName": "Pignans", "postalCode": "83790", "departmentCode": "83",
+    "url": "immobilier-27000001-vente-parcelle-pignans",
+    "mediasUrls": [],
+}
+
+
+def test_etreproprio_reads_the_classifieds_api(db, fake_http, monkeypatch):
+    import sources.fr
+    from sources import SourceUnavailable
+    from sources.fr import (etreproprio_search_key, parse_etreproprio, scrape_etreproprio,
+                            scrape_encheres_publiques)
+    monkeypatch.setattr(sources.fr.time, "sleep", lambda s: None)
+
+    assert etreproprio_search_key("h", price_max=50000) == "th.p-50000"
+    assert etreproprio_search_key("h", price_min=25000, price_max=37500, page=2) == "th.p25000-37500.g2"
+    assert etreproprio_search_key("l", price_max=50000, land_min=10000) == "tl.p-50000.m10000"
+
+    row = parse_etreproprio(ETRE_AD)
+    assert row["id"] == "etreproprio:27282178" and row["price"] == 43541 and row["area_m2"] == 65
+    assert row["url"].endswith("/immobilier-27282178-vente-charmante-maison-de-bourg-anneville-en-saire")
+    assert "terrain 71 m²" in row["description"] and "2 pièces" in row["description"]
+    assert json.loads(row["raw_json"])["dpe"] == "E"
+    land = parse_etreproprio(ETRE_LAND)
+    assert land["tipo"] == "terrain" and land["area_m2"] == 15000
+    assert parse_etreproprio({**ETRE_AD, "id": None}) is None
+
+    def handler(method, url, kw):
+        assert "/api/classifieds/" in url
+        key = url.rsplit("/", 1)[-1]
+        if key.startswith("tl."):
+            return FakeResponse(json_data={"classifiedsNb": 1, "classifieds": [ETRE_LAND]})
+        return FakeResponse(json_data={"classifiedsNb": 1, "classifieds": [ETRE_AD]})
+
+    fake_http(handler)
+    assert scrape_etreproprio(db, max_price=50000) == 2   # house (3 bands, same id) + land
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE source='etreproprio'").fetchone()[0] == 2
+    with pytest.raises(SourceUnavailable, match="licitor"):
+        scrape_encheres_publiques(db)
 
 
 def _immoweb_ad(**over):
