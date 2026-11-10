@@ -108,19 +108,31 @@ function calendarDate(isoDate) {
     : isoDate;
 }
 
-function deadlineSummaryHtml(d) {
-  if (!d || d.precision === "unknown") return '<span class="small muted">date unknown</span>';
-  if (d.precision === "invalid" || !d.date) return '<span class="small muted">Deadline unavailable</span>';
+function deadlineBlockHtml(d, roleLabel) {
+  if (!d || d.precision === "unknown") return "";
+  if (d.precision === "invalid" || !d.date) return "";
   const zone = d.timezone ? AS.esc(d.timezone) : "time zone not known";
+  const label = roleLabel ? `<div class="small muted">${AS.esc(roleLabel)}</div>` : "";
   if (d.precision === "date") {
-    return `<div><strong>${AS.esc(relativeDayLabel(d.days))}</strong> <span class="small muted">— closing time not published</span></div>
+    return `${label}<div><strong>${AS.esc(relativeDayLabel(d.days))}</strong> <span class="small muted">— closing time not published</span></div>
       <div class="small"><time datetime="${AS.esc(d.date)}">${AS.esc(calendarDate(d.date))}</time></div>
       <div class="small faint">Date only (${zone})</div>`;
   }
   const relative = d.instant ? relativeInstantLabel(d.instant) : relativeDayLabel(d.days);
-  return `<div><strong>${AS.esc(relative)}</strong></div>
+  return `${label}<div><strong>${AS.esc(relative)}</strong></div>
     <div class="small"><time datetime="${AS.esc(d.instant || d.date)}">${AS.esc(calendarDate(d.date))}, ${AS.esc(d.time || "")}</time></div>
     <div class="small faint">${d.precision === "local" ? `Sale-local time (${zone}); the notice gives no zone` : `Sale-local time (${zone})`}</div>`;
+}
+
+function deadlineSummaryHtml(d) {
+  if (!d || d.precision === "unknown") return '<span class="small muted">date unknown</span>';
+  if (d.precision === "invalid" || !d.date) return '<span class="small muted">Deadline unavailable</span>';
+  if (d.role === "offer" && d.sale && d.sale.date) {
+    const offer = deadlineBlockHtml(d.offer || d, "Offers close");
+    const sale = deadlineBlockHtml(d.sale, "Hearing / auction");
+    return `${offer}<div class="small faint" style="margin-top:0.35rem"></div>${sale}`;
+  }
+  return deadlineBlockHtml(d, d.role === "offer" ? "Offers close" : null);
 }
 
 // The same summaries as plain text, for the comparison (listings-comparison.js):
@@ -166,14 +178,24 @@ function checksSummaryText(checks) {
   return ordered.map(x => `${x.label} (${CHECK_WORD[x.state] || "unverified"}): ${x.text}`).join("; ");
 }
 
+function deadlineOneText(d, prefix) {
+  if (!d || !d.date) return "";
+  const zone = d.timezone || "time zone not known";
+  const head = prefix ? `${prefix}: ` : "";
+  if (d.precision === "date") return `${head}${calendarDate(d.date)} — closing time not published; date only (${zone})`;
+  const relative = d.instant ? relativeInstantLabel(d.instant) : relativeDayLabel(d.days);
+  return `${head}${calendarDate(d.date)}, ${d.time || ""} — ${relative}; `
+    + (d.precision === "local" ? `sale-local time (${zone}); the notice gives no zone` : `sale-local time (${zone})`);
+}
+
 function deadlineSummaryText(d) {
   if (!d || d.precision === "unknown") return "date unknown";
   if (d.precision === "invalid" || !d.date) return "Deadline unavailable";
-  const zone = d.timezone || "time zone not known";
-  if (d.precision === "date") return `${calendarDate(d.date)} — closing time not published; date only (${zone})`;
-  const relative = d.instant ? relativeInstantLabel(d.instant) : relativeDayLabel(d.days);
-  return `${calendarDate(d.date)}, ${d.time || ""} — ${relative}; `
-    + (d.precision === "local" ? `sale-local time (${zone}); the notice gives no zone` : `sale-local time (${zone})`);
+  if (d.role === "offer" && d.sale && d.sale.date) {
+    return [deadlineOneText(d.offer || d, "Offers close"), deadlineOneText(d.sale, "Hearing / auction")]
+      .filter(Boolean).join(" · ");
+  }
+  return deadlineOneText(d, d.role === "offer" ? "Offers close" : "");
 }
 
 // Selecting for comparison (listings-comparison.js), on every surface: never a status change.

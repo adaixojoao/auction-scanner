@@ -9,9 +9,11 @@ Display only: every figure and state here comes from the module that owns it.
   "verified" whose inputs changed reads "needs rechecking", never verified.
   A fact the notice states (scoring._occupation, scoring.condition) is shown
   as source-reported, never as verified.
-- Deadline: the stored date_end with its own precision. A date without a time
-  stays a date; a time without an offset is the sale country's local time
-  (ics_export.TIME_ZONES, as the calendar export reads it).
+- Deadline: the actionable cutoff (raw_json.offer_end when the source publishes
+  one, else date_end) with its own precision. A date without a time stays a
+  date; a time without an offset is the sale country's local time
+  (ics_export.TIME_ZONES, as the calendar export reads it). When offer_end and
+  date_end differ, both are returned (role "offer" + sale hearing).
 
 Nothing here hides, ranks or gates a listing: db.load_listings and the
 existing checks still decide that.
@@ -192,16 +194,9 @@ def checks(item: dict, rows: dict | None, cfg: dict | None) -> dict:
     return {"items": out, "concerns": sum(1 for x in out if x["state"] == "concern")}
 
 
-def deadline(item: dict, now: datetime | None = None) -> dict:
-    """The stored deadline with its precision.
-
-    {"precision": "instant" | "local" | "date" | "unknown" | "invalid",
-     "date", "time", "timezone", "instant", "days"}. A date-only value gets no
-    time; "days" counts calendar days from today in the sale's time zone.
-    This is a label: expiry and eligibility stay with common.effective_end.
-    """
+def _deadline_parts(raw, item: dict, now: datetime) -> dict:
+    """One deadline value → presentation fields (no role)."""
     from ics_export import TIME_ZONES, _parse
-    raw = item.get("date_end")
     none = {"precision": "unknown", "date": None, "time": None, "timezone": None, "instant": None, "days": None}
     if raw in (None, ""):
         return none
@@ -216,7 +211,6 @@ def deadline(item: dict, now: datetime | None = None) -> dict:
         zone = ZoneInfo(zone_name)
     except Exception:  # noqa: BLE001 — no time-zone data (Windows without tzdata)
         zone = None
-    now = now or datetime.now(timezone.utc)
     today = now.astimezone(zone).date() if zone else now.date()
     has_time = "T" in str(raw) or " " in str(raw).strip()
     if dt.tzinfo is not None:
@@ -231,6 +225,25 @@ def deadline(item: dict, now: datetime | None = None) -> dict:
                 "days": (dt.date() - today).days}
     return {**none, "precision": "date", "date": dt.date().isoformat(), "timezone": zone_name if zone else None,
             "days": (dt.date() - today).days}
+
+
+def deadline(item: dict, now: datetime | None = None) -> dict:
+    """The actionable deadline with its precision.
+
+    Primary fields describe offer_end when the source published one, else
+    date_end. {"precision", "date", "time", "timezone", "instant", "days",
+    "role": "offer"|"sale"}. When both exist and differ, "offer" and "sale"
+    hold each side. Expiry stays with common.action_deadline / effective_end.
+    """
+    from common import offer_end_raw
+    now = now or datetime.now(timezone.utc)
+    sale = _deadline_parts(item.get("date_end"), item, now)
+    offer_raw = offer_end_raw(item)
+    offer = _deadline_parts(offer_raw, item, now) if offer_raw else None
+    if offer and offer.get("date"):
+        out = {**offer, "role": "offer", "offer": offer, "sale": sale}
+        return out
+    return {**sale, "role": "sale"}
 
 
 def thumbnail(item: dict) -> str | None:

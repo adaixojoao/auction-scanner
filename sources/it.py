@@ -112,6 +112,12 @@ def pvp_listing(lot: dict) -> dict | None:
     if occ:
         raw["occupation"] = occ
     date = lot.get("dataOraVendita") or lot.get("dataVendita")
+    # Offers often close before the hearing; without this the listing looks open
+    # after Presenta un'offerta is already disabled.
+    offer = lot.get("terminePresentazioneOfferte") or lot.get("dataTerminePresentazioneOfferte")
+    if offer:
+        offer_s = str(offer).strip()
+        raw["offer_end"] = f"{offer_s}:00" if len(offer_s) == 16 and "T" in offer_s else offer_s
     title = f"{(desc[:90] or 'Immobile')} · {where.get('citta') or ''}"[:200]
     description = ". ".join(p for p in parts if p)[:3000] or None
     return make_listing(

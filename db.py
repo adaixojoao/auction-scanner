@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 from common import (
-    LOG, effective_end, find_terms, has_term, normalize, parse_dt, patch_raw, safe_url, utcnow, utcnow_iso,
+    LOG, action_deadline, effective_end, find_terms, has_term, normalize, parse_dt, patch_raw, safe_url, utcnow, utcnow_iso,
 )
 
 DB_PATH = os.environ.get("AUCTION_SCANNER_DB") or os.path.join(
@@ -2948,7 +2948,9 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             continue
         reason = None
 
-        end = effective_end(item.get("date_end"))
+        # Offer cutoff (when published) closes the sale for us even if the
+        # hearing/auction date_end is still ahead (Italian PVP, …).
+        end = effective_end(action_deadline(item))
         if item["status"] == "dismissed":
             why = why_dismissed.get(item["id"])
             item["dismiss_reason"] = why

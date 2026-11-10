@@ -268,14 +268,21 @@ def locate_seaside(db, cfg: dict, session, rows: list[dict] | None = None) -> in
 BOTH_LOOKUPS_FIRST = 15
 
 
-def both_first(db, cfg: dict, order: list[dict]) -> list[dict]:
-    """`order`, with the best of Live and invest still to be looked up ahead of it."""
+def both_first(db, cfg: dict, order: list[dict], *,
+               both: list[dict] | None = None) -> list[dict]:
+    """`order`, with the best of Live and invest still to be looked up ahead of it.
+
+    Pass `both` (from both_rows()) when the scan already has that list — calling
+    load_listings(mode="both") again rescored tens of thousands of rows and
+    starved the rest of enrichment. near_miss rows are skipped: enrichment
+    budget goes to homes within cash first.
+    """
     import surroundings
-    from db import load_listings
-    top = _ptes_first(sorted(load_listings(db, filters=cfg.get("filters"), mode="both"),
-                             key=lambda it: -(it.get("rank") or 0)))
-    # Skip near misses: enrichment budget goes to homes within cash first.
-    top = [it for it in top if not it.get("near_miss")]
+    pool = both if both is not None else both_rows(db, cfg)
+    top = _ptes_first(sorted(
+        (it for it in pool if not it.get("near_miss") and not it.get("hidden_reason")),
+        key=lambda it: -(it.get("rank") or 0),
+    ))
     first = list(islice((it for it in top if surroundings.missing(it)), BOTH_LOOKUPS_FIRST))
     ids = {it["id"] for it in first}
     return first + [it for it in order if it["id"] not in ids]
@@ -378,6 +385,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     from db import reuse_lists
                     with reuse_lists():
                         _set_state(db, current="map positions")
+                        both = None                  # Live and invest list, shared below
                         try:
                             import geo
                             best = enrich_order(db, cfg)
@@ -390,15 +398,17 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                             geo.check_water_pending(db, session, best)
                             import outline                    # the house and its plot on the map
                             outline.check_pending(db, session, best)
+                            # Live and invest once: surroundings, seaside and stale share it.
+                            both = both_rows(db, cfg)
                             import surroundings              # noise, quakes, amenities, zoning, sold prices
-                            surroundings.check_pending(db, session, both_first(db, cfg, best))
+                            surroundings.check_pending(db, session, both_first(db, cfg, best, both=both))
                             import climate                   # heat by 2090, water, fire, flood: local files
                             climate.assess_pending(db, best, geo.town_index(db), seaside_first=True)
                         except Exception:  # noqa: BLE001 — a map position must never fail the scan
                             LOG.exception("Locating listings failed")
-                        both = None                  # Live and invest, loaded once for two checks
                         try:
-                            both = both_rows(db, cfg)
+                            if both is None:
+                                both = both_rows(db, cfg)
                             from sources.pt import read_imovirtual_details
                             read_imovirtual_details(db, make_session(timeout=30),
                                                     sorted((it for it in both if not it.get("hidden_reason")),
