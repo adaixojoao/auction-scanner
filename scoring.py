@@ -909,15 +909,15 @@ OLD_CASE_YEARS = {"PT": 20, "ES": 10, "IT": 10}
 
 
 # French planning that changes whether a Live/Invest home is realistically
-# rebuildable or renovable. Surroundings still names the zone; these lines are
-# scored so they are not lost among amenities.
+# rebuildable or renovable. Surroundings still names every zone; farm (A) and
+# SPR are scored so they are not lost among amenities. Natural (N) stays a
+# note only — it is already worded in surroundings.notes.
 FR_FARM_ZONE_POINTS = -18
-FR_NATURAL_ZONE_POINTS = -12
 FR_SPR_POINTS = -8
 
 
 def _fr_planning_points(item: dict, reasons: list[str]) -> float:
-    """Penalties for farm/natural zoning and SPR on a home goal. 0 elsewhere."""
+    """Penalties for farm zoning and SPR on a home goal. 0 elsewhere."""
     import surroundings
     found = (surroundings.current(item) or {}).get("found") or {}
     points = 0.0
@@ -928,11 +928,6 @@ def _fr_planning_points(item: dict, reasons: list[str]) -> float:
         points += FR_FARM_ZONE_POINTS
         reasons.append(
             f"planning: farm zone{label} — new homes normally not allowed; check grandfathering (PLU)"
-        )
-    elif zone.startswith("N"):
-        points += FR_NATURAL_ZONE_POINTS
-        reasons.append(
-            f"planning: natural zone{label} — building very limited (PLU)"
         )
     h = found.get("fr_heritage") or {}
     spr = h.get("spr") or []
