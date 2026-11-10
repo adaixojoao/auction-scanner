@@ -149,8 +149,11 @@ def scrape_immoweb(db, max_price: float = 50000, **_):
     for slug, tipo in IMMOWEB_SEARCHES.items():
         for page in range(1, IMMOWEB_MAX_PAGES + 1):
             try:
+                # isALifeAnnuitySale=false drops viagers from the search so the
+                # cheapest pages are plain sales (the parser still skips them).
                 resp = session.get(f"{IMMOWEB}/fr/recherche/{slug}/a-vendre",
-                                   params={"countries": "BE", "maxPrice": int(max_price), "orderBy": "cheapest",
+                                   params={"countries": "BE", "maxPrice": int(max_price),
+                                           "orderBy": "cheapest", "isALifeAnnuitySale": "false",
                                            "page": page})
                 resp.raise_for_status()
             except Exception as e:  # noqa: BLE001 — one search failing is not the source failing
