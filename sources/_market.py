@@ -86,10 +86,6 @@ PORTALS: dict[str, Portal] = {
         ("https://www.iadfrance.fr/annonces/achat/maison",
          "https://www.iadfrance.fr/annonces/achat/terrain"),
         r"/annonce/", r"/r(\d{5,})"),
-    "etreproprio": Portal(
-        "etreproprio", "FR", "https://www.etreproprio.com",
-        ("https://www.etreproprio.com/annonces/vente-maison",),
-        r"/immobilier-\d+", r"/immobilier-(\d+)"),
     "optimhome": Portal(
         "optimhome", "FR", "https://www.optimhome.com",
         ("https://www.optimhome.com/fr/immobilier/vente",),
