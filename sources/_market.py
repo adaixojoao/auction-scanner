@@ -114,9 +114,14 @@ PORTALS: dict[str, Portal] = {
         ("https://www.willhaben.at/iad/immobilien/haus-kaufen/haus-angebote?PRICE_TO={max}&rows=30",
          "https://www.willhaben.at/iad/immobilien/grundstuecke/grundstueck-angebote?PRICE_TO={max}&rows=30"),
         "", "", parser="willhaben"),
+    # Old SEO path haus-kaufen/preis-bis-N 404s (Nov 2026). The immobilien
+    # search uses preis=-N (blank floor, ceiling N) and intention=kauf.
     "wohnnet": Portal(
         "wohnnet", "AT", "https://www.wohnnet.at",
-        ("https://www.wohnnet.at/immobilien/haus-kaufen/preis-bis-{max}",),
+        ("https://www.wohnnet.at/immobilien/haeuser/oesterreich/?preis=-{max}&intention=kauf",
+         "https://www.wohnnet.at/immobilien/haeuser/oesterreich/?preis=-{max}&intention=kauf&page=2",
+         "https://www.wohnnet.at/immobilien/wohnungen/oesterreich/?preis=-{max}&intention=kauf",
+         "https://www.wohnnet.at/immobilien/grundstuecke/oesterreich/?preis=-{max}&intention=kauf"),
         r"/immobilien/.+-\d{6,}", r"-(\d{6,})"),
     "athome": Portal(
         "athome", "LU", "https://www.athome.lu",

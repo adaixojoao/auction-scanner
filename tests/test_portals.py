@@ -191,6 +191,14 @@ def test_custojusto_keeps_sales_under_the_budget_and_drops_the_rest(db, fake_htt
     assert "Madalena" in (rows[0]["concelho"] or "")
 
 
+def test_wohnnet_search_uses_the_price_ceiling_query():
+    from sources._market import PORTALS
+    urls = PORTALS["wohnnet"].urls
+    assert any("haeuser/oesterreich" in u and "preis=-{max}" in u for u in urls)
+    assert any("grundstuecke/oesterreich" in u for u in urls)
+    assert not any("haus-kaufen/preis-bis" in u for u in urls)
+
+
 def test_portals_skip_a_foreign_willhaben_ad_and_tag_a_french_athome_home():
     from sources._market import parse_portal
     assert [r["external_id"] for r in parse_portal("willhaben", WILLHABEN)] == ["1889070517"]
