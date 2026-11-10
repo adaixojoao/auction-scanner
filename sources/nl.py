@@ -12,10 +12,9 @@ from datetime import datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_price, make_listing, make_session, parse_date_dmy, parse_price, safe_url
+from common import LOG, make_listing, make_session, parse_price, safe_url
 from db import upsert_listing
-from sources import register
-from sources._cards import listing_id_from_url
+from sources import SourceUnavailable, register
 
 NL_DETAILS_PER_SCAN = 80
 _MONTHS = {m: i for i, m in enumerate(("januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
@@ -457,38 +456,15 @@ def scrape_vastgoedveiling(db, max_price: float = 50000, **_):
 # the default scan so every Dutch auction is listed once.
 @register("veilingbiljet", "NL", default=False)
 def scrape_veilingbiljet(db, max_price: float = 100000, **_):
-    """veilingbiljet.nl — Dutch foreclosure auctions (the same lots as openbareverkoop.nl)."""
-    session = make_session()
-    base = "https://www.veilingbiljet.nl"
-    resp = session.get(f"{base}/objecten/")
-    resp.raise_for_status()
-    total = 0
-    seen = set()
-    for card in BeautifulSoup(resp.text, "html.parser").select(
-            "div.object, article, div[class*='object'], li[class*='object']"):
-        link = card.select_one("a[href]")
-        url = safe_url(link.get("href"), base) if link else None
-        if not url:
-            continue
-        eid = listing_id_from_url(url)
-        if eid in seen:
-            continue
-        seen.add(eid)
-        title_el = card.select_one("h2,h3,.title,.object-title")
-        price = find_price(card.get_text(" "))
-        if price and price > max_price:
-            continue
-        loc_el = card.select_one(".location,.city,.plaats")
-        date_el = card.select_one(".date,.veilingdatum")
-        upsert_listing(db, make_listing(
-            "veilingbiljet", eid, "NL",
-            title=title_el.get_text(strip=True)[:200] if title_el else f"Veilingbiljet #{eid}",
-            description="Veilingbiljet.nl executieveiling", tipo="vastgoed",
-            price=price, concelho=loc_el.get_text(strip=True) if loc_el else None,
-            url=url, date_end=parse_date_dmy(date_el.get_text()) if date_el else None,
-        ))
-        total += 1
-    return total
+    """veilingbiljet.nl — Dutch foreclosure auctions (same lots as openbareverkoop.nl).
+
+    The old /objecten/ HTML list redirects to an error page (Nov 2026). The site
+    still serves the same JSON as openbareverkoop.nl at /kavels/searchresults;
+    that feed is already read by the netherlands source.
+    """
+    raise SourceUnavailable(
+        "veilingbiljet.nl no longer has an /objecten/ list; the same lots come "
+        "through the netherlands (openbareverkoop.nl) source")
 
 
 @register("remaxnl", "NL", description="RE/MAX — homes for sale in the Netherlands")

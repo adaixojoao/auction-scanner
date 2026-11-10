@@ -147,6 +147,20 @@ def test_bot_walled_sources_are_out_of_the_default_scan():
         assert REGISTRY[name].default is False, name
 
 
+def test_gobidreal_blocked_by_cloudflare(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="Cloudflare"):
+        REGISTRY["gobidreal"].func(db, max_price=100000)
+
+
+def test_veilingbiljet_blocked_points_at_openbareverkoop(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="openbareverkoop"):
+        REGISTRY["veilingbiljet"].func(db, max_price=100000)
+
+
 def test_subastasactivas_stays_off_default_and_reads_the_json_api(db, fake_http):
     from sources.es import subastasactivas_listing
     item = {
