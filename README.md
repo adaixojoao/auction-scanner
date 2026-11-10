@@ -733,10 +733,10 @@ summary.
 | Country | Sources |
 |---|---|
 | PT | e-leilões, Citius, leilosoc, BCP, Whitestar, CGD, Santander, BPI, Imobancos, Centro de Leilões, Bid Leiloeira · *idealista (Selenium, on request)* · Portal das Finanças (with your account: Settings → Accounts) · not scanned: Novo Banco (portal closed) |
-| ES | BOE subastas (includes AEAT tax auctions), Servihabitat (cheapest 20 per province), Haya, SubastasActivas · not scanned: Sareb (bot wall) |
+| ES | BOE subastas (includes AEAT tax auctions), Servihabitat (cheapest 20 per province), Haya · not scanned: Sareb (bot wall); SubastasActivas (aggregator, largely the same as BOE; on request) |
 | FR | licitor, Enchères Publiques |
 | IT | astegiudiziarie, PVP Giustizia (search API), Astalegale (search API) · not scanned: Gobid Real (bot wall) |
-| DE | zvg-portal, justiz-auktion, zwangsversteigerung.de |
+| DE | zvg-portal · not scanned: justiz-auktion (no property left); zwangsversteigerung.de (blocks scrapers; same lots as zvg-portal) |
 | NL | openbareverkoop (each lot's page: size, year, use, date), veilingnotaris + vastgoedveiling (one platform, read as one; also its German lots) · not scanned: veilingbiljet (the same lots as openbareverkoop) |
 | HR · PL | e-oglasna, FINA · komornik · not scanned (bot wall or broken certificate): biddit (BE), eauction (GR), ANAF (RO), DLS (CY) |
 | EU | *CourtBid via Apify (needs `apify_token` in config.json, on request)* |

@@ -717,38 +717,113 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
     return ScanCount(total, "partial" if missed else "full", pages)
 
 
-# Blocked by this PC's firewall on every scan, same as haya.es.
-@register("subastasactivas", "ES", default=False)
+# Off the default scan: largely the same lots as BOE (spain). Kept by name for
+# AEAT / TGSS / notarial rows the aggregator surfaces first. The site is a
+# Next.js app; cards come from /api/auctions, not the HTML shell.
+SUBASTASACTIVAS = "https://subastasactivas.com"
+SUBASTASACTIVAS_API = f"{SUBASTASACTIVAS}/api/auctions"
+SUBASTASACTIVAS_CATEGORIES = (
+    "Viviendas", "Terrenos", "Fincas rústicas", "Locales", "Naves industriales",
+)
+SUBASTASACTIVAS_TIPO = {
+    "Viviendas": "vivienda",
+    "Terrenos": "terreno",
+    "Fincas rústicas": "rustico",
+    "Locales": "local",
+    "Naves industriales": "nave",
+}
+SUBASTASACTIVAS_MAX_PAGES = 40
+
+
+def subastasactivas_listing(item: dict) -> dict | None:
+    """One /api/auctions row as a listing, or None without an id or detail path."""
+    eid = str(item.get("id") or "").strip()
+    path = item.get("detailPath") or ""
+    if not eid or not path:
+        return None
+    category = (item.get("category") or "").strip()
+    prop = (item.get("propertyType") or category or "inmueble").strip()
+    address = (item.get("address") or "").strip()
+    title = (address or item.get("title") or prop)[:200]
+    price = (to_number(item.get("valorSubasta"))
+             or to_number(item.get("appraisalValue"))
+             or to_number(item.get("minimumBid")))
+    bid = to_number(item.get("currentBidAmount")) or to_number(item.get("currentBid"))
+    raw = {
+        "category": category or None,
+        "property_type": prop or None,
+        "source": item.get("source"),
+        "status": item.get("status"),
+        "auction_type": item.get("auctionType"),
+        "occupancy": item.get("occupancy"),
+        "cadastral_ref": item.get("cadastralRef"),
+    }
+    if item.get("latitude") is not None and item.get("longitude") is not None:
+        try:
+            raw.update(lat=float(item["latitude"]), lon=float(item["longitude"]))
+        except (TypeError, ValueError):
+            pass
+    desc = " · ".join(x for x in (
+        prop, address, item.get("municipality"), item.get("province"),
+        f"fuente {item['source']}" if item.get("source") else None,
+        "SubastasActivas",
+    ) if x)
+    return make_listing(
+        "subastasactivas", eid, "ES",
+        title=title,
+        description=desc[:500],
+        tipo=SUBASTASACTIVAS_TIPO.get(category, "inmueble"),
+        area_m2=item.get("surfaceM2"),
+        price=price,
+        current_bid=bid,
+        min_price=item.get("minimumBid"),
+        concelho=item.get("municipality"),
+        district=item.get("province"),
+        url=path,
+        base_url=SUBASTASACTIVAS,
+        image_url=item.get("imageUrl"),
+        date_end=item.get("endDate"),
+        raw_json=raw,
+    )
+
+
+@register("subastasactivas", "ES", default=False,
+          description="SubastasActivas — BOE / AEAT / TGSS / notarial auction aggregator")
 def scrape_subastasactivas(db, max_price: float = 100000, **_):
     """subastasactivas.com — aggregator of BOE/AEAT/Social Security/notarial auctions."""
-    session = make_session()
-    base = "https://subastasactivas.com"
-    resp = session.get(f"{base}/subastas",
-                       params={"tipo": "inmueble", "precioMax": int(max_price), "estado": "activa"})
-    resp.raise_for_status()
-    total = 0
-    seen = set()
-    for card in BeautifulSoup(resp.text, "html.parser").select(
-            "div.subasta, article, div[class*='subasta'], tr[class*='subasta']"):
-        link = card.select_one("a[href]")
-        url = safe_url(link.get("href"), base) if link else None
-        if not url:
-            continue
-        m = re.search(r"/(\w+)/?$", url.split("?")[0])
-        eid = m.group(1) if m else stable_id(url)
-        if eid in seen:
-            continue
-        seen.add(eid)
-        text = card.get_text(" ", strip=True)
-        price = find_price(text)
-        if price and price > max_price:
-            continue
-        upsert_listing(db, make_listing(
-            "subastasactivas", eid, "ES",
-            title=text[:120], description="SubastasActivas aggregator",
-            tipo="inmueble", price=price, url=url, date_end=parse_date_dmy(text),
-        ))
-        total += 1
+    session = make_session(timeout=30)
+    total, seen = 0, set()
+    categories = ",".join(SUBASTASACTIVAS_CATEGORIES)
+    for page in range(1, SUBASTASACTIVAS_MAX_PAGES + 1):
+        resp = session.get(SUBASTASACTIVAS_API, params={
+            "status": "active",
+            "priceMax": int(max_price),
+            "categories": categories,
+            "page": page,
+            "limit": 50,
+            "sort": "endsAt_asc",
+        })
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list) or not rows:
+            break
+        kept = 0
+        for item in rows:
+            row = subastasactivas_listing(item)
+            if not row or row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            if row["price"] and row["price"] > max_price:
+                continue
+            upsert_listing(db, row)
+            total += 1
+            kept += 1
+        db.commit()
+        LOG.info(f"SubastasActivas page {page}: +{kept} (total {total})")
+        if not (payload.get("pagination") or {}).get("hasMore"):
+            break
+        time.sleep(0.4)
     return total
 
 

@@ -143,8 +143,67 @@ def test_servihabitat_the_first_province_failing_is_the_source_failing(db, fake_
 
 
 def test_bot_walled_sources_are_out_of_the_default_scan():
-    for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece", "haya", "subastasactivas"):
+    for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece", "haya"):
         assert REGISTRY[name].default is False, name
+
+
+def test_subastasactivas_stays_off_default_and_reads_the_json_api(db, fake_http):
+    from sources.es import subastasactivas_listing
+    item = {
+        "id": "bc59a498-b1af-4688-8b84-98346bc9c930",
+        "title": "SUB-RC-2026-3100200101141",
+        "category": "Viviendas",
+        "propertyType": "Vivienda",
+        "valorSubasta": 87626.72,
+        "appraisalValue": 109699.2,
+        "municipality": "Tudela",
+        "province": "Navarra",
+        "endDate": "2026-11-26T18:00:00.000Z",
+        "detailPath": "/subastas/navarra/tudela/vivienda-calle-alberto-pelairea-n-2-1-c",
+        "imageUrl": "/api/auction-image/x",
+        "address": "C/ Alberto Pelairea, nº 2, 1º C, Tudela",
+        "surfaceM2": 87.45,
+        "source": "BOE",
+        "status": "celebrandose",
+        "latitude": 42.06,
+        "longitude": -1.61,
+    }
+    row = subastasactivas_listing(item)
+    assert row["id"] == "subastasactivas:bc59a498-b1af-4688-8b84-98346bc9c930"
+    assert row["price"] == 87626.72 and row["tipo"] == "vivienda" and row["concelho"] == "Tudela"
+    assert row["url"].endswith("/subastas/navarra/tudela/vivienda-calle-alberto-pelairea-n-2-1-c")
+    assert '"lat": 42.06' in row["raw_json"]
+    assert subastasactivas_listing({"id": "x"}) is None
+
+    pages = []
+
+    def handler(method, url, kw):
+        pages.append(url)
+        assert "/api/auctions" in url
+        params = kw.get("params") or {}
+        assert params.get("status") == "active"
+        assert "Viviendas" in (params.get("categories") or "")
+        page = int(params.get("page") or 1)
+        rows = [item] if page == 1 else []
+        return FakeResponse(json_data={
+            "success": True,
+            "data": rows,
+            "pagination": {"page": page, "limit": 50, "hasMore": False, "totalCount": len(rows)},
+        })
+
+    fake_http(handler)
+    assert REGISTRY["subastasactivas"].default is False
+    assert REGISTRY["subastasactivas"].func(db, max_price=100000) == 1
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE source='subastasactivas'").fetchone()[0] == 1
+
+
+def test_zvg_de_blocked_points_at_the_court_portal(db, fake_http):
+    from sources import SourceUnavailable
+
+    fake_http(lambda method, url, kw: FakeResponse(
+        "Lieber Datenspezialist, vielen Dank… von unserem System gesperrt."))
+    with pytest.raises(SourceUnavailable, match="zvg-portal"):
+        REGISTRY["zvg_de"].func(db, max_price=100000)
 
 
 # ─── The Netherlands ────────────────────────────────────────────────

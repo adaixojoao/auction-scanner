@@ -2043,9 +2043,12 @@ def scrape_estamo(db, max_price: float = 50000, **_):
 
 
 # ─── IP Património: railway and road property for sale ────────────────
-# The rail and road company's sales ("Alienações") are a layer of its
-# ArcGIS map of business opportunities: one point per property, with the
-# base price, the deadline and the sale notice. Empty between rounds.
+# The rail and road company's sales ("Alienações") are layer 0 of its
+# ArcGIS map of business opportunities (Experience
+# 1e7f73378b364c068e9700e13a7ce22b): one point per property, with the base
+# price, the deadline and the sale notice. Layer 1 is Subconcessões (rents /
+# leases), not purchases — leave it alone. The sales layer is often empty
+# between rounds; a 0-feature answer is a quiet market, not a broken URL.
 IPP_SALES = ("https://utility.arcgis.com/usrsvcs/servers/1c79b13c1c604fd6ac7e0584b8404f6b/rest/services/"
              "webapps/Oportunidades_de_negocio/FeatureServer/0/query")
 _IPP_AREA = "dbpatrimonio.patrimoniodata.oport_alienacoes.area"
