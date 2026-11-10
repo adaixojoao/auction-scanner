@@ -908,9 +908,46 @@ def local_price(item: dict) -> tuple[float, str] | None:
 OLD_CASE_YEARS = {"PT": 20, "ES": 10, "IT": 10}
 
 
+# French planning that changes whether a Live/Invest home is realistically
+# rebuildable or renovable. Surroundings still names the zone; these lines are
+# scored so they are not lost among amenities.
+FR_FARM_ZONE_POINTS = -18
+FR_NATURAL_ZONE_POINTS = -12
+FR_SPR_POINTS = -8
+
+
+def _fr_planning_points(item: dict, reasons: list[str]) -> float:
+    """Penalties for farm/natural zoning and SPR on a home goal. 0 elsewhere."""
+    import surroundings
+    found = (surroundings.current(item) or {}).get("found") or {}
+    points = 0.0
+    z = found.get("fr_zoning") or {}
+    zone = (z.get("zone") or "").upper()
+    label = f" ({z['label']})" if z.get("label") else ""
+    if zone.startswith("A"):
+        points += FR_FARM_ZONE_POINTS
+        reasons.append(
+            f"planning: farm zone{label} — new homes normally not allowed; check grandfathering (PLU)"
+        )
+    elif zone.startswith("N"):
+        points += FR_NATURAL_ZONE_POINTS
+        reasons.append(
+            f"planning: natural zone{label} — building very limited (PLU)"
+        )
+    h = found.get("fr_heritage") or {}
+    spr = h.get("spr") or []
+    if spr:
+        points += FR_SPR_POINTS
+        name = spr[0] if isinstance(spr[0], str) else (spr[0].get("name") if isinstance(spr[0], dict) else "SPR")
+        reasons.append(
+            f"planning: site patrimonial remarquable ({name}) — outside works need the ABF"
+        )
+    return points
+
+
 def _surroundings(item: dict, reasons: list[str]) -> None:
     """What official maps and statistics say about the place (surroundings.py,
-    crime.py): shown, not scored."""
+    crime.py): shown, not scored — except FR farm/SPR via _fr_planning_points."""
     import coast_retreat
     import crime
     import incomes
@@ -1004,7 +1041,9 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
             "Rank a priced home by the worse of the living score and the investment score. When "
             "no local sale price exists, the rank is the living score and the investment is not "
             "priced. A beach flat with no resale case still ranks low. A cheap home that is not "
-            "by the sea fails. A home that cannot be visited is out."
+            "by the sea fails. A home that cannot be visited is out. French farm (A) or natural "
+            "(N) zoning and a site patrimonial remarquable cut the rank: rebuild and outside "
+            "works are restricted."
         ) + _OUTLOOK_NOTE
     if mode == "invest":
         return _INVEST_PRIORITIES + _OUTLOOK_NOTE
@@ -1025,6 +1064,7 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         "One dwelling in Catastro counts as the floor when the notice states none; several "
         "dwellings are not added together. A sale the court marks as the debtor's main home is "
         "occupied, and the bid rules for a main home are stricter. A home that cannot be visited is out. "
+        "French farm (A) or natural (N) zoning and a site patrimonial remarquable cut the rank. "
         "A lake or a river you could swim in "
         "is not a substitute, and a poor climate (extreme heat, a flood at the house, repeated "
         "fires, or severe water stress) is not a place to live. Prefer western continental Europe "
@@ -1098,7 +1138,9 @@ _INVEST_PRIORITIES = (
     "small "
     "to let; somewhere the heat by 2071-2100 or a flood zone will take the value away; in France, "
     "an energy class (DPE) of G or F, because such homes normally cannot be let on a new lease (G "
-    "since 2025, F from 2028) until energy works are done; a price that is only the down payment of "
+    "since 2025, F from 2028) until energy works are done; French farm (A) or natural (N) zoning "
+    "or a site patrimonial remarquable, which restrict rebuild and outside works; a price that is "
+    "only the down payment of "
     "a viager or vente à terme. When the "
     "listing does not say the condition, treat it as needing work; on a sale portal or a bank's site "
     "a price far below the local one with no word on the state is a warning, not a bargain. Do not "
@@ -2585,9 +2627,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         s += 4
         reasons.append("no minimum bid")
 
-    # Urgency. days_left() understands naive dates; the old tz-aware subtraction
-    # raised on them, so most sources never got this bonus.
-    left = days_left(item.get("date_end"), now or utcnow())
+    # Urgency: offer cutoff when published, else the hearing/sale date.
+    from common import action_deadline
+    left = days_left(action_deadline(item), now or utcnow())
     if left is not None and left > 0:
         s += curve(left, DAYS_LEFT_POINTS) * w("sale")
         if left <= 3:
@@ -2620,6 +2662,8 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if caps:
         s = min(s, *caps)
     s += _population_outlook_points(item, reasons)
+    if kind == "home":
+        s += _fr_planning_points(item, reasons)
     _surroundings(item, reasons)
     return s, reasons
 
@@ -3849,6 +3893,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
                  building_age.note(item), markets.house_price_note(item), markets.mortgage_note(item)):
         if lets:
             reasons.append(lets)
+    s += _fr_planning_points(item, reasons)
     _surroundings(item, reasons)
     # A price this far under local sales is not a rent. Drop whatever figure was
     # worked out, including when the comparison was a province average.

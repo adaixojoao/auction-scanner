@@ -189,8 +189,9 @@ def test_legal_access_appears_only_for_rural_plots():
 
 def test_a_date_only_deadline_stays_a_date():
     d = presentation.deadline(row(date_end="2030-01-10"), NOW)
-    assert d == {"precision": "date", "date": "2030-01-10", "time": None, "timezone": "Europe/Lisbon",
-                 "instant": None, "days": 0}
+    assert d["precision"] == "date" and d["date"] == "2030-01-10" and d["time"] is None
+    assert d["timezone"] == "Europe/Lisbon" and d["instant"] is None and d["days"] == 0
+    assert d["role"] == "sale"
 
 
 def test_naive_midnight_is_a_date_not_a_closing_time():

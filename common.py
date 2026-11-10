@@ -1038,6 +1038,34 @@ def days_left(date_end, now: datetime | None = None) -> float | None:
     return (end - now).total_seconds() / 86400
 
 
+def offer_end_raw(item: dict) -> str | None:
+    """ISO offer-submission cutoff from raw_json, if the source published one.
+
+    Italian PVP (and similar) often close offers a day before the hearing:
+    date_end alone then looks open when you can no longer bid.
+    """
+    try:
+        raw = item.get("raw_json")
+        data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("offer_end")
+    if value in (None, ""):
+        return None
+    return str(value).strip() or None
+
+
+def action_deadline(item: dict) -> str | None:
+    """Last moment to act: offer cutoff when known, else the sale/hearing date."""
+    offer = offer_end_raw(item)
+    if offer and effective_end(offer) is not None:
+        return offer
+    end = item.get("date_end")
+    return str(end).strip() if end not in (None, "") else None
+
+
 # ─── Text matching ───────────────────────────────────────────────────
 
 def normalize(text) -> str:

@@ -35,10 +35,15 @@ PHOTOS_PER_SCAN = {"ollama": 5, "anthropic": 20}
 # When many board homes still have photos and no answer, drain faster. Ollama
 # is slow on CPU (~1–3 min/home), so catch-up stays modest; Claude can do more.
 # A second, higher tier kicks in when the queue is huge (hundreds waiting).
+# The default queue() is already top-N per goal (PHOTO_TOP_PER_MODE), so catch-up
+# mainly matters when a caller hands check_pending a long list, or Claude runs.
 PHOTOS_CATCHUP = {"ollama": 18, "anthropic": 60}
 PHOTOS_CATCHUP_HARD = {"ollama": 24, "anthropic": 80}
 PHOTOS_CATCHUP_WHEN = 40            # pending homes that trigger catch-up
 PHOTOS_CATCHUP_HARD_WHEN = 200      # pending homes that raise the budget again
+# Per scoring.MODES tab: only this many tops are queued for a vision look.
+# A listing on several tops is looked at once (best rank kept).
+PHOTO_TOP_PER_MODE = 5
 PHOTO_FAILURES_IN_A_ROW = 2         # then the looker is down (Ollama out of memory, …)
 MAX_PHOTOS = {"ollama": 2, "anthropic": 6}   # a 6 GB laptop swaps with more images in one Ollama call
 MAX_PHOTO_BYTES = 3_000_000
@@ -634,41 +639,38 @@ def _exact_sea(item: dict) -> bool:
     return km is not None and not beach.get("approx") and km <= SWIM_MAX_KM
 
 
-def queue(db, cfg: dict) -> list[dict]:
-    """Homes to look at. Exact beach homes first, then the best of each home goal.
+def queue(db, cfg: dict, n: int | None = None) -> list[dict]:
+    """Listings to look at: the top `n` of each scoring.MODES tab, deduped.
 
-    Unknown condition is what makes the all-in estimate too wide to trust. The
-    photos are how that gets settled, so a house by the sea is looked at before
-    an inland one with a higher score."""
+    Default `n` is PHOTO_TOP_PER_MODE (5). A home on several tops is kept once,
+    at its best rank. Exact beach homes among that shortlist go first — unknown
+    condition is what makes the all-in estimate too wide to trust.
+
+    Plots in the land/forest tops are included too (site photos / outside look);
+    the looker still skips a row with nothing to see (`needs_photo_check` /
+    `needs_outside_check`).
+    """
     from db import load_listings
+    from scoring import MODES
+
+    n = PHOTO_TOP_PER_MODE if n is None else max(0, int(n))
     best: dict[str, dict] = {}
-
-    def keep(it: dict) -> None:
-        if it.get("kind") != "home":
-            return
-        rank = it.get("rank", it["score"])
-        old = best.get(it["id"])
-        if old is None or rank > old.get("rank", -1):
-            best[it["id"]] = it
-
-    for mode in ("both", "home", "invest"):
-        for it in load_listings(db, filters=cfg.get("filters"), mode=mode):
-            keep(it)
-    # Hidden only because the all-in uses the middle of an unknown repair
-    # range. A photo that shows a sound house uses the low end instead; not
-    # when the price, taxes and fees are already over the cash (from
-    # common.light_checks_from: db.heavy_checks_spared), as no photo brings it under.
-    from common import light_checks_from
-    from db import _cash_on_hand, heavy_checks_spared
-    cash, light_from = _cash_on_hand(), light_checks_from(cfg)
-    for it in load_listings(db, filters=cfg.get("filters"), mode="both", include_hidden=True):
-        reason = it.get("hidden_reason") or ""
-        if reason and not reason.startswith("cash "):
-            continue
-        if _exact_sea(it) and not heavy_checks_spared(it, cash, light_from):
-            keep(it)
-    return sorted(best.values(), key=lambda it: (not _exact_sea(it), (it.get("rank") or 0) < KEEP_SCORE,
-                                                 -it.get("rank", it["score"])))
+    for mode in MODES:
+        rows = load_listings(db, filters=cfg.get("filters"), mode=mode)
+        top = sorted(rows, key=lambda it: -(it.get("rank") or it.get("score") or 0))[:n]
+        for it in top:
+            rank = it.get("rank") or it.get("score") or 0
+            old = best.get(it["id"])
+            if old is None or rank > (old.get("rank") or old.get("score") or 0):
+                best[it["id"]] = {**it, "rank": rank}
+    return sorted(
+        best.values(),
+        key=lambda it: (
+            not _exact_sea(it),
+            (it.get("rank") or 0) < KEEP_SCORE,
+            -(it.get("rank") or it.get("score") or 0),
+        ),
+    )
 
 
 def photos_root(db) -> str | None:
