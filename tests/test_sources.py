@@ -1186,6 +1186,22 @@ def test_immoweb_keeps_plain_sales_and_skips_annuities_and_options():
     assert immoweb_results(":results='[{&quot;id&quot;:1}]'") == [{"id": 1}]
 
 
+def test_immoweb_search_asks_to_exclude_life_annuities(db, fake_http, monkeypatch):
+    import sources.be as be
+    monkeypatch.setattr(be.time, "sleep", lambda s: None)
+    calls = []
+
+    def handler(method, url, kw):
+        calls.append(kw.get("params") or {})
+        # Empty results attribute so pagination stops after one page per search.
+        return FakeResponse(":results='[]'")
+
+    fake_http(handler)
+    assert be.scrape_immoweb(db, max_price=50000) == 0
+    assert calls and all(c.get("isALifeAnnuitySale") == "false" for c in calls)
+    assert calls[0]["maxPrice"] == 50000
+
+
 def test_era_detail_text_keeps_viager_figures():
     from sources._market import era_detail_text
     html = """
