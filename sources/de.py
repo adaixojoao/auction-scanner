@@ -160,50 +160,15 @@ def scrape_zvg(db, max_price: float = 50000, **_):
 
 @register("justiz_auktion", "DE", default=False)
 def scrape_justiz_auktion(db, max_price: float = 50000, **_):
-    """justiz-auktion.de — surplus assets. No property category left (Sept 2026);
-    kept runnable by name only."""
-    session = make_session()
-    base = "https://www.justiz-auktion.de/"
-    total_scraped = 0
+    """justiz-auktion.de — surplus assets only (phones, furniture, …).
 
-    for start in range(0, 200, 10):
-        try:
-            resp = session.get(f"{base}auction_search.php", params={"start": start})
-            resp.raise_for_status()
-        except Exception:
-            if start == 0:
-                raise
-            break
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        items = soup.select("a.link_detail, .auktionstitel a, a[href*='auction_detail']")
-        if not items:
-            break
-
-        for link in items:
-            href = link.get("href") or ""
-            title = link.get_text(strip=True)[:200]
-            if not href or not title:
-                continue
-            eid_m = re.search(r"(\d{4,})", href) or re.search(r"(\d{4,})", title)
-            eid = eid_m.group(1) if eid_m else None
-            if not eid:
-                continue
-            parent = link.find_parent(["div", "article", "li", "tr"]) or link
-            price = find_price(parent.get_text(" "))
-            if price and price > max_price:
-                continue
-            upsert_listing(db, make_listing(
-                "justiz_auktion", eid, "DE", id_prefix="justiz",
-                title=title, description=parent.get_text(" ", strip=True)[:500],
-                tipo="imovel", price=price, url=href, base_url=base,
-            ))
-            total_scraped += 1
-
-        db.commit()
-        LOG.info(f"  Justiz-Auktion start={start}: {total_scraped} total")
-        time.sleep(1)
-    return total_scraped
+    The Immobilien / property category was removed (Sept 2026); the live
+    catalogue is Bekleidung, Elektronik, Wohnen furniture, etc. Court property
+    sales stay on zvg-portal.de (`zvg`).
+    """
+    raise SourceUnavailable(
+        "justiz-auktion.de no longer lists property (surplus goods only); "
+        "German court sales come through the zvg (zvg-portal.de) source")
 
 
 @register("zvg_de", "DE", default=False)

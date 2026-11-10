@@ -206,6 +206,13 @@ def test_zvg_de_blocked_points_at_the_court_portal(db, fake_http):
         REGISTRY["zvg_de"].func(db, max_price=100000)
 
 
+def test_justiz_auktion_blocked_points_at_zvg(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="zvg"):
+        REGISTRY["justiz_auktion"].func(db, max_price=50000)
+
+
 def test_haya_blocked_by_firewall(db):
     from sources import SourceUnavailable
 
