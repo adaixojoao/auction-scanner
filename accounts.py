@@ -1,7 +1,7 @@
 """accounts.py — signing in to sites that show their best sales only to account holders.
 
-The owner's own accounts (Portal das Finanças, and any other site that gets a
-login connector here). How it works:
+The owner's own accounts (Portal das Finanças, Idealista, Biddit, Sareb, Haya,
+Enchères Publiques, and any other site that gets a login connector here). How it works:
 
 - Settings → Accounts takes a username and a password per site. The password is
   encrypted with Windows DPAPI before it is written to config.json: only this
@@ -25,6 +25,8 @@ import sys
 from datetime import timedelta
 from html import unescape
 from urllib.parse import urljoin, urlparse
+
+from bs4 import BeautifulSoup
 
 from common import LOG, make_session, parse_dt, utcnow, utcnow_iso
 
@@ -109,27 +111,44 @@ def _pause_key(site: str) -> str:
     return f"login_paused:{site}"
 
 
-def account_session(db, cfg: dict, site: str, *, session=None):
-    """A session signed in to `site`, or None (no account, or paused after a
-    failure). A failure pauses the site and tells the owner once."""
+def run_signed_in(db, cfg: dict, site: str, fn) -> bool:
+    """Call fn(username, password). True if it signed in; False if there is no
+    account, the site is paused, or the sign-in failed (paused and the owner told)."""
     from db import get_kv, set_kv
     creds = credentials(cfg, site)
     if not creds:
-        return None
+        return False
     paused = parse_dt(get_kv(db, _pause_key(site)) or "")
     if paused and utcnow() - paused < timedelta(hours=LOGIN_PAUSE_HOURS):
         LOG.info(f"Account {site}: paused since {paused:%Y-%m-%d %H:%M} after a failed sign-in")
-        return None
-    session = session or make_session(timeout=30)
+        return False
     try:
-        LOGINS[site]["login"](session, *creds)
+        fn(*creds)
     except (LoginNeedsCode, LoginFailed) as e:
         set_kv(db, _pause_key(site), utcnow_iso())
         _tell_owner(cfg, site, e)
         LOG.warning(f"Account {site}: {e}")
-        return None
+        return False
     set_kv(db, _pause_key(site), "")
-    return session
+    return True
+
+
+def account_session(db, cfg: dict, site: str, *, session=None):
+    """A session signed in to `site`, or None (no account, or paused after a
+    failure). A failure pauses the site and tells the owner once."""
+    if not credentials(cfg, site):
+        return None
+    session = session or make_session(timeout=30)
+    if run_signed_in(db, cfg, site, lambda user, pwd: LOGINS[site]["login"](session, user, pwd)):
+        return session
+    return None
+
+
+def missing_account_message(site: str) -> str:
+    """What Sources shows when a walled site has no working login."""
+    name = LOGINS[site]["name"]
+    return (f"{name} needs your account in Settings → Accounts "
+            "(or signing in is paused)")
 
 
 def _tell_owner(cfg: dict, site: str, error: Exception):
@@ -179,6 +198,99 @@ def _auto_forms(session, resp, hops: int = 4):
     return resp
 
 
+# ── Generic email/password form (Idealista, Biddit, Sareb, Haya, Enchères) ──
+
+def _reject_wall(text: str, where: str) -> None:
+    """CAPTCHA / Incapsula / Cloudflare / SMS — never worked around."""
+    low = (text or "").lower()
+    if "codigosms" in low or "reenviarcodigo" in low:
+        raise LoginNeedsCode(f"{where} asked for an SMS code")
+    if "captcha" in low or "recaptcha" in low or "hcaptcha" in low:
+        raise LoginFailed(f"{where} showed a CAPTCHA")
+    if "_incapsula_resource" in low:
+        raise LoginFailed(f"{where} answered with an Incapsula bot check")
+    if "cf-browser-verification" in low or "just a moment" in low:
+        raise LoginFailed(f"{where} answered with a Cloudflare bot check")
+
+
+def login_form(session, url: str, username: str, password: str, *,
+               user_fields: tuple[str, ...] = (
+                   "email", "username", "user", "login", "identifier", "nif"),
+               ) -> None:
+    """POST the first password form on `url`. Leaves the session signed in."""
+    page = session.get(url)
+    page.raise_for_status()
+    host = urlparse(url).hostname or url
+    _reject_wall(page.text, host)
+    soup = BeautifulSoup(page.text or "", "html.parser")
+    form = None
+    for candidate in soup.find_all("form"):
+        if (candidate.find("input", attrs={"type": re.compile(r"password", re.I)})
+                or candidate.find("input", attrs={"name": re.compile(r"pass", re.I)})):
+            form = candidate
+            break
+    if form is None:
+        raise LoginFailed(f"{host} has no password form (JavaScript login or the page changed)")
+    action = urljoin(getattr(page, "url", url), form.get("action") or getattr(page, "url", url))
+    data: dict[str, str] = {}
+    password_name = None
+    user_name = None
+    for inp in form.find_all("input"):
+        name = inp.get("name")
+        if not name:
+            continue
+        typ = (inp.get("type") or "text").lower()
+        if typ in ("submit", "button", "image", "reset"):
+            continue
+        data[name] = inp.get("value") or ""
+        if typ == "password" or "pass" in name.lower():
+            password_name = name
+        elif typ in ("email", "text", "tel") and name.lower() in user_fields:
+            user_name = user_name or name
+    if not password_name:
+        raise LoginFailed(f"{host} has no password field")
+    data[password_name] = password
+    if user_name:
+        data[user_name] = username
+    else:
+        for inp in form.find_all("input"):
+            name = inp.get("name")
+            typ = (inp.get("type") or "text").lower()
+            if name and typ in ("text", "email", "tel") and name != password_name:
+                data[name] = username
+                break
+        else:
+            raise LoginFailed(f"{host} has no username field")
+    resp = session.post(action, data=data, headers={
+        "Referer": getattr(page, "url", url),
+        "Origin": f"{urlparse(action).scheme}://{urlparse(action).netloc}",
+    })
+    _reject_wall(resp.text, host)
+    path = urlparse(getattr(resp, "url", "") or "").path.lower()
+    if any(part in path for part in ("/login", "/signin", "/connexion", "/iniciar", "/identifi")):
+        raise LoginFailed(f"{host} did not sign in (wrong email or password?)")
+
+
+def login_idealista(session, username: str, password: str) -> None:
+    login_form(session, "https://www.idealista.pt/login", username, password)
+
+
+def login_biddit(session, username: str, password: str) -> None:
+    login_form(session, "https://www.biddit.be/nl/login", username, password)
+
+
+def login_encheres_publiques(session, username: str, password: str) -> None:
+    login_form(session, "https://www.encheres-publiques.com/login", username, password)
+
+
+def login_sareb(session, username: str, password: str) -> None:
+    login_form(session, "https://www.sareb.es/login", username, password)
+
+
+def login_haya(session, username: str, password: str) -> None:
+    login_form(session, "https://www.haya.es/login", username, password)
+
+
 # ── Portal das Finanças and the other AT/Segurança Social services (acesso.gov.pt) ──
 
 ACESSO = "https://www.acesso.gov.pt/v2/"
@@ -220,5 +332,32 @@ LOGINS = {
         "note": "NIF and the Portal das Finanças password. If your account asks for an SMS code, "
                 "the app cannot sign in on its own and will tell you.",
         "login": lambda session, user, pwd: login_acesso_gov(session, user, pwd, start=FINANCAS_SALES),
+    },
+    "idealista": {
+        "name": "Idealista",
+        "note": "Email and password for idealista.pt. The scrape signs in with Chrome; "
+                "a CAPTCHA still cannot be passed.",
+        "login": login_idealista,
+    },
+    "biddit": {
+        "name": "Biddit",
+        "note": "Email and password for biddit.be. Its search only answers a signed-in session.",
+        "login": login_biddit,
+    },
+    "encheres_publiques": {
+        "name": "Enchères Publiques",
+        "note": "Email and password for encheres-publiques.com. Without them the site returns HTTP 403.",
+        "login": login_encheres_publiques,
+    },
+    "sareb": {
+        "name": "Sareb",
+        "note": "Email and password for sareb.es. The public search answers with an Incapsula check.",
+        "login": login_sareb,
+    },
+    "haya": {
+        "name": "Haya",
+        "note": "Email and password for haya.es. This PC's firewall has also been blocking the site; "
+                "a login cannot open it until the firewall allows it.",
+        "login": login_haya,
     },
 }

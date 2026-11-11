@@ -326,15 +326,71 @@ def enrich_france_details(db, session, limit: int = 160):
 
 
 @register("encheres_publiques", "FR", default=False)
-def scrape_encheres_publiques(db, max_price: float = 100000, **_):
+def scrape_encheres_publiques(db, max_price: float = 100000, config: dict | None = None, **_):
     """encheres-publiques.com — French judicial property auctions.
 
-    Refuses automated requests (HTTP 403, 15 runs in a row by 2026-10-24);
-    licitor.com ("france") covers the same tribunal sales.
+    Refuses a script that is not signed in (HTTP 403). With an account in
+    Settings → Accounts the same search is tried signed in; licitor.com
+    ("france") still covers the same tribunal sales.
     """
-    raise SourceUnavailable(
-        "encheres-publiques.com refuses automated reads (HTTP 403); "
-        "the same tribunal sales come through the france (licitor.com) source")
+    import accounts
+    session = accounts.account_session(db, config or {}, "encheres_publiques")
+    if session is None:
+        raise SourceUnavailable(
+            accounts.missing_account_message("encheres_publiques")
+            + "; the same tribunal sales also come through the france (licitor.com) source")
+    base = "https://www.encheres-publiques.com"
+    total = 0
+    pages = 0
+    incomplete = False
+    for page in range(1, 21):
+        try:
+            resp = session.get(f"{base}/rechercher", params={"page": page, "prixMax": int(max_price)})
+            if resp.status_code == 403:
+                raise SourceUnavailable(
+                    "encheres-publiques.com still refuses the signed-in session (HTTP 403); "
+                    "the same tribunal sales come through the france (licitor.com) source")
+            resp.raise_for_status()
+        except SourceUnavailable:
+            raise
+        except Exception:
+            if page == 1:
+                raise
+            incomplete = True
+            break
+        pages += 1
+        soup = BeautifulSoup(resp.text, "html.parser")
+        found = 0
+        seen: set[str] = set()
+        for a in soup.select("a[href]"):
+            href = a.get("href") or ""
+            m = re.search(r"(?:annonce|enchere|lot|bien)[^0-9]{0,12}(\d{5,})", href, re.I)
+            if not m:
+                continue
+            eid = m.group(1)
+            if eid in seen:
+                continue
+            seen.add(eid)
+            text = a.get_text(" ", strip=True)
+            parent = a.parent.get_text(" ", strip=True) if a.parent else text
+            price = find_price(parent) or find_price(text)
+            if price and price > max_price:
+                continue
+            upsert_listing(db, make_listing(
+                "encheres_publiques", eid, "FR",
+                title=(text or f"Enchère {eid}")[:200],
+                description=(parent or "")[:1500] or None,
+                tipo="immeuble", price=price, url=href, base_url=base,
+            ))
+            found += 1
+            total += 1
+        db.commit()
+        if not found:
+            break
+        time.sleep(0.8)
+    else:
+        incomplete = True
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 # ─── Bien'ici: a big French portal with an open search service ─────

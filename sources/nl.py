@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 
 from common import LOG, make_listing, make_session, parse_price, safe_url
 from db import upsert_listing
-from sources import SourceUnavailable, register
+from sources import ScanCount, SourceUnavailable, register
 
 NL_DETAILS_PER_SCAN = 80
 _MONTHS = {m: i for i, m in enumerate(("januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
@@ -270,9 +270,12 @@ def scrape_veilingnotaris(db, max_price: float = 50000, **_):
     session = make_session(timeout=15)
     base = "https://veilingnotaris.nl"
     rows, seen = [], set()
+    pages = 0
+    incomplete = False
     for page in range(1, 20):
         resp = session.get(f"{base}/veilingen/", params={"page": page} if page > 1 else None)
         resp.raise_for_status()
+        pages += 1
         new = 0
         for a in BeautifulSoup(resp.text, "html.parser").select("a[href]"):
             href = a.get("href", "")
@@ -299,12 +302,14 @@ def scrape_veilingnotaris(db, max_price: float = 50000, **_):
         if not new:
             break
         time.sleep(0.3)
+    else:
+        incomplete = True
     _read_details(db, session, [r for r in rows if '"detail_checked"' not in (r.get("raw_json") or "")],
                   [NL_DETAILS_PER_SCAN])
     for row in rows:
         upsert_listing(db, row)
     db.commit()
-    return len(rows)
+    return ScanCount(len(rows), "partial" if incomplete else "full", pages)
 
 
 # vastgoedveiling.nl (Hekkelman) shares auction numbers with veilingnotaris.nl
@@ -529,10 +534,13 @@ def biedboek_listing(detail: dict) -> dict | None:
 def scrape_biedboek(db, max_price: float = 50000, **_):
     session = make_session(timeout=30)
     total = 0
+    pages = 0
+    incomplete = False
     for page in range(1, 60):
         resp = session.get(f"{BIEDBOEK}/api/real-estate/preview",
                            params={"pageSize": 100, "pageNumber": page, "adv": "false", "language": "nl"})
         resp.raise_for_status()
+        pages += 1
         rows = (resp.json().get("realEstates") or {}).get("data") or []
         if not rows:
             break
@@ -545,12 +553,14 @@ def scrape_biedboek(db, max_price: float = 50000, **_):
                 LOG.info(f"biedboek {row.get('shortId')}: {type(e).__name__}")
                 continue
             listing = biedboek_listing(detail)
-            if listing and (listing["price"] or 0) <= 2 * max_price:
+            if listing and (listing["price"] or 0) <= max_price:
                 upsert_listing(db, listing)
                 total += 1
             time.sleep(0.2)
         db.commit()
-    return total
+    else:
+        incomplete = True
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 # ─── Gemeenteblad: municipal sale notices (Didam) ─────────────────────

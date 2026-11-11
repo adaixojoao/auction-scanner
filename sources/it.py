@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from common import LOG, auction_occupation, find_area, find_floor_area, find_price, make_listing, make_session, parse_price
 from db import upsert_listing
-from sources import SourceUnavailable, register
+from sources import ScanCount, SourceUnavailable, register
 
 
 @register("italy", "IT")
@@ -43,7 +43,8 @@ def scrape_italy(db, max_price: float = 50000, **_):
             price=price, url=href, base_url=base,
         ))
         total_scraped += 1
-    return total_scraped
+    # Only the front page is read; unread lots say nothing about the site.
+    return ScanCount(total_scraped, "partial", 1)
 
 
 # The portal is an Angular app; its search is a JSON API. filtroAnnunci 1 is
@@ -135,10 +136,13 @@ def scrape_italy_pvp(db, max_price: float = 50000, **_):
     """pvp.giustizia.it — Portale Vendite Pubbliche (official judicial sales portal)."""
     session = make_session(timeout=60)
     total = 0
+    pages = 0
+    incomplete = False
     for page in range(0, 30):
         resp = session.post(PVP_API, params={"page": page, "size": PVP_PAGE},
                             json={"tipoLotto": "IMMOBILI", "filtroAnnunci": 1})
         resp.raise_for_status()
+        pages += 1
         body = (resp.json() or {}).get("body") or {}
         for lot in body.get("content") or []:
             price = lot.get("prezzoBaseAsta") or 0
@@ -152,8 +156,10 @@ def scrape_italy_pvp(db, max_price: float = 50000, **_):
         if body.get("last", True) or page + 1 >= (body.get("totalPages") or 0):
             break
         time.sleep(1)
+    else:
+        incomplete = True
     LOG.info(f"PVP: {total} listings")
-    return total
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 ASTALEGALE = "https://www.astalegale.net"
@@ -211,12 +217,15 @@ def scrape_astalegale(db, max_price: float = 100000, **_):
     homes up to the budget, 12 a page)."""
     session = make_session(timeout=30)
     total, seen = 0, set()
+    pages = 0
+    incomplete = False
     # The search API answers the public site and refuses a request that does not name it.
     headers = {"Origin": ASTALEGALE, "Referer": ASTALEGALE + "/", "Accept": "application/json"}
     for page in range(1, ASTALEGALE_MAX_PAGES + 1):
         resp = session.post(ASTALEGALE_API, json={"categories": ["residenziali"], "prezzoA": int(max_price),
                                                   "page": page}, headers=headers)
         resp.raise_for_status()
+        pages += 1
         results = (resp.json() or {}).get("results") or {}
         lots = results.get("currentPage") or []
         for lot in lots:
@@ -231,8 +240,10 @@ def scrape_astalegale(db, max_price: float = 100000, **_):
         if not lots or page * (results.get("pageSize") or 12) >= (results.get("totalResults") or 0):
             break
         time.sleep(0.3)
+    else:
+        incomplete = True
     LOG.info(f"Astalegale: {total} listings")
-    return total
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 FALLCOASTE = "https://www.fallcoaste.it"
@@ -271,7 +282,6 @@ def fallcoaste_listing(art) -> dict | None:
 @register("fallcoaste", "IT", kind="aggregator", access="public_html", docs_url=FALLCOASTE)
 def scrape_fallcoaste(db, max_price: float = 100000, **_):
     """Fallco Aste — Italian bankruptcy (fallimento / liquidazione) and court home sales."""
-    from sources import ScanCount
     session = make_session(timeout=40)
     total, seen, scope, pages = 0, set(), "partial", 0
     for page in range(1, FALLCOASTE_MAX_PAGES + 1):

@@ -485,12 +485,14 @@ def scrape_aeat(db, max_price: float = 50000, **_):
         "come in through the Spain (BOE) source")
 
 
-# Not in the default scan (Sept 2026): Sareb: behind an Incapsula bot wall (403); check sareb.es by hand.
-# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+# Not in the default scan: Sareb sits behind Incapsula. Bot checks are not
+# worked around; with an account in Settings → Accounts the same search is
+# tried signed in.
 @register("sareb", "ES", default=False)
-def scrape_sareb(db, max_price: float = 100000, **_):
+def scrape_sareb(db, max_price: float = 100000, config: dict | None = None, **_):
     """sareb.es — Spanish state bad bank."""
-    session = make_session()
+    import accounts
+    session = accounts.account_session(db, config or {}, "sareb") or make_session()
     base = "https://www.sareb.es"
     total = 0
     for page in range(1, 50):
@@ -502,8 +504,12 @@ def scrape_sareb(db, max_price: float = 100000, **_):
                 break
             resp.raise_for_status()
             if "_Incapsula_Resource" in resp.text:
-                raise SourceUnavailable("sareb.es answers scripts with an Incapsula bot check "
-                                        "instead of listings; look at it in a browser")
+                if not accounts.credentials(config or {}, "sareb"):
+                    raise SourceUnavailable(
+                        "sareb.es needs your account in Settings → Accounts "
+                        "(it answers scripts with an Incapsula bot check)")
+                raise SourceUnavailable(
+                    "sareb.es still answers with an Incapsula bot check after signing in")
             data = resp.json()
         except Exception:
             if page == 1:
@@ -539,14 +545,65 @@ def scrape_sareb(db, max_price: float = 100000, **_):
     return total
 
 
-# Blocked by this PC's firewall (WinError 10013) on every scan. Left registered
-# by name so Sources can show why; a default scan no longer waits on it.
+# This PC's firewall has been blocking haya.es (WinError 10013). Left
+# registered by name so Sources can show why; a login is tried when one is
+# stored, and cannot open the site until the firewall allows it.
 @register("haya", "ES", default=False)
-def scrape_haya(db, max_price: float = 100000, **_):
+def scrape_haya(db, max_price: float = 100000, config: dict | None = None, **_):
     """haya.es — Sareb/BBVA repossessions."""
-    raise SourceUnavailable(
-        "haya.es is blocked by this PC's firewall (WinError 10013); "
-        "Sareb stock is also listed through other Spanish bank sources when they answer")
+    import accounts
+    session = accounts.account_session(db, config or {}, "haya")
+    if session is None:
+        raise SourceUnavailable(
+            accounts.missing_account_message("haya")
+            + "; this PC's firewall has also been blocking the site (WinError 10013)")
+    base = "https://www.haya.es"
+    total = 0
+    try:
+        for page in range(1, 30):
+            resp = session.get(f"{base}/inmuebles",
+                               params={"page": page, "precioMax": int(max_price)})
+            if resp.status_code == 404:
+                break
+            resp.raise_for_status()
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {}
+            items = data if isinstance(data, list) else data.get("inmuebles", data.get("items", []))
+            if not items:
+                break
+            for item in items:
+                price = to_number(item.get("precio")) or to_number(item.get("price")) or 0
+                if price > max_price:
+                    continue
+                eid = str(item.get("id") or item.get("referencia")
+                          or stable_id(json.dumps(item, sort_keys=True, default=str)))
+                upsert_listing(db, make_listing(
+                    "haya", eid, "ES",
+                    title=str(item.get("titulo") or item.get("title") or f"Haya #{eid}")[:200],
+                    description=item.get("descripcion") or "Haya repossession",
+                    tipo=item.get("tipo") or "inmueble",
+                    area_m2=item.get("superficie") or item.get("area"),
+                    price=price, min_price=price,
+                    district=item.get("provincia") or item.get("district"),
+                    concelho=item.get("municipio") or item.get("city"),
+                    url=item.get("url") or f"{base}/inmueble/{eid}", base_url=base,
+                    image_url=item.get("imagen") or item.get("image"),
+                    raw_json=json.dumps(item, ensure_ascii=False)[:2000],
+                ))
+                total += 1
+            db.commit()
+            if len(items) < 20:
+                break
+            time.sleep(0.8)
+    except Exception as e:  # noqa: BLE001 — firewall vs HTTP vs parser
+        if getattr(e, "winerror", None) == 10013 or "10013" in str(e):
+            raise SourceUnavailable(
+                "haya.es is blocked by this PC's firewall (WinError 10013); "
+                "a login cannot open it until the firewall allows the site") from e
+        raise
+    return total
 
 
 # servihabitat.com (Liferay): one page per province, cheapest first with ?o=4,

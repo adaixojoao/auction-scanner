@@ -68,19 +68,26 @@ _loaded = False
 
 # What an ordinary scan reads: forced sales (court, tax, social security,
 # insolvency, execution) in Portugal, Spain, France, the Netherlands and Italy,
-# plus bank repossessions in Portugal and Spain.
-# Every other source stays registered and can still be run by name. Belgium and
-# Luxembourg have none here: Biddit is walled off and the rest are agency portals.
+# bank repossessions, and the agency portals whose search was seen to honour a
+# price ceiling (or to list cheap homes). Sites behind a login or a bot wall
+# stay registered and run by name once an account is in Settings → Accounts.
 DEFAULT_SOURCES = frozenset({
     "citius", "eleiloes", "financas", "leilosoc", "bidleiloeira",  # PT
     "bcp", "bpi", "cgd", "santander", "whitestar",                 # PT banks
     "centroleiloes", "imobancos",                                  # PT banks
+    "imovirtual", "custojusto", "casasapo",                        # PT portals
     "spain", "tgss", "eactivos",                                   # ES
     "aliseda", "altamira", "solvia", "servihabitat",               # ES banks
+    "pisos", "habitaclia",                                         # ES portals
     "france", "vench", "notaires",                                 # FR (notaires: viager / nue-propriété)
+    "paruvendu", "iadfrance", "citya", "safti", "optimhome",       # FR portals
     "netherlands", "veilingnotaris", "vastgoedveiling",            # NL
+    "remaxnl",                                                     # NL portal
     "pvp_giustizia", "fallcoaste", "italy", "astalegale",          # IT
-    "era",                                                         # BE agency (price-filtered)
+    "era", "immovlan", "immoweb",                                  # BE agencies
+    "athome", "wortimmo",                                          # LU
+    "kleinanzeigen", "immowelt",                                   # DE
+    "willhaben", "wohnnet",                                        # AT
 })
 
 

@@ -106,6 +106,65 @@ FORWARD_FORM = """<html><form name="formCredential" id="forwardParticipantForm" 
   <input value="SIVI" type="hidden" name="partID"/></form><div id="root-data"></div></html>"""
 
 
+FORM_LOGIN = """<html><form action="/do-login" method="post">
+<input type="hidden" name="csrf" value="tok"/>
+<input type="email" name="email"/>
+<input type="password" name="password"/>
+</form></html>"""
+
+
+class FormSession:
+    """GET the login form, POST the email and password, land on `after_url`."""
+
+    def __init__(self, page, after_url, after_text="<h1>ok</h1>"):
+        self.page, self.after_url, self.after_text, self.calls = page, after_url, after_text, []
+
+    def get(self, url, **kw):
+        self.calls.append(("GET", url, None))
+        resp = FakeResponse(self.page)
+        resp.url = url
+        return resp
+
+    def post(self, url, data=None, **kw):
+        self.calls.append(("POST", url, data))
+        resp = FakeResponse(self.after_text)
+        resp.url = self.after_url
+        return resp
+
+
+def test_a_password_form_signs_in_and_a_captcha_or_failed_page_stops():
+    s = FormSession(FORM_LOGIN, "https://www.idealista.pt/")
+    accounts.login_form(s, "https://www.idealista.pt/login", "me@example.com", "secret")
+    posted = next(d for m, u, d in s.calls if m == "POST")
+    assert posted == {"csrf": "tok", "email": "me@example.com", "password": "secret"}
+    with pytest.raises(accounts.LoginFailed, match="CAPTCHA"):
+        accounts.login_form(FormSession('<div class="g-recaptcha"></div>', "https://x/"),
+                            "https://www.biddit.be/nl/login", "a", "b")
+    with pytest.raises(accounts.LoginFailed, match="did not sign in"):
+        accounts.login_form(FormSession(FORM_LOGIN, "https://www.idealista.pt/login"),
+                            "https://www.idealista.pt/login", "me@example.com", "wrong")
+
+
+def test_walled_sites_are_on_settings_and_blocked_without_an_account(db):
+    import dashboard
+    from sources import REGISTRY, run_source
+    dashboard.app.config["TESTING"] = True
+    view = dashboard.app.test_client().get("/api/accounts").get_json()
+    for site in ("financas", "idealista", "biddit", "encheres_publiques", "sareb", "haya"):
+        assert site in accounts.LOGINS and site in view
+        assert "secret" not in view[site] and view[site]["has_password"] is False
+    for name in ("biddit", "encheres_publiques", "haya"):
+        result = run_source(db, REGISTRY[name], max_price=100000, config={})
+        assert result["status"] == "blocked" and "Accounts" in result["message"]
+
+
+def test_sareb_without_an_account_asks_for_one_when_incapsula_answers(db, fake_http):
+    from sources import REGISTRY, run_source
+    fake_http(lambda m, u, kw: FakeResponse("_Incapsula_Resource"))
+    result = run_source(db, REGISTRY["sareb"], max_price=100000, config={})
+    assert result["status"] == "blocked" and "Accounts" in result["message"]
+
+
 def test_acesso_gov_forwards_with_a_form_that_has_no_visible_submit():
     """The real answer: a form of hidden inputs to the site, submitted by the page's own script."""
     s = FlowSession(FORWARD_FORM)
