@@ -384,3 +384,27 @@ def test_era_a_later_page_failing_is_not_a_full_scan(db, fake_http):
     fake_http(down)
     with pytest.raises(requests.HTTPError):
         scrape_era(db, max_price=100000)
+
+
+def test_a_fee_or_per_m2_is_not_the_asking_price():
+    from sources._market import parse_portal
+    fee = """<a href="/annonces-immobilieres/maison/vente/loupia-11300/maison-de-village/ref-22653367">
+    Maison</a><span>12 €</span><span>42 000 €</span>"""
+    assert parse_portal("entreparticuliers", fee)[0]["price"] == 42000
+    rate = """<div><a href="/inzerat/196264135/investicny-byt.php">Byt</a>
+    <span>790 €/m²</span><span>Cena: 49 990 €</span></div>"""
+    assert parse_portal("bazos", rate)[0]["price"] == 49990
+
+
+def test_a_card_with_no_euro_amount_is_still_kept(db, fake_http):
+    from db import load_listings
+    from sources._market import parse_portal, scrape_named
+    html = """<a href="/annonces-immobilieres/maison/vente/loupia-11300/maison-de-village/ref-22653367">
+    Maison de village à rénover, prix sur demande</a>"""
+    row = parse_portal("entreparticuliers", html)[0]
+    assert row["external_id"] == "22653367" and row["price"] is None
+    fake_http(lambda m, u, kw: FakeResponse(html))
+    result = scrape_named(db, "entreparticuliers", 100000)
+    assert result == 1 and result.scope == "partial"
+    kept = load_listings(db, include_hidden=True)
+    assert len(kept) == 1 and kept[0]["price"] is None

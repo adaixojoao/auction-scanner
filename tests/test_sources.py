@@ -16,18 +16,22 @@ def test_registry_is_complete():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
     # An ordinary scan reads the default sources in these countries; PT runs first.
-    # Luxembourg still has no default source; Belgium's is ERA (agency, under budget).
+    # Agency portals whose search was seen to list cheap homes are in the default set.
     assert {s.name for s in REGISTRY.values() if s.default} == DEFAULT_SOURCES
-    assert {s.country for s in sources_for(None)} == {"PT", "ES", "FR", "NL", "IT", "BE"}
+    assert {s.country for s in sources_for(None)} == {
+        "PT", "ES", "FR", "NL", "IT", "BE", "LU", "DE", "AT"}
     assert sources_for(None)[0].country == "PT"
     assert {s.name for s in sources_for(["PT"])} == {"eleiloes", "leilosoc", "citius", "financas", "bidleiloeira",
                                                      "bcp", "bpi", "cgd", "santander", "whitestar",
-                                                     "centroleiloes", "imobancos"}
-    assert {s.name for s in sources_for(["BE"])} == {"era"}
+                                                     "centroleiloes", "imobancos",
+                                                     "imovirtual", "custojusto", "casasapo"}
+    assert {s.name for s in sources_for(["BE"])} == {"era", "immovlan", "immoweb"}
     assert "notaires" in {s.name for s in sources_for(["FR"])}
-    assert sources_for(["LU"]) == []
+    assert {s.name for s in sources_for(["LU"])} == {"athome", "wortimmo"}
     assert "astalegale" in {s.name for s in sources_for(["IT"])}
     assert "servihabitat" in {s.name for s in sources_for(["ES"])}
+    assert "kleinanzeigen" in {s.name for s in sources_for(["DE"])}
+    assert "willhaben" in {s.name for s in sources_for(["AT"])}
     # Everything else can still be run by name or listed as optional.
     assert len(sources_for(None, include_optional=True)) == len(REGISTRY)
     # the CLI accepts every registered name

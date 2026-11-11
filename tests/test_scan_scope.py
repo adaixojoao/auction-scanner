@@ -186,3 +186,62 @@ def test_france_is_partial_when_the_tribunal_cap_stops_it(db, fake_http):
     fake_http(lambda m, u, kw: FakeResponse(links if u.endswith("france.html") else "<html></html>"))
     result = scrape_france(db, max_price=100000)
     assert result == 0 and result.scope == "partial" and result.pages_seen == 60
+
+
+def test_italy_front_page_is_always_partial(db, fake_http):
+    from sources.it import scrape_italy
+    fake_http(lambda m, u, kw: FakeResponse(
+        '<a href="/vendita-asta-casa-roma-l123-p456">Casa Roma</a>'))
+    result = scrape_italy(db, max_price=100000)
+    assert result == 1 and result.scope == "partial" and result.pages_seen == 1
+
+
+def test_pvp_page_cap_is_partial(db, fake_http):
+    from sources.it import scrape_italy_pvp
+    fake_http(lambda m, u, kw: FakeResponse(json_data={
+        "body": {"content": [], "last": False, "totalPages": 99}}))
+    result = scrape_italy_pvp(db, max_price=100000)
+    assert result == 0 and result.scope == "partial" and result.pages_seen == 30
+
+
+def test_veilingnotaris_page_cap_is_partial(db, fake_http):
+    from sources.nl import scrape_veilingnotaris
+
+    def handler(method, url, kw):
+        page = (kw.get("params") or {}).get("page") or 1
+        return FakeResponse(f'<a href="/veilingen/{page}/foo-bar/">Woonhuis</a>')
+
+    fake_http(handler)
+    result = scrape_veilingnotaris(db, max_price=100000)
+    assert result.scope == "partial" and result.pages_seen == 19
+    assert result == 19
+
+
+def test_biedboek_keeps_sales_under_the_budget_not_twice(db, fake_http):
+    from sources.nl import scrape_biedboek
+
+    def listing(short_id, amount):
+        return {
+            "shortId": short_id,
+            "translation": {"name": "Bosperceel", "city": "Vessem",
+                            "realEstateParagraphs": [{"html": "<p>Het Rijksvastgoedbedrijf biedt te koop aan.</p>"}]},
+            "biddingData": {"minimumAmount": amount},
+        }
+
+    def handler(method, url, kw):
+        if "preview" in url:
+            page = (kw.get("params") or {}).get("pageNumber")
+            data = [{"shortId": "cheap", "realEstateStatus": 100},
+                    {"shortId": "dear", "realEstateStatus": 100}] if page == 1 else []
+            return FakeResponse(json_data={"realEstates": {"data": data}})
+        if url.rstrip("/").endswith("cheap"):
+            return FakeResponse(json_data=listing("cheap", 40000))
+        if url.rstrip("/").endswith("dear"):
+            return FakeResponse(json_data=listing("dear", 90000))
+        return FakeResponse(json_data={"realEstates": {"data": []}})
+
+    fake_http(handler)
+    result = scrape_biedboek(db, max_price=50000)
+    assert result == 1 and result.scope == "full"
+    rows = db.execute("SELECT external_id, price FROM listings WHERE source='biedboek'").fetchall()
+    assert [(r["external_id"], r["price"]) for r in rows] == [("cheap", 40000)]

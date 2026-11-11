@@ -318,14 +318,45 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
 
 # ─── Idealista (Selenium) ────────────────────────────────────────────
 
+def _idealista_sign_in(driver, username: str, password: str) -> None:
+    """Fill the Idealista login form in Chrome. CAPTCHA is never worked around."""
+    import accounts
+    from selenium.common.exceptions import NoSuchElementException
+    from selenium.webdriver.common.by import By
+
+    driver.get("https://www.idealista.pt/login")
+    time.sleep(2)
+    source = (driver.page_source or "").lower()
+    if "captcha" in source:
+        raise accounts.LoginFailed("idealista.pt showed a CAPTCHA")
+    try:
+        email = driver.find_element(By.CSS_SELECTOR, "input[type='email'], input[name='email'], #email")
+        pwd = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+    except NoSuchElementException as e:
+        raise accounts.LoginFailed("idealista.pt login page has changed") from e
+    email.clear()
+    email.send_keys(username)
+    pwd.clear()
+    pwd.send_keys(password)
+    pwd.submit()
+    time.sleep(3)
+    source = (driver.page_source or "").lower()
+    if "captcha" in source:
+        raise accounts.LoginFailed("idealista.pt showed a CAPTCHA")
+    if "/login" in (driver.current_url or "").lower():
+        raise accounts.LoginFailed("idealista.pt did not sign in (wrong email or password?)")
+
+
 @register("idealista", "PT", default=False)
-def scrape_idealista(db, max_price: float = 50000, **_):
+def scrape_idealista(db, max_price: float = 50000, config: dict | None = None, **_):
     """idealista.pt — regular listings via Selenium (needs Chrome; not in default runs)."""
+    import accounts
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
 
     driver = None
     total_scraped = 0
+    signed_in = False
     try:
         for attempt in ("standalone", "remote"):
             try:
@@ -353,6 +384,13 @@ def scrape_idealista(db, max_price: float = 50000, **_):
             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         })
 
+        if accounts.credentials(config or {}, "idealista"):
+            signed_in = accounts.run_signed_in(
+                db, config or {}, "idealista",
+                lambda user, pwd: _idealista_sign_in(driver, user, pwd))
+            if not signed_in:
+                raise SourceUnavailable(accounts.missing_account_message("idealista"))
+
         base = f"https://www.idealista.pt/comprar-casas/portugal/com-preco-max_{int(max_price)},publicado_ultimas-48-horas/"
         for page in range(1, 15):
             driver.get(base if page == 1 else base + f"pagina-{page}.htm")
@@ -360,6 +398,10 @@ def scrape_idealista(db, max_price: float = 50000, **_):
 
             source = driver.page_source.lower()
             if "captcha" in source or "blocked" in source:
+                if not signed_in:
+                    raise SourceUnavailable(
+                        "idealista.pt showed a CAPTCHA; add your account in Settings → Accounts "
+                        "so the scrape can sign in first")
                 LOG.warning(f"idealista: CAPTCHA/block on page {page}. Stopping.")
                 break
 
@@ -498,6 +540,8 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
     """leilosoc.com — private auction house (court and insolvency sales)."""
     session = make_session(timeout=20)
     total = 0
+    pages = 0
+    incomplete = False
     for page in range(1, 20):
         try:
             resp = session.get(f"{LEILOSOC}/en/category/5-real-estate/", params={"page": page})
@@ -505,7 +549,9 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
         except Exception:
             if page == 1:
                 raise
+            incomplete = True
             break
+        pages += 1
         lots, more = leilosoc_lots(resp.text)
         for lot in sorted(lots, key=lambda x: (x.get("auctionId") or 0, x.get("order") or 0, x.get("batchId") or 0)):
             auction = str(lot.get("auctionId"))
@@ -530,7 +576,9 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
         if not more:
             break
         time.sleep(0.5)
-    return total
+    else:
+        incomplete = True
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 # ─── BCP Millennium ─────────────────────────────────────────────────
@@ -1048,6 +1096,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
     past = (datetime.now() - timedelta(days=180)).strftime("%d/%m/%Y")
 
     total_scraped = 0
+    missed = False
     for i, (trib_id, trib_name) in enumerate(tribunais):
         try:
             state = _citius_form_state(session)
@@ -1065,6 +1114,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
             })
         except Exception as e:
             LOG.debug(f"  Tribunal {trib_id} error: {e}")
+            missed = True
             continue
 
         form = {k: v for k, v in (
@@ -1113,7 +1163,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
             LOG.info(f"  Citius: {i+1}/{len(tribunais)} tribunais, {total_scraped} listings so far")
         time.sleep(0.3)
     fetch_citius_details(db, session)
-    return total_scraped
+    return ScanCount(total_scraped, "partial" if missed else "full")
 
 
 # ─── Portal das Finanças (tax seizures) ─────────────────────────────

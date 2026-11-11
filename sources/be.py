@@ -37,12 +37,18 @@ def biddit_listing(item: dict) -> dict | None:
     )
 
 
-# Not in the default scan (Sept 2026): Biddit: its search API rejects anything but a browser (F5 firewall); check biddit.be by hand.
-# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+# Not in the default scan: Biddit's search API rejects anything but a signed-in
+# browser (F5 firewall). Bot checks are not worked around; with an account in
+# Settings → Accounts the same API is tried with that session.
 @register("biddit", "BE", default=False)
-def scrape_biddit(db, max_price: float = 50000, **_):
+def scrape_biddit(db, max_price: float = 50000, config: dict | None = None, **_):
     """biddit.be — Belgian online notary auctions."""
-    session = make_session(headers={"Accept": "application/json"})
+    import accounts
+    from sources import SourceUnavailable
+    session = accounts.account_session(db, config or {}, "biddit")
+    if session is None:
+        raise SourceUnavailable(accounts.missing_account_message("biddit"))
+    session.headers["Accept"] = "application/json"
     total_scraped = 0
 
     for page in range(0, 20):

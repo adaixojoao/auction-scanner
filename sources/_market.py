@@ -239,6 +239,16 @@ PORTALS: dict[str, Portal] = {
 }
 
 
+# A fee or a deposit listed first is almost always under this; an asking price is not.
+_ASKING_FLOOR = 1000.0
+
+
+def _is_per_m2(after_sign: str) -> bool:
+    """True when the amount next to this €/EUR is a rate, not an asking price."""
+    head = (after_sign or "").lstrip()
+    return bool(re.match(r"/\s*m", head, re.I) or re.match(r"[\d\s.,]+\s*/\s*m", head, re.I))
+
+
 def _amounts(text: str) -> list[float]:
     found = []
     rest = str(text or "")
@@ -246,14 +256,32 @@ def _amounts(text: str) -> list[float]:
         price = find_price(rest)
         if not price:
             break
-        found.append(price)
         cut = rest.find("€")
+        token_len = 1
         if cut < 0:
-            cut = rest.upper().find("EUR")
-        if cut < 0:
-            break
-        rest = rest[cut + 1:]
+            mark = re.search(r"EUR", rest, re.I)
+            if not mark:
+                break
+            cut, token_len = mark.start(), mark.end() - mark.start()
+        after = rest[cut + token_len:]
+        rest = after
+        if _is_per_m2(after):
+            continue
+        found.append(price)
     return found
+
+
+def _pick_price(amounts: list[float], portal: Portal) -> float | None:
+    """The asking price on a card, not a fee or a leftover €/m²."""
+    if not amounts:
+        return None
+    usable = [a for a in amounts if a >= portal.min_amount]
+    pool = usable or amounts
+    if portal.price_mode == "max":
+        return max(pool)
+    floor = max(portal.min_amount, _ASKING_FLOOR)
+    asking = [a for a in pool if a >= floor]
+    return asking[0] if asking else pool[0]
 
 
 def _era_price(a) -> str | None:
@@ -299,6 +327,19 @@ def _card_text(a) -> str:
         if getattr(sib, "get_text", None):
             chunk.append(sib.get_text(" ", strip=True))
         if find_price(" ".join(chunk)):
+            # A fee or a €/m² often sits in the first chip; keep nearby short
+            # amounts on the same card, but stop before the next listing.
+            extra = sib.next_sibling
+            for _ in range(4):
+                if extra is None:
+                    break
+                if getattr(extra, "get_text", None):
+                    piece = extra.get_text(" ", strip=True)
+                    if find_price(piece) and len(piece) <= 40:
+                        chunk.append(piece)
+                    elif piece:
+                        break
+                extra = extra.next_sibling
             break
         sib = sib.next_sibling
     return f"{label} {' '.join(chunk)}".strip()
@@ -362,7 +403,7 @@ def _tipo(url: str, title: str) -> str:
 
 
 def _row(portal: Portal, eid: str, *, title: str, text: str, url: str,
-         price: float, area=None, district=None, concelho=None, freguesia=None,
+         price: float | None, area=None, district=None, concelho=None, freguesia=None,
          image=None, country=None) -> dict:
     return {
         "external_id": str(eid),
@@ -419,10 +460,15 @@ def parse_links(html: str, portal: Portal) -> list[dict]:
                 text = f"{stated} {text}"
         amounts = _amounts(text)
         if not amounts:
-            continue
-        price = max(amounts) if portal.price_mode == "max" else amounts[0]
-        if price < portal.min_amount:
-            continue
+            # ERA's empty price line is "on request", not a sale we can rank.
+            # Other portals still keep the card so a later detail page can fill it.
+            if portal.name == "era":
+                continue
+            price = None
+        else:
+            price = _pick_price(amounts, portal)
+            if price is None or price < portal.min_amount:
+                continue
         seen.add(eid)
         country = portal.country
         if portal.name == "athome":
@@ -515,7 +561,7 @@ def parse_casasapo(html: str, portal: Portal) -> list[dict]:
         url = _clean_url(target, portal.base) if target else None
         text = card.get_text(" ", strip=True)
         price = find_price(text)
-        if not url or not price:
+        if not url:
             continue
         seen.add(eid)
         named = card.select_one("[data-title]")
@@ -843,7 +889,7 @@ def scrape_named(db, name: str, max_price: float) -> int:
         for item in parser(resp.text, portal):
             eid = item["external_id"]
             price = item.get("price")
-            if eid in seen or not price or price > max_price:
+            if eid in seen or (price is not None and price > max_price):
                 continue
             seen.add(eid)
             upsert_listing(db, make_listing(
