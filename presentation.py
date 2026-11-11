@@ -16,7 +16,8 @@ Display only: every figure and state here comes from the module that owns it.
   date_end differ, both are returned (role "offer" + sale hearing).
 
 Nothing here hides, ranks or gates a listing: db.load_listings and the
-existing checks still decide that.
+existing checks still decide that. The eligibility line repeats the
+evaluator's stored state and is never a bid or a value.
 """
 from __future__ import annotations
 
@@ -257,7 +258,41 @@ def thumbnail(item: dict) -> str | None:
     return _url(item.get("image_url"))
 
 
+# evaluator.evaluate states, as words. None of them is a bid or a price.
+_ELIGIBILITY = {
+    "research": (
+        "Research",
+        "Research only — not a bid",
+        "Eligibility check: research only. Gaps remain, so this is not a bid.",
+    ),
+    "finalist": (
+        "Finalist",
+        "Finalist on the checks — not a bid",
+        "Eligibility check: finalist on the recorded checks. This is not a bid and does not set a price.",
+    ),
+    "bid_ready": (
+        "Recorded",
+        "Recorded — this app does not bid",
+        "Eligibility check recorded a later state. This app does not bid from it.",
+    ),
+}
+
+
+def eligibility(item: dict) -> dict | None:
+    """The stored eligibility state for this reading, or None when there is none.
+
+    Live and invest and Investment home record it. It does not hide a listing,
+    set a bid, or say what the property is worth.
+    """
+    found = _ELIGIBILITY.get(item.get("evaluator_state"))
+    if not found:
+        return None
+    label, short, text = found
+    return {"state": item["evaluator_state"], "label": label, "short": short, "text": text}
+
+
 def summary(item: dict, check_rows: dict | None, cfg: dict | None, now: datetime | None = None) -> dict:
     basis = price(item)
     return {"price": basis, "all_in": all_in(item, basis["kind"]), "checks": checks(item, check_rows, cfg),
-            "deadline": deadline(item, now), "thumbnail": thumbnail(item)}
+            "deadline": deadline(item, now), "thumbnail": thumbnail(item),
+            "eligibility": eligibility(item)}

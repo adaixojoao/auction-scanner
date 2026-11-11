@@ -1970,16 +1970,16 @@ def scrape_imovirtual(db, max_price: float = 50000, **_):
 
 
 @register("custojusto", "PT",
-          description="CustoJusto — plots, and houses in the inland districts")
+          description="CustoJusto — plots and houses across Portugal")
 def scrape_custojusto(db, max_price: float = 50000, **_):
-    """CustoJusto — plots, and houses in the inland districts."""
+    """CustoJusto — plots and houses across Portugal, at or under the ceiling."""
     from sources._market import scrape_named
     return scrape_named(db, "custojusto", max_price)
 
 
-@register("casasapo", "PT", description="Casa Sapo — plots for sale across Portugal")
+@register("casasapo", "PT", description="Casa Sapo — houses, flats and plots across Portugal")
 def scrape_casasapo(db, max_price: float = 50000, **_):
-    """Casa Sapo — plots for sale across Portugal."""
+    """Casa Sapo — houses, flats and plots across Portugal, at or under the ceiling."""
     from sources._market import scrape_named
     return scrape_named(db, "casasapo", max_price)
 

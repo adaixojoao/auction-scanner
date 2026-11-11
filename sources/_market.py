@@ -60,35 +60,46 @@ ERA_MAX_PAGES = 12          # past this the rest is read next scan, and the scan
 
 
 PORTALS: dict[str, Portal] = {
+    # ps/pe are the site's own floor and ceiling. A national house search
+    # without them led with €500k+ ads; with pe=50000 every card was ≤ €50k
+    # (live check 2026-11-11).
     "custojusto": Portal(
         "custojusto", "PT", "https://www.custojusto.pt",
-        ("https://www.custojusto.pt/portugal/imobiliario/terrenos-venda",
-         "https://www.custojusto.pt/guarda/imobiliario/moradias-venda",
-         "https://www.custojusto.pt/castelo-branco/imobiliario/moradias-venda",
-         "https://www.custojusto.pt/braganca/imobiliario/moradias-venda",
-         "https://www.custojusto.pt/viseu/imobiliario/moradias-venda"),
+        ("https://www.custojusto.pt/portugal/imobiliario/terrenos-venda?ps=1&pe={max}",
+         "https://www.custojusto.pt/portugal/imobiliario/moradias-venda?ps=1&pe={max}"),
         "", "", parser="custojusto"),
+    # gp is the ceiling the site's own search applies (title: "até N €").
+    # /Venda/Terrenos/ is the old path, still parsed, but it does not take gp.
     "casasapo": Portal(
         "casasapo", "PT", "https://casa.sapo.pt",
-        ("https://casa.sapo.pt/Venda/Terrenos/",),
+        ("https://casa.sapo.pt/comprar-moradias/?gp={max}",
+         "https://casa.sapo.pt/comprar-apartamentos/?gp={max}",
+         "https://casa.sapo.pt/comprar-terrenos/?gp={max}"),
         "", "", parser="casasapo"),
+    # pxm is ignored: on 2026-11-10 a maison search with pxm=50000 still led
+    # with multi-million houses. px1 is the ceiling the site's own search applies.
     "paruvendu": Portal(
         "paruvendu", "FR", "https://www.paruvendu.fr",
-        ("https://www.paruvendu.fr/immobilier/vente/maison/?pxm={max}",
-         "https://www.paruvendu.fr/immobilier/vente/terrain/?pxm={max}"),
+        ("https://www.paruvendu.fr/immobilier/vente/maison/?px1={max}",
+         "https://www.paruvendu.fr/immobilier/vente/terrain/?px1={max}"),
         r"/immobilier/vente/", r"/(\d{7,})"),
     "entreparticuliers": Portal(
         "entreparticuliers", "FR", "https://www.entreparticuliers.com",
         ("https://www.entreparticuliers.com/annonces-immobilieres/vente/maison",),
         r"ref-\d+", r"ref-(\d+)"),
+    # /annonces/achat/maison ignores priceMax and redirects. /annonces/vente/maison
+    # with priceMax=50000 kept every card at or under €50k (live check 2026-11-11).
     "iadfrance": Portal(
         "iadfrance", "FR", "https://www.iadfrance.fr",
-        ("https://www.iadfrance.fr/annonces/achat/maison",
-         "https://www.iadfrance.fr/annonces/achat/terrain"),
+        ("https://www.iadfrance.fr/annonces/vente/maison?priceMax={max}",
+         "https://www.iadfrance.fr/annonces/vente/maison?priceMax={max}&page=2",
+         "https://www.iadfrance.fr/annonces/vente/terrain?priceMax={max}",
+         "https://www.iadfrance.fr/annonces/vente/terrain?priceMax={max}&page=2"),
         r"/annonce/", r"/r(\d{5,})"),
     "optimhome": Portal(
         "optimhome", "FR", "https://www.optimhome.com",
-        ("https://www.optimhome.com/fr/immobilier/vente",),
+        ("https://www.optimhome.com/fr/immobilier/vente",
+         "https://www.optimhome.com/fr/achat/terrain"),
         r"/immobilier/vente/.+/\d", r"/(\d{5,})"),
     "laforet": Portal(
         "laforet", "FR", "https://www.laforet.com",
@@ -132,20 +143,29 @@ PORTALS: dict[str, Portal] = {
         "kvee", "EE", "https://www.kv.ee",
         ("https://www.kv.ee/search?deal_type=1&price_max={max}",),
         "", "", parser="kvee"),
+    # viviendas-{city}.htm now redirects to that city's capital, not the
+    # province. casas-baratas-provincia-{name}.htm is the whole province's
+    # cheap-house bucket (live 2026-11-11: almost every card under €25k).
     "habitaclia": Portal(
         "habitaclia", "ES", "https://www.habitaclia.com",
-        ("https://www.habitaclia.com/viviendas-lugo.htm",
-         "https://www.habitaclia.com/viviendas-ourense.htm",
-         "https://www.habitaclia.com/viviendas-leon.htm"),
+        tuple(
+            f"https://www.habitaclia.com/casas-baratas-provincia-{prov}.htm"
+            for prov in (
+                "lugo", "ourense", "leon", "asturias", "zamora", "caceres",
+                "badajoz", "palencia", "soria", "teruel", "cuenca", "avila",
+                "salamanca", "huelva", "jaen",
+            )),
         r"/comprar/", _UUID),
     "etuovi": Portal(
         "etuovi", "FI", "https://www.etuovi.com",
         ("https://www.etuovi.com/myytavat-asunnot?hinta_max={max}",
          "https://www.etuovi.com/myytavat-tontit?hinta_max={max}"),
         r"/kohde/\d+", r"/kohde/(\d+)"),
+    # cenado is the ceiling the site's own search applies (live 2026-11-11:
+    # ?cenado=50000 kept every card at or under €50k; the unfiltered homepage did not).
     "bazos": Portal(
         "bazos", "SK", "https://reality.bazos.sk",
-        ("https://reality.bazos.sk/",),
+        ("https://reality.bazos.sk/?cenaod=&cenado={max}",),
         r"/inzerat/\d+", r"/inzerat/(\d+)"),
     "realitysk": Portal(
         "realitysk", "SK", "https://www.reality.sk",
@@ -162,8 +182,7 @@ PORTALS: dict[str, Portal] = {
          "https://immovlan.be/nl/vastgoed?transactiontypes=for-sale&propertytypes=apartment&maxprice={max}",
          "https://immovlan.be/nl/vastgoed?transactiontypes=for-sale&propertytypes=land&maxprice={max}"),
         r"/detail/", r"/([A-Za-z]{2,4}\d{4,})", id_last=True),
-    # Newest page of houses and of land in departments where prices are still low.
-    # A national search 404s; these department pages were seen in October 2026.
+    # A national search 404s (still, 2026-11-11). Department pages work.
     "safti": Portal(
         "safti", "FR", "https://www.safti.fr",
         tuple(
@@ -171,11 +190,17 @@ PORTALS: dict[str, Portal] = {
             for kind in ("maison", "terrain")
             for dept in ("creuse-23", "lozere-48", "cantal-15", "nievre-58",
                          "indre-36", "correze-19", "meuse-55", "haute-marne-52",
-                         "ariege-09", "allier-03")),
+                         "ariege-09", "allier-03", "aveyron-12", "dordogne-24",
+                         "gers-32", "lot-46", "ardeche-07", "haute-vienne-87",
+                         "orne-61", "deux-sevres-79", "vosges-88", "cher-18",
+                         "hautes-alpes-05", "cotes-d-armor-22")),
         r"/annonces/achat/(?:maison|terrain)/", r"/(\d{6,})", id_last=True),
+    # prixMax is the ceiling the site applies (live 2026-11-11: every card ≤ €50k).
+    # priceMax / maxPrice are ignored. The terrain path returns cards this
+    # parser does not yet read (TTER ids).
     "citya": Portal(
         "citya", "FR", "https://www.citya.com",
-        ("https://www.citya.com/annonces/vente/maison",),
+        ("https://www.citya.com/annonces/vente/maison?prixMax={max}",),
         r"/annonces/vente/maison/", r"/(TMAI[A-Z0-9-]+)", id_last=True),
     # The house search only accepts a few price buckets; €300,000 is one that
     # answers. The buyer's own ceiling is applied when the row is saved.
@@ -200,12 +225,16 @@ PORTALS: dict[str, Portal] = {
         ("https://www.remax.nl/koop?prijs_max={max}",),
         r"/aanbod/", r"-(\d{4,})", id_last=True),
     # Houses on the first pages start around €500,000. Land is where a plot
-    # under the budget actually appears, including just over the German border.
+    # under the budget actually appears, including just over the German border
+    # and on the French side (live 2026-11-11: page 5 had plots from €39k).
     "wortimmo": Portal(
         "wortimmo", "LU", "https://www.wortimmo.lu",
         ("https://www.wortimmo.lu/fr/vente/terrain",
          "https://www.wortimmo.lu/fr/vente/terrain?page=2",
-         "https://www.wortimmo.lu/fr/vente/terrain?page=3"),
+         "https://www.wortimmo.lu/fr/vente/terrain?page=3",
+         "https://www.wortimmo.lu/fr/vente/terrain?page=4",
+         "https://www.wortimmo.lu/fr/vente/terrain?page=5",
+         "https://www.wortimmo.lu/fr/vente/terrain/france"),
         r"-id_\d+", r"id_(\d+)"),
 }
 
@@ -473,9 +502,15 @@ def parse_casasapo(html: str, portal: Portal) -> list[dict]:
             continue
         target = None
         for a in card.select("a[href]"):
-            wanted = parse_qs(urlsplit(a["href"]).query).get("l")
+            href = a.get("href") or ""
+            wanted = parse_qs(urlsplit(href).query).get("l")
             if wanted:
                 target = wanted[0]
+                break
+            # 2026-11-11: the listing link is on the card itself; the old
+            # gespub counter?l= wrapper is gone from comprar-* search pages.
+            if re.search(r"/comprar-[^/?#]+\.html", href, re.I):
+                target = href
                 break
         url = _clean_url(target, portal.base) if target else None
         text = card.get_text(" ", strip=True)
@@ -486,7 +521,9 @@ def parse_casasapo(html: str, portal: Portal) -> list[dict]:
         named = card.select_one("[data-title]")
         title = (named.get("data-title") if named else None) or text[:120]
         district = None
-        where = re.search(r"Distrito de ([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ -]{1,40})", text)
+        loc_el = card.select_one(".property-location")
+        loc_text = loc_el.get_text(" ", strip=True) if loc_el is not None else text
+        where = re.search(r"Distrito de ([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ -]{1,40})", loc_text)
         if where:
             district = where.group(1).strip(" -")
         out.append(_row(
@@ -773,8 +810,10 @@ def _scrape_era(db, max_price: float):
 def scrape_named(db, name: str, max_price: float) -> int:
     """Save listings at or under max_price. The first page's failure propagates.
 
-    Returns a ScanCount, "partial" when a later page could not be read: the
-    listings it would have shown are not marked as gone."""
+    The URL list is the pages we know how to read, not the whole site. The
+    result is always partial so a listing that sat on a later page is not
+    treated as gone. ERA paginates the site's own index and reports full
+    only when that search actually finished."""
     from sources import ScanCount
 
     if name == "era":
@@ -786,6 +825,7 @@ def scrape_named(db, name: str, max_price: float) -> int:
     seen: set[str] = set()
     first = True
     skipped = 0
+    pages = 0
     for template in portal.urls:
         url = template.format(max=int(max_price))
         try:
@@ -798,6 +838,7 @@ def scrape_named(db, name: str, max_price: float) -> int:
             skipped += 1
             continue
         first = False
+        pages += 1
         kept = 0
         for item in parser(resp.text, portal):
             eid = item["external_id"]
@@ -817,5 +858,7 @@ def scrape_named(db, name: str, max_price: float) -> int:
             total += kept
             db.commit()
             time.sleep(0.8)
-    LOG.info(f"{name}: {total} listings" + (f", {skipped} page(s) unread" if skipped else ""))
-    return ScanCount(total, "partial" if skipped else "full", len(portal.urls) - skipped)
+    LOG.info(f"{name}: {total} listings"
+             + (f", {skipped} page(s) unread" if skipped else "")
+             + ", search not finished")
+    return ScanCount(total, "partial", pages)

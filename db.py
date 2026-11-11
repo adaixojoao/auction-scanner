@@ -3040,7 +3040,7 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             item["floor_market"] = floor_market or {}
             inputs = _reads_record(log, shared, shared_memo)
             _optional = {"research_only", "extreme_discount", "floor_guess",
-                         "live_rank", "invest_rank", "both_factor"}
+                         "live_rank", "invest_rank", "both_factor", "evaluator_state"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
                 if _k in item:
@@ -3127,7 +3127,55 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         _release(mode)               # the items hold what they need; the scores file keeps the rest
     if not maps_before and climate.maps_loaded():
         climate.release_maps()       # a seaside home read for Live and invest: not kept for the life of the app
+    if mode in ("both", "invest"):
+        _attach_eligibility(db, items, ev_rev_sums, now, scored, mode)
     return items
+
+
+def _attach_eligibility(db, items, ev_rev_sums, now, scored, mode) -> None:
+    """Copy a fresh stored decision onto items this pass did not just evaluate.
+
+    A cache hit keeps evaluator_state once it has been saved with the score.
+    Older kept scores do not, so the lists, the report and Offers would omit a
+    decision already in evaluator_decisions. A stale or expired row is left
+    unset. This does not reevaluate or promote a listing. A backfill is written
+    into the score cache so the next read does not query again.
+    """
+    missing = [it for it in items if it.get("id") and not it.get("_slim") and not it.get("evaluator_state")]
+    if not missing:
+        return
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    wanted = {it["id"]: it for it in missing}
+    updates = []
+    for row in db.execute(
+        "SELECT listing_id, state, requirements_json, evidence_rev_sum FROM evaluator_decisions"
+    ):
+        it = wanted.get(row["listing_id"])
+        if it is None or row["state"] not in ("research", "finalist", "bid_ready"):
+            continue
+        if row["evidence_rev_sum"] != ev_rev_sums.get(it["id"], 0):
+            continue
+        try:
+            requirements = json.loads(row["requirements_json"])
+        except (TypeError, ValueError):
+            continue
+        if _decision_expired(requirements, now):
+            continue
+        it["evaluator_state"] = row["state"]
+        kept = scored.get(it["id"]) if scored is not None else None
+        if not kept:
+            continue
+        data = kept[1]
+        if isinstance(data, bytes):
+            data = _unpack(data)
+        if not isinstance(data, dict):
+            continue
+        data["evaluator_state"] = row["state"]
+        scored[it["id"]] = (kept[0], data, kept[2])
+        updates.append((it["id"], kept[0], kept[2], data))
+    if updates:
+        _save_kept(db, mode, updates)
 
 
 def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw) -> list[dict]:

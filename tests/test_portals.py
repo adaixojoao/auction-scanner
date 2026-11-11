@@ -20,6 +20,13 @@ CASASAPO = """<div class="property" id="property_81b60d9f-b8eb-11f1-90a1-0600000
 </div>
 <p>Aldeia, Distrito de Faro | 90m² | 38.000 €</p></div>"""
 
+CASASAPO_DIRECT = """<div class="property" id="property_5d194c14-a70a-4c48-870d-f6165f73b7d8">
+<div class="property-media" data-title="Moradia T3">
+<a href="/comprar-moradia-t3-oleiros-estreito-vilar-barroco-5d194c14-a70a-4c48-870d-f6165f73b7d8.html">foto</a>
+</div>
+<div class="property-location">Estreito-Vilar Barroco, Oleiros, Distrito de Castelo Branco</div>
+<div class="property-price-value">18.000 €</div></div>"""
+
 PARUVENDU = """<div class="blocAnnonce" data-id="1295984707">
 <a href="/immobilier/vente/maison/1295984707A1" title="Maison - 3 pièce(s) - 77 m²">Maison</a>
 <span>55 000 €</span></div>"""
@@ -134,6 +141,55 @@ TOPREALITY = """<div data-ga4-container-item_id="LT_9435745" data-ga4-container-
 <a href="/prenajom/restauracia/1">rent</a></div>"""
 
 
+def test_paruvendu_sends_the_price_ceiling_the_site_applies():
+    # pxm is ignored and the page leads with multi-million houses. px1 is the ceiling.
+    from sources._market import PORTALS
+    urls = PORTALS["paruvendu"].urls
+    assert urls
+    assert all("px1={max}" in url for url in urls)
+    assert all("pxm=" not in url for url in urls)
+
+
+def test_portals_send_the_price_ceiling_the_site_applies():
+    from sources._market import PORTALS
+    assert all("pe={max}" in u for u in PORTALS["custojusto"].urls)
+    assert any("portugal/imobiliario/moradias-venda" in u for u in PORTALS["custojusto"].urls)
+    assert all("gp={max}" in u for u in PORTALS["casasapo"].urls)
+    assert any("comprar-moradias" in u for u in PORTALS["casasapo"].urls)
+    assert any("comprar-terrenos" in u for u in PORTALS["casasapo"].urls)
+    assert all("priceMax={max}" in u for u in PORTALS["iadfrance"].urls)
+    assert any("/annonces/vente/maison" in u for u in PORTALS["iadfrance"].urls)
+    assert any("/annonces/vente/terrain" in u for u in PORTALS["iadfrance"].urls)
+    assert all("prixMax={max}" in u for u in PORTALS["citya"].urls)
+    assert all("cenado={max}" in u for u in PORTALS["bazos"].urls)
+
+
+def test_habitaclia_reads_cheap_houses_across_inland_provinces():
+    from sources._market import PORTALS
+    urls = PORTALS["habitaclia"].urls
+    assert len(urls) >= 15
+    assert all("casas-baratas-provincia-" in u for u in urls)
+    for prov in ("lugo", "ourense", "leon", "asturias", "zamora", "caceres"):
+        assert any(f"provincia-{prov}.htm" in u for u in urls)
+
+
+def test_safti_covers_more_than_the_original_ten_departments():
+    from sources._market import PORTALS
+    urls = PORTALS["safti"].urls
+    depts = {u.rsplit("/", 1)[-1] for u in urls}
+    assert "creuse-23" in depts and "aveyron-12" in depts and "orne-61" in depts
+    assert any("/maison/" in u for u in urls) and any("/terrain/" in u for u in urls)
+    assert len(depts) >= 20
+
+
+def test_wortimmo_reads_later_land_pages_and_the_french_side():
+    from sources._market import PORTALS
+    urls = PORTALS["wortimmo"].urls
+    assert any(u.endswith("/terrain") for u in urls)
+    assert any("page=5" in u for u in urls)
+    assert any(u.endswith("/terrain/france") for u in urls)
+
+
 def test_each_portal_reads_the_card_it_was_built_from():
     from sources._market import parse_portal
     cases = {
@@ -176,11 +232,22 @@ def test_each_portal_reads_the_card_it_was_built_from():
         assert parse_portal(name, "") == []
 
 
+def test_casasapo_reads_the_direct_listing_link():
+    from sources._market import parse_portal
+    row = parse_portal("casasapo", CASASAPO_DIRECT)[0]
+    assert row["external_id"] == "5d194c14-a70a-4c48-870d-f6165f73b7d8"
+    assert row["price"] == 18000
+    assert row["district"] == "Castelo Branco"
+    assert "Usado" not in (row["district"] or "")
+    assert row["url"].endswith("5d194c14-a70a-4c48-870d-f6165f73b7d8.html")
+
+
 def test_custojusto_keeps_sales_under_the_budget_and_drops_the_rest(db, fake_http):
     from db import load_listings
     from sources.pt import scrape_custojusto
     fake_http(lambda m, u, kw: FakeResponse(CUSTOJUSTO))
-    assert scrape_custojusto(db, max_price=100000) == 1
+    result = scrape_custojusto(db, max_price=100000)
+    assert result == 1 and result.scope == "partial"
     rows = load_listings(db, include_hidden=True)
     assert len(rows) == 1 and rows[0]["source"] == "custojusto"
     assert rows[0]["price"] == 42000 and rows[0]["area_m2"] == 104

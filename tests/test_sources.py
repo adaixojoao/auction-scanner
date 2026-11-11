@@ -1022,6 +1022,16 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     assert all(c[2]["params"] == {"maxPrice": 100000, "minSurface": 10000} for c in land)
 
 
+def test_fotocasa_page_cap_with_results_left_is_partial(db, fake_http, monkeypatch):
+    import sources.es
+    from sources.es import scrape_fotocasa
+    monkeypatch.setattr(sources.es.time, "sleep", lambda s: None)
+    monkeypatch.setattr(sources.es, "FOTOCASA_MAX_PAGES", 1)
+    fake_http(lambda m, url, kw: FakeResponse(_fotocasa_html([FOTOCASA_AD], 10)))
+    got = scrape_fotocasa(db, max_price=50000)
+    assert got > 0 and got.scope == "partial"
+
+
 def test_fotocasa_cut_off_halfway_is_a_partial_scan(db, fake_http, monkeypatch):
     import sources.es
     from sources.es import FOTOCASA_PROVINCES, scrape_fotocasa

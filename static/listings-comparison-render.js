@@ -13,6 +13,7 @@
     ["cost_basis", "Cost basis and missing costs"],
     ["area", "Floor / plot area"],
     ["valuation", "Valuation / benchmark basis"],
+    ["eligibility", "Eligibility check"],
     ["checks", "Ownership, possession, and legal access"],
     ["evidence", "Unresolved evidence"],
     ["next_action", "Next investigation action"],

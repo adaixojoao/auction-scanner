@@ -117,6 +117,46 @@ def test_evaluator_state_set_on_item(tmp_path):
     assert invest_items[0]["evaluator_state"] in ("research", "finalist", "bid_ready")
 
 
+def _decision(db, listing_id, state, rev, requirements="[]"):
+    db.execute(
+        """INSERT INTO evaluator_decisions
+           (listing_id, state, requirements_json, provenance_json, evidence_rev_sum, evaluated_at)
+           VALUES (?, ?, ?, '{}', ?, ?)""",
+        (listing_id, state, requirements, rev, NOW.isoformat()),
+    )
+    db.commit()
+
+
+def test_a_fresh_stored_decision_is_attached_without_rescoring(tmp_path):
+    from db import _attach_eligibility
+    db = _fresh_db(tmp_path)
+    _decision(db, "citius:1", "research", 0)
+    item = {"id": "citius:1"}
+    _attach_eligibility(db, [item], {}, NOW, {}, "invest")
+    assert item["evaluator_state"] == "research"
+
+
+def test_a_stale_or_expired_decision_is_not_shown_as_current(tmp_path):
+    from db import _attach_eligibility
+    db = _fresh_db(tmp_path)
+    _decision(db, "citius:1", "finalist", 0)
+    _decision(db, "citius:2", "finalist", 0,
+              '[{"outcome": "pass", "expires_at": "2000-01-01T00:00:00+00:00"}]')
+    stale, expired = {"id": "citius:1"}, {"id": "citius:2"}
+    _attach_eligibility(db, [stale, expired], {"citius:1": 4, "citius:2": 0}, NOW, {}, "invest")
+    assert "evaluator_state" not in stale
+    assert "evaluator_state" not in expired
+
+
+def test_home_mode_does_not_copy_an_invest_decision_onto_the_row(tmp_path):
+    db = _fresh_db(tmp_path)
+    _invest_listing(db)
+    _decision(db, "citius:1", "finalist", 0)
+    items = load_listings(db, mode="home", include_hidden=True, now=NOW)
+    it = next(x for x in items if x.get("id") == "citius:1")
+    assert not it.get("evaluator_state")
+
+
 def test_load_decision_absent_for_unknown_listing(tmp_path):
     """load_decision must return None for a listing_id with no row."""
     db = _fresh_db(tmp_path)
