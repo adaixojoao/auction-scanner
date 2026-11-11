@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 
 from common import LOG, find_floor_area, find_price, land_max_price, make_listing, make_session, normalize, parse_price
 from db import upsert_listing
-from sources import SourceUnavailable, register
+from sources import ScanCount, SourceUnavailable, register
 
 LICITOR_BASE = "https://www.licitor.com"
 
@@ -92,13 +92,19 @@ def scrape_france(db, max_price: float = 50000, **_):
     LOG.info(f"  France: {len(tribunal_links)} tribunal pages found")
 
     total_scraped = 0
-    for i, trib_url in enumerate(tribunal_links[:60]):  # limit to 60 tribunals
+    # Sixty tribunals is a cap, and a tribunal page that fails was not read.
+    # Either one means this run did not see every sale.
+    missed = len(tribunal_links) > 60
+    pages = 0
+    for i, trib_url in enumerate(tribunal_links[:60]):
         try:
             resp = session.get(trib_url)
             resp.raise_for_status()
         except Exception as e:
             LOG.debug(f"France tribunal error: {e}")
+            missed = True
             continue
+        pages += 1
 
         count = 0
         for a in BeautifulSoup(resp.text, "html.parser").select(
@@ -130,7 +136,7 @@ def scrape_france(db, max_price: float = 50000, **_):
         time.sleep(0.5)
 
     enrich_france_details(db, session)
-    return total_scraped
+    return ScanCount(total_scraped, "partial" if missed else "full", pages)
 
 
 # An annonce page names the tribunal, the hearing date and time, the mise à

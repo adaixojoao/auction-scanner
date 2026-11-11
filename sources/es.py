@@ -74,8 +74,15 @@ def scrape_spain(db, max_price: float = 50000, **_):
     total_scraped = _spain_parse_page(soup, db, max_price)
     db.commit()
 
+    # A later page that fails, or the 20-page cap, is not the whole site.
+    # Recording it as a full read would hide sales that were simply not reached.
+    incomplete = False
+    pages = 1
     if id_busqueda and total_results > page_size:
-        max_pages = min((total_results // page_size) + 1, 20)
+        pages_needed = (total_results // page_size) + 1
+        max_pages = min(pages_needed, 20)
+        if pages_needed > 20:
+            incomplete = True
         for page_num in range(1, max_pages):
             offset = page_num * page_size
             try:
@@ -83,18 +90,22 @@ def scrape_spain(db, max_price: float = 50000, **_):
                 resp.raise_for_status()
             except Exception as e:
                 LOG.warning(f"Spain page {page_num+1} error: {e}")
+                incomplete = True
                 break
             count = _spain_parse_page(BeautifulSoup(resp.text, "html.parser"), db, max_price)
             db.commit()
             total_scraped += count
+            pages += 1
             LOG.info(f"  Spain page {page_num+1}: {count} items (total: {total_scraped})")
             if count == 0:
                 break
             time.sleep(1)
+    elif total_results > page_size:
+        incomplete = True
 
     enrich_spain_details(db, session)
     fetch_catastro(db, session)
-    return total_scraped
+    return ScanCount(total_scraped, "partial" if incomplete else "full", pages)
 
 
 def _spain_parse_page(soup, db, max_price) -> int:
@@ -1526,6 +1537,8 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
     budget = FOTOCASA_DETAILS_PER_SCAN
     failed = 0
     refused = False
+    # Hitting the page cap with results still unread is not a full read.
+    incomplete = False
 
     def get_page(path, params):
         resp = session.get(path, params=params)
@@ -1582,11 +1595,15 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
                 if not ads or seen >= count:
                     break
                 time.sleep(0.8)
+            else:
+                incomplete = True
     LOG.info(f"Fotocasa: {total} listings" + (f", {failed} searches failed" if failed else "")
-             + ("; stopped: Fotocasa kept refusing" if refused else ""))
-    # A search that failed (Fotocasa cut the scan off halfway, 2026-10-29) left its
-    # listings unseen: partial, so they are not taken for gone.
-    return ScanCount(total, "partial") if failed else total
+             + ("; stopped: Fotocasa kept refusing" if refused else "")
+             + ("; page cap reached" if incomplete else ""))
+    # A search that failed (Fotocasa cut the scan off halfway, 2026-10-29), or
+    # that stopped at the page cap with results still unread, left listings
+    # unseen: partial, so they are not taken for gone.
+    return ScanCount(total, "partial") if failed or incomplete else total
 
 
 # ─── Seguridad Social (TGSS) ─────────────────────────────────────────
@@ -2082,9 +2099,9 @@ def scrape_solvia(db, max_price: float = 50000, config: dict | None = None, **_)
 
 
 @register("habitaclia", "ES",
-          description="Habitaclia — homes for sale in Lugo, Ourense and León")
+          description="Habitaclia — cheap houses in inland Spanish provinces")
 def scrape_habitaclia(db, max_price: float = 50000, **_):
-    """Habitaclia — homes for sale in Lugo, Ourense and León."""
+    """Habitaclia — cheap houses in inland Spanish provinces."""
     from sources._market import scrape_named
     return scrape_named(db, "habitaclia", max_price)
 

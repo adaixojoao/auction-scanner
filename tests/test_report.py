@@ -33,6 +33,22 @@ def test_report_covers_every_country_and_escapes_tables(db, add, tmp_path):
     assert os.path.exists(tmp_path / "report.pdf")
 
 
+def test_the_report_names_the_eligibility_check_and_does_not_call_it_a_bid():
+    from collections import Counter
+
+    from report import _why, build_markdown
+    item = {"title": "House", "score": 40, "rank": 40, "mode": "invest",
+            "mode_label": "Investment home", "country": "PT", "category": "imoveis",
+            "price": 20000, "current_bid": None, "reasons": ["a cheap house"],
+            "evaluator_state": "finalist", "tipo": "moradia", "area_m2": 80,
+            "date_end": "2030-06-01",
+            "url": "https://example.test/house", "id": "x:1"}
+    assert "not a bid" in _why(item)
+    assert _why({"reasons": ["only a reason"]}) == "only a reason"
+    md, _parts = build_markdown([item], Counter(), [], 50000, 50000, datetime.now(timezone.utc))
+    assert "Finalist on the checks" in md and "not a bid" in md
+
+
 def test_shown_score_uses_the_unclamped_rank():
     assert _shown_score({"score": 100, "rank": 118.4}) == 118
     assert _shown_score({"score": 73, "rank": 73.2}) == 73

@@ -59,6 +59,11 @@ function reasonsSummaryHtml(reasons) {
 }
 
 const CHECK_MARK = {verified: "✓", not_applicable: "–", concern: "!", needs_recheck: "↻", source_reported: "i", unverified: "?"};
+function eligibilitySummaryHtml(eligibility) {
+  if (!eligibility || !eligibility.text) return "";
+  return `<p class="small eligibility" data-state="${AS.esc(eligibility.state || "")}"><b>${AS.esc(eligibility.label || "Eligibility")}:</b> ${AS.esc(eligibility.text)}</p>`;
+}
+
 function checksSummaryHtml(checks) {
   const items = checks && Array.isArray(checks.items) ? checks.items : [];
   if (!items.length) return '<span class="small muted">No checks for this listing</span>';
