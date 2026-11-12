@@ -13,7 +13,6 @@ from common import (LOG, find_area, find_price, has_term, land_max_price, make_l
                     parse_date_dmy, parse_price, possession, prefer_stated_area, safe_url, stable_id, to_number, utcnow_iso)
 from db import upsert_listing
 from sources import ScanCount, SourceUnavailable, register
-from sources._cards import CardSite, scrape_cards
 
 BOE_SEARCH = "https://subastas.boe.es/subastas_ava.php"
 
@@ -75,8 +74,15 @@ def scrape_spain(db, max_price: float = 50000, **_):
     total_scraped = _spain_parse_page(soup, db, max_price)
     db.commit()
 
+    # A later page that fails, or the 20-page cap, is not the whole site.
+    # Recording it as a full read would hide sales that were simply not reached.
+    incomplete = False
+    pages = 1
     if id_busqueda and total_results > page_size:
-        max_pages = min((total_results // page_size) + 1, 20)
+        pages_needed = (total_results // page_size) + 1
+        max_pages = min(pages_needed, 20)
+        if pages_needed > 20:
+            incomplete = True
         for page_num in range(1, max_pages):
             offset = page_num * page_size
             try:
@@ -84,18 +90,22 @@ def scrape_spain(db, max_price: float = 50000, **_):
                 resp.raise_for_status()
             except Exception as e:
                 LOG.warning(f"Spain page {page_num+1} error: {e}")
+                incomplete = True
                 break
             count = _spain_parse_page(BeautifulSoup(resp.text, "html.parser"), db, max_price)
             db.commit()
             total_scraped += count
+            pages += 1
             LOG.info(f"  Spain page {page_num+1}: {count} items (total: {total_scraped})")
             if count == 0:
                 break
             time.sleep(1)
+    elif total_results > page_size:
+        incomplete = True
 
     enrich_spain_details(db, session)
     fetch_catastro(db, session)
-    return total_scraped
+    return ScanCount(total_scraped, "partial" if incomplete else "full", pages)
 
 
 def _spain_parse_page(soup, db, max_price) -> int:
@@ -475,12 +485,14 @@ def scrape_aeat(db, max_price: float = 50000, **_):
         "come in through the Spain (BOE) source")
 
 
-# Not in the default scan (Sept 2026): Sareb: behind an Incapsula bot wall (403); check sareb.es by hand.
-# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+# Not in the default scan: Sareb sits behind Incapsula. Bot checks are not
+# worked around; with an account in Settings → Accounts the same search is
+# tried signed in.
 @register("sareb", "ES", default=False)
-def scrape_sareb(db, max_price: float = 100000, **_):
+def scrape_sareb(db, max_price: float = 100000, config: dict | None = None, **_):
     """sareb.es — Spanish state bad bank."""
-    session = make_session()
+    import accounts
+    session = accounts.account_session(db, config or {}, "sareb") or make_session()
     base = "https://www.sareb.es"
     total = 0
     for page in range(1, 50):
@@ -492,8 +504,12 @@ def scrape_sareb(db, max_price: float = 100000, **_):
                 break
             resp.raise_for_status()
             if "_Incapsula_Resource" in resp.text:
-                raise SourceUnavailable("sareb.es answers scripts with an Incapsula bot check "
-                                        "instead of listings; look at it in a browser")
+                if not accounts.credentials(config or {}, "sareb"):
+                    raise SourceUnavailable(
+                        "sareb.es needs your account in Settings → Accounts "
+                        "(it answers scripts with an Incapsula bot check)")
+                raise SourceUnavailable(
+                    "sareb.es still answers with an Incapsula bot check after signing in")
             data = resp.json()
         except Exception:
             if page == 1:
@@ -529,21 +545,65 @@ def scrape_sareb(db, max_price: float = 100000, **_):
     return total
 
 
-HAYA = CardSite(
-    source="haya", country="ES", base="https://www.haya.es", path="/inmuebles/",
-    card_selector="div.property-card, article.inmueble, div[class*='property'], div[class*='inmueble']",
-    title_selector="h2,h3,.title,.property-title",
-    location_selector=".location,.localidad,.municipio",
-    area_selector=".area,.superficie,[class*='area']",
-    params={"precio_max": "{max_price}"}, max_pages=29,
-    description="Haya Real Estate (Sareb/BBVA)", tipo="inmueble", price_is_min_price=True,
-)
-# Blocked by this PC's firewall (WinError 10013) on every scan. Left runnable by
-# name; a default scan no longer waits on it.
+# This PC's firewall has been blocking haya.es (WinError 10013). Left
+# registered by name so Sources can show why; a login is tried when one is
+# stored, and cannot open the site until the firewall allows it.
 @register("haya", "ES", default=False)
-def scrape_haya(db, max_price: float = 100000, **_):
+def scrape_haya(db, max_price: float = 100000, config: dict | None = None, **_):
     """haya.es — Sareb/BBVA repossessions."""
-    return scrape_cards(db, HAYA, max_price)
+    import accounts
+    session = accounts.account_session(db, config or {}, "haya")
+    if session is None:
+        raise SourceUnavailable(
+            accounts.missing_account_message("haya")
+            + "; this PC's firewall has also been blocking the site (WinError 10013)")
+    base = "https://www.haya.es"
+    total = 0
+    try:
+        for page in range(1, 30):
+            resp = session.get(f"{base}/inmuebles",
+                               params={"page": page, "precioMax": int(max_price)})
+            if resp.status_code == 404:
+                break
+            resp.raise_for_status()
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {}
+            items = data if isinstance(data, list) else data.get("inmuebles", data.get("items", []))
+            if not items:
+                break
+            for item in items:
+                price = to_number(item.get("precio")) or to_number(item.get("price")) or 0
+                if price > max_price:
+                    continue
+                eid = str(item.get("id") or item.get("referencia")
+                          or stable_id(json.dumps(item, sort_keys=True, default=str)))
+                upsert_listing(db, make_listing(
+                    "haya", eid, "ES",
+                    title=str(item.get("titulo") or item.get("title") or f"Haya #{eid}")[:200],
+                    description=item.get("descripcion") or "Haya repossession",
+                    tipo=item.get("tipo") or "inmueble",
+                    area_m2=item.get("superficie") or item.get("area"),
+                    price=price, min_price=price,
+                    district=item.get("provincia") or item.get("district"),
+                    concelho=item.get("municipio") or item.get("city"),
+                    url=item.get("url") or f"{base}/inmueble/{eid}", base_url=base,
+                    image_url=item.get("imagen") or item.get("image"),
+                    raw_json=json.dumps(item, ensure_ascii=False)[:2000],
+                ))
+                total += 1
+            db.commit()
+            if len(items) < 20:
+                break
+            time.sleep(0.8)
+    except Exception as e:  # noqa: BLE001 — firewall vs HTTP vs parser
+        if getattr(e, "winerror", None) == 10013 or "10013" in str(e):
+            raise SourceUnavailable(
+                "haya.es is blocked by this PC's firewall (WinError 10013); "
+                "a login cannot open it until the firewall allows the site") from e
+        raise
+    return total
 
 
 # servihabitat.com (Liferay): one page per province, cheapest first with ?o=4,
@@ -668,17 +728,35 @@ def _servihabitat_details(db, session, rows: list[dict], budget: list[int]) -> N
 @register("servihabitat", "ES")
 def scrape_servihabitat(db, max_price: float = 100000, **_):
     """servihabitat.com — CaixaBank repossessions, the cheapest homes of each province."""
-    session = make_session(timeout=30)
+    session = make_session(timeout=20)
     total, full = 0, []
     details_left = [SERVIHABITAT_DETAILS_PER_SCAN]
     found: list[dict] = []
+    # A day the site hangs used to time out every province, swallow each error
+    # and record a full scan of the one page that answered. Unseen homes then
+    # looked as if they had left the site. The first province's failure is the
+    # source's failure; a later run of failures stops the sweep as partial.
+    started = False
+    missed = False
+    consecutive = 0
+    pages = 0
     for province in SERVIHABITAT_PROVINCES:
         try:
             resp = session.get(f"{SERVIHABITAT}/es/venta/vivienda/{province}", params={"o": 4})
             resp.raise_for_status()
-        except Exception as e:  # noqa: BLE001: one province failing is not the source failing
+        except Exception as e:  # noqa: BLE001: a later province is not the whole site
+            if not started:
+                raise
+            missed = True
+            consecutive += 1
             LOG.info(f"Servihabitat {province}: {type(e).__name__}")
+            if consecutive >= 3:
+                LOG.warning("Servihabitat: stopping after repeated failures; the rest is read next scan")
+                break
             continue
+        started = True
+        consecutive = 0
+        pages += 1
         rows = parse_servihabitat_page(resp.text, province)
         if len(rows) >= 20 and all((r["price"] or 0) <= max_price for r in rows):
             full.append(province)
@@ -696,41 +774,116 @@ def scrape_servihabitat(db, max_price: float = 100000, **_):
     if full:
         LOG.info(f"Servihabitat: more within budget than one page in {', '.join(full)}")
     LOG.info(f"Servihabitat: {total} listings")
-    return total
+    return ScanCount(total, "partial" if missed else "full", pages)
 
 
-# Blocked by this PC's firewall on every scan, same as haya.es.
-@register("subastasactivas", "ES", default=False)
+# Off the default scan: largely the same lots as BOE (spain). Kept by name for
+# AEAT / TGSS / notarial rows the aggregator surfaces first. The site is a
+# Next.js app; cards come from /api/auctions, not the HTML shell.
+SUBASTASACTIVAS = "https://subastasactivas.com"
+SUBASTASACTIVAS_API = f"{SUBASTASACTIVAS}/api/auctions"
+SUBASTASACTIVAS_CATEGORIES = (
+    "Viviendas", "Terrenos", "Fincas rústicas", "Locales", "Naves industriales",
+)
+SUBASTASACTIVAS_TIPO = {
+    "Viviendas": "vivienda",
+    "Terrenos": "terreno",
+    "Fincas rústicas": "rustico",
+    "Locales": "local",
+    "Naves industriales": "nave",
+}
+SUBASTASACTIVAS_MAX_PAGES = 40
+
+
+def subastasactivas_listing(item: dict) -> dict | None:
+    """One /api/auctions row as a listing, or None without an id or detail path."""
+    eid = str(item.get("id") or "").strip()
+    path = item.get("detailPath") or ""
+    if not eid or not path:
+        return None
+    category = (item.get("category") or "").strip()
+    prop = (item.get("propertyType") or category or "inmueble").strip()
+    address = (item.get("address") or "").strip()
+    title = (address or item.get("title") or prop)[:200]
+    price = (to_number(item.get("valorSubasta"))
+             or to_number(item.get("appraisalValue"))
+             or to_number(item.get("minimumBid")))
+    bid = to_number(item.get("currentBidAmount")) or to_number(item.get("currentBid"))
+    raw = {
+        "category": category or None,
+        "property_type": prop or None,
+        "source": item.get("source"),
+        "status": item.get("status"),
+        "auction_type": item.get("auctionType"),
+        "occupancy": item.get("occupancy"),
+        "cadastral_ref": item.get("cadastralRef"),
+    }
+    if item.get("latitude") is not None and item.get("longitude") is not None:
+        try:
+            raw.update(lat=float(item["latitude"]), lon=float(item["longitude"]))
+        except (TypeError, ValueError):
+            pass
+    desc = " · ".join(x for x in (
+        prop, address, item.get("municipality"), item.get("province"),
+        f"fuente {item['source']}" if item.get("source") else None,
+        "SubastasActivas",
+    ) if x)
+    return make_listing(
+        "subastasactivas", eid, "ES",
+        title=title,
+        description=desc[:500],
+        tipo=SUBASTASACTIVAS_TIPO.get(category, "inmueble"),
+        area_m2=item.get("surfaceM2"),
+        price=price,
+        current_bid=bid,
+        min_price=item.get("minimumBid"),
+        concelho=item.get("municipality"),
+        district=item.get("province"),
+        url=path,
+        base_url=SUBASTASACTIVAS,
+        image_url=item.get("imageUrl"),
+        date_end=item.get("endDate"),
+        raw_json=raw,
+    )
+
+
+@register("subastasactivas", "ES", default=False,
+          description="SubastasActivas — BOE / AEAT / TGSS / notarial auction aggregator")
 def scrape_subastasactivas(db, max_price: float = 100000, **_):
     """subastasactivas.com — aggregator of BOE/AEAT/Social Security/notarial auctions."""
-    session = make_session()
-    base = "https://subastasactivas.com"
-    resp = session.get(f"{base}/subastas",
-                       params={"tipo": "inmueble", "precioMax": int(max_price), "estado": "activa"})
-    resp.raise_for_status()
-    total = 0
-    seen = set()
-    for card in BeautifulSoup(resp.text, "html.parser").select(
-            "div.subasta, article, div[class*='subasta'], tr[class*='subasta']"):
-        link = card.select_one("a[href]")
-        url = safe_url(link.get("href"), base) if link else None
-        if not url:
-            continue
-        m = re.search(r"/(\w+)/?$", url.split("?")[0])
-        eid = m.group(1) if m else stable_id(url)
-        if eid in seen:
-            continue
-        seen.add(eid)
-        text = card.get_text(" ", strip=True)
-        price = find_price(text)
-        if price and price > max_price:
-            continue
-        upsert_listing(db, make_listing(
-            "subastasactivas", eid, "ES",
-            title=text[:120], description="SubastasActivas aggregator",
-            tipo="inmueble", price=price, url=url, date_end=parse_date_dmy(text),
-        ))
-        total += 1
+    session = make_session(timeout=30)
+    total, seen = 0, set()
+    categories = ",".join(SUBASTASACTIVAS_CATEGORIES)
+    for page in range(1, SUBASTASACTIVAS_MAX_PAGES + 1):
+        resp = session.get(SUBASTASACTIVAS_API, params={
+            "status": "active",
+            "priceMax": int(max_price),
+            "categories": categories,
+            "page": page,
+            "limit": 50,
+            "sort": "endsAt_asc",
+        })
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list) or not rows:
+            break
+        kept = 0
+        for item in rows:
+            row = subastasactivas_listing(item)
+            if not row or row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            if row["price"] and row["price"] > max_price:
+                continue
+            upsert_listing(db, row)
+            total += 1
+            kept += 1
+        db.commit()
+        LOG.info(f"SubastasActivas page {page}: +{kept} (total {total})")
+        if not (payload.get("pagination") or {}).get("hasMore"):
+            break
+        time.sleep(0.4)
     return total
 
 
@@ -1441,6 +1594,8 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
     budget = FOTOCASA_DETAILS_PER_SCAN
     failed = 0
     refused = False
+    # Hitting the page cap with results still unread is not a full read.
+    incomplete = False
 
     def get_page(path, params):
         resp = session.get(path, params=params)
@@ -1497,11 +1652,15 @@ def scrape_fotocasa(db, max_price: float = 50000, config: dict | None = None, **
                 if not ads or seen >= count:
                     break
                 time.sleep(0.8)
+            else:
+                incomplete = True
     LOG.info(f"Fotocasa: {total} listings" + (f", {failed} searches failed" if failed else "")
-             + ("; stopped: Fotocasa kept refusing" if refused else ""))
-    # A search that failed (Fotocasa cut the scan off halfway, 2026-10-29) left its
-    # listings unseen: partial, so they are not taken for gone.
-    return ScanCount(total, "partial") if failed else total
+             + ("; stopped: Fotocasa kept refusing" if refused else "")
+             + ("; page cap reached" if incomplete else ""))
+    # A search that failed (Fotocasa cut the scan off halfway, 2026-10-29), or
+    # that stopped at the page cap with results still unread, left listings
+    # unseen: partial, so they are not taken for gone.
+    return ScanCount(total, "partial") if failed or incomplete else total
 
 
 # ─── Seguridad Social (TGSS) ─────────────────────────────────────────
@@ -1997,9 +2156,9 @@ def scrape_solvia(db, max_price: float = 50000, config: dict | None = None, **_)
 
 
 @register("habitaclia", "ES",
-          description="Habitaclia — homes for sale in Lugo, Ourense and León")
+          description="Habitaclia — cheap houses in inland Spanish provinces")
 def scrape_habitaclia(db, max_price: float = 50000, **_):
-    """Habitaclia — homes for sale in Lugo, Ourense and León."""
+    """Habitaclia — cheap houses in inland Spanish provinces."""
     from sources._market import scrape_named
     return scrape_named(db, "habitaclia", max_price)
 

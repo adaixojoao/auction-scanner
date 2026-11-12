@@ -9,12 +9,15 @@ Display only: every figure and state here comes from the module that owns it.
   "verified" whose inputs changed reads "needs rechecking", never verified.
   A fact the notice states (scoring._occupation, scoring.condition) is shown
   as source-reported, never as verified.
-- Deadline: the stored date_end with its own precision. A date without a time
-  stays a date; a time without an offset is the sale country's local time
-  (ics_export.TIME_ZONES, as the calendar export reads it).
+- Deadline: the actionable cutoff (raw_json.offer_end when the source publishes
+  one, else date_end) with its own precision. A date without a time stays a
+  date; a time without an offset is the sale country's local time
+  (ics_export.TIME_ZONES, as the calendar export reads it). When offer_end and
+  date_end differ, both are returned (role "offer" + sale hearing).
 
 Nothing here hides, ranks or gates a listing: db.load_listings and the
-existing checks still decide that.
+existing checks still decide that. The eligibility line repeats the
+evaluator's stored state and is never a bid or a value.
 """
 from __future__ import annotations
 
@@ -111,10 +114,10 @@ def all_in(item: dict, price_kind: str | None = None) -> dict:
     An unknown figure stays None: it is never shown as €0.
     """
     from costs import floor_resolution, repair_unresolved, selected_acquisition, selected_planning
-    from scoring import categorize, condition, property_kind
+    from scoring import categorize, condition, market_value_as_is, property_kind
     acq = selected_acquisition(item)
     empty = {"low": None, "high": None, "known_subtotal": None, "repairs_priced": False,
-             "basis_label": "", "missing": [], "excludes": []}
+             "basis_label": "", "missing": [], "excludes": [], "as_is": None}
     if (item.get("category") or categorize(item)) != "imoveis":
         return {**empty, "headline": "No cost estimate for this kind of item"}
     if acq["kind"] == "unusable":
@@ -140,11 +143,15 @@ def all_in(item: dict, price_kind: str | None = None) -> dict:
         excludes.append("IMT on a taxable value (VPT) above the price")
     low, high = _amount(range_.get("low")), _amount(range_.get("high"))
     priced = low is not None and high is not None and high >= low
+    as_is = market_value_as_is(item) if kind == "home" else None
     return {"low": round(low) if priced else None, "high": round(high) if priced else None,
             "known_subtotal": round(est["total"]) if _amount(est.get("total")) is not None else None,
             "repairs_priced": priced,
             "basis_label": f"Estimate at {(acq['kind'] != 'predicted' and _BASIS.get(price_kind)) or est.get('basis') or acq['label']}",
-            "missing": missing, "excludes": excludes, "headline": ""}
+            "missing": missing, "excludes": excludes, "headline": "",
+            "as_is": None if not as_is else {
+                "amount": round(as_is["amount"]), "after_work": round(as_is["after_work"]),
+                "note": as_is["note"]}}
 
 
 def checks(item: dict, rows: dict | None, cfg: dict | None) -> dict:
@@ -188,16 +195,9 @@ def checks(item: dict, rows: dict | None, cfg: dict | None) -> dict:
     return {"items": out, "concerns": sum(1 for x in out if x["state"] == "concern")}
 
 
-def deadline(item: dict, now: datetime | None = None) -> dict:
-    """The stored deadline with its precision.
-
-    {"precision": "instant" | "local" | "date" | "unknown" | "invalid",
-     "date", "time", "timezone", "instant", "days"}. A date-only value gets no
-    time; "days" counts calendar days from today in the sale's time zone.
-    This is a label: expiry and eligibility stay with common.effective_end.
-    """
+def _deadline_parts(raw, item: dict, now: datetime) -> dict:
+    """One deadline value → presentation fields (no role)."""
     from ics_export import TIME_ZONES, _parse
-    raw = item.get("date_end")
     none = {"precision": "unknown", "date": None, "time": None, "timezone": None, "instant": None, "days": None}
     if raw in (None, ""):
         return none
@@ -212,7 +212,6 @@ def deadline(item: dict, now: datetime | None = None) -> dict:
         zone = ZoneInfo(zone_name)
     except Exception:  # noqa: BLE001 — no time-zone data (Windows without tzdata)
         zone = None
-    now = now or datetime.now(timezone.utc)
     today = now.astimezone(zone).date() if zone else now.date()
     has_time = "T" in str(raw) or " " in str(raw).strip()
     if dt.tzinfo is not None:
@@ -229,6 +228,25 @@ def deadline(item: dict, now: datetime | None = None) -> dict:
             "days": (dt.date() - today).days}
 
 
+def deadline(item: dict, now: datetime | None = None) -> dict:
+    """The actionable deadline with its precision.
+
+    Primary fields describe offer_end when the source published one, else
+    date_end. {"precision", "date", "time", "timezone", "instant", "days",
+    "role": "offer"|"sale"}. When both exist and differ, "offer" and "sale"
+    hold each side. Expiry stays with common.action_deadline / effective_end.
+    """
+    from common import offer_end_raw
+    now = now or datetime.now(timezone.utc)
+    sale = _deadline_parts(item.get("date_end"), item, now)
+    offer_raw = offer_end_raw(item)
+    offer = _deadline_parts(offer_raw, item, now) if offer_raw else None
+    if offer and offer.get("date"):
+        out = {**offer, "role": "offer", "offer": offer, "sale": sale}
+        return out
+    return {**sale, "role": "sale"}
+
+
 def thumbnail(item: dict) -> str | None:
     """One small picture: the first copy kept on this PC, else the cover (https only)."""
     from urllib.parse import quote
@@ -240,7 +258,41 @@ def thumbnail(item: dict) -> str | None:
     return _url(item.get("image_url"))
 
 
+# evaluator.evaluate states, as words. None of them is a bid or a price.
+_ELIGIBILITY = {
+    "research": (
+        "Research",
+        "Research only — not a bid",
+        "Eligibility check: research only. Gaps remain, so this is not a bid.",
+    ),
+    "finalist": (
+        "Finalist",
+        "Finalist on the checks — not a bid",
+        "Eligibility check: finalist on the recorded checks. This is not a bid and does not set a price.",
+    ),
+    "bid_ready": (
+        "Recorded",
+        "Recorded — this app does not bid",
+        "Eligibility check recorded a later state. This app does not bid from it.",
+    ),
+}
+
+
+def eligibility(item: dict) -> dict | None:
+    """The stored eligibility state for this reading, or None when there is none.
+
+    Live and invest and Investment home record it. It does not hide a listing,
+    set a bid, or say what the property is worth.
+    """
+    found = _ELIGIBILITY.get(item.get("evaluator_state"))
+    if not found:
+        return None
+    label, short, text = found
+    return {"state": item["evaluator_state"], "label": label, "short": short, "text": text}
+
+
 def summary(item: dict, check_rows: dict | None, cfg: dict | None, now: datetime | None = None) -> dict:
     basis = price(item)
     return {"price": basis, "all_in": all_in(item, basis["kind"]), "checks": checks(item, check_rows, cfg),
-            "deadline": deadline(item, now), "thumbnail": thumbnail(item)}
+            "deadline": deadline(item, now), "thumbnail": thumbnail(item),
+            "eligibility": eligibility(item)}

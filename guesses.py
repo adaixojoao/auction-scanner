@@ -2,15 +2,17 @@
 
 Court and tax notices (Citius, e-leilões, the Finanças sales) seldom state the
 floor area and seldom give coordinates. Scored only on stated facts, such a
-sale never reaches the top, however good it is. So two gaps may be filled with
-a guess:
+sale never reaches the top, however good it is. Gaps filled here, with a test,
+not improvised in a scorer:
 
 - the floor area: the house's outline on the map with its levels, else the
   lower quartile of the floors the scanner itself has seen for homes of the
   same type (T3, V2…) in the same district, else in the country, else the
   ground the house covers on the map (one level: at least that);
 - the beach from a parish, village or town pin: the distance from the pin
-  plus how far the house can be from it (SPREAD_KM), the worst case.
+  plus how far the house can be from it (SPREAD_KM), the worst case;
+- the usufructuary's age for Bare ownership when the notice states none:
+  DEFAULT_USUFRUCT_AGE (conservative — a longer wait).
 
 The rules, so a guess cannot pass for a fact:
 - conservative: a lower quartile, a worst case, never a middle or a best;
@@ -33,6 +35,10 @@ from common import footprint_figure, land_figure, normalize
 GUESS_FACTOR = 0.95            # each guess an item is ranked on costs 5% of its rank
 MIN_FLOORS = 8                 # floors seen before their lower quartile is used
 FLOOR_RANGE = (20.0, 400.0)    # a stored figure outside this is not one home's floor
+# Bare ownership: when the notice does not state the usufructuary's age, rank
+# with a conservative adult age (longer wait than a typical elderly holder).
+# Named in the reasons and charged GUESS_FACTOR; never sets a bid.
+DEFAULT_USUFRUCT_AGE = 60
 # How far the house can be from a pin of this precision (geo.py), in km: a
 # village's houses lie within about 1.5 km of its pin, a parish's within about
 # 3 km (the average Portuguese parish is about 30 km²), a municipality's
@@ -132,6 +138,20 @@ def beach_worst_case(item: dict) -> dict | None:
     if spread is None or km is None:
         return None
     return {"km": round(float(km) + spread, 1), "spread": spread, "precision": pos["precision"]}
+
+
+def usufructuary_age_guess(holders: list[dict] | None) -> dict | None:
+    """Conservative age when the notice states none: DEFAULT_USUFRUCT_AGE.
+
+    Returns {"age", "basis"} or None when a stated age already exists."""
+    for h in holders or []:
+        if h.get("age"):
+            return None
+    return {
+        "age": DEFAULT_USUFRUCT_AGE,
+        "basis": (f"usufructuary age not stated — using {DEFAULT_USUFRUCT_AGE} "
+                  f"(conservative; older holders wait less)"),
+    }
 
 
 def charge(rank: float, guesses: list[str]) -> float:

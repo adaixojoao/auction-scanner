@@ -1652,6 +1652,7 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
                 cfg: dict | None = None) -> dict:
     import checklist
     import listing_info
+    import presentation
     from letters import bid_card, channel, classify_property, guidance, letter_types_for, place_of
     raw = _raw(it)
     area = it.get("area_m2") or 0
@@ -1687,6 +1688,7 @@ def _offer_view(it: dict, key: str, offer: dict | None = None, checks: dict | No
         "score": it["score"],
         "rank": it.get("rank", it["score"]),
         "reasons": it["reasons"],
+        "eligibility": presentation.eligibility(it),
         "climate": listing_info.climate_panel(it),
         "location_check": geo.location_confidence(it),
         "location_gate": location_gate_applies(it),     # with /api/offers' location_gate_mode
@@ -2637,6 +2639,8 @@ EDITABLE = {
     "max_price": None,            # one budget per goal (common.py)
     "invest_max_price": None,
     "land_max_price": None,
+    "bare_max_price": None,
+    "bare_discount_rate": None,
     "cash_on_hand": None,         # price + taxes + fees + low end of repairs
     "check_max_price": None,      # the work spent on a listing (common.py)
     "light_checks_from": None,

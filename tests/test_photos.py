@@ -203,10 +203,23 @@ def test_exact_beach_homes_are_photographed_first(monkeypatch):
               "beach": {"km": 12.0, "approx": False}}
 
     def fake_load(db, filters=None, mode="home", **_):
-        return [inland, sea] if mode == "home" else []
+        return [inland, sea] if mode in ("home", "both", "invest") else []
 
     monkeypatch.setattr("db.load_listings", fake_load)
     assert [it["id"] for it in photos.queue(None, {})][0] == "a"
+
+
+def test_photo_queue_is_top_n_per_mode_deduped(monkeypatch):
+    rows = [{"id": f"h{i}", "kind": "home", "rank": 100 - i, "score": 100 - i,
+             "beach": {"km": 20.0, "approx": False}} for i in range(12)]
+
+    def fake_load(db, filters=None, mode="home", **_):
+        return list(rows) if mode == "home" else (list(rows[:3]) if mode == "both" else [])
+
+    monkeypatch.setattr("db.load_listings", fake_load)
+    got = photos.queue(None, {}, n=5)
+    assert len(got) == 5
+    assert [it["id"] for it in got] == ["h0", "h1", "h2", "h3", "h4"]
 
 
 def test_a_score_of_85_keeps_the_photos_and_a_lower_one_does_not(db):

@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 from common import LOG, find_area, find_price, make_listing, make_session, parse_date_dmy, parse_price, safe_url
 from db import upsert_listing
-from sources import register
+from sources import SourceUnavailable, register
 from sources._cards import listing_id_from_url
 
 ZVG_BASE = "https://www.zvg-portal.de/"
@@ -160,64 +160,36 @@ def scrape_zvg(db, max_price: float = 50000, **_):
 
 @register("justiz_auktion", "DE", default=False)
 def scrape_justiz_auktion(db, max_price: float = 50000, **_):
-    """justiz-auktion.de — surplus assets. No property category left (Sept 2026);
-    kept runnable by name only."""
-    session = make_session()
-    base = "https://www.justiz-auktion.de/"
-    total_scraped = 0
+    """justiz-auktion.de — surplus assets only (phones, furniture, …).
 
-    for start in range(0, 200, 10):
-        try:
-            resp = session.get(f"{base}auction_search.php", params={"start": start})
-            resp.raise_for_status()
-        except Exception:
-            if start == 0:
-                raise
-            break
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        items = soup.select("a.link_detail, .auktionstitel a, a[href*='auction_detail']")
-        if not items:
-            break
-
-        for link in items:
-            href = link.get("href") or ""
-            title = link.get_text(strip=True)[:200]
-            if not href or not title:
-                continue
-            eid_m = re.search(r"(\d{4,})", href) or re.search(r"(\d{4,})", title)
-            eid = eid_m.group(1) if eid_m else None
-            if not eid:
-                continue
-            parent = link.find_parent(["div", "article", "li", "tr"]) or link
-            price = find_price(parent.get_text(" "))
-            if price and price > max_price:
-                continue
-            upsert_listing(db, make_listing(
-                "justiz_auktion", eid, "DE", id_prefix="justiz",
-                title=title, description=parent.get_text(" ", strip=True)[:500],
-                tipo="imovel", price=price, url=href, base_url=base,
-            ))
-            total_scraped += 1
-
-        db.commit()
-        LOG.info(f"  Justiz-Auktion start={start}: {total_scraped} total")
-        time.sleep(1)
-    return total_scraped
+    The Immobilien / property category was removed (Sept 2026); the live
+    catalogue is Bekleidung, Elektronik, Wohnen furniture, etc. Court property
+    sales stay on zvg-portal.de (`zvg`).
+    """
+    raise SourceUnavailable(
+        "justiz-auktion.de no longer lists property (surplus goods only); "
+        "German court sales come through the zvg (zvg-portal.de) source")
 
 
 @register("zvg_de", "DE", default=False)
 def scrape_zvg_de(db, max_price: float = 100000, **_):
     """zwangsversteigerung.de — private aggregator of German forced auctions.
-    Never matched its pages (paged results, members-only parts); its lots are
-    the court sales zvg already reads from zvg-portal.de (2026-10-24)."""
+
+    Off the default scan: it rate-limits automated reads, and its lots are the
+    court sales `zvg` already reads from zvg-portal.de (2026-11-10).
+    """
     session = make_session()
     base = "https://www.zwangsversteigerung.de"
     resp = session.get(f"{base}/immobilien/", params={"verkehrswert_max": int(max_price)})
     resp.raise_for_status()
+    text = resp.text or ""
+    if "von unserem System gesperrt" in text or "Datenspezialist" in text:
+        raise SourceUnavailable(
+            "zwangsversteigerung.de blocks automated reads; the same court sales "
+            "come through the zvg (zvg-portal.de) source")
     total = 0
     seen = set()
-    for card in BeautifulSoup(resp.text, "html.parser").select(
+    for card in BeautifulSoup(text, "html.parser").select(
             "div.object, article, div[class*='object'], tr.result"):
         link = card.select_one("a[href]")
         url = safe_url(link.get("href"), base) if link else None
@@ -227,16 +199,16 @@ def scrape_zvg_de(db, max_price: float = 100000, **_):
         if eid in seen:
             continue
         seen.add(eid)
-        text = card.get_text(" ", strip=True)
-        price = find_price(text)
+        body = card.get_text(" ", strip=True)
+        price = find_price(body)
         if price and price > max_price:
             continue
-        loc_m = re.search(r"\b\d{5}\s+(\w[\w\s-]+)", text)
+        loc_m = re.search(r"\b\d{5}\s+(\w[\w\s-]+)", body)
         upsert_listing(db, make_listing(
             "zvg_de", eid, "DE",
-            title=text[:120], description="Zwangsversteigerung.de aggregator",
+            title=body[:120], description="Zwangsversteigerung.de aggregator",
             tipo="imovel", price=price, district=loc_m.group(1).strip()[:60] if loc_m else None,
-            url=url, date_end=parse_date_dmy(text),
+            url=url, date_end=parse_date_dmy(body),
         ))
         total += 1
     return total

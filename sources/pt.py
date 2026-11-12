@@ -277,11 +277,14 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
           AND date_end > ?
           AND tipo NOT IN ({",".join("?" * len(_NOT_PROPERTY))})
         ORDER BY CASE
+            -- Bare ownership needs the onus / area text; card titles are enough to queue.
+            WHEN LOWER(title) LIKE '%nua propriedade%'
+              OR LOWER(title) LIKE '%usufruto%' THEN 0
             WHEN LOWER(title) LIKE '%moradia%'
               OR LOWER(title) LIKE '%apartamento%'
               OR LOWER(title) LIKE '%casa%'
-              OR LOWER(title) LIKE '%vivenda%' THEN 0
-            ELSE 1
+              OR LOWER(title) LIKE '%vivenda%' THEN 1
+            ELSE 2
         END, price DESC
         LIMIT ?
     """, (DETAIL_VERSION, max_price, max_price, utcnow_iso()[:10], *_NOT_PROPERTY, limit)).fetchall()
@@ -315,14 +318,45 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
 
 # ─── Idealista (Selenium) ────────────────────────────────────────────
 
+def _idealista_sign_in(driver, username: str, password: str) -> None:
+    """Fill the Idealista login form in Chrome. CAPTCHA is never worked around."""
+    import accounts
+    from selenium.common.exceptions import NoSuchElementException
+    from selenium.webdriver.common.by import By
+
+    driver.get("https://www.idealista.pt/login")
+    time.sleep(2)
+    source = (driver.page_source or "").lower()
+    if "captcha" in source:
+        raise accounts.LoginFailed("idealista.pt showed a CAPTCHA")
+    try:
+        email = driver.find_element(By.CSS_SELECTOR, "input[type='email'], input[name='email'], #email")
+        pwd = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+    except NoSuchElementException as e:
+        raise accounts.LoginFailed("idealista.pt login page has changed") from e
+    email.clear()
+    email.send_keys(username)
+    pwd.clear()
+    pwd.send_keys(password)
+    pwd.submit()
+    time.sleep(3)
+    source = (driver.page_source or "").lower()
+    if "captcha" in source:
+        raise accounts.LoginFailed("idealista.pt showed a CAPTCHA")
+    if "/login" in (driver.current_url or "").lower():
+        raise accounts.LoginFailed("idealista.pt did not sign in (wrong email or password?)")
+
+
 @register("idealista", "PT", default=False)
-def scrape_idealista(db, max_price: float = 50000, **_):
+def scrape_idealista(db, max_price: float = 50000, config: dict | None = None, **_):
     """idealista.pt — regular listings via Selenium (needs Chrome; not in default runs)."""
+    import accounts
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
 
     driver = None
     total_scraped = 0
+    signed_in = False
     try:
         for attempt in ("standalone", "remote"):
             try:
@@ -350,6 +384,13 @@ def scrape_idealista(db, max_price: float = 50000, **_):
             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         })
 
+        if accounts.credentials(config or {}, "idealista"):
+            signed_in = accounts.run_signed_in(
+                db, config or {}, "idealista",
+                lambda user, pwd: _idealista_sign_in(driver, user, pwd))
+            if not signed_in:
+                raise SourceUnavailable(accounts.missing_account_message("idealista"))
+
         base = f"https://www.idealista.pt/comprar-casas/portugal/com-preco-max_{int(max_price)},publicado_ultimas-48-horas/"
         for page in range(1, 15):
             driver.get(base if page == 1 else base + f"pagina-{page}.htm")
@@ -357,6 +398,10 @@ def scrape_idealista(db, max_price: float = 50000, **_):
 
             source = driver.page_source.lower()
             if "captcha" in source or "blocked" in source:
+                if not signed_in:
+                    raise SourceUnavailable(
+                        "idealista.pt showed a CAPTCHA; add your account in Settings → Accounts "
+                        "so the scrape can sign in first")
                 LOG.warning(f"idealista: CAPTCHA/block on page {page}. Stopping.")
                 break
 
@@ -495,6 +540,8 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
     """leilosoc.com — private auction house (court and insolvency sales)."""
     session = make_session(timeout=20)
     total = 0
+    pages = 0
+    incomplete = False
     for page in range(1, 20):
         try:
             resp = session.get(f"{LEILOSOC}/en/category/5-real-estate/", params={"page": page})
@@ -502,7 +549,9 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
         except Exception:
             if page == 1:
                 raise
+            incomplete = True
             break
+        pages += 1
         lots, more = leilosoc_lots(resp.text)
         for lot in sorted(lots, key=lambda x: (x.get("auctionId") or 0, x.get("order") or 0, x.get("batchId") or 0)):
             auction = str(lot.get("auctionId"))
@@ -527,7 +576,9 @@ def scrape_leilosoc(db, max_price: float = 50000, **_):
         if not more:
             break
         time.sleep(0.5)
-    return total
+    else:
+        incomplete = True
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 # ─── BCP Millennium ─────────────────────────────────────────────────
@@ -1045,6 +1096,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
     past = (datetime.now() - timedelta(days=180)).strftime("%d/%m/%Y")
 
     total_scraped = 0
+    missed = False
     for i, (trib_id, trib_name) in enumerate(tribunais):
         try:
             state = _citius_form_state(session)
@@ -1062,6 +1114,7 @@ def scrape_citius(db, max_price: float = 50000, **_):
             })
         except Exception as e:
             LOG.debug(f"  Tribunal {trib_id} error: {e}")
+            missed = True
             continue
 
         form = {k: v for k, v in (
@@ -1110,13 +1163,20 @@ def scrape_citius(db, max_price: float = 50000, **_):
             LOG.info(f"  Citius: {i+1}/{len(tribunais)} tribunais, {total_scraped} listings so far")
         time.sleep(0.3)
     fetch_citius_details(db, session)
-    return total_scraped
+    return ScanCount(total_scraped, "partial" if missed else "full")
 
 
 # ─── Portal das Finanças (tax seizures) ─────────────────────────────
 
 FINANCAS = "https://vendas.portaldasfinancas.gov.pt"
 FINANCAS_DETAILS_PER_SCAN = 80
+# Property sales, including lots the portal files under furniture and property.
+_FINANCAS_PROPERTY = {"imoveis", "moveis e imoveis"}
+
+
+def _financas_property(categoria: str) -> bool:
+    from common import normalize
+    return normalize((categoria or "").replace("\xa0", " ")) in _FINANCAS_PROPERTY
 
 
 def _euros(text: str | None) -> float | None:
@@ -1195,7 +1255,7 @@ def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **
         raise SourceUnavailable("Portal das Finanças sent the sign-in page back after signing in")
     total, details_left = 0, FINANCAS_DETAILS_PER_SCAN
     for sale in parse_financas_list(resp.text):
-        if sale["categoria"] != "Imóveis":
+        if not _financas_property(sale["categoria"]):
             continue
         pay = sale["ultima"] or sale["valor_base"] or 0
         if pay > max_price:
@@ -1213,7 +1273,8 @@ def scrape_financas(db, max_price: float = 50000, config: dict | None = None, **
                 LOG.info(f"Portal das Finanças: details of {sale['numero']} failed ({type(e).__name__})")
             time.sleep(0.5)
         raw = raw or {}
-        raw.update(venda=sale["venda"], modalidade=sale["modalidade"], numero=sale["numero"])
+        raw.update(venda=sale["venda"], modalidade=sale["modalidade"], numero=sale["numero"],
+                   categoria=sale["categoria"])
         desc = raw.get("descricao") or ""
         # Finanças lists the plot as "área total do terreno"; the house is the
         # gross / private construction figure (1228.2026.16: plot 202, house 96).
@@ -1959,16 +2020,16 @@ def scrape_imovirtual(db, max_price: float = 50000, **_):
 
 
 @register("custojusto", "PT",
-          description="CustoJusto — plots, and houses in the inland districts")
+          description="CustoJusto — plots and houses across Portugal")
 def scrape_custojusto(db, max_price: float = 50000, **_):
-    """CustoJusto — plots, and houses in the inland districts."""
+    """CustoJusto — plots and houses across Portugal, at or under the ceiling."""
     from sources._market import scrape_named
     return scrape_named(db, "custojusto", max_price)
 
 
-@register("casasapo", "PT", description="Casa Sapo — plots for sale across Portugal")
+@register("casasapo", "PT", description="Casa Sapo — houses, flats and plots across Portugal")
 def scrape_casasapo(db, max_price: float = 50000, **_):
-    """Casa Sapo — plots for sale across Portugal."""
+    """Casa Sapo — houses, flats and plots across Portugal, at or under the ceiling."""
     from sources._market import scrape_named
     return scrape_named(db, "casasapo", max_price)
 
@@ -2032,9 +2093,12 @@ def scrape_estamo(db, max_price: float = 50000, **_):
 
 
 # ─── IP Património: railway and road property for sale ────────────────
-# The rail and road company's sales ("Alienações") are a layer of its
-# ArcGIS map of business opportunities: one point per property, with the
-# base price, the deadline and the sale notice. Empty between rounds.
+# The rail and road company's sales ("Alienações") are layer 0 of its
+# ArcGIS map of business opportunities (Experience
+# 1e7f73378b364c068e9700e13a7ce22b): one point per property, with the base
+# price, the deadline and the sale notice. Layer 1 is Subconcessões (rents /
+# leases), not purchases — leave it alone. The sales layer is often empty
+# between rounds; a 0-feature answer is a quiet market, not a broken URL.
 IPP_SALES = ("https://utility.arcgis.com/usrsvcs/servers/1c79b13c1c604fd6ac7e0584b8404f6b/rest/services/"
              "webapps/Oportunidades_de_negocio/FeatureServer/0/query")
 _IPP_AREA = "dbpatrimonio.patrimoniodata.oport_alienacoes.area"

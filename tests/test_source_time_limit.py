@@ -38,7 +38,24 @@ def test_a_source_stopped_by_the_limit_is_recorded_not_raised(db):
     def stuck(db, **_):
         raise SourceTimeLimit("over")
     result = run_source(db, Source("stucktest", "PT", stuck), max_price=1)
-    assert result["status"] == "error" and "time limit" in result["message"]
+    assert result["status"] == "error" and result["count"] == 0
+    assert "time limit" in result["message"]
+    assert db.execute("SELECT scope FROM scrape_log WHERE source = 'stucktest'").fetchone()[0] == "partial"
+
+
+def test_a_source_stopped_by_the_limit_counts_what_it_already_saved(db):
+    from common import make_listing
+    from db import upsert_listing
+
+    def stuck(db, **_):
+        upsert_listing(db, make_listing("stucktest", "1", "PT", title="Casa", price=9000))
+        raise SourceTimeLimit("over")
+
+    result = run_source(db, Source("stucktest", "PT", stuck), max_price=1)
+    assert result["status"] == "ok" and result["count"] == 1
+    assert "time limit" in result["message"]
+    row = db.execute("SELECT scope, count FROM scrape_log WHERE source = 'stucktest'").fetchone()
+    assert row["scope"] == "partial" and row["count"] == 1
 
 
 def test_boe_public_returns_a_count(db, fake_http):

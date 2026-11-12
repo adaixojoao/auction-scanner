@@ -1,6 +1,7 @@
 import json
 import urllib.parse
 
+import pytest
 import scraper
 from common import COUNTRY_NAMES
 from conftest import FakeResponse
@@ -14,15 +15,23 @@ def test_registry_is_complete():
     for s in REGISTRY.values():
         assert s.country in COUNTRY_NAMES or s.country == "EU", s
         assert s.description, f"{s.name} needs a docstring"
-    # An ordinary scan reads only forced sales in these countries; PT runs first.
-    # Belgium and Luxembourg have no forced-sale source that can be read.
+    # An ordinary scan reads the default sources in these countries; PT runs first.
+    # Agency portals whose search was seen to list cheap homes are in the default set.
     assert {s.name for s in REGISTRY.values() if s.default} == DEFAULT_SOURCES
-    assert {s.country for s in sources_for(None)} == {"PT", "ES", "FR", "NL", "IT"}
+    assert {s.country for s in sources_for(None)} == {
+        "PT", "ES", "FR", "NL", "IT", "BE", "LU", "DE", "AT"}
     assert sources_for(None)[0].country == "PT"
     assert {s.name for s in sources_for(["PT"])} == {"eleiloes", "leilosoc", "citius", "financas", "bidleiloeira",
                                                      "bcp", "bpi", "cgd", "santander", "whitestar",
-                                                     "centroleiloes", "imobancos"}
-    assert sources_for(["BE", "LU"]) == []
+                                                     "centroleiloes", "imobancos",
+                                                     "imovirtual", "custojusto", "casasapo"}
+    assert {s.name for s in sources_for(["BE"])} == {"era", "immovlan", "immoweb"}
+    assert "notaires" in {s.name for s in sources_for(["FR"])}
+    assert {s.name for s in sources_for(["LU"])} == {"athome", "wortimmo"}
+    assert "astalegale" in {s.name for s in sources_for(["IT"])}
+    assert "servihabitat" in {s.name for s in sources_for(["ES"])}
+    assert "kleinanzeigen" in {s.name for s in sources_for(["DE"])}
+    assert "willhaben" in {s.name for s in sources_for(["AT"])}
     # Everything else can still be run by name or listed as optional.
     assert len(sources_for(None, include_optional=True)) == len(REGISTRY)
     # the CLI accepts every registered name
@@ -1017,6 +1026,16 @@ def test_fotocasa_reads_the_page_data(db, fake_http, monkeypatch):
     assert all(c[2]["params"] == {"maxPrice": 100000, "minSurface": 10000} for c in land)
 
 
+def test_fotocasa_page_cap_with_results_left_is_partial(db, fake_http, monkeypatch):
+    import sources.es
+    from sources.es import scrape_fotocasa
+    monkeypatch.setattr(sources.es.time, "sleep", lambda s: None)
+    monkeypatch.setattr(sources.es, "FOTOCASA_MAX_PAGES", 1)
+    fake_http(lambda m, url, kw: FakeResponse(_fotocasa_html([FOTOCASA_AD], 10)))
+    got = scrape_fotocasa(db, max_price=50000)
+    assert got > 0 and got.scope == "partial"
+
+
 def test_fotocasa_cut_off_halfway_is_a_partial_scan(db, fake_http, monkeypatch):
     import sources.es
     from sources.es import FOTOCASA_PROVINCES, scrape_fotocasa
@@ -1107,6 +1126,57 @@ def test_bienici_reads_the_search_service(db, fake_http, monkeypatch):
     assert sent[3]["propertyType"] == ["terrain"] and sent[3]["minArea"] == 10000
 
 
+ETRE_AD = {
+    "id": 27282178, "title": "Charmante maison de bourg", "niceTitle": "Charmante maison",
+    "price": 43541, "houseArea": 65, "terrainArea": 71, "roomNb": 2, "categoryCode": 1,
+    "categoryName": "Maison", "cityName": "Anneville-En-Saire", "postalCode": "50760",
+    "departmentCode": "50", "dpeGlobalLetter": "e",
+    "url": "immobilier-27282178-vente-charmante-maison-de-bourg-anneville-en-saire",
+    "mediasUrls": ["https://storage.etreproprio.com/classified/image/thumb/x.webp"],
+}
+ETRE_LAND = {
+    "id": 27000001, "title": "Parcelle boisée", "price": 22000, "houseArea": None,
+    "terrainArea": 15000, "categoryCode": 3, "categoryName": "Terrain",
+    "cityName": "Pignans", "postalCode": "83790", "departmentCode": "83",
+    "url": "immobilier-27000001-vente-parcelle-pignans",
+    "mediasUrls": [],
+}
+
+
+def test_etreproprio_reads_the_classifieds_api(db, fake_http, monkeypatch):
+    import sources.fr
+    from sources import SourceUnavailable
+    from sources.fr import (etreproprio_search_key, parse_etreproprio, scrape_etreproprio,
+                            scrape_encheres_publiques)
+    monkeypatch.setattr(sources.fr.time, "sleep", lambda s: None)
+
+    assert etreproprio_search_key("h", price_max=50000) == "th.p-50000"
+    assert etreproprio_search_key("h", price_min=25000, price_max=37500, page=2) == "th.p25000-37500.g2"
+    assert etreproprio_search_key("l", price_max=50000, land_min=10000) == "tl.p-50000.m10000"
+
+    row = parse_etreproprio(ETRE_AD)
+    assert row["id"] == "etreproprio:27282178" and row["price"] == 43541 and row["area_m2"] == 65
+    assert row["url"].endswith("/immobilier-27282178-vente-charmante-maison-de-bourg-anneville-en-saire")
+    assert "terrain 71 m²" in row["description"] and "2 pièces" in row["description"]
+    assert json.loads(row["raw_json"])["dpe"] == "E"
+    land = parse_etreproprio(ETRE_LAND)
+    assert land["tipo"] == "terrain" and land["area_m2"] == 15000
+    assert parse_etreproprio({**ETRE_AD, "id": None}) is None
+
+    def handler(method, url, kw):
+        assert "/api/classifieds/" in url
+        key = url.rsplit("/", 1)[-1]
+        if key.startswith("tl."):
+            return FakeResponse(json_data={"classifiedsNb": 1, "classifieds": [ETRE_LAND]})
+        return FakeResponse(json_data={"classifiedsNb": 1, "classifieds": [ETRE_AD]})
+
+    fake_http(handler)
+    assert scrape_etreproprio(db, max_price=50000) == 2   # house (3 bands, same id) + land
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE source='etreproprio'").fetchone()[0] == 2
+    with pytest.raises(SourceUnavailable, match="licitor"):
+        scrape_encheres_publiques(db)
+
+
 def _immoweb_ad(**over):
     ad = {"id": 21881855, "flags": {"main": None, "secondary": []},
           "property": {"type": "HOUSE", "subtype": "HOUSE", "title": "Maison à rénover", "netHabitableSurface": 120,
@@ -1128,6 +1198,38 @@ def test_immoweb_keeps_plain_sales_and_skips_annuities_and_options():
     assert parse_immoweb(_immoweb_ad(flags={"main": "under_option", "secondary": []}), "maison") is None
     assert parse_immoweb(_immoweb_ad(flags={"main": None, "secondary": ["life_annuity"]}), "maison") is None
     assert immoweb_results(":results='[{&quot;id&quot;:1}]'") == [{"id": 1}]
+
+
+def test_immoweb_search_asks_to_exclude_life_annuities(db, fake_http, monkeypatch):
+    import sources.be as be
+    monkeypatch.setattr(be.time, "sleep", lambda s: None)
+    calls = []
+
+    def handler(method, url, kw):
+        calls.append(kw.get("params") or {})
+        # Empty results attribute so pagination stops after one page per search.
+        return FakeResponse(":results='[]'")
+
+    fake_http(handler)
+    assert be.scrape_immoweb(db, max_price=50000) == 0
+    assert calls and all(c.get("isALifeAnnuitySale") == "false" for c in calls)
+    assert calls[0]["maxPrice"] == 50000
+
+
+def test_era_detail_text_keeps_viager_figures():
+    from sources._market import era_detail_text
+    html = """
+    <html><body><main><article>
+      <h1>Villa à Awans en viager occupé</h1>
+      <p>Bouquet 80 000 €. Rente viagère 450 € / mois. Crédirentière âgée de 78 ans.</p>
+      <script>void(0)</script>
+    </article></main></body></html>
+    """
+    text = era_detail_text(html)
+    assert "Bouquet 80 000" in text and "450" in text and "78 ans" in text
+    assert "void" not in text
+
+
 def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
     from sources.fr import parse_notaires
     ad = {"annonceId": 2082120, "prixAffiche": 10000, "prixTotal": 10600, "typeBien": "MAI", "typeTransaction": "VENTE",
@@ -1137,7 +1239,10 @@ def test_notaires_reads_an_ad_and_skips_annuities_and_promised_sales():
     row = parse_notaires(ad)
     assert row["id"] == "notaires:2082120" and row["price"] == 10600          # notary fees included
     assert row["area_m2"] == 30 and row["concelho"] == "Berrien" and "<br>" not in row["description"]
-    assert parse_notaires({**ad, "viager": "OUI"}) is None
+    # Viager is kept for the Bare ownership goal; other goals still skip on the word.
+    viager = parse_notaires({**ad, "viager": "OUI"})
+    assert viager and "Viager occupé" in viager["description"]
+    assert json.loads(viager["raw_json"])["viager"] is True
     assert parse_notaires({**ad, "descriptionFr": "Sous compromis : maison"}) is None
     land = parse_notaires({**ad, "typeBien": "TER"})
     assert land["tipo"] == "terrain" and land["area_m2"] == 2111

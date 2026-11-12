@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 from common import (
-    LOG, effective_end, find_terms, has_term, normalize, parse_dt, patch_raw, safe_url, utcnow, utcnow_iso,
+    LOG, action_deadline, effective_end, find_terms, has_term, normalize, parse_dt, patch_raw, safe_url, utcnow, utcnow_iso,
 )
 
 DB_PATH = os.environ.get("AUCTION_SCANNER_DB") or os.path.join(
@@ -898,7 +898,9 @@ LEARNED_RAW_KEYS = ("geo", "geo_checked", "photo_check", "outside_check", "kept_
                     "climate", "verified_geo", "geo_tried", "geo_street_tried", "bad_sale_pin", "sale_pin_checked",
                     # Without these a scraper's fresh row wiped them, so the same lookups were
                     # paid for again every scan and the best homes showed none (2026-11-02).
-                    "surroundings", "perizia", "outline", "site_check")
+                    "surroundings", "perizia", "outline", "site_check",
+                    # Detail-page body kept for Bare ownership (viager age / rente).
+                    "page_text", "era_detail_checked")
 
 
 def _keep_learned(new: str | None, old: str | None) -> str | None:
@@ -1052,6 +1054,7 @@ def upsert_listing(db: sqlite3.Connection, row: dict) -> str:
         db.execute("RELEASE SAVEPOINT listing_change_upsert")
         raise
     db.execute("RELEASE SAVEPOINT listing_change_upsert")
+    invalidate_snapshot()
     return result
 
 
@@ -1117,6 +1120,10 @@ TWIN_UNIT_OPENING = 80    # characters of description that must match: portals t
 
 _FRACTION_RE = re.compile(r"\bfra(?:c|cc)ao\s+(?:autonoma\s+)?(?:designada\s+(?:pela\s+letra\s+)?)?\"?([a-z]{1,3})\b")
 _ARTICLE_RE = re.compile(r"\bartigo\s+(?:matricial\s+)?(?:urbano\s+|rustico\s+)?(?:n\.?\s*o?\s*)?(\d{1,6})\b")
+# Spanish Social Security / registro: "CRU 28075000033781", "CRU: 03044000359758",
+# "F.R. 8243", "F.R. 4/23617" — same unit when two TGSS cards share one.
+_CRU_RE = re.compile(r"\bcru\s*:?\s*(\d{8,20})\b", re.I)
+_FR_RE = re.compile(r"\bf\.?\s*r\.?\s*:?\s*(\d{1,6}(?:\s*/\s*\d{1,6})?)\b", re.I)
 
 
 def _unit_markers(r) -> dict:
@@ -1160,6 +1167,12 @@ def _unit_markers(r) -> dict:
         registry.add(("fracao", m.group(1)))
     for m in _ARTICLE_RE.finditer(text):
         registry.add(("artigo", m.group(1)))
+    # Prefer the raw description for CRU / F.R. (digits and slashes survive).
+    blob = f"{r['title'] or ''} {r['description'] or ''}"
+    for m in _CRU_RE.finditer(blob):
+        registry.add(("cru", m.group(1)))
+    for m in _FR_RE.finditer(blob):
+        registry.add(("fr", re.sub(r"\s+", "", m.group(1))))
     return {"address": address, "registry": frozenset(registry)}
 
 
@@ -1588,6 +1601,7 @@ def set_listing_status(db: sqlite3.Connection, listing_id: str, status: str | No
     db.execute("INSERT INTO listing_status_history (listing_id, status, reason, changed_at)"
                " VALUES (?,?,?,?)", (listing_id, status, reason, utcnow_iso()))
     db.commit()
+    invalidate_snapshot()
 
 
 def listing_status_history(db: sqlite3.Connection, listing_id: str) -> list[dict]:
@@ -1885,6 +1899,13 @@ def filter_reason(item: dict, filters: dict | None, mode: str = "home") -> str |
         from scoring import OCCUPANCY_PATTERNS
         keywords = [k for k in keywords
                     if not has_term(k, OCCUPANCY_PATTERNS, negations=False)]
+    if mode == "bare" and keywords:
+        # Usufruct / tenancy words are the point of this goal; shares stay excluded.
+        from scoring import OCCUPANCY_PATTERNS, USUFRUCT_PATTERNS
+        keywords = [k for k in keywords
+                    if not has_term(k, OCCUPANCY_PATTERNS, negations=False)
+                    and not has_term(k, USUFRUCT_PATTERNS, negations=False)
+                    and normalize(k) not in ("usufruct", "usufruto", "ocupado", "arrendado", "inquilino")]
     if keywords:
         hits = find_terms(f"{item.get('title') or ''} {item.get('description') or ''}", keywords)
         if hits:
@@ -2927,7 +2948,9 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             continue
         reason = None
 
-        end = effective_end(item.get("date_end"))
+        # Offer cutoff (when published) closes the sale for us even if the
+        # hearing/auction date_end is still ahead (Italian PVP, …).
+        end = effective_end(action_deadline(item))
         if item["status"] == "dismissed":
             why = why_dismissed.get(item["id"])
             item["dismiss_reason"] = why
@@ -3017,7 +3040,7 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             item["floor_market"] = floor_market or {}
             inputs = _reads_record(log, shared, shared_memo)
             _optional = {"research_only", "extreme_discount", "floor_guess",
-                         "live_rank", "invest_rank", "both_factor"}
+                         "live_rank", "invest_rank", "both_factor", "evaluator_state"}
             data = {k: item[k] for k in _DERIVED if k not in _optional}
             for _k in _optional:
                 if _k in item:
@@ -3104,7 +3127,55 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         _release(mode)               # the items hold what they need; the scores file keeps the rest
     if not maps_before and climate.maps_loaded():
         climate.release_maps()       # a seaside home read for Live and invest: not kept for the life of the app
+    if mode in ("both", "invest"):
+        _attach_eligibility(db, items, ev_rev_sums, now, scored, mode)
     return items
+
+
+def _attach_eligibility(db, items, ev_rev_sums, now, scored, mode) -> None:
+    """Copy a fresh stored decision onto items this pass did not just evaluate.
+
+    A cache hit keeps evaluator_state once it has been saved with the score.
+    Older kept scores do not, so the lists, the report and Offers would omit a
+    decision already in evaluator_decisions. A stale or expired row is left
+    unset. This does not reevaluate or promote a listing. A backfill is written
+    into the score cache so the next read does not query again.
+    """
+    missing = [it for it in items if it.get("id") and not it.get("_slim") and not it.get("evaluator_state")]
+    if not missing:
+        return
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    wanted = {it["id"]: it for it in missing}
+    updates = []
+    for row in db.execute(
+        "SELECT listing_id, state, requirements_json, evidence_rev_sum FROM evaluator_decisions"
+    ):
+        it = wanted.get(row["listing_id"])
+        if it is None or row["state"] not in ("research", "finalist", "bid_ready"):
+            continue
+        if row["evidence_rev_sum"] != ev_rev_sums.get(it["id"], 0):
+            continue
+        try:
+            requirements = json.loads(row["requirements_json"])
+        except (TypeError, ValueError):
+            continue
+        if _decision_expired(requirements, now):
+            continue
+        it["evaluator_state"] = row["state"]
+        kept = scored.get(it["id"]) if scored is not None else None
+        if not kept:
+            continue
+        data = kept[1]
+        if isinstance(data, bytes):
+            data = _unpack(data)
+        if not isinstance(data, dict):
+            continue
+        data["evaluator_state"] = row["state"]
+        scored[it["id"]] = (kept[0], data, kept[2])
+        updates.append((it["id"], kept[0], kept[2], data))
+    if updates:
+        _save_kept(db, mode, updates)
 
 
 def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw) -> list[dict]:
@@ -3138,7 +3209,7 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
         if mode not in family_modes:
             continue
         budget = mode_max_price(cfg, mode, cfg.get("max_price") or 0)
-        for item in load_listings(db, mode=mode, **kw):
+        for item in publication_snapshot(db, mode=mode, **kw):
             # Each goal pays its own price: a listing over this goal's budget
             # cannot be bought for it, whatever it scores.
             if budget and (item.get("price") or 0) > budget:
@@ -3191,8 +3262,15 @@ SNAP_TTL: float = 10.0
 def publication_snapshot(db: sqlite3.Connection, *, filters: dict | None = None,
                          mode: str = "home", include_hidden: bool = False,
                          slim_hidden: bool = False, now: datetime | None = None,
-                         ttl: float | None = None) -> list[dict]:
-    """Database-scoped snapshot; consumers cannot mutate the cached copy."""
+                         where: str = "", params=(), apply_min_score: bool = True,
+                         refresh: bool = False, ttl: float | None = None) -> list[dict]:
+    """Database-scoped snapshot; consumers cannot mutate the cached copy.
+
+    The cache key includes every argument that changes which listings come back,
+    so a report and an alert that ask the same question share one read.
+    `refresh` always reads again. The Listings tab does not use this: it calls
+    load_listings so a shortlist or a dismiss is visible on the next click
+    even if this cache was not cleared."""
     import copy
 
     effective_ttl = ttl if ttl is not None else SNAP_TTL
@@ -3202,14 +3280,16 @@ def publication_snapshot(db: sqlite3.Connection, *, filters: dict | None = None,
     identity = ("file", os.path.realpath(path)) if path else ("memory", id(db))
     time_key = now.isoformat() if now is not None else None
     policy_key = json.dumps(_load_config_safe(), sort_keys=True, default=str)
-    cache_key = (identity, mode, include_hidden, slim_hidden, filters_key, time_key, policy_key)
+    cache_key = (identity, mode, include_hidden, slim_hidden, filters_key, time_key, policy_key,
+                 where, tuple(params), apply_min_score)
     with _SNAP_LOCK:
         stamp = time.monotonic()
         entry = _SNAP_CACHE.get(cache_key)
-        if entry is not None and stamp - entry[0] < effective_ttl:
+        if not refresh and entry is not None and stamp - entry[0] < effective_ttl:
             return copy.deepcopy(entry[1])
-        listings = load_listings(db, filters=filters, mode=mode,
-                                 include_hidden=include_hidden, slim_hidden=slim_hidden, now=now)
+        listings = load_listings(db, filters=filters, mode=mode, include_hidden=include_hidden,
+                                 slim_hidden=slim_hidden, now=now, where=where, params=params,
+                                 apply_min_score=apply_min_score, refresh=refresh)
         stored_copy = copy.deepcopy(listings)
         _SNAP_CACHE[cache_key] = (time.monotonic(), stored_copy)
         return copy.deepcopy(stored_copy)

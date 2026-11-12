@@ -183,7 +183,7 @@ Status: **implemented and verified** | **partial** | **not implemented** | **blo
 | Implementation | `db.py` — `publication_snapshot(db, *, filters, mode, include_hidden, slim_hidden, now, ttl)` caches the result of `load_listings()` for `SNAP_TTL` seconds (default 10 s), keyed on (db path, mode, include_hidden, slim_hidden, filters hash). Multiple consumers calling with the same args within the TTL receive the identical list object. `invalidate_snapshot(mode)` drops cached entries; `invalidate_snapshot()` clears all. |
 | Tests | `tests/test_f11_f15.py` — 5 snapshot tests |
 | Status | **implemented and verified** |
-| Gap | Consumers (`dashboard.py`, `report.py`, `telegram_*.py`) still call `load_listings()`/`load_best()` directly and do not yet use `publication_snapshot()`. Migration is incremental: callers can opt in by switching to `publication_snapshot()`. The snapshot infrastructure is in place and tested. |
+| Gap | `load_best()` (the report, alerts and Offers) reads through `publication_snapshot()`. The Listings tab still calls `load_listings()` so a click sees a shortlist or a dismiss immediately. `set_listing_status()` clears the snapshot cache. |
 
 ---
 

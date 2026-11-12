@@ -102,6 +102,23 @@ def test_a_broken_thumbnail_becomes_the_neutral_fallback(app):
     assert app.page.text_content('#rows tr[data-id="x:2"] .result-thumbnail-fallback') == "No image"
 
 
+def test_the_eligibility_line_is_shown_and_stays_text(app):
+    hostile = '<img src=x onerror="window.pwned=1">'
+    base = _listing()["presentation"]
+    item = _listing(presentation={**base, "eligibility": {
+        "state": "finalist", "label": "Finalist",
+        "short": "Finalist on the checks — not a bid",
+        "text": "Eligibility check: finalist on the recorded checks. This is not a bid and does not set a price. " + hostile,
+    }})
+    app.override["/api/listings"] = _answer([item])
+    app.open()
+    cell = app.page.locator('#rows tr[data-id="x:1"] td.t-checks')
+    text = cell.text_content()
+    assert "Finalist" in text and "not a bid" in text and "does not set a price" in text
+    assert cell.locator("img").count() == 0
+    assert not app.page.evaluate("window.pwned === 1")
+
+
 def test_reasons_titles_and_check_labels_stay_text(app):
     hostile = '<img src=x onerror="window.pwned=1">'
     item = _listing(title=hostile * 20, reasons=["a", "b", hostile, "d"],

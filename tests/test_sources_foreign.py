@@ -2,6 +2,8 @@
 a trimmed copy of the live answer's shape, with invented addresses."""
 import json
 
+import pytest
+
 from conftest import FakeResponse
 from sources import REGISTRY, load_all
 
@@ -25,6 +27,9 @@ def test_astalegale_search_api_pages_and_masked_lots(db, fake_http):
 
     def handler(method, url, kw):
         assert url == "https://api.astalegale.net/Search" and kw["json"]["prezzoA"] == 30000
+        # The API refuses a request that does not name the public site.
+        assert kw["headers"]["Origin"] == "https://www.astalegale.net"
+        assert kw["headers"]["Referer"] == "https://www.astalegale.net/"
         page = kw["json"]["page"]
         return FakeResponse(json_data={"results": {"currentPage": pages.get(page, []), "pageSize": 2,
                                                    "totalResults": 6, "pageIndex": page}})
@@ -109,9 +114,124 @@ def test_servihabitat_cheapest_of_each_province(db, fake_http, monkeypatch):
     assert "sin posesión" in again                          # kept on the next scan
 
 
+def test_servihabitat_a_hung_sweep_is_not_a_full_scan(db, fake_http, monkeypatch):
+    """One province answering and the rest timing out must not count as the whole site."""
+    import sources.es as es
+    monkeypatch.setattr(es, "SERVIHABITAT_PROVINCES", ("valencia", "teruel", "madrid", "sevilla"))
+
+    def handler(method, url, kw):
+        if url.rsplit("/", 1)[-1].split("?")[0] == "valencia":
+            return FakeResponse(_servi_card(60580509, "9.500"))
+        raise RuntimeError("timed out")
+
+    fake_http(handler)
+    result = REGISTRY["servihabitat"].func(db, max_price=30000)
+    assert result == 1 and result.scope == "partial" and result.pages_seen == 1
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE source='servihabitat'").fetchone()[0] == 1
+
+
+def test_servihabitat_the_first_province_failing_is_the_source_failing(db, fake_http, monkeypatch):
+    import sources.es as es
+    monkeypatch.setattr(es, "SERVIHABITAT_PROVINCES", ("valencia", "teruel"))
+
+    def handler(method, url, kw):
+        raise RuntimeError("timed out")
+
+    fake_http(handler)
+    with pytest.raises(RuntimeError, match="timed out"):
+        REGISTRY["servihabitat"].func(db, max_price=30000)
+
+
 def test_bot_walled_sources_are_out_of_the_default_scan():
-    for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece", "haya", "subastasactivas"):
+    for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece", "haya"):
         assert REGISTRY[name].default is False, name
+
+
+def test_gobidreal_blocked_by_cloudflare(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="Cloudflare"):
+        REGISTRY["gobidreal"].func(db, max_price=100000)
+
+
+def test_veilingbiljet_blocked_points_at_openbareverkoop(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="openbareverkoop"):
+        REGISTRY["veilingbiljet"].func(db, max_price=100000)
+
+
+def test_subastasactivas_stays_off_default_and_reads_the_json_api(db, fake_http):
+    from sources.es import subastasactivas_listing
+    item = {
+        "id": "bc59a498-b1af-4688-8b84-98346bc9c930",
+        "title": "SUB-RC-2026-3100200101141",
+        "category": "Viviendas",
+        "propertyType": "Vivienda",
+        "valorSubasta": 87626.72,
+        "appraisalValue": 109699.2,
+        "municipality": "Tudela",
+        "province": "Navarra",
+        "endDate": "2026-11-26T18:00:00.000Z",
+        "detailPath": "/subastas/navarra/tudela/vivienda-calle-alberto-pelairea-n-2-1-c",
+        "imageUrl": "/api/auction-image/x",
+        "address": "C/ Alberto Pelairea, nº 2, 1º C, Tudela",
+        "surfaceM2": 87.45,
+        "source": "BOE",
+        "status": "celebrandose",
+        "latitude": 42.06,
+        "longitude": -1.61,
+    }
+    row = subastasactivas_listing(item)
+    assert row["id"] == "subastasactivas:bc59a498-b1af-4688-8b84-98346bc9c930"
+    assert row["price"] == 87626.72 and row["tipo"] == "vivienda" and row["concelho"] == "Tudela"
+    assert row["url"].endswith("/subastas/navarra/tudela/vivienda-calle-alberto-pelairea-n-2-1-c")
+    assert '"lat": 42.06' in row["raw_json"]
+    assert subastasactivas_listing({"id": "x"}) is None
+
+    pages = []
+
+    def handler(method, url, kw):
+        pages.append(url)
+        assert "/api/auctions" in url
+        params = kw.get("params") or {}
+        assert params.get("status") == "active"
+        assert "Viviendas" in (params.get("categories") or "")
+        page = int(params.get("page") or 1)
+        rows = [item] if page == 1 else []
+        return FakeResponse(json_data={
+            "success": True,
+            "data": rows,
+            "pagination": {"page": page, "limit": 50, "hasMore": False, "totalCount": len(rows)},
+        })
+
+    fake_http(handler)
+    assert REGISTRY["subastasactivas"].default is False
+    assert REGISTRY["subastasactivas"].func(db, max_price=100000) == 1
+    assert db.execute("SELECT COUNT(*) FROM listings WHERE source='subastasactivas'").fetchone()[0] == 1
+
+
+def test_zvg_de_blocked_points_at_the_court_portal(db, fake_http):
+    from sources import SourceUnavailable
+
+    fake_http(lambda method, url, kw: FakeResponse(
+        "Lieber Datenspezialist, vielen Dank… von unserem System gesperrt."))
+    with pytest.raises(SourceUnavailable, match="zvg-portal"):
+        REGISTRY["zvg_de"].func(db, max_price=100000)
+
+
+def test_justiz_auktion_blocked_points_at_zvg(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="zvg"):
+        REGISTRY["justiz_auktion"].func(db, max_price=50000)
+
+
+def test_haya_blocked_by_firewall(db):
+    from sources import SourceUnavailable
+
+    with pytest.raises(SourceUnavailable, match="firewall"):
+        REGISTRY["haya"].func(db, max_price=100000)
 
 
 # ─── The Netherlands ────────────────────────────────────────────────

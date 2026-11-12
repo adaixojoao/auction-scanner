@@ -53,6 +53,23 @@ def test_requested_time_is_part_of_snapshot_identity(monkeypatch):
         store.invalidate_snapshot()
 
 
+def test_load_best_shares_one_snapshot_per_goal(monkeypatch, db):
+    calls = []
+    monkeypatch.setattr(store, "load_listings", lambda conn, **kw: calls.append(kw["mode"]) or [])
+    store.invalidate_snapshot()
+    try:
+        store.load_best(db)
+        first = len(calls)
+        assert first >= 1
+        store.load_best(db)
+        assert len(calls) == first
+        store.invalidate_snapshot()
+        store.load_best(db)
+        assert len(calls) == first * 2
+    finally:
+        store.invalidate_snapshot()
+
+
 def test_mode_invalidation_only_removes_selected_goal(monkeypatch):
     conn = sqlite3.connect(":memory:")
     store.invalidate_snapshot()

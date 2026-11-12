@@ -92,11 +92,11 @@ def _portal(monkeypatch, urls):
     monkeypatch.setattr(market.time, "sleep", lambda s: None)
 
 
-def test_market_portal_with_every_page_read_is_full(db, monkeypatch):
+def test_market_portal_url_list_is_not_the_whole_site(db, monkeypatch):
     _portal(monkeypatch, ["https://m.example/a", "https://m.example/b"])
     _serve(monkeypatch, market, lambda m, u, kw: FakeResponse(u.rsplit("/", 1)[1]))
     result = market.scrape_named(db, "mkttest", 100000)
-    assert result == 2 and result.scope == "full" and result.pages_seen == 2
+    assert result == 2 and result.scope == "partial" and result.pages_seen == 2
 
 
 def test_market_portal_with_a_skipped_page_is_partial(db, monkeypatch):
@@ -137,3 +137,111 @@ def test_full_scrape_still_makes_unseen_listings_stale(db, add):
     _stale_setup(db, add)
     store.record_scrape(db, "cardtest", count=3, status="ok", scope="full", timestamp=NOW.isoformat())
     assert _hidden_reason(db).startswith("stale:")
+
+
+def test_spain_is_partial_when_a_later_page_fails(db, fake_http):
+    from sources.es import scrape_spain
+    first = ('<a href="?id_busqueda=abc">next</a>'
+             '<div class="paginar">Resultados de 100</div>')
+    fake_http(lambda m, u, kw: FakeResponse("", status=500) if "id_busqueda" in u
+              else FakeResponse(first if m == "POST" else "<html></html>"))
+    result = scrape_spain(db, max_price=100000)
+    assert result == 0 and result.scope == "partial" and result.pages_seen == 1
+
+
+def test_spain_is_partial_when_the_page_cap_stops_it(db, fake_http):
+    from sources.es import scrape_spain
+    card = '<div id="contenido"><h3>SUBASTA SUB-JA-2024-1</h3></div>'
+    first = ('<a href="?id_busqueda=abc">next</a>'
+             '<div class="paginar">Resultados de 5000</div>' + card)
+    fake_http(lambda m, u, kw: FakeResponse(first if m == "POST" else card))
+    result = scrape_spain(db, max_price=100000)
+    assert result.scope == "partial" and result.pages_seen == 20
+
+
+def test_france_is_partial_when_a_tribunal_page_fails(db, fake_http):
+    from sources.fr import scrape_france
+    index = ('<a href="/ventes-judiciaires-immobilieres/paris.html">Paris</a>'
+             '<a href="/ventes-judiciaires-immobilieres/lyon.html">Lyon</a>')
+    sale = '<a href="/annonce/12345.html">59 Lille Une maison d habitation de 80 m2</a>'
+
+    def handler(method, url, kw):
+        if url.endswith("france.html"):
+            return FakeResponse(index)
+        if url.endswith("paris.html"):
+            return FakeResponse(sale)
+        if url.endswith("lyon.html"):
+            return FakeResponse("", status=500)
+        return FakeResponse("<html></html>")
+
+    fake_http(handler)
+    result = scrape_france(db, max_price=100000)
+    assert result == 1 and result.scope == "partial" and result.pages_seen == 1
+
+
+def test_france_is_partial_when_the_tribunal_cap_stops_it(db, fake_http):
+    from sources.fr import scrape_france
+    links = "".join(
+        f'<a href="/ventes-judiciaires-immobilieres/t{i}.html">T{i}</a>' for i in range(61))
+    fake_http(lambda m, u, kw: FakeResponse(links if u.endswith("france.html") else "<html></html>"))
+    result = scrape_france(db, max_price=100000)
+    assert result == 0 and result.scope == "partial" and result.pages_seen == 60
+
+
+def test_italy_front_page_is_always_partial(db, fake_http):
+    from sources.it import scrape_italy
+    fake_http(lambda m, u, kw: FakeResponse(
+        '<a href="/vendita-asta-casa-roma-l123-p456">Casa Roma</a>'))
+    result = scrape_italy(db, max_price=100000)
+    assert result == 1 and result.scope == "partial" and result.pages_seen == 1
+
+
+def test_pvp_page_cap_is_partial(db, fake_http):
+    from sources.it import scrape_italy_pvp
+    fake_http(lambda m, u, kw: FakeResponse(json_data={
+        "body": {"content": [], "last": False, "totalPages": 99}}))
+    result = scrape_italy_pvp(db, max_price=100000)
+    assert result == 0 and result.scope == "partial" and result.pages_seen == 30
+
+
+def test_veilingnotaris_page_cap_is_partial(db, fake_http):
+    from sources.nl import scrape_veilingnotaris
+
+    def handler(method, url, kw):
+        page = (kw.get("params") or {}).get("page") or 1
+        return FakeResponse(f'<a href="/veilingen/{page}/foo-bar/">Woonhuis</a>')
+
+    fake_http(handler)
+    result = scrape_veilingnotaris(db, max_price=100000)
+    assert result.scope == "partial" and result.pages_seen == 19
+    assert result == 19
+
+
+def test_biedboek_keeps_sales_under_the_budget_not_twice(db, fake_http):
+    from sources.nl import scrape_biedboek
+
+    def listing(short_id, amount):
+        return {
+            "shortId": short_id,
+            "translation": {"name": "Bosperceel", "city": "Vessem",
+                            "realEstateParagraphs": [{"html": "<p>Het Rijksvastgoedbedrijf biedt te koop aan.</p>"}]},
+            "biddingData": {"minimumAmount": amount},
+        }
+
+    def handler(method, url, kw):
+        if "preview" in url:
+            page = (kw.get("params") or {}).get("pageNumber")
+            data = [{"shortId": "cheap", "realEstateStatus": 100},
+                    {"shortId": "dear", "realEstateStatus": 100}] if page == 1 else []
+            return FakeResponse(json_data={"realEstates": {"data": data}})
+        if url.rstrip("/").endswith("cheap"):
+            return FakeResponse(json_data=listing("cheap", 40000))
+        if url.rstrip("/").endswith("dear"):
+            return FakeResponse(json_data=listing("dear", 90000))
+        return FakeResponse(json_data={"realEstates": {"data": []}})
+
+    fake_http(handler)
+    result = scrape_biedboek(db, max_price=50000)
+    assert result == 1 and result.scope == "full"
+    rows = db.execute("SELECT external_id, price FROM listings WHERE source='biedboek'").fetchall()
+    assert [(r["external_id"], r["price"]) for r in rows] == [("cheap", 40000)]

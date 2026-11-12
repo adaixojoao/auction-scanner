@@ -125,6 +125,7 @@ const comparison = (() => {
       cost_basis: costBasisText(p.all_in),
       area: areaText,
       valuation: past ? `Auctions within ${past.km} km sold for a median of ${AS.money(past.median)} (${past.count} lots, last year): a benchmark, not a valuation of this property` : "",
+      eligibility: p.eligibility && p.eligibility.text ? p.eligibility.text : "",
       checks: checksSummaryText(p.checks),
       evidence: investigationEvidenceText(d.investigation),
       next_action: investigationNextText(d.investigation),

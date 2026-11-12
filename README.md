@@ -656,7 +656,7 @@ than €20,001 instead of jumping at a step.
 - **A project is planned on the land budget.** Open a plot and the panel says what acquiring it costs against the land budget in Settings, what is left, and how many hectares of the crop the climate still allows that leftover plants. Over the budget, it says not to buy. The figures are estimates (transfer tax, the CAOF planting matrix, the crop model).
 - **Carbon credits are not counted.** A crop's carbon is shown as "+ up to €… carbon if an eligible project is found — not counted". Selling credits needs a specific methodology, additionality, approval and a buyer; until a project like that is evidenced, the base case earns nothing from carbon, and land machines cannot reach earns nothing at all.
 - **Inflation counts against you (3.5% a year).** Planting costs are brought forward to 2026 prices. Income (timber, cork, produce, grant premiums) stays at its published price, fixed in euros, so each later year is worth 3.5% less on top of the 3% for waiting. The Forestry return and the 20% goal are after inflation.
-- **Grants are named, never counted.** `data/forest_grants.csv` lists the planting and replanting schemes with their legal text and the day they were checked: PEPAC C.3.2.1 in Portugal, the replanting aid in France. The panel names a grant that may apply and what to ask the forest service. No grant changes a score, a return or a bid, because it depends on an approved application. A grant never pays for the land, an existing stand you keep, eucalyptus or a nut orchard. A row stays "partial", with no euro figure, until its per-hectare amounts have been read in the official text. Spain's grants are regional and not in the table yet. What is still to do is in `docs/forestry_grants_todo.md`.
+- **A confirmed grant is in the Forestry return; an unconfirmed one is only named.** `data/forest_grants.csv` lists the planting and replanting schemes with their legal text and the day they were checked: PEPAC C.3.2.1 in Portugal, the replanting aid in France. The panel names a grant that may apply and what to ask the forest service. A row marked confirmed, with a rate and a cost cap, adds its figure to the Forestry return as an estimate, and only if an application is approved. It does not set a bid and it never pays for the land. A partial row, an existing stand you keep, eucalyptus and a nut orchard stay unscored. The shipped rows are still partial, so nothing moves until the official amounts are read. Spain's grants are regional and not in the table yet. What is still to do is in `docs/forestry_grants_todo.md`.
 - **Habitat is scored, never invented.** Natura 2000 / ZNIEFF from a stored
   site check, and Natura, REN or RAN named in the notice, cost the land and
   forestry scores because planting, felling and building normally need permits.
@@ -733,10 +733,10 @@ summary.
 | Country | Sources |
 |---|---|
 | PT | e-leilões, Citius, leilosoc, BCP, Whitestar, CGD, Santander, BPI, Imobancos, Centro de Leilões, Bid Leiloeira · *idealista (Selenium, on request)* · Portal das Finanças (with your account: Settings → Accounts) · not scanned: Novo Banco (portal closed) |
-| ES | BOE subastas (includes AEAT tax auctions), Servihabitat (cheapest 20 per province), Haya, SubastasActivas · not scanned: Sareb (bot wall) |
+| ES | BOE subastas (includes AEAT tax auctions), Servihabitat (cheapest 20 per province), Haya · not scanned: Sareb (bot wall); SubastasActivas (aggregator, largely the same as BOE; on request) |
 | FR | licitor, Enchères Publiques |
 | IT | astegiudiziarie, PVP Giustizia (search API), Astalegale (search API) · not scanned: Gobid Real (bot wall) |
-| DE | zvg-portal, justiz-auktion, zwangsversteigerung.de |
+| DE | zvg-portal · not scanned: justiz-auktion (no property left); zwangsversteigerung.de (blocks scrapers; same lots as zvg-portal) |
 | NL | openbareverkoop (each lot's page: size, year, use, date), veilingnotaris + vastgoedveiling (one platform, read as one; also its German lots) · not scanned: veilingbiljet (the same lots as openbareverkoop) |
 | HR · PL | e-oglasna, FINA · komornik · not scanned (bot wall or broken certificate): biddit (BE), eauction (GR), ANAF (RO), DLS (CY) |
 | EU | *CourtBid via Apify (needs `apify_token` in config.json, on request)* |

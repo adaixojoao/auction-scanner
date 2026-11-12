@@ -55,6 +55,8 @@
     <div class="field"><label>Maximum price — a home to live in (EUR)</label><input type="number" id="max_price" step="5000"></div>
     <div class="field"><label>Maximum price — a home to let or resell (EUR)</label><input type="number" id="invest_max_price" step="5000"></div>
     <div class="field"><label>Maximum price — land (EUR)</label><input type="number" id="land_max_price" step="5000"></div>
+    <div class="field"><label>Maximum price — bare ownership (EUR)</label><input type="number" id="bare_max_price" step="5000"></div>
+    <div class="field"><label>Bare ownership discount rate (e.g. 0.06)</label><input type="number" id="bare_discount_rate" min="0" max="0.25" step="0.01"></div>
     <div class="field"><label>Ignore listings over (EUR)</label><input type="number" id="check_max_price" min="0" step="5000">
       <p class="help">Above this, a listing is kept only so the scanner knows it: never scored, checked or shown, and no budget goes higher. A ☆ one, or one you made an offer on, stays. 0 means no limit.</p></div>
     <div class="field"><label>Light checks first from (EUR)</label><input type="number" id="light_checks_from" min="0" step="5000">
@@ -200,7 +202,7 @@
 
 <div class="card" id="accounts">
   <h3>Site logins</h3>
-  <p class="small muted" style="margin-bottom:10px">Some sites show their best sales only to account holders (the Portal das Finanças' seized goods). With your account here the scan signs in for you. The password is encrypted by Windows for your user on this PC and never shown again. If a site asks for an SMS code, shows a CAPTCHA or refuses the password, the app stops trying for a day and tells you on Telegram.</p>
+  <p class="small muted" style="margin-bottom:10px">Some sites show their sales only to account holders (Portal das Finanças, Idealista, Biddit, Sareb, Haya, Enchères Publiques). With your account here the scan signs in for you. The password is encrypted by Windows for your user on this PC and never shown again. A CAPTCHA or an SMS code is never worked around: the app stops trying for a day and tells you on Telegram.</p>
   <div id="accounts-list"></div>
 </div>
 
@@ -328,6 +330,8 @@ async function load() {
   setv("cash_on_hand", c.cash_on_hand ?? 0);
   setv("max_price", c.max_price); setv("invest_max_price", c.invest_max_price ?? 100000);
   setv("land_max_price", c.land_max_price ?? 100000);
+  setv("bare_max_price", c.bare_max_price ?? 100000);
+  setv("bare_discount_rate", c.bare_discount_rate ?? 0.06);
   setv("check_max_price", c.check_max_price ?? 100000); setv("light_checks_from", c.light_checks_from ?? 50000); setv("max_listings", c.max_listings ?? 100); setv("availability_valid_hours", c.availability_valid_hours ?? 0); setv("min_score", f.min_score); setv("min_area_m2", f.min_area_m2); setv("avoid_heavy_pollution", f.avoid_heavy_pollution !== false);
   setv("rural_min_m2", f.rural_min_m2); setv("rural_max_eur_m2", f.rural_max_eur_m2);
   WEIGHT_KEYS.forEach(([mode, name]) => { const v = Math.round(100 * weightNow(f.weights, mode, name)); $("w_" + mode + "_" + name).value = v; $("wv_" + mode + "_" + name).textContent = v + "%"; });
@@ -451,6 +455,8 @@ async function save() {
     max_price: num("max_price"),
     invest_max_price: num("invest_max_price"),
     land_max_price: num("land_max_price"),
+    bare_max_price: num("bare_max_price"),
+    bare_discount_rate: num("bare_discount_rate"),
     check_max_price: num("check_max_price") || 0,
     light_checks_from: num("light_checks_from") || 0,
     max_listings: num("max_listings"),

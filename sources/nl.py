@@ -12,10 +12,9 @@ from datetime import datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
 
-from common import LOG, find_price, make_listing, make_session, parse_date_dmy, parse_price, safe_url
+from common import LOG, make_listing, make_session, parse_price, safe_url
 from db import upsert_listing
-from sources import register
-from sources._cards import listing_id_from_url
+from sources import ScanCount, SourceUnavailable, register
 
 NL_DETAILS_PER_SCAN = 80
 _MONTHS = {m: i for i, m in enumerate(("januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
@@ -271,9 +270,12 @@ def scrape_veilingnotaris(db, max_price: float = 50000, **_):
     session = make_session(timeout=15)
     base = "https://veilingnotaris.nl"
     rows, seen = [], set()
+    pages = 0
+    incomplete = False
     for page in range(1, 20):
         resp = session.get(f"{base}/veilingen/", params={"page": page} if page > 1 else None)
         resp.raise_for_status()
+        pages += 1
         new = 0
         for a in BeautifulSoup(resp.text, "html.parser").select("a[href]"):
             href = a.get("href", "")
@@ -300,12 +302,14 @@ def scrape_veilingnotaris(db, max_price: float = 50000, **_):
         if not new:
             break
         time.sleep(0.3)
+    else:
+        incomplete = True
     _read_details(db, session, [r for r in rows if '"detail_checked"' not in (r.get("raw_json") or "")],
                   [NL_DETAILS_PER_SCAN])
     for row in rows:
         upsert_listing(db, row)
     db.commit()
-    return len(rows)
+    return ScanCount(len(rows), "partial" if incomplete else "full", pages)
 
 
 # vastgoedveiling.nl (Hekkelman) shares auction numbers with veilingnotaris.nl
@@ -457,38 +461,15 @@ def scrape_vastgoedveiling(db, max_price: float = 50000, **_):
 # the default scan so every Dutch auction is listed once.
 @register("veilingbiljet", "NL", default=False)
 def scrape_veilingbiljet(db, max_price: float = 100000, **_):
-    """veilingbiljet.nl — Dutch foreclosure auctions (the same lots as openbareverkoop.nl)."""
-    session = make_session()
-    base = "https://www.veilingbiljet.nl"
-    resp = session.get(f"{base}/objecten/")
-    resp.raise_for_status()
-    total = 0
-    seen = set()
-    for card in BeautifulSoup(resp.text, "html.parser").select(
-            "div.object, article, div[class*='object'], li[class*='object']"):
-        link = card.select_one("a[href]")
-        url = safe_url(link.get("href"), base) if link else None
-        if not url:
-            continue
-        eid = listing_id_from_url(url)
-        if eid in seen:
-            continue
-        seen.add(eid)
-        title_el = card.select_one("h2,h3,.title,.object-title")
-        price = find_price(card.get_text(" "))
-        if price and price > max_price:
-            continue
-        loc_el = card.select_one(".location,.city,.plaats")
-        date_el = card.select_one(".date,.veilingdatum")
-        upsert_listing(db, make_listing(
-            "veilingbiljet", eid, "NL",
-            title=title_el.get_text(strip=True)[:200] if title_el else f"Veilingbiljet #{eid}",
-            description="Veilingbiljet.nl executieveiling", tipo="vastgoed",
-            price=price, concelho=loc_el.get_text(strip=True) if loc_el else None,
-            url=url, date_end=parse_date_dmy(date_el.get_text()) if date_el else None,
-        ))
-        total += 1
-    return total
+    """veilingbiljet.nl — Dutch foreclosure auctions (same lots as openbareverkoop.nl).
+
+    The old /objecten/ HTML list redirects to an error page (Nov 2026). The site
+    still serves the same JSON as openbareverkoop.nl at /kavels/searchresults;
+    that feed is already read by the netherlands source.
+    """
+    raise SourceUnavailable(
+        "veilingbiljet.nl no longer has an /objecten/ list; the same lots come "
+        "through the netherlands (openbareverkoop.nl) source")
 
 
 @register("remaxnl", "NL", description="RE/MAX — homes for sale in the Netherlands")
@@ -553,10 +534,13 @@ def biedboek_listing(detail: dict) -> dict | None:
 def scrape_biedboek(db, max_price: float = 50000, **_):
     session = make_session(timeout=30)
     total = 0
+    pages = 0
+    incomplete = False
     for page in range(1, 60):
         resp = session.get(f"{BIEDBOEK}/api/real-estate/preview",
                            params={"pageSize": 100, "pageNumber": page, "adv": "false", "language": "nl"})
         resp.raise_for_status()
+        pages += 1
         rows = (resp.json().get("realEstates") or {}).get("data") or []
         if not rows:
             break
@@ -569,12 +553,14 @@ def scrape_biedboek(db, max_price: float = 50000, **_):
                 LOG.info(f"biedboek {row.get('shortId')}: {type(e).__name__}")
                 continue
             listing = biedboek_listing(detail)
-            if listing and (listing["price"] or 0) <= 2 * max_price:
+            if listing and (listing["price"] or 0) <= max_price:
                 upsert_listing(db, listing)
                 total += 1
             time.sleep(0.2)
         db.commit()
-    return total
+    else:
+        incomplete = True
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 # ─── Gemeenteblad: municipal sale notices (Didam) ─────────────────────

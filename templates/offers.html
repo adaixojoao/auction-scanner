@@ -144,6 +144,7 @@ function renderList() {
       <div class="m">${AS.esc(c.sale)}${c.status === "shortlisted" ? ' · <span class="warn">★ on Offers</span>' : ""} · ${AS.esc(c.location || "")}${overdue(c.offer) ? ` · <span class="warn">no answer for ${overdue(c.offer)} days</span>` : ""}</div>
       <div class="m">${c.price ? AS.esc(PRICE_LABEL[c.country] || "Price") + " " + AS.money(c.price) : "no price"}${c.offer ? " · " + offerSummary(c.offer) : (c.bid ? ` · suggested EUR ${AS.esc(c.bid)}` : "")}
         ${c.date_end ? " · ends " + AS.esc(c.date_end.slice(0, 10)) : ""}
+        ${c.eligibility && c.eligibility.short ? ` · ${AS.esc(c.eligibility.short)}` : ""}
         ${!c.offer && c.checklist && c.checklist.blocking_left ? ` · <span class="warn">${c.checklist.blocking_left} blocking</span>` : ""}</div>
     </div>`).join("");
 }
@@ -203,6 +204,7 @@ function renderDetail() {
        ${k.court_email ? `<br><b>Court:</b> <a href="mailto:${AS.esc(k.court_email)}">${AS.esc(k.court_email)}</a>` : ""}</p>` : ""}
     ${c.visit ? `<p class="small" style="margin-top:6px"><b>Visits:</b> ${AS.esc(c.visit)}</p>` : ""}
     <div class="tags" style="margin-top:10px">${(c.reasons || []).map(r => `<span class="tag">${AS.esc(r)}</span>`).join("")}</div>
+    ${c.eligibility && c.eligibility.text ? `<p class="small">${AS.esc(c.eligibility.text)}</p>` : ""}
     ${loc.warn}${loc.kept}
     ${AS.climateHtml(c.climate)}
     ${AS.bidCapHtml(c.bid_cap, {done, compare: bidCompare(c, d.bid || d.online)})}

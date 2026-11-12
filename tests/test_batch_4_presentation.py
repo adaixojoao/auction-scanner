@@ -189,8 +189,9 @@ def test_legal_access_appears_only_for_rural_plots():
 
 def test_a_date_only_deadline_stays_a_date():
     d = presentation.deadline(row(date_end="2030-01-10"), NOW)
-    assert d == {"precision": "date", "date": "2030-01-10", "time": None, "timezone": "Europe/Lisbon",
-                 "instant": None, "days": 0}
+    assert d["precision"] == "date" and d["date"] == "2030-01-10" and d["time"] is None
+    assert d["timezone"] == "Europe/Lisbon" and d["instant"] is None and d["days"] == 0
+    assert d["role"] == "sale"
 
 
 def test_naive_midnight_is_a_date_not_a_closing_time():
@@ -236,7 +237,8 @@ def test_every_row_and_research_card_carries_a_summary(client, add):
     data = client.get("/api/listings?mode=home&min_score=0").get_json()
     assert data["items"], data
     p = data["items"][0]["presentation"]
-    assert set(p) == {"price", "all_in", "checks", "deadline", "thumbnail"}
+    assert set(p) == {"price", "all_in", "checks", "deadline", "thumbnail", "eligibility"}
+    assert p["eligibility"] is None
     assert data["items"][0]["reasons"] == data["items"][0]["reasons"]    # unchanged field
 
 
@@ -263,6 +265,18 @@ def test_scores_and_reasons_are_the_same_with_the_summaries(client, add):
         db.close()
     for it in data["items"]:
         assert (it["score"], it["reasons"]) == (direct[it["id"]]["score"], direct[it["id"]]["reasons"])
+
+
+def test_eligibility_is_a_label_and_never_a_bid():
+    research = presentation.eligibility(row(evaluator_state="research"))
+    assert research["label"] == "Research" and "not a bid" in research["text"]
+    finalist = presentation.eligibility(row(evaluator_state="finalist"))
+    assert "does not set a price" in finalist["text"] and "not a bid" in finalist["short"]
+    recorded = presentation.eligibility(row(evaluator_state="bid_ready"))
+    assert "does not bid" in recorded["text"]
+    assert presentation.eligibility(row()) is None
+    assert presentation.eligibility(row(evaluator_state="ready")) is None
+    assert presentation.summary(row(evaluator_state="finalist"), {}, {})["eligibility"]["state"] == "finalist"
 
 
 def test_a_page_of_homes_with_an_observed_floor_market_still_answers(client, add):

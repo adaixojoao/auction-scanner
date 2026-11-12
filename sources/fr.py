@@ -11,8 +11,7 @@ from bs4 import BeautifulSoup
 
 from common import LOG, find_floor_area, find_price, land_max_price, make_listing, make_session, normalize, parse_price
 from db import upsert_listing
-from sources import register
-from sources._cards import CardSite, scrape_cards
+from sources import ScanCount, SourceUnavailable, register
 
 LICITOR_BASE = "https://www.licitor.com"
 
@@ -93,13 +92,19 @@ def scrape_france(db, max_price: float = 50000, **_):
     LOG.info(f"  France: {len(tribunal_links)} tribunal pages found")
 
     total_scraped = 0
-    for i, trib_url in enumerate(tribunal_links[:60]):  # limit to 60 tribunals
+    # Sixty tribunals is a cap, and a tribunal page that fails was not read.
+    # Either one means this run did not see every sale.
+    missed = len(tribunal_links) > 60
+    pages = 0
+    for i, trib_url in enumerate(tribunal_links[:60]):
         try:
             resp = session.get(trib_url)
             resp.raise_for_status()
         except Exception as e:
             LOG.debug(f"France tribunal error: {e}")
+            missed = True
             continue
+        pages += 1
 
         count = 0
         for a in BeautifulSoup(resp.text, "html.parser").select(
@@ -131,7 +136,7 @@ def scrape_france(db, max_price: float = 50000, **_):
         time.sleep(0.5)
 
     enrich_france_details(db, session)
-    return total_scraped
+    return ScanCount(total_scraped, "partial" if missed else "full", pages)
 
 
 # An annonce page names the tribunal, the hearing date and time, the mise à
@@ -320,24 +325,72 @@ def enrich_france_details(db, session, limit: int = 160):
     return len(rows)
 
 
-ENCHERES_PUBLIQUES = CardSite(
-    source="encheres_publiques", country="FR", base="https://www.encheres-publiques.com",
-    path="/immobilier",
-    card_selector="div.bien, article.property, div[class*='bien'], div[class*='lot']",
-    title_selector="h2,h3,.title,.bien-title",
-    location_selector=".location,.ville,.commune",
-    date_selector=".date,.date-vente",
-    params={"prix_max": "{max_price}"}, max_pages=19, delay=0.8,
-    description="Enchères Publiques France", tipo="immobilier", id_prefix="encheres_pub",
-)
-
-
 @register("encheres_publiques", "FR", default=False)
-def scrape_encheres_publiques(db, max_price: float = 100000, **_):
+def scrape_encheres_publiques(db, max_price: float = 100000, config: dict | None = None, **_):
     """encheres-publiques.com — French judicial property auctions.
-    Refuses automated requests (HTTP 403, 15 runs in a row by 2026-10-24);
-    licitor.com ("france") covers the same tribunal sales."""
-    return scrape_cards(db, ENCHERES_PUBLIQUES, max_price)
+
+    Refuses a script that is not signed in (HTTP 403). With an account in
+    Settings → Accounts the same search is tried signed in; licitor.com
+    ("france") still covers the same tribunal sales.
+    """
+    import accounts
+    session = accounts.account_session(db, config or {}, "encheres_publiques")
+    if session is None:
+        raise SourceUnavailable(
+            accounts.missing_account_message("encheres_publiques")
+            + "; the same tribunal sales also come through the france (licitor.com) source")
+    base = "https://www.encheres-publiques.com"
+    total = 0
+    pages = 0
+    incomplete = False
+    for page in range(1, 21):
+        try:
+            resp = session.get(f"{base}/rechercher", params={"page": page, "prixMax": int(max_price)})
+            if resp.status_code == 403:
+                raise SourceUnavailable(
+                    "encheres-publiques.com still refuses the signed-in session (HTTP 403); "
+                    "the same tribunal sales come through the france (licitor.com) source")
+            resp.raise_for_status()
+        except SourceUnavailable:
+            raise
+        except Exception:
+            if page == 1:
+                raise
+            incomplete = True
+            break
+        pages += 1
+        soup = BeautifulSoup(resp.text, "html.parser")
+        found = 0
+        seen: set[str] = set()
+        for a in soup.select("a[href]"):
+            href = a.get("href") or ""
+            m = re.search(r"(?:annonce|enchere|lot|bien)[^0-9]{0,12}(\d{5,})", href, re.I)
+            if not m:
+                continue
+            eid = m.group(1)
+            if eid in seen:
+                continue
+            seen.add(eid)
+            text = a.get_text(" ", strip=True)
+            parent = a.parent.get_text(" ", strip=True) if a.parent else text
+            price = find_price(parent) or find_price(text)
+            if price and price > max_price:
+                continue
+            upsert_listing(db, make_listing(
+                "encheres_publiques", eid, "FR",
+                title=(text or f"Enchère {eid}")[:200],
+                description=(parent or "")[:1500] or None,
+                tipo="immeuble", price=price, url=href, base_url=base,
+            ))
+            found += 1
+            total += 1
+        db.commit()
+        if not found:
+            break
+        time.sleep(0.8)
+    else:
+        incomplete = True
+    return ScanCount(total, "partial" if incomplete else "full", pages)
 
 
 # ─── Bien'ici: a big French portal with an open search service ─────
@@ -434,8 +487,8 @@ NOTAIRES_SALE = {"VENTE": "sale", "VNI": "online auction (36h-immo)", "VAE": "no
 
 
 def parse_notaires(ad: dict) -> dict | None:
-    if not ad.get("annonceId") or ad.get("viager") == "OUI" or ad.get("bienVendu") == "OUI":
-        return None                    # a life annuity is not a purchase; sold is sold
+    if not ad.get("annonceId") or ad.get("bienVendu") == "OUI":
+        return None                    # sold is sold
     price = ad.get("prixTotal") or ad.get("prixAffiche")
     if not price:
         return None
@@ -444,15 +497,20 @@ def parse_notaires(ad: dict) -> dict | None:
     built = ad.get("surface")
     sale = NOTAIRES_SALE.get(ad.get("typeTransaction"), "sale")
     town = ad.get("communeNom") or ad.get("localiteNom")
+    is_viager = ad.get("viager") == "OUI"
     extras = [f"Terrain {land:,.0f} m²" if land else None, f"Surface {built:,.0f} m²" if built else None,
               f"Prix frais de notaire inclus: {price:,.0f} €",
-              "Vente aux enchères" if ad.get("typeTransaction") in ("VNI", "VAE") else None]
+              "Vente aux enchères" if ad.get("typeTransaction") in ("VNI", "VAE") else None,
+              # Bare ownership ranks viager occupé; other goals still skip on the word.
+              "Viager occupé" if is_viager else None]
     text = re.sub(r"\s*<br\s*/?>\s*", "\n", ad.get("descriptionFr") or "")
     text = re.sub(r"<[^>]+>", " ", text).strip()
     if re.match(r"\W*sous (?:compromis|offre)", text, re.I):
         return None                    # already promised to a buyer
     description = " · ".join(x for x in [text] + extras if x)
     raw = {"sale": sale}
+    if is_viager:
+        raw["viager"] = True
     if ad.get("origineJudiciaire") == "OUI":
         raw["judicial"] = True
     # Auction end date: notaires API uses several field names depending on sale type
@@ -613,11 +671,114 @@ def scrape_iadfrance(db, max_price: float = 50000, **_):
     return scrape_named(db, "iadfrance", max_price)
 
 
-@register("etreproprio", "FR", description="Être Proprio — houses for sale across France")
-def scrape_etreproprio(db, max_price: float = 50000, **_):
-    """Être Proprio — houses for sale across France."""
-    from sources._market import scrape_named
-    return scrape_named(db, "etreproprio", max_price)
+# ─── Être Proprio: Nuxt searchKey → /api/classifieds/{key} ────────────
+# Categories are t + letters (h house, l land); price is p{min}-{max} (a blank
+# floor is p-50000); land size is m{min}; page N>1 is gN. Segments join with ".".
+# The HTML list ignored query filters; this is the search the site's own UI uses.
+ETREPROPRIO = "https://www.etreproprio.com"
+ETREPROPRIO_PAGE = 20
+ETREPROPRIO_MAX_PAGES = 60
+ETREPROPRIO_LAND_MIN_M2 = 10000
+
+
+def etreproprio_search_key(cats: str, *, price_min=None, price_max=None,
+                           land_min=None, page: int = 1) -> str:
+    """Opaque searchKey for /api/classifieds/{key} (see Nuxt search form)."""
+    parts = [f"t{cats}"]
+    if price_min is not None or price_max is not None:
+        lo = "" if price_min is None else str(int(price_min))
+        hi = "" if price_max is None else f"-{int(price_max)}"
+        parts.append(f"p{lo}{hi}")
+    if land_min is not None:
+        parts.append(f"m{int(land_min)}")
+    if page > 1:
+        parts.append(f"g{page}")
+    return ".".join(parts)
+
+
+def parse_etreproprio(ad: dict) -> dict | None:
+    eid = ad.get("id")
+    price = ad.get("price")
+    if not eid or not price:
+        return None
+    land = ad.get("categoryCode") == 3 or (ad.get("categoryName") or "").lower() == "terrain"
+    town = ad.get("cityName")
+    land_m2 = ad.get("terrainArea")
+    built = ad.get("houseArea")
+    kind = "Terrain" if land else (ad.get("categoryName") or "Maison")
+    extra = f" · terrain {land_m2:.0f} m²" if land_m2 and not land else ""
+    rooms = f" · {ad['roomNb']} pièces" if ad.get("roomNb") else ""
+    raw: dict = {}
+    if land_m2:
+        raw["land_m2"] = land_m2
+    dpe = (ad.get("dpeGlobalLetter") or "").upper()
+    if len(dpe) == 1 and dpe in "ABCDEFG":
+        raw["dpe"] = dpe
+    photos = ad.get("mediasUrls") or []
+    if not photos and ad.get("medias"):
+        photos = [m.get("url") for m in ad["medias"] if m.get("url")]
+    path = ad.get("url") or f"immobilier-{eid}"
+    return make_listing(
+        "etreproprio", str(eid), "FR",
+        title=f"{kind} à {town}" + (f" ({ad.get('postalCode')})" if ad.get("postalCode") else ""),
+        description=((ad.get("title") or ad.get("niceTitle") or "") + rooms + extra)[:3000].strip(" ·"),
+        tipo="terrain" if land else "maison",
+        area_m2=(land_m2 or built) if land else built,
+        price=float(price), min_price=float(price),
+        district=ad.get("departmentCode"), concelho=town,
+        url=f"{ETREPROPRIO}/{path.lstrip('/')}",
+        image_url=photos[0] if photos else None,
+        raw_json=json.dumps(raw, ensure_ascii=False) if raw else None,
+    )
+
+
+@register("etreproprio", "FR", description="Être Proprio — houses and land for sale across France")
+def scrape_etreproprio(db, max_price: float = 50000, config: dict | None = None, **_):
+    """Être Proprio — houses (price bands) and land from 1 ha, via the classifieds API."""
+    session = make_session(timeout=30)
+    total = 0
+    seen: set[str] = set()
+    # Same band split as Bien'ici: the API answers ~20 a page and a national
+    # house search under budget runs to hundreds of pages.
+    house_bands = [(0, max_price / 2), (max_price / 2, max_price * 0.75),
+                   (max_price * 0.75, max_price)]
+    searches = [("h", band, None, max_price) for band in house_bands]
+    land_limit = land_max_price(config, max_price)
+    searches.append(("l", (None, land_limit), ETREPROPRIO_LAND_MIN_M2, land_limit))
+
+    first = True
+    for cats, (lo, hi), land_min, limit in searches:
+        for page in range(1, ETREPROPRIO_MAX_PAGES + 1):
+            key = etreproprio_search_key(
+                cats, price_min=lo, price_max=hi, land_min=land_min, page=page)
+            try:
+                resp = session.get(f"{ETREPROPRIO}/api/classifieds/{key}")
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception:
+                if first:
+                    raise
+                LOG.info(f"Être Proprio: skipped later page ({key})")
+                break
+            first = False
+            ads = data.get("classifieds") or []
+            kept = 0
+            for ad in ads:
+                row = parse_etreproprio(ad)
+                if not row or row["external_id"] in seen or row["price"] > limit:
+                    continue
+                seen.add(row["external_id"])
+                upsert_listing(db, row)
+                kept += 1
+            if kept:
+                total += kept
+                db.commit()
+            nb = int(data.get("classifiedsNb") or 0)
+            if not ads or page * ETREPROPRIO_PAGE >= nb:
+                break
+            time.sleep(0.5)
+    LOG.info(f"Être Proprio: {total} listings")
+    return total
 
 
 @register("optimhome", "FR", description="Optimhome — houses and land for sale across France")

@@ -53,6 +53,8 @@ FLAGS = {
 # so no goal is thrown away at scrape time; each tab then applies its own.
 LAND_MAX_PRICE = 100_000
 INVEST_MAX_PRICE = 100_000
+BARE_MAX_PRICE = 100_000
+BARE_DISCOUNT_RATE = 0.06   # annual discount for the Bare ownership wait estimate
 # The owner's rules for the work spent on a listing (2026-10-13): above
 # CHECK_MAX_PRICE (what you would pay, price_to_pay) a listing is kept only so
 # the scanner knows it, and is never scored, checked or shown; from
@@ -103,10 +105,25 @@ def invest_max_price(config: dict | None, max_price: float) -> float:
     return _budget(config, "invest_max_price", INVEST_MAX_PRICE, max_price)
 
 
+def bare_max_price(config: dict | None, max_price: float) -> float:
+    """The price limit for bare ownership / future possession."""
+    return _budget(config, "bare_max_price", BARE_MAX_PRICE, max_price)
+
+
+def bare_discount_rate(config: dict | None) -> float:
+    """Annual discount rate for the Bare ownership present-value estimate."""
+    try:
+        rate = float((config or {}).get("bare_discount_rate", BARE_DISCOUNT_RATE))
+    except (TypeError, ValueError):
+        rate = BARE_DISCOUNT_RATE
+    return max(0.0, min(0.25, rate))
+
+
 def scrape_max_price(config: dict | None, max_price: float) -> float:
-    """What a scrape must keep: the highest of the three budgets. A listing
+    """What a scrape must keep: the highest of the goal budgets. A listing
     above every budget can serve no goal, so it is not stored."""
-    return max(invest_max_price(config, max_price), land_max_price(config, max_price))
+    return max(invest_max_price(config, max_price), land_max_price(config, max_price),
+               bare_max_price(config, max_price))
 
 
 def mode_max_price(config: dict | None, mode: str, max_price: float) -> float:
@@ -121,6 +138,8 @@ def mode_max_price(config: dict | None, mode: str, max_price: float) -> float:
         return 0.0
     if mode == "invest":
         return invest_max_price(config, max_price)
+    if mode == "bare":
+        return bare_max_price(config, max_price)
     if mode in ("land", "forest"):
         return land_max_price(config, max_price)
     return _capped(config, float(max_price))
@@ -1017,6 +1036,34 @@ def days_left(date_end, now: datetime | None = None) -> float | None:
         return None
     now = now or utcnow()
     return (end - now).total_seconds() / 86400
+
+
+def offer_end_raw(item: dict) -> str | None:
+    """ISO offer-submission cutoff from raw_json, if the source published one.
+
+    Italian PVP (and similar) often close offers a day before the hearing:
+    date_end alone then looks open when you can no longer bid.
+    """
+    try:
+        raw = item.get("raw_json")
+        data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("offer_end")
+    if value in (None, ""):
+        return None
+    return str(value).strip() or None
+
+
+def action_deadline(item: dict) -> str | None:
+    """Last moment to act: offer cutoff when known, else the sale/hearing date."""
+    offer = offer_end_raw(item)
+    if offer and effective_end(offer) is not None:
+        return offer
+    end = item.get("date_end")
+    return str(end).strip() if end not in (None, "") else None
 
 
 # ─── Text matching ───────────────────────────────────────────────────

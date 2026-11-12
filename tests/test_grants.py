@@ -134,13 +134,43 @@ def test_an_orchard_plan_says_why_no_forest_grant_applies():
     assert plan["crop"] == "carob" and line["value"] == "none known" and "farm investment" in line["note"]
 
 
-def test_the_score_does_not_move_with_the_grant_table(monkeypatch, tmp_path):
+def test_a_confirmed_grant_changes_the_forestry_score_and_a_partial_one_does_not(monkeypatch, tmp_path):
     import scoring
-    item = plot(area_m2=200000)
-    before = scoring.score(dict(item), mode="forest")
-    monkeypatch.setattr(grants, "GRANTS_FILE", write(tmp_path / "g.csv", row(status="confirmed", cost_cap_eur_ha="9000",
-                                                                            premium_eur_ha_year="900", premium_years="20")))
-    assert scoring.score(dict(item), mode="forest") == before
+    pine = {"crop": "maritime pine", "eur_ha_year": 100, "carbon_eur_ha_year": 0, "note": "", "limits": [],
+            "sources": [], "until": None}
+    monkeypatch.setattr(forestry, "options", lambda *a, **k: [pine])
+    item = plot(area_m2=200000, price=200000)
+    monkeypatch.setattr(grants, "GRANTS_FILE", write(tmp_path / "partial.csv", row()))
+    low, low_why = scoring.score_detail(dict(item), mode="forest")
+    assert any("grants not counted" in r for r in low_why)
+    # Confirmed in name only: no cap has been read, so no figure and no movement.
+    monkeypatch.setattr(grants, "GRANTS_FILE", write(tmp_path / "bare.csv", row(status="confirmed")))
+    bare, bare_why = scoring.score_detail(dict(item), mode="forest")
+    assert bare == low and any("grants not counted" in r for r in bare_why)
+    monkeypatch.setattr(grants, "GRANTS_FILE", write(
+        tmp_path / "confirmed.csv",
+        row(status="confirmed", cost_cap_eur_ha="9000", premium_eur_ha_year="900", premium_years="20")))
+    high, high_why = scoring.score_detail(dict(item), mode="forest")
+    assert high > low
+    line = next(r for r in high_why if r.startswith("return ≈"))
+    assert "estimate" in line and "approved" in line and "does not set a bid" in line
+    assert "grants not counted" not in line
+    text = scoring.buyer_priorities({}, "forest")
+    assert "confirmed published figure" in text and "estimate" in text and "does not set a bid" in text
+    assert "not yet confirmed" in text
+
+
+def test_a_confirmed_grant_is_named_in_the_plan_as_an_estimate(monkeypatch, tmp_path):
+    pine = {"crop": "maritime pine", "eur_ha_year": 100, "carbon_eur_ha_year": 0, "note": "", "limits": [],
+            "sources": [], "until": None}
+    monkeypatch.setattr(forestry, "options", lambda *a, **k: [pine])
+    monkeypatch.setattr(grants, "GRANTS_FILE", write(
+        tmp_path / "g.csv",
+        row(status="confirmed", cost_cap_eur_ha="9000", premium_eur_ha_year="900", premium_years="20")))
+    plan = forestry.project_plan(plot(), 100_000)
+    line = next(l for l in plan["lines"] if l["label"] == "Grants that may apply")
+    assert "in the Forestry return" in line["note"] and "does not set a bid" in line["note"]
+    assert any("does not set a bid" in s and "only if an application is approved" in s for s in plan["steps"])
 
 
 # ─── inflation ─────────────────────────────────────────────────────────────

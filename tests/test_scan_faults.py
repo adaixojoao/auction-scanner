@@ -205,11 +205,10 @@ def test_a_pin_near_its_town_is_not_questioned(db, add, monkeypatch):
 def test_the_best_of_live_and_invest_go_first(monkeypatch):
     top = [{"id": f"b{i}", "rank": 60 - i} for i in range(20)]
     high = [{"id": "h1", "rank": 90}, {"id": "b0", "rank": 60}]
-    import db as dbmod
     import surroundings
-    monkeypatch.setattr(dbmod, "load_listings", lambda *a, **k: list(reversed(top)))
     monkeypatch.setattr(surroundings, "missing", lambda it: [] if it["id"] == "b1" else ["noise"])
-    got = [it["id"] for it in pipeline.both_first(None, {}, high)]
+    # Pass both= so both_first does not call load_listings(mode="both") again.
+    got = [it["id"] for it in pipeline.both_first(None, {}, high, both=list(reversed(top)))]
     assert got[0] == "b0" and "b1" not in got
     assert len(got) == pipeline.BOTH_LOOKUPS_FIRST + 1 and got[-1] == "h1"
 

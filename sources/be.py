@@ -37,12 +37,18 @@ def biddit_listing(item: dict) -> dict | None:
     )
 
 
-# Not in the default scan (Sept 2026): Biddit: its search API rejects anything but a browser (F5 firewall); check biddit.be by hand.
-# Bot walls are not worked around; it stays runnable by name in case the site opens up.
+# Not in the default scan: Biddit's search API rejects anything but a signed-in
+# browser (F5 firewall). Bot checks are not worked around; with an account in
+# Settings → Accounts the same API is tried with that session.
 @register("biddit", "BE", default=False)
-def scrape_biddit(db, max_price: float = 50000, **_):
+def scrape_biddit(db, max_price: float = 50000, config: dict | None = None, **_):
     """biddit.be — Belgian online notary auctions."""
-    session = make_session(headers={"Accept": "application/json"})
+    import accounts
+    from sources import SourceUnavailable
+    session = accounts.account_session(db, config or {}, "biddit")
+    if session is None:
+        raise SourceUnavailable(accounts.missing_account_message("biddit"))
+    session.headers["Accept"] = "application/json"
     total_scraped = 0
 
     for page in range(0, 20):
@@ -149,8 +155,11 @@ def scrape_immoweb(db, max_price: float = 50000, **_):
     for slug, tipo in IMMOWEB_SEARCHES.items():
         for page in range(1, IMMOWEB_MAX_PAGES + 1):
             try:
+                # isALifeAnnuitySale=false drops viagers from the search so the
+                # cheapest pages are plain sales (the parser still skips them).
                 resp = session.get(f"{IMMOWEB}/fr/recherche/{slug}/a-vendre",
-                                   params={"countries": "BE", "maxPrice": int(max_price), "orderBy": "cheapest",
+                                   params={"countries": "BE", "maxPrice": int(max_price),
+                                           "orderBy": "cheapest", "isALifeAnnuitySale": "false",
                                            "page": page})
                 resp.raise_for_status()
             except Exception as e:  # noqa: BLE001 — one search failing is not the source failing
@@ -179,8 +188,8 @@ def scrape_immovlan(db, max_price: float = 50000, **_):
     return scrape_named(db, "immovlan", max_price)
 
 
-@register("era", "BE", description="ERA — houses and flats for sale in Belgium")
+@register("era", "BE", description="ERA — houses, flats and plots for sale in Belgium")
 def scrape_era(db, max_price: float = 50000, **_):
-    """ERA — houses and flats for sale in Belgium."""
+    """ERA — houses, flats and plots for sale in Belgium, at or under the budget."""
     from sources._market import scrape_named
     return scrape_named(db, "era", max_price)

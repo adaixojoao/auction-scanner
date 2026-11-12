@@ -29,9 +29,10 @@ that is how "desocupado" counted as occupied and "11/2023" as a 1/2 share.
 
 ## One goal per tab, and one budget each
 
-The owner is buying four different things (`scoring.MODES`), and each is
+The owner is buying several different things (`scoring.MODES`), and each is
 ranked on its own: a **home to live in**, a **home to let or resell**, a
-**plot as an investment**, and a **forestry project** on such a plot. A
+**plot as an investment**, a **forestry project** on such a plot, and
+**bare ownership** (future possession while someone else keeps use). A
 listing is judged only against the goal asked for, and says where it does
 belong ("a plot, not a place to live — see Investment land") instead of
 scoring badly as something it never was. Keep changes to a score pointed at
@@ -68,14 +69,16 @@ as a fact.
 
 Court and tax notices (Citius, e-leilões, Finanças) seldom state the floor or
 give coordinates; scored on stated facts alone they never reach the top. So
-`guesses.py` may fill exactly two gaps, and a new one is added there, with a
+`guesses.py` may fill the gaps listed there, and a new one is added there, with a
 test, not improvised in a scorer:
 
 - a floor the notice does not state: the map's outline with its levels, else
   the **lower quartile** of the floors the scanner has seen for that type of
   home (T3, V2…) in the district (`MIN_FLOORS` of them), else the country;
 - the sea from a village, parish or town pin, at its **worst case** (the
-  distance plus `SPREAD_KM` for that precision), for Live and invest.
+  distance plus `SPREAD_KM` for that precision), for Live and invest;
+- the usufructuary's age for Bare ownership when the notice states none
+  (`DEFAULT_USUFRUCT_AGE`, conservative).
 
 A guess is conservative (a lower quartile or a worst case, never a middle),
 named in the reasons with what it came from, and charged `GUESS_FACTOR` of the

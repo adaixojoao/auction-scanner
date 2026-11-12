@@ -272,6 +272,23 @@ def test_flats_of_one_building_are_hinted_toward_the_cheapest(db, add):
     assert hints["pvp_giustizia:4"] is None
 
 
+def test_tgss_same_cru_twin_cards_are_duplicates(db, add):
+    # Aranjuez-style: two TGSS cards, same title/price/area/opening, same CRU.
+    desc = ("100% NUDA PROPIEDAD CASA EN ARANJUEZ F.R. 8243. "
+            "FINCA DE ARANJUEZ N.º 8243. CRU 28075000033781. SUPERFICIE DE 90 M2.")
+    add("tgss", "286", "ES", title="Finca Urbana en Aranjuez", price=7362, area_m2=90,
+        concelho="Aranjuez", description=desc)
+    add("tgss", "274", "ES", title="Finca Urbana en Aranjuez", price=7362, area_m2=90,
+        concelho="Aranjuez", description=desc)
+    assert mark_duplicates(db) == 1
+    flagged = db.execute(
+        "SELECT id, duplicate_of FROM listings WHERE duplicate_of IS NOT NULL"
+    ).fetchone()
+    assert flagged["id"] in ("tgss:286", "tgss:274")
+    assert flagged["duplicate_of"] in ("tgss:286", "tgss:274")
+    assert flagged["id"] != flagged["duplicate_of"]
+
+
 def test_duplicates_deduped_when_one_side_has_no_area(db, add):
     # Citius scrapes often have no area_m2; the same property on e-leilões has one.
     # Price+área match (area treated as match when one side is None) → possible_match hint.

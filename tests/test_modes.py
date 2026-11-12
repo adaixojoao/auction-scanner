@@ -308,12 +308,14 @@ def test_cheap_rustic_land_is_not_doubtful_for_forestry():
 
 def test_a_scan_keeps_what_any_goal_could_buy_and_each_tab_caps_its_own():
     from common import invest_max_price, land_max_price, mode_max_price, scrape_max_price
+    from common import bare_max_price
     cfg = {"max_price": 60000, "invest_max_price": 150000, "land_max_price": 120000,
-           "check_max_price": 0}                                  # no limit on the work: the budgets alone
+           "bare_max_price": 140000, "check_max_price": 0}        # no limit on the work: the budgets alone
     # A €150,000 house used to be thrown away at scrape time by the home budget.
     assert scrape_max_price(cfg, cfg["max_price"]) == 150000
-    assert [mode_max_price(cfg, m, cfg["max_price"]) for m in ("home", "invest", "land", "forest")] \
-        == [60000, 150000, 120000, 120000]
+    assert [mode_max_price(cfg, m, cfg["max_price"]) for m in ("home", "invest", "land", "forest", "bare")] \
+        == [60000, 150000, 120000, 120000, 140000]
+    assert bare_max_price(cfg, cfg["max_price"]) == 140000
     # Never below the house budget, whatever is configured.
     assert land_max_price({"land_max_price": 10000, "check_max_price": 0}, 60000) == 60000
     assert invest_max_price({"check_max_price": 0}, 200000) == 200000
@@ -366,7 +368,8 @@ def test_alerts_judge_a_listing_by_the_goal_it_suits(db, add, monkeypatch):
 def test_a_listing_over_its_goals_budget_is_not_alerted(db, add, monkeypatch):
     import config
     from db import load_best
-    cfg = {**config.DEFAULTS, "max_price": 50000, "invest_max_price": 50000, "land_max_price": 50000}
+    cfg = {**config.DEFAULTS, "max_price": 50000, "invest_max_price": 50000,
+           "land_max_price": 50000, "bare_max_price": 50000}
     monkeypatch.setattr(config, "load_config", lambda: cfg)
     add("eleiloes", "dear", title="Moradia T3", tipo="moradia", description="Em bom estado. No centro da vila.",
         concelho="Guarda", area_m2=120, price=80000)
@@ -628,7 +631,8 @@ def test_map_and_climate_lookups_take_the_best_of_every_tab_in_turn(monkeypatch)
              "home": [{"id": "h1", "score": 90}, {"id": "shared", "score": 80}],
              "invest": [{"id": "shared", "score": 70}],
              "land": [{"id": "l1", "score": 75}],
-             "forest": [{"id": "f1", "score": 85}, {"id": "f2", "score": 60}]}
+             "forest": [{"id": "f1", "score": 85}, {"id": "f2", "score": 60}],
+             "bare": []}
     monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home", **kw: lists[mode])
     assert [it["id"] for it in pipeline.enrich_order(None, {})] == [
         "live", "h1", "f1", "shared", "l1", "f2"]
@@ -643,7 +647,7 @@ def test_enrich_order_puts_portugal_and_spain_ahead_within_each_band(monkeypatch
                  {"id": "pt_hi", "score": 88, "country": "PT"}],
         "home": [{"id": "es_lo", "score": 70, "country": "ES"},
                  {"id": "fr_lo", "score": 72, "country": "FR"}],
-        "invest": [], "land": [], "forest": [],
+        "invest": [], "land": [], "forest": [], "bare": [],
     }
     monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home", **kw: lists[mode])
     assert [it["id"] for it in pipeline.enrich_order(None, {})] == [
@@ -653,7 +657,7 @@ def test_enrich_order_puts_portugal_and_spain_ahead_within_each_band(monkeypatch
 def test_site_check_queue_puts_forestry_ahead_of_other_land(monkeypatch):
     import db
     import pipeline
-    lists = {"home": [], "invest": [],
+    lists = {"home": [], "invest": [], "bare": [],
              "land": [{"id": "l1", "score": 90, "rank": 90}, {"id": "both", "score": 70, "rank": 70}],
              "forest": [{"id": "f1", "score": 80, "rank": 80}, {"id": "both", "score": 85, "rank": 85}]}
     monkeypatch.setattr(db, "load_listings", lambda conn, filters=None, mode="home": lists[mode])

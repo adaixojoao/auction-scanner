@@ -15,6 +15,7 @@ const MODE_NOTE = {
   invest: "Homes to make money on: far below the local price all-in (taxes, fees and the work), a net rental yield, by the beach, forced or bank sales.",
   land: "Plots as an investment: cheap per hectare against what land goes for there, big enough, reachable, water on it — with the forestry upside on top.",
   forest: "Land for a forestry project: the cheaper the hectare, the better, and the sooner the sale can close. 10 ha is the project, 5 ha can be a first plot. Portugal first — you can visit it. No deadline of this year.",
+  bare: "Bare ownership / future possession: buy cheap today a home that is only free later — elderly usufructuary or protected tenant, target about 20–30% of free value. Estimates only.",
 };
 
 // One short line per goal: the opening words of its note above, which stays in full under "How this ranking works".
@@ -24,6 +25,7 @@ const MODE_INTRO = {
   invest: "Homes to make money on.",
   land: "Plots as an investment.",
   forest: "Land for a forestry project.",
+  bare: "Bare ownership — free later.",
 };
 
 // ── The view: goal, filters, sort and page, in the URL and remembered ──

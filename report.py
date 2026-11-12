@@ -38,6 +38,20 @@ def _money(v) -> str:
     return f"€{v:,.0f}" if v else "?"
 
 
+def _why(item) -> str:
+    """Reasons, with the eligibility check first when this reading has one.
+
+    The check is not a bid. A listing with no stored state is unchanged.
+    """
+    from presentation import eligibility
+    parts = []
+    found = eligibility(item)
+    if found:
+        parts.append(found["short"])
+    parts.extend(item.get("reasons") or [])
+    return ", ".join(parts)
+
+
 def _shown_score(item) -> int:
     """The number the listings page shows: the unclamped rank when a sale
     scores past 100, so two top picks are not both just "100"."""
@@ -99,7 +113,7 @@ def _table(lines, rows, *, with_country=False):
             f"| {i} | {_shown_score(it)} | {md_cell(it.get('mode_label') or '-')} | "
             f"{country}{_md_link(it)} | {_money(it['price'])}{drop} | "
             f"{_money(it['current_bid']) if it.get('current_bid') else '-'} | {md_cell(_loc(it), 60)} | "
-            f"{(it.get('date_end') or '-')[:10]} | {md_cell(', '.join(it['reasons']), 160)} |"
+            f"{(it.get('date_end') or '-')[:10]} | {md_cell(_why(it), 200)} |"
         )
     lines.append("")
 
@@ -199,10 +213,12 @@ def build_markdown(items, hidden_counts: Counter, health, max_price, max_bid, no
     # LLM-ready compact summary for the top imóveis (saves tokens)
     lines.append("## Top Imóveis — Compact (for LLM analysis)")
     lines.append("```json")
+    from presentation import eligibility
     compact = [{
         "t": (it["title"] or "")[:60], "vb": it["price"], "bid": it["current_bid"],
         "loc": _loc(it), "tipo": it["tipo"], "area": it["area_m2"],
         "ends": (it["date_end"] or "")[:10], "url": it["url"], "score": it["score"],
+        "elig": (eligibility(it) or {}).get("short", ""),
     } for it in props[:15]]
     lines.append(json.dumps(compact, ensure_ascii=False, indent=1))
     lines.append("```")
@@ -332,7 +348,7 @@ def _write_docx(parts, now: datetime, max_price, n_items, out_dir, desktop):
                     row[2].text = title
                 row[3].text = _money(it["price"])
                 row[4].text = _loc(it)[:30]
-                row[5].text = ", ".join(it["reasons"])[:60]
+                row[5].text = _why(it)[:80]
 
     _save_copy(doc.save, os.path.join(out_dir, "report.docx"), desktop, "Auction-Report.docx")
 
@@ -388,7 +404,7 @@ def _write_pdf(parts, now: datetime, max_price, n_items, out_dir, desktop):
                 cells = [
                     str(idx), f"{it['score']:.0f}", s((it["title"] or "?")[:70]),
                     f"EUR {it['price']:,.0f}" if it["price"] else "?",
-                    s(_loc(it)[:32]), s(", ".join(it["reasons"])[:55]),
+                    s(_loc(it)[:32]), s(_why(it)[:80]),
                 ]
                 for j, (w, c) in enumerate(zip(col_w, cells)):
                     pdf.cell(w, 4, c, border=1, link=(it.get("url") or "") if j == 2 else "")
@@ -429,7 +445,7 @@ def print_console_summary(db, max_price: float = 50000, *, filters: dict | None 
         for i, it in enumerate(top5, 1):
             _safe_print(f"  {i}. [{it['score']:.0f}] {(it['title'] or '?')[:40]}")
             _safe_print(f"     EUR {it['price']:,.0f}  {_loc(it)[:20]}  {(it.get('date_end') or '')[:10]}")
-            _safe_print(f"     {', '.join(it['reasons'])[:60]}")
+            _safe_print(f"     {_why(it)[:80]}")
             _safe_print(f"     {it.get('url') or ''}")
 
     failing = [h for h in source_health(db, known_sources) if h["state"] in ("error", "broken", "blocked")]

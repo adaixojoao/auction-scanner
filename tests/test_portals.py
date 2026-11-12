@@ -1,4 +1,6 @@
 """Parsers for the public sale portals. Fixtures are the card shapes seen live."""
+import pytest
+
 from conftest import FakeResponse
 
 
@@ -18,6 +20,13 @@ CASASAPO = """<div class="property" id="property_81b60d9f-b8eb-11f1-90a1-0600000
 </div>
 <p>Aldeia, Distrito de Faro | 90m² | 38.000 €</p></div>"""
 
+CASASAPO_DIRECT = """<div class="property" id="property_5d194c14-a70a-4c48-870d-f6165f73b7d8">
+<div class="property-media" data-title="Moradia T3">
+<a href="/comprar-moradia-t3-oleiros-estreito-vilar-barroco-5d194c14-a70a-4c48-870d-f6165f73b7d8.html">foto</a>
+</div>
+<div class="property-location">Estreito-Vilar Barroco, Oleiros, Distrito de Castelo Branco</div>
+<div class="property-price-value">18.000 €</div></div>"""
+
 PARUVENDU = """<div class="blocAnnonce" data-id="1295984707">
 <a href="/immobilier/vente/maison/1295984707A1" title="Maison - 3 pièce(s) - 77 m²">Maison</a>
 <span>55 000 €</span></div>"""
@@ -27,9 +36,6 @@ Maison de village 115 m² à rénover</a><span>42 000 €</span>"""
 
 IAD = """<a href="/annonce/maison-vente-3-pieces-la-ciotat-79m2/r2126785">Maison 79 m²</a>
 <span>89 000 €</span>"""
-
-ETRE = """<a href="/immobilier-26976112-vente-appartement-saint-etienne">Appartement</a>
-<span>61 000 €</span>"""
 
 OPTIM = """<a href="/fr/immobilier/vente/terrain/credin/terrain-a-vendre-de-2-390-00-m2-credin-56/509927">
 Terrain 2 390 m²</a><span>28 000 €</span>"""
@@ -104,6 +110,8 @@ SAFTI = """<div><a href="/annonces/achat/maison/charron-23700/1724756">Maison - 
 
 CITYA = """<a href="/annonces/vente/maison/sedan-08200/TMAI376-965615">
 Vente Maison 5 pièces 98.62m² à Sedan</a><span>122 000 €</span>
+<a href="/annonces/vente/terrain/sedan-08200/TTER12-345678">
+Terrain 2 000 m² à Sedan</a><span>18 000 €</span>
 <a href="/annonces/vente/maison">Maisons</a><span>1 €</span>"""
 
 IMMOWELT_AT = """<a href="https://www.immowelt.at/expose/3a8df362-4d8a-489d-9e31-c9d9d5602e3b"
@@ -135,6 +143,58 @@ TOPREALITY = """<div data-ga4-container-item_id="LT_9435745" data-ga4-container-
 <a href="/prenajom/restauracia/1">rent</a></div>"""
 
 
+def test_paruvendu_sends_the_price_ceiling_the_site_applies():
+    # pxm is ignored and the page leads with multi-million houses. px1 is the ceiling.
+    from sources._market import PORTALS
+    urls = PORTALS["paruvendu"].urls
+    assert urls
+    assert all("px1={max}" in url for url in urls)
+    assert all("pxm=" not in url for url in urls)
+
+
+def test_portals_send_the_price_ceiling_the_site_applies():
+    from sources._market import PORTALS
+    assert all("pe={max}" in u for u in PORTALS["custojusto"].urls)
+    assert any("portugal/imobiliario/moradias-venda" in u for u in PORTALS["custojusto"].urls)
+    assert all("gp={max}" in u for u in PORTALS["casasapo"].urls)
+    assert any("comprar-moradias" in u for u in PORTALS["casasapo"].urls)
+    assert any("comprar-terrenos" in u for u in PORTALS["casasapo"].urls)
+    assert all("priceMax={max}" in u for u in PORTALS["iadfrance"].urls)
+    assert any("/annonces/vente/maison" in u for u in PORTALS["iadfrance"].urls)
+    assert any("/annonces/vente/terrain" in u for u in PORTALS["iadfrance"].urls)
+    assert all("prixMax={max}" in u for u in PORTALS["citya"].urls)
+    assert any("/annonces/vente/terrain?" in u for u in PORTALS["citya"].urls)
+    assert all("/fr/achat/terrain" in u for u in PORTALS["optimhome"].urls)
+    assert not any(u.rstrip("/").endswith("/vente") for u in PORTALS["optimhome"].urls)
+    assert all("cenado={max}" in u for u in PORTALS["bazos"].urls)
+
+
+def test_habitaclia_reads_cheap_houses_across_inland_provinces():
+    from sources._market import PORTALS
+    urls = PORTALS["habitaclia"].urls
+    assert len(urls) >= 15
+    assert all("casas-baratas-provincia-" in u for u in urls)
+    for prov in ("lugo", "ourense", "leon", "asturias", "zamora", "caceres"):
+        assert any(f"provincia-{prov}.htm" in u for u in urls)
+
+
+def test_safti_covers_more_than_the_original_ten_departments():
+    from sources._market import PORTALS
+    urls = PORTALS["safti"].urls
+    depts = {u.rsplit("/", 1)[-1] for u in urls}
+    assert "creuse-23" in depts and "aveyron-12" in depts and "orne-61" in depts
+    assert any("/maison/" in u for u in urls) and any("/terrain/" in u for u in urls)
+    assert len(depts) >= 20
+
+
+def test_wortimmo_reads_later_land_pages_and_the_french_side():
+    from sources._market import PORTALS
+    urls = PORTALS["wortimmo"].urls
+    assert any(u.endswith("/terrain") for u in urls)
+    assert any("page=5" in u for u in urls)
+    assert any(u.endswith("/terrain/france") for u in urls)
+
+
 def test_each_portal_reads_the_card_it_was_built_from():
     from sources._market import parse_portal
     cases = {
@@ -143,7 +203,6 @@ def test_each_portal_reads_the_card_it_was_built_from():
         "paruvendu": (PARUVENDU, "1295984707", 55000, None),
         "entreparticuliers": (ENTRE, "22653367", 42000, None),
         "iadfrance": (IAD, "2126785", 89000, None),
-        "etreproprio": (ETRE, "26976112", 61000, None),
         "optimhome": (OPTIM, "509927", 28000, None),
         "laforet": (LAFORET, "52970436", 64000, None),
         "kleinanzeigen": (KLEIN, "3509674879", 45000, None),
@@ -166,7 +225,7 @@ def test_each_portal_reads_the_card_it_was_built_from():
         "remaxnl": (REMAXNL, "9535", 53500, None),
         "wortimmo": (WORTIMMO, "572965", 150000, None),
     }
-    assert len(cases) == 27
+    assert len(cases) == 26
     for name, (html, eid, price, district) in cases.items():
         rows = parse_portal(name, html)
         assert rows and rows[0]["external_id"] == eid, name
@@ -178,15 +237,34 @@ def test_each_portal_reads_the_card_it_was_built_from():
         assert parse_portal(name, "") == []
 
 
+def test_casasapo_reads_the_direct_listing_link():
+    from sources._market import parse_portal
+    row = parse_portal("casasapo", CASASAPO_DIRECT)[0]
+    assert row["external_id"] == "5d194c14-a70a-4c48-870d-f6165f73b7d8"
+    assert row["price"] == 18000
+    assert row["district"] == "Castelo Branco"
+    assert "Usado" not in (row["district"] or "")
+    assert row["url"].endswith("5d194c14-a70a-4c48-870d-f6165f73b7d8.html")
+
+
 def test_custojusto_keeps_sales_under_the_budget_and_drops_the_rest(db, fake_http):
     from db import load_listings
     from sources.pt import scrape_custojusto
     fake_http(lambda m, u, kw: FakeResponse(CUSTOJUSTO))
-    assert scrape_custojusto(db, max_price=100000) == 1
+    result = scrape_custojusto(db, max_price=100000)
+    assert result == 1 and result.scope == "partial"
     rows = load_listings(db, include_hidden=True)
     assert len(rows) == 1 and rows[0]["source"] == "custojusto"
     assert rows[0]["price"] == 42000 and rows[0]["area_m2"] == 104
     assert "Madalena" in (rows[0]["concelho"] or "")
+
+
+def test_wohnnet_search_uses_the_price_ceiling_query():
+    from sources._market import PORTALS
+    urls = PORTALS["wohnnet"].urls
+    assert any("haeuser/oesterreich" in u and "preis=-{max}" in u for u in urls)
+    assert any("grundstuecke/oesterreich" in u for u in urls)
+    assert not any("haus-kaufen/preis-bis" in u for u in urls)
 
 
 def test_portals_skip_a_foreign_willhaben_ad_and_tag_a_french_athome_home():
@@ -198,6 +276,9 @@ def test_portals_skip_a_foreign_willhaben_ad_and_tag_a_french_athome_home():
         "eigentumswohnung-1210-wien", "mehrfamilienhaus-deutschland"))[0]
     assert german["country"] == "DE"
     assert parse_portal("optimhome", OPTIM)[0]["tipo"] == "terreno"
+    citya = parse_portal("citya", CITYA)
+    assert [r["external_id"] for r in citya] == ["TMAI376-965615", "TTER12-345678"]
+    assert citya[1]["tipo"] == "terreno" and citya[1]["price"] == 18000
     assert [r["external_id"] for r in parse_portal("immovlan", IMMOVLAN)] == ["vbe75212", "vbe75070"]
     assert parse_portal("immovlan", IMMOVLAN)[1]["tipo"] == "terreno"
     bouw = '<a href="/nl/detail/bouwgrond/te-koop/6698/grand-halleux/vwd12819">Bouwgrond</a><span>44 000 €</span>'
@@ -237,3 +318,101 @@ def test_the_heading_wins_over_the_photo_link():
     <span>49 900 €</span>"""
     plot = parse_portal("laforet", land)[0]
     assert plot["tipo"] == "terreno" and "pouliguen" in plot["title"]
+
+
+def test_era_reads_the_price_line_not_the_reference_number():
+    from sources._market import parse_portal
+    card = """<article>
+    <a href="/fr/a-vendre/durbuy/maison/01461087">Maison</a>
+    <div class="field field--price">€ 95 000</div>
+    <span>01461087 € 95 000</span></article>"""
+    row = parse_portal("era", card)[0]
+    assert row["price"] == 95000
+    assert row["external_id"] == "durbuy/maison/01461087"
+    on_request = """<article>
+    <a href="/fr/a-vendre/huy/maison/une-maison">Maison</a>
+    <div class="field field--price on-demand">Prix sur demande</div>
+    <span>123456 € 10</span></article>"""
+    assert parse_portal("era", on_request) == []
+
+
+def test_era_asks_for_homes_under_the_budget_and_stops_at_a_short_page(db, fake_http):
+    from db import load_listings
+    from sources._market import ERA_PAGE_SIZE
+    from sources.be import scrape_era
+    cheap = """<article><a href="/fr/a-vendre/libin/maison/maison-a-renover">Maison à rénover</a>
+    <div class="field field--price">€ 80 000</div></article>"""
+    numbered = """<article><a href="/fr/a-vendre/durbuy/maison/01461087">Maison</a>
+    <div class="field field--price">€ 95 000</div><span>01461087 € 95 000</span></article>"""
+    dear = """<article><a href="/fr/a-vendre/spa/maison/villa">Villa</a>
+    <div class="field field--price">€ 450 000</div></article>"""
+
+    def handler(method, url, kw):
+        assert "property_index" in url
+        params = kw["params"]
+        assert params["filter[price]"] == "(min:1;max:100000)"
+        assert params["filter[property_type]"] == "46,44,63"
+        assert params["sort"] == "price"
+        offset = params["pager[offset]"]
+        if offset == "0":
+            cards = [cheap] * (ERA_PAGE_SIZE - 1) + [dear]
+        elif offset == "36":
+            cards = [numbered]
+        else:
+            raise AssertionError(offset)
+        return FakeResponse(json_data={"data": [{"attributes": {"teaser": c}} for c in cards]})
+
+    fake_http(handler)
+    result = scrape_era(db, max_price=100000)
+    assert result == 2 and result.scope == "full" and result.pages_seen == 2
+    rows = {r["price"]: r for r in load_listings(db, include_hidden=True)}
+    assert set(rows) == {80000, 95000}
+    assert rows[95000]["id"] == "era:durbuy/maison/01461087"
+
+
+def test_era_a_later_page_failing_is_not_a_full_scan(db, fake_http):
+    import requests
+    from sources._market import ERA_PAGE_SIZE
+    from sources.be import scrape_era
+    cheap = """<article><a href="/fr/a-vendre/libin/maison/maison-a-renover">Maison</a>
+    <div class="field field--price">€ 80 000</div></article>"""
+
+    def handler(method, url, kw):
+        if kw["params"]["pager[offset]"] == "0":
+            return FakeResponse(json_data={"data": [{"attributes": {"teaser": cheap}}] * ERA_PAGE_SIZE})
+        return FakeResponse(status=503)
+
+    fake_http(handler)
+    result = scrape_era(db, max_price=100000)
+    assert result == 1 and result.scope == "partial" and result.pages_seen == 1
+
+    def down(method, url, kw):
+        return FakeResponse(status=503)
+
+    fake_http(down)
+    with pytest.raises(requests.HTTPError):
+        scrape_era(db, max_price=100000)
+
+
+def test_a_fee_or_per_m2_is_not_the_asking_price():
+    from sources._market import parse_portal
+    fee = """<a href="/annonces-immobilieres/maison/vente/loupia-11300/maison-de-village/ref-22653367">
+    Maison</a><span>12 €</span><span>42 000 €</span>"""
+    assert parse_portal("entreparticuliers", fee)[0]["price"] == 42000
+    rate = """<div><a href="/inzerat/196264135/investicny-byt.php">Byt</a>
+    <span>790 €/m²</span><span>Cena: 49 990 €</span></div>"""
+    assert parse_portal("bazos", rate)[0]["price"] == 49990
+
+
+def test_a_card_with_no_euro_amount_is_still_kept(db, fake_http):
+    from db import load_listings
+    from sources._market import parse_portal, scrape_named
+    html = """<a href="/annonces-immobilieres/maison/vente/loupia-11300/maison-de-village/ref-22653367">
+    Maison de village à rénover, prix sur demande</a>"""
+    row = parse_portal("entreparticuliers", html)[0]
+    assert row["external_id"] == "22653367" and row["price"] is None
+    fake_http(lambda m, u, kw: FakeResponse(html))
+    result = scrape_named(db, "entreparticuliers", 100000)
+    assert result == 1 and result.scope == "partial"
+    kept = load_listings(db, include_hidden=True)
+    assert len(kept) == 1 and kept[0]["price"] is None
