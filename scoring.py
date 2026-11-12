@@ -426,6 +426,10 @@ NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 NO_PRICE_OFFER_CAP = 80
 # Court/offer homes with no established floor: under mid-board until sized.
 MISSING_FLOOR_CAP = 75
+# Asking ads with no hearing or offer cutoff (Pisos, Idealista, …): climate and
+# size used to push them to display 100 while court/tax sales with a date sat
+# lower (2026-11-12). Mid-board until a deadline appears or it is a forced sale.
+OPEN_ENDED_HOME_CAP = 55
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
 # all year round, no fires, no floods. Heat is the mean daily maximum of the
@@ -1090,7 +1094,9 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         "homes needing heavy work (ruins, full rebuilds); expensive homes; isolated or bad "
         "locations; timeshares "
         "(a few weeks a year); shops, garages, storage, offices and other commercial premises "
-        "(bedrijfsruimte, lojas). Without a published price — unless it is a sealed-bid or "
+        "(bedrijfsruimte, lojas). Prefer a court, tax or other forced sale, or any sale with a "
+        "published auction or offer deadline, over an open-ended portal asking ad (those stay "
+        "under the mid-board until a deadline appears). Without a published price — unless it is a sealed-bid or "
         "private-negotiation sale where you name the offer — the listing cannot be judged for "
         "cheapness and stays out of the top. Water is only a plus where the land does not flood; "
         "a home in a flood zone is a risk."
@@ -2555,6 +2561,13 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
             reasons.insert(1, f"{er['cheaper_pct']:.0f}% cheaper than the last round")
     _sale_history(item, reasons)
 
+    # ── How the sale works ────────────────────────────────────────────
+    # Sealed bids are a great chance: you set the price and few people bid.
+    sealed = has_term(full, SEALED_BID_PATTERNS, negations=False)
+    is_forced = forced_sale(item)
+    from common import action_deadline
+    deadline = action_deadline(item)
+
     if bid and price and price > 0:
         ratio = bid / price
         s += curve(ratio, BID_RATIO_POINTS) * w("price")
@@ -2566,7 +2579,9 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
             reasons.append(f"bid {ratio:.0%} of VB — good discount")
         elif ratio > 1.50:
             reasons.append(f"overbid {ratio:.0%} — overheated")
-    elif not bid and price:
+    elif not bid and price and (is_forced or sealed):
+        # Auction with a published price and no competing bid yet — not a portal
+        # asking price (those used to get the same +8 and fill My home).
         s += 8
         reasons.append("no bids yet")
 
@@ -2594,14 +2609,10 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         elif pay > 60000:
             reasons.append(f"€{pay:,.0f} — not a low price")
 
-    # ── How the sale works ────────────────────────────────────────────
-    # Sealed bids are a great chance: you set the price and few people bid.
-    sealed = has_term(full, SEALED_BID_PATTERNS, negations=False)
     if sealed:
         s += 20 * w("sale")
         reasons.append("sealed-bid (carta fechada)")
 
-    is_forced = forced_sale(item)
     if is_forced:
         s += 6 * w("sale")
         reasons.append("forced sale (must sell)")
@@ -2633,14 +2644,18 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
         reasons.append("no minimum bid")
 
     # Urgency: offer cutoff when published, else the hearing/sale date.
-    from common import action_deadline
-    left = days_left(action_deadline(item), now or utcnow())
+    left = days_left(deadline, now or utcnow())
     if left is not None and left > 0:
         s += curve(left, DAYS_LEFT_POINTS) * w("sale")
         if left <= 3:
             reasons.append(f"{left * 24:.0f}h left — urgent" if left < 1 else f"{left:.0f}d left — urgent")
         elif left <= 7:
             reasons.append(f"{left:.0f}d left")
+
+    # Open-ended asking ad (portal/bank/notaire without a cutoff): not a My home top.
+    if kind == "home" and not is_forced and not deadline:
+        caps.append(OPEN_ENDED_HOME_CAP)
+        reasons.append("open-ended sale ad — no auction or offer deadline")
 
     if price and price < 300:
         s -= 20
