@@ -229,10 +229,16 @@ _TOWN_PIN = "position is the town, not the house"
 
 def both_rows(db, cfg: dict) -> list[dict]:
     """Live and invest with its hidden listings, slim: what the seaside lookup
-    and the stale check both start from (loaded once for the two)."""
-    from db import load_listings
-    return load_listings(db, filters=cfg.get("filters"), include_hidden=True, apply_min_score=False,
+    and the stale check both start from (loaded once for the two).
+
+    Expired, dismissed and duplicate rows are dropped: enrichment and link
+    checks must not spend the scan on sales that can no longer be bought.
+    """
+    from db import hidden_category, load_listings
+    rows = load_listings(db, filters=cfg.get("filters"), include_hidden=True, apply_min_score=False,
                          mode="both", slim_hidden=True)
+    return [it for it in rows
+            if hidden_category(it.get("hidden_reason")) not in ("expired", "dismissed", "duplicate")]
 
 
 def seaside_unplaced(db, cfg: dict, limit: int = SEASIDE_LOCATE_MAX,
