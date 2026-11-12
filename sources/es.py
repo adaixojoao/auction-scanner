@@ -2128,6 +2128,9 @@ def scrape_solvia(db, max_price: float = 50000, config: dict | None = None, **_)
     session = make_session(timeout=40)
     headers = {"Accept": "application/json", "Origin": SOLVIA}
     total = 0
+    # A single province returning 500 is not a dead site (seen 2026-11-12). Try
+    # the next one before treating the opening failure as the source's error.
+    opening_error: Exception | None = None
     for pid, name in SOLVIA_PROVINCES.items():
         for page in range(SOLVIA_MAX_PAGES):
             try:
@@ -2137,10 +2140,15 @@ def scrape_solvia(db, max_price: float = 50000, config: dict | None = None, **_)
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:  # noqa: BLE001 — one province failing is not the source failing
-                if total == 0 and page == 0 and pid == next(iter(SOLVIA_PROVINCES)):
-                    raise
+                if total == 0 and page == 0:
+                    if opening_error is None:
+                        opening_error = e
+                        LOG.info(f"Solvia {name} p{page}: {type(e).__name__} — trying another province")
+                        break
+                    raise opening_error
                 LOG.info(f"Solvia {name} p{page}: {type(e).__name__}")
                 break
+            opening_error = None
             for item in data.get("inmuebles") or []:
                 row = parse_solvia(item)
                 if row and row["price"] <= (land_max_price(config, max_price) if row["tipo"] == "terreno" else max_price):
@@ -2151,6 +2159,8 @@ def scrape_solvia(db, max_price: float = 50000, config: dict | None = None, **_)
                 break
             time.sleep(1)
         time.sleep(1)
+    if total == 0 and opening_error is not None:
+        raise opening_error
     LOG.info(f"Solvia: {total} listings")
     return total
 

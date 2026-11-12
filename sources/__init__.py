@@ -80,7 +80,7 @@ DEFAULT_SOURCES = frozenset({
     "aliseda", "altamira", "solvia", "servihabitat",               # ES banks
     "pisos", "habitaclia",                                         # ES portals
     "france", "vench", "notaires",                                 # FR (notaires: viager / nue-propriété)
-    "paruvendu", "iadfrance", "citya", "safti", "optimhome",       # FR portals
+    "paruvendu", "iadfrance", "citya", "safti", "optimhome", "laforet",  # FR portals
     "netherlands", "veilingnotaris", "vastgoedveiling",            # NL
     "remaxnl",                                                     # NL portal
     "pvp_giustizia", "fallcoaste", "italy", "astalegale",          # IT

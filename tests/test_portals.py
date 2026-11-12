@@ -166,6 +166,7 @@ def test_portals_send_the_price_ceiling_the_site_applies():
     assert any("/annonces/vente/terrain?" in u for u in PORTALS["citya"].urls)
     assert all("/fr/achat/terrain" in u for u in PORTALS["optimhome"].urls)
     assert not any(u.rstrip("/").endswith("/vente") for u in PORTALS["optimhome"].urls)
+    assert all("sort=price_asc" in u for u in PORTALS["laforet"].urls)
     assert all("cenado={max}" in u for u in PORTALS["bazos"].urls)
 
 
