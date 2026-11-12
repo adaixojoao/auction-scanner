@@ -2177,6 +2177,35 @@ def forget_scores(db: sqlite3.Connection | None = None) -> None:
             sdb.execute("DELETE FROM score_cache")
 
 
+def purge_orphan_scores(db) -> int:
+    """Drop kept scores whose listing row is gone.
+
+    Listings are not deleted in normal use; orphans appear when an ID scheme
+    changes or a source rewrite leaves scores pointing at nothing. Land and
+    forestry tops were dominated by such Fotocasa/Bienici rows (2026-11-12).
+    """
+    sdb = _score_db(db)
+    if sdb is None:
+        return 0
+    alive = {row[0] for row in db.execute("SELECT id FROM listings")}
+    with _SCORE_LOCK, sdb:
+        cached = [row[0] for row in sdb.execute("SELECT DISTINCT id FROM score_cache")]
+        orphans = [lid for lid in cached if lid not in alive]
+        if not orphans:
+            return 0
+        for i in range(0, len(orphans), 500):
+            chunk = orphans[i:i + 500]
+            sdb.execute(
+                f"DELETE FROM score_cache WHERE id IN ({','.join('?' * len(chunk))})",
+                chunk,
+            )
+    for kept in _SCORED.values():
+        for lid in orphans:
+            kept.pop(lid, None)
+    LOG.info(f"Dropped scores for {len(orphans)} listings that are no longer stored")
+    return len(orphans)
+
+
 # Scores are also kept on disk, so a restart or a new window does not score
 # 60,000 listings again: only listings whose row (or the day, or the filters) changed.
 _LOADED_MODES: set = set()

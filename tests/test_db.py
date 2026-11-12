@@ -733,3 +733,33 @@ def test_status_history_is_append_only_and_survives_clearing(db):
     with pytest.raises(ValueError):
         set_listing_status(db, "eleiloes:s1", "sold")
     assert len(listing_status_history(db, "eleiloes:s1")) == 2         # a refused change is not recorded
+
+
+def test_purge_orphan_scores_drops_rows_without_listings(db, add):
+    """Scores left behind after an ID rewrite must not outrank real listings."""
+    import pickle
+
+    import db as dbmod
+    from db import purge_orphan_scores
+
+    alive = add(external_id="alive", title="Moradia T3", price=20000)
+    sdb = dbmod._score_db(db)
+    payload = pickle.dumps({"score": 1, "rank": 1})
+    with dbmod._SCORE_LOCK, sdb:
+        sdb.executemany(
+            "INSERT OR REPLACE INTO score_cache VALUES (?, ?, ?, ?, ?)",
+            [
+                ("land", "fotocasa:gone", "k", None, payload),
+                ("forestry", "fotocasa:gone", "k", None, payload),
+                ("land", alive["id"], "k", None, payload),
+            ],
+        )
+    dbmod._SCORED.setdefault("land", {})["fotocasa:gone"] = ("k", payload, None)
+    dbmod._SCORED["land"][alive["id"]] = ("k", payload, None)
+
+    assert purge_orphan_scores(db) == 1
+    left = {(m, i) for m, i in sdb.execute("SELECT mode, id FROM score_cache")}
+    assert left == {("land", alive["id"])}
+    assert "fotocasa:gone" not in dbmod._SCORED["land"]
+    assert alive["id"] in dbmod._SCORED["land"]
+    assert purge_orphan_scores(db) == 0

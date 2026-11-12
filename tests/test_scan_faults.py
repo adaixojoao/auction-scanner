@@ -103,6 +103,45 @@ def test_the_pages_floor_fills_a_gap_and_never_replaces(db, add, monkeypatch):
     assert area[gap["id"]] == 32.0 and area[told["id"]] == 50
 
 
+def test_perizia_stops_after_consecutive_failures(db, add, monkeypatch):
+    items = [
+        add(source="astalegale", external_id=f"Bf{i}", country="IT", title="Abitazione", price=1000,
+            url=f"https://www.astalegale.net/Aste/Detail/Bf{i}")
+        for i in range(perizia.MAX_CONSECUTIVE_FAILURES + 2)
+    ]
+    calls = {"n": 0}
+
+    def boom(_session, _item):
+        calls["n"] += 1
+        raise TimeoutError("Astalegale down")
+
+    monkeypatch.setattr(perizia, "check", boom)
+    assert perizia.check_pending(db, None, items) == 0
+    assert calls["n"] == perizia.MAX_CONSECUTIVE_FAILURES
+
+
+def test_perizia_failure_streak_resets_after_a_read(db, add, monkeypatch):
+    # Enough rows for four failures, one success, then five more failures.
+    n_items = 4 + 1 + perizia.MAX_CONSECUTIVE_FAILURES + 2
+    items = [
+        add(source="astalegale", external_id=f"Br{i}", country="IT", title="Abitazione", price=1000,
+            url=f"https://www.astalegale.net/Aste/Detail/Br{i}")
+        for i in range(n_items)
+    ]
+    calls = {"n": 0}
+
+    def flaky(_session, _item):
+        calls["n"] += 1
+        # Four failures, one success, then failures again: the streak restarts.
+        if calls["n"] != 5:
+            raise TimeoutError("transient")
+        return {"found": False, "why": "none"}
+
+    monkeypatch.setattr(perizia, "check", flaky)
+    assert perizia.check_pending(db, None, items) == 1
+    assert calls["n"] == 4 + 1 + perizia.MAX_CONSECUTIVE_FAILURES
+
+
 # ─── One lot on two portals ─────────────────────────────────────────────
 def test_one_lot_on_the_pvp_and_astalegale_is_one_sale(db, add):
     pvp = add(source="pvp_giustizia", external_id="4631042", country="IT", id_prefix="pvp", title="Immobile", price=17799.78,

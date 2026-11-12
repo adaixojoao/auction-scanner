@@ -27,6 +27,9 @@ VERSION = 6                       # 2: a share only when the passage is about wh
 PER_SCAN = 40                     # reports read per scan, the best homes first
 MAX_BYTES = 60_000_000            # Bianco's report, 42 MB, was left unread at 25 MB (2026-11-02)
 MAX_TRIES = 3                     # candidate reports read for one listing (a scan gives way to the next)
+# Stop the pass after this many consecutive download failures (Astalegale
+# ConnectTimeouts used to burn the whole queue one by one, 2026-11-12).
+MAX_CONSECUTIVE_FAILURES = 5
 SOURCES = ("pvp_giustizia", "astalegale")
 PVP_API = "https://pvp.giustizia.it/ve-3f723b85-986a1b71/ve-ms/vendite/{}/restricted"
 PVP_FILES = "https://resource-pvp.giustizia.it"
@@ -349,6 +352,7 @@ def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
     """Read the report of up to `limit` listings in `items` (best first) that have none yet."""
     import geo
     done = 0
+    failures = 0
     for item in items:
         if done >= limit:
             break
@@ -359,8 +363,13 @@ def check_pending(db, session, items: list[dict], limit: int = PER_SCAN) -> int:
         try:
             result = check(session, item)
         except Exception as e:  # noqa: BLE001 — a site down: try at the next scan
+            failures += 1
             LOG.info(f"Perizia {item['id']}: {type(e).__name__}")
+            if failures >= MAX_CONSECUTIVE_FAILURES:
+                LOG.info(f"Perizia: stopping after {failures} consecutive failures")
+                break
             continue
+        failures = 0
         # The row on disk: a loaded copy of Live and invest can carry a trimmed raw_json.
         row = db.execute("SELECT raw_json FROM listings WHERE id = ?", (item["id"],)).fetchone()
         if row is None:
