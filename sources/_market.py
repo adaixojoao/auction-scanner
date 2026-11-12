@@ -96,10 +96,11 @@ PORTALS: dict[str, Portal] = {
          "https://www.iadfrance.fr/annonces/vente/terrain?priceMax={max}",
          "https://www.iadfrance.fr/annonces/vente/terrain?priceMax={max}&page=2"),
         r"/annonce/", r"/r(\d{5,})"),
+    # The house list ignores a price ceiling and leads with dear homes.
+    # /fr/achat/terrain is where plots under the budget actually appear.
     "optimhome": Portal(
         "optimhome", "FR", "https://www.optimhome.com",
-        ("https://www.optimhome.com/fr/immobilier/vente",
-         "https://www.optimhome.com/fr/achat/terrain"),
+        ("https://www.optimhome.com/fr/achat/terrain",),
         r"/immobilier/vente/.+/\d", r"/(\d{5,})"),
     "laforet": Portal(
         "laforet", "FR", "https://www.laforet.com",
@@ -196,12 +197,12 @@ PORTALS: dict[str, Portal] = {
                          "hautes-alpes-05", "cotes-d-armor-22")),
         r"/annonces/achat/(?:maison|terrain)/", r"/(\d{6,})", id_last=True),
     # prixMax is the ceiling the site applies (live 2026-11-11: every card ≤ €50k).
-    # priceMax / maxPrice are ignored. The terrain path returns cards this
-    # parser does not yet read (TTER ids).
+    # priceMax / maxPrice are ignored. House ids are TMAI…; plot ids are TTER….
     "citya": Portal(
         "citya", "FR", "https://www.citya.com",
-        ("https://www.citya.com/annonces/vente/maison?prixMax={max}",),
-        r"/annonces/vente/maison/", r"/(TMAI[A-Z0-9-]+)", id_last=True),
+        ("https://www.citya.com/annonces/vente/maison?prixMax={max}",
+         "https://www.citya.com/annonces/vente/terrain?prixMax={max}"),
+        r"/annonces/vente/(?:maison|terrain)/", r"/((?:TMAI|TTER)[A-Z0-9-]+)", id_last=True),
     # The house search only accepts a few price buckets; €300,000 is one that
     # answers. The buyer's own ceiling is applied when the row is saved.
     # Plots honour pma. A stray €120 in a card is not a price.

@@ -110,6 +110,8 @@ SAFTI = """<div><a href="/annonces/achat/maison/charron-23700/1724756">Maison - 
 
 CITYA = """<a href="/annonces/vente/maison/sedan-08200/TMAI376-965615">
 Vente Maison 5 pièces 98.62m² à Sedan</a><span>122 000 €</span>
+<a href="/annonces/vente/terrain/sedan-08200/TTER12-345678">
+Terrain 2 000 m² à Sedan</a><span>18 000 €</span>
 <a href="/annonces/vente/maison">Maisons</a><span>1 €</span>"""
 
 IMMOWELT_AT = """<a href="https://www.immowelt.at/expose/3a8df362-4d8a-489d-9e31-c9d9d5602e3b"
@@ -161,6 +163,9 @@ def test_portals_send_the_price_ceiling_the_site_applies():
     assert any("/annonces/vente/maison" in u for u in PORTALS["iadfrance"].urls)
     assert any("/annonces/vente/terrain" in u for u in PORTALS["iadfrance"].urls)
     assert all("prixMax={max}" in u for u in PORTALS["citya"].urls)
+    assert any("/annonces/vente/terrain?" in u for u in PORTALS["citya"].urls)
+    assert all("/fr/achat/terrain" in u for u in PORTALS["optimhome"].urls)
+    assert not any(u.rstrip("/").endswith("/vente") for u in PORTALS["optimhome"].urls)
     assert all("cenado={max}" in u for u in PORTALS["bazos"].urls)
 
 
@@ -271,6 +276,9 @@ def test_portals_skip_a_foreign_willhaben_ad_and_tag_a_french_athome_home():
         "eigentumswohnung-1210-wien", "mehrfamilienhaus-deutschland"))[0]
     assert german["country"] == "DE"
     assert parse_portal("optimhome", OPTIM)[0]["tipo"] == "terreno"
+    citya = parse_portal("citya", CITYA)
+    assert [r["external_id"] for r in citya] == ["TMAI376-965615", "TTER12-345678"]
+    assert citya[1]["tipo"] == "terreno" and citya[1]["price"] == 18000
     assert [r["external_id"] for r in parse_portal("immovlan", IMMOVLAN)] == ["vbe75212", "vbe75070"]
     assert parse_portal("immovlan", IMMOVLAN)[1]["tipo"] == "terreno"
     bouw = '<a href="/nl/detail/bouwgrond/te-koop/6698/grand-halleux/vwd12819">Bouwgrond</a><span>44 000 €</span>'
