@@ -307,6 +307,36 @@ def test_urgency_works_with_naive_dates():
     assert any("urgent" in r for r in reasons)
 
 
+def test_open_ended_portal_home_is_capped_below_dated_court_sales():
+    """Pisos-style ads with no deadline used to fill My home at display 100."""
+    from scoring import OPEN_ENDED_HOME_CAP
+    portal = item(source="pisos", country="ES", title="Casa T3",
+                  description="Vivienda en buen estado", price=40000, area_m2=100)
+    court = item(source="financas", country="PT", title="Moradia T3 em bom estado",
+                 description="Fração habitação", price=50000, area_m2=120,
+                 date_end="2030-06-01T10:00:00")
+    sc_p, why_p = score(portal)
+    sc_c, why_c = score(court)
+    assert any("open-ended sale ad" in r for r in why_p)
+    assert not any("open-ended sale ad" in r for r in why_c)
+    assert 0 < sc_p <= OPEN_ENDED_HOME_CAP
+    assert sc_c > sc_p
+    # A portal that publishes a deadline keeps its full score (no open-ended cap).
+    dated_portal, why_d = score({**portal, "date_end": "2030-06-01T10:00:00"})
+    assert not any("open-ended sale ad" in r for r in why_d)
+    assert dated_portal > sc_p
+
+
+def test_no_bids_yet_is_only_for_auctions_not_portal_asking_prices():
+    portal, why_p = score_detail(item(source="pisos", country="ES", title="Casa",
+                                      price=40000, area_m2=100))
+    auction, why_a = score_detail(item(source="citius", title="Moradia",
+                                       price=40000, area_m2=100))
+    assert "no bids yet" not in why_p
+    assert "no bids yet" in why_a
+    assert auction > portal
+
+
 def test_price_drop_bonus():
     from scoring import score_detail
     base, _ = score_detail(item(title="Moradia", price=20000))
@@ -586,6 +616,7 @@ def test_the_ai_check_is_told_the_same_goal():
     text = buyer_priorities({"rural_min_m2": 20000, "rural_max_eur_m2": 0.3})
     assert "at least 20,000 m²" in text and "€0.30/m²" in text and "heavy work" in text
     assert "western continental Europe" in text
+    assert "open-ended portal asking ad" in text
 
 
 def test_off_western_continental_europe_costs_a_flat_ten():
@@ -924,11 +955,12 @@ def test_a_bid_below_the_minimum_accepted_is_judged_at_the_minimum():
 
 def test_years_on_sale_cost_points():
     """Nobody bought it in six years: usually there is a reason."""
-    from datetime import datetime
     import json as _json
-    now = datetime(2026, 9, 25)
+    # date_end keeps these off the open-ended portal cap so years-on-sale can still rank them.
+    now = datetime(2026, 9, 25, tzinfo=timezone.utc)
     fresh = {"source": "whitestar", "country": "PT", "title": "Moradia T2", "description": "", "price": 15000,
-             "area_m2": 90, "raw_json": _json.dumps({"data_publicacao": "2026-03-01"})}
+             "area_m2": 90, "date_end": "2030-06-01T10:00:00",
+             "raw_json": _json.dumps({"data_publicacao": "2026-03-01"})}
     stale = {**fresh, "raw_json": _json.dumps({"data_publicacao": "2020-02-21"})}
     old_case = {**fresh, "source": "citius", "raw_json": _json.dumps({"processo": "536/06.0TTGRD-A"})}
     new_case = {**fresh, "source": "citius", "raw_json": _json.dumps({"processo": "468/24.6T8MBR"})}
