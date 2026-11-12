@@ -346,9 +346,10 @@ def scrape_encheres_publiques(db, max_price: float = 100000, config: dict | None
     for page in range(1, 21):
         try:
             resp = session.get(f"{base}/rechercher", params={"page": page, "prixMax": int(max_price)})
-            if resp.status_code == 403:
+            body = resp.text or ""
+            if resp.status_code == 403 or "just a moment" in body.lower() or "cf-challenge" in body.lower():
                 raise SourceUnavailable(
-                    "encheres-publiques.com still refuses the signed-in session (HTTP 403); "
+                    "encheres-publiques.com answers a Cloudflare bot check instead of listings; "
                     "the same tribunal sales come through the france (licitor.com) source")
             resp.raise_for_status()
         except SourceUnavailable:

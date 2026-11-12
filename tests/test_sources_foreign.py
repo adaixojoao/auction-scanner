@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from conftest import FakeResponse
+from conftest import FakeResponse, FakeSession
 from sources import REGISTRY, load_all
 
 load_all()
@@ -262,10 +262,16 @@ def test_justiz_auktion_blocked_points_at_zvg(db):
         REGISTRY["justiz_auktion"].func(db, max_price=50000)
 
 
-def test_haya_blocked_by_firewall(db):
+def test_haya_points_at_solvia_when_unreachable(db, monkeypatch):
     from sources import SourceUnavailable
+    import accounts
 
-    with pytest.raises(SourceUnavailable, match="firewall"):
+    with pytest.raises(SourceUnavailable, match="solvia"):
+        REGISTRY["haya"].func(db, max_price=100000)
+
+    monkeypatch.setattr(accounts, "account_session",
+                        lambda *a, **k: FakeSession(lambda m, u, kw: FakeResponse("cloudflare", status=522)))
+    with pytest.raises(SourceUnavailable, match="solvia"):
         REGISTRY["haya"].func(db, max_price=100000)
 
 

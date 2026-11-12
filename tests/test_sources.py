@@ -1176,6 +1176,16 @@ def test_etreproprio_reads_the_classifieds_api(db, fake_http, monkeypatch):
     with pytest.raises(SourceUnavailable, match="licitor"):
         scrape_encheres_publiques(db)
 
+    # A signed-in session that still gets Cloudflare is the same pointer.
+    import accounts
+    from conftest import FakeSession
+    monkeypatch.setattr(
+        accounts, "account_session",
+        lambda *a, **k: FakeSession(
+            lambda m, u, kw: FakeResponse("<title>Just a moment...</title>", status=403)))
+    with pytest.raises(SourceUnavailable, match="Cloudflare"):
+        scrape_encheres_publiques(db)
+
 
 def _immoweb_ad(**over):
     ad = {"id": 21881855, "flags": {"main": None, "secondary": []},
