@@ -216,7 +216,10 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
         db.commit()
     except SourceTimeLimit:
         db.commit()                     # the pages read before the limit are kept
-        count, status, scope = 0, "error", "partial"
+        count = db.execute(
+            "SELECT COUNT(*) FROM listings WHERE source = ? AND last_seen >= ?",
+            (source.name, started_iso)).fetchone()[0]
+        status, scope = ("ok" if count else "error"), "partial"
         message = f"stopped at the {limit_min}-minute time limit before it finished"
         LOG.warning(f"Source {source.name}: {message}")
     except SourceUnavailable as e:
