@@ -269,10 +269,12 @@ def make_session(*, verify: bool | str = True, timeout: float = 20,
         session.headers.update(headers)
     session.verify = verify
 
+    # 500 is retried too: Solvia's search API occasionally answers 500 on the
+    # first province and recovers on the next try (2026-11-12).
     retry = Retry(
         total=2, connect=2, read=0, status=2,
         backoff_factor=1.0,
-        status_forcelist=(429, 502, 503, 504),
+        status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=None,
         respect_retry_after_header=False,
         raise_on_status=False,

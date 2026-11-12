@@ -142,6 +142,41 @@ def test_servihabitat_the_first_province_failing_is_the_source_failing(db, fake_
         REGISTRY["servihabitat"].func(db, max_price=30000)
 
 
+def test_solvia_skips_a_broken_first_province(db, fake_http, monkeypatch):
+    """A transient 500 on A Coruña used to mark the whole source dead."""
+    import sources.es as es
+    from conftest import FakeResponse
+
+    monkeypatch.setattr(es, "SOLVIA_PROVINCES", {"15": "A Coruña", "27": "Lugo"})
+    item = {"id": "192413-155113-O", "precio": 22000.0, "m2": 120.0, "mostrarPrecio": True,
+            "categoriaTipoVivienda": {"nombre": "Viviendas"}, "tipoVivienda": {"nombre": "Casa"},
+            "poblacion": {"nombre": "Foz"}, "provincia": {"nombre": "Lugo"}}
+
+    def handler(method, url, kw):
+        body = kw.get("json") or {}
+        if body.get("idProvincia") == "15":
+            return FakeResponse("", status=500)
+        return FakeResponse(json_data={"inmuebles": [item], "paginacion": {"hayPaginaSiguiente": False}})
+
+    fake_http(handler)
+    assert REGISTRY["solvia"].func(db, max_price=50000) == 1
+    assert db.execute("SELECT id FROM listings WHERE source='solvia'").fetchone()[0] == "solvia:192413-155113"
+
+
+def test_solvia_two_opening_failures_are_the_source_failing(db, fake_http, monkeypatch):
+    import sources.es as es
+    from conftest import FakeResponse
+
+    monkeypatch.setattr(es, "SOLVIA_PROVINCES", {"15": "A Coruña", "27": "Lugo"})
+
+    def handler(method, url, kw):
+        return FakeResponse("", status=500)
+
+    fake_http(handler)
+    with pytest.raises(Exception):
+        REGISTRY["solvia"].func(db, max_price=50000)
+
+
 def test_bot_walled_sources_are_out_of_the_default_scan():
     for name in ("sareb", "gobidreal", "biddit", "anaf", "cyprus", "greece", "haya"):
         assert REGISTRY[name].default is False, name

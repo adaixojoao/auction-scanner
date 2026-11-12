@@ -102,10 +102,13 @@ PORTALS: dict[str, Portal] = {
         "optimhome", "FR", "https://www.optimhome.com",
         ("https://www.optimhome.com/fr/achat/terrain",),
         r"/immobilier/vente/.+/\d", r"/(\d{5,})"),
+    # No priceMax: the list ignores it. sort=price_asc leads with the cheap
+    # end (live check 2026-11-12: maisons from €11k, terrains from €3k); the
+    # scraper still drops cards over the budget.
     "laforet": Portal(
         "laforet", "FR", "https://www.laforet.com",
-        ("https://www.laforet.com/acheter/achat-maison",
-         "https://www.laforet.com/acheter/achat-terrain"),
+        ("https://www.laforet.com/acheter/achat-maison?sort=price_asc",
+         "https://www.laforet.com/acheter/achat-terrain?sort=price_asc"),
         r"/acheter/", r"(\d{6,})", id_last=True),
     "kleinanzeigen": Portal(
         "kleinanzeigen", "DE", "https://www.kleinanzeigen.de",
