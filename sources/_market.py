@@ -83,9 +83,11 @@ PORTALS: dict[str, Portal] = {
         ("https://www.paruvendu.fr/immobilier/vente/maison/?px1={max}",
          "https://www.paruvendu.fr/immobilier/vente/terrain/?px1={max}"),
         r"/immobilier/vente/", r"/(\d{7,})"),
+    # prix_max / priceMax / sort params are ignored. prixMax is the ceiling
+    # the site's own search applies (live 2026-11-12: cards stayed ≤ €50k).
     "entreparticuliers": Portal(
         "entreparticuliers", "FR", "https://www.entreparticuliers.com",
-        ("https://www.entreparticuliers.com/annonces-immobilieres/vente/maison",),
+        ("https://www.entreparticuliers.com/annonces-immobilieres/vente/maison?prixMax={max}",),
         r"ref-\d+", r"ref-(\d+)"),
     # /annonces/achat/maison ignores priceMax and redirects. /annonces/vente/maison
     # with priceMax=50000 kept every card at or under €50k (live check 2026-11-11).
@@ -115,10 +117,12 @@ PORTALS: dict[str, Portal] = {
         ("https://www.kleinanzeigen.de/s-haus-kaufen/preis::{max}/c208",
          "https://www.kleinanzeigen.de/s-grundstuecke-garten/preis::{max}/c207"),
         r"/s-anzeige/", r"/(\d{8,})"),
+    # /liste/…?pma=N redirects to an unfiltered /suche/ page. classified-search
+    # with priceMax keeps every card at or under the ceiling (live 2026-11-12).
     "immowelt": Portal(
         "immowelt", "DE", "https://www.immowelt.de",
-        ("https://www.immowelt.de/liste/deutschland/haeuser/kaufen?pmi=0&pma={max}",
-         "https://www.immowelt.de/liste/deutschland/grundstuecke/kaufen?pmi=0&pma={max}"),
+        ("https://www.immowelt.de/classified-search?distributionTypes=Buy&estateTypes=House&locations=AD02DE1&priceMax={max}",
+         "https://www.immowelt.de/classified-search?distributionTypes=Buy&estateTypes=Plot&locations=AD02DE1&priceMax={max}"),
         r"/expose/", _UUID),
     "willhaben": Portal(
         "willhaben", "AT", "https://www.willhaben.at",
@@ -206,13 +210,13 @@ PORTALS: dict[str, Portal] = {
         ("https://www.citya.com/annonces/vente/maison?prixMax={max}",
          "https://www.citya.com/annonces/vente/terrain?prixMax={max}"),
         r"/annonces/vente/(?:maison|terrain)/", r"/((?:TMAI|TTER)[A-Z0-9-]+)", id_last=True),
-    # The house search only accepts a few price buckets; €300,000 is one that
-    # answers. The buyer's own ceiling is applied when the row is saved.
-    # Plots honour pma. A stray €120 in a card is not a price.
+    # Same classified-search shape as DE Immowelt (live 2026-11-12: AT houses
+    # under priceMax stayed ≤ the ceiling; the old /suche/…/preis--N path did not).
+    # A stray €120 in a card is not a price.
     "immoweltat": Portal(
         "immoweltat", "AT", "https://www.immowelt.at",
-        ("https://www.immowelt.at/suche/kaufen/haus/preis--300000/osterreich/ad02at1",
-         "https://www.immowelt.at/liste/oesterreich/grundstuecke/kaufen?pmi=0&pma={max}"),
+        ("https://www.immowelt.at/classified-search?distributionTypes=Buy&estateTypes=House&locations=AD02AT1&priceMax={max}",
+         "https://www.immowelt.at/classified-search?distributionTypes=Buy&estateTypes=Plot&locations=AD02AT1&priceMax={max}"),
         r"/expose/", _UUID, min_amount=1000),
     # The results page ignores a price limit and leads with new expensive homes.
     # _scrape_era reads the search index the site's own filter uses. The path

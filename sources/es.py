@@ -545,18 +545,18 @@ def scrape_sareb(db, max_price: float = 100000, config: dict | None = None, **_)
     return total
 
 
-# This PC's firewall has been blocking haya.es (WinError 10013). Left
-# registered by name so Sources can show why; a login is tried when one is
-# stored, and cannot open the site until the firewall allows it.
+# haya.es has been unreachable from this PC (firewall WinError 10013, then
+# Cloudflare origin 522). Intrum folded Haya into Solvia (late 2024); the
+# solvia source covers that stock. Left registered so Sources can say why.
 @register("haya", "ES", default=False)
 def scrape_haya(db, max_price: float = 100000, config: dict | None = None, **_):
-    """haya.es — Sareb/BBVA repossessions."""
+    """haya.es — BBVA repossessions (now under Intrum/Solvia)."""
     import accounts
     session = accounts.account_session(db, config or {}, "haya")
     if session is None:
         raise SourceUnavailable(
             accounts.missing_account_message("haya")
-            + "; this PC's firewall has also been blocking the site (WinError 10013)")
+            + "; Haya/BBVA stock is under Intrum — use the solvia source")
     base = "https://www.haya.es"
     total = 0
     try:
@@ -565,6 +565,11 @@ def scrape_haya(db, max_price: float = 100000, config: dict | None = None, **_):
                                params={"page": page, "precioMax": int(max_price)})
             if resp.status_code == 404:
                 break
+            if resp.status_code in (520, 521, 522, 523, 524) or (
+                    resp.status_code >= 500 and "cloudflare" in (resp.text or "").lower()):
+                raise SourceUnavailable(
+                    f"haya.es origin is down (HTTP {resp.status_code}); "
+                    "Haya/BBVA stock is under Intrum — use the solvia source")
             resp.raise_for_status()
             try:
                 data = resp.json()
@@ -597,11 +602,13 @@ def scrape_haya(db, max_price: float = 100000, config: dict | None = None, **_):
             if len(items) < 20:
                 break
             time.sleep(0.8)
+    except SourceUnavailable:
+        raise
     except Exception as e:  # noqa: BLE001 — firewall vs HTTP vs parser
         if getattr(e, "winerror", None) == 10013 or "10013" in str(e):
             raise SourceUnavailable(
                 "haya.es is blocked by this PC's firewall (WinError 10013); "
-                "a login cannot open it until the firewall allows the site") from e
+                "Haya/BBVA stock is under Intrum — use the solvia source") from e
         raise
     return total
 

@@ -168,6 +168,11 @@ def test_portals_send_the_price_ceiling_the_site_applies():
     assert not any(u.rstrip("/").endswith("/vente") for u in PORTALS["optimhome"].urls)
     assert all("sort=price_asc" in u for u in PORTALS["laforet"].urls)
     assert all("cenado={max}" in u for u in PORTALS["bazos"].urls)
+    assert all("prixMax={max}" in u for u in PORTALS["entreparticuliers"].urls)
+    assert all("classified-search" in u and "priceMax={max}" in u for u in PORTALS["immowelt"].urls)
+    assert any("estateTypes=House" in u for u in PORTALS["immowelt"].urls)
+    assert any("estateTypes=Plot" in u for u in PORTALS["immowelt"].urls)
+    assert all("classified-search" in u and "priceMax={max}" in u for u in PORTALS["immoweltat"].urls)
 
 
 def test_habitaclia_reads_cheap_houses_across_inland_provinces():
