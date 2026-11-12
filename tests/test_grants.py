@@ -23,7 +23,7 @@ def write(path, *rows):
 def row(**kw):
     base = {"country": "PT", "measure": "X.1", "name": "Test grant", "case": "planting", "species": "any",
             "rate": "0.75", "legal_text": "Portaria test", "source_url": "https://example.org/law",
-            "checked_on": "2026-10-21", "status": "partial"}
+            "checked_on": "2026-10-21", "status": "partial", "call_closes": ""}
     return base | kw
 
 
@@ -50,15 +50,35 @@ def test_every_shipped_grant_row_is_sourced_and_well_formed():
             assert not r["cost_cap_eur_ha"] and not r["premium_eur_ha_year"]
 
 
-def test_portugal_names_pepac_for_a_native_planting_without_inventing_an_amount():
-    out = grants.for_project("PT", "cork oak", "planting", hectares=20, plant_eur_ha=2500)
+def test_portugal_names_pepac_for_a_native_planting_without_inventing_an_amount(tmp_path):
+    # The live 01/C.3.2.1/2025 call closed 2025-09-15; open a row with no close date
+    # so the naming/amount rules stay testable without inventing a €/ha cap.
+    path = write(tmp_path / "g.csv",
+                 row(measure="C.3.2.1", species="favoured_broadleaf", premium_years="20",
+                     income_loss_years="8-12", legal_text="Portaria n.º 124/2025/1"),
+                 row(measure="C.3.2.1", species="other", premium_years="15",
+                     income_loss_years="8-12", legal_text="Portaria n.º 124/2025/1"))
+    out = grants.for_project("PT", "cork oak", "planting", hectares=20, plant_eur_ha=2500, path=path)
     [g] = out["grants"]
     assert g["measure"] == "C.3.2.1" and g["status"] == "partial" and g["eur_ha_year"] is None
     assert "75% of eligible planting cost" in g["what"] and "not yet checked" in g["what"]
     assert "20 years" in g["what"]                             # favoured broadleaves: the longer premium
     assert "124/2025/1" in g["legal_text"]
-    other = grants.for_project("PT", "maritime pine", "planting", hectares=20, plant_eur_ha=2000)
+    other = grants.for_project("PT", "maritime pine", "planting", hectares=20, plant_eur_ha=2000, path=path)
     assert "15 years" in other["grants"][0]["what"]
+
+
+def test_portugal_refuses_a_closed_pepac_call():
+    out = grants.for_project("PT", "cork oak", "planting", hectares=20, plant_eur_ha=2500)
+    assert out["grants"] == []
+    assert any("closed on 2025-09-15" in r for r in out["refused"])
+
+
+def test_shipped_portugal_rows_keep_unit_costs_partial_and_record_the_closed_call():
+    pt = [r for r in grants.rows() if r["country"] == "PT" and r["measure"] == "C.3.2.1"]
+    assert pt and all(r["status"] == "partial" and not r["cost_cap_eur_ha"] for r in pt)
+    assert all(r["call_closes"] == "2025-09-15" for r in pt)
+    assert all(float(r["rate"]) == 0.75 for r in pt)
 
 
 def test_no_grant_for_keeping_a_stand_eucalyptus_or_an_orchard():
@@ -115,10 +135,14 @@ def plot(**kw):
     return base | kw
 
 
-def test_the_plan_names_a_grant_that_may_apply_and_never_counts_it(monkeypatch):
+def test_the_plan_names_a_grant_that_may_apply_and_never_counts_it(monkeypatch, tmp_path):
     pine = {"crop": "maritime pine", "eur_ha_year": 100, "carbon_eur_ha_year": 0, "note": "", "limits": [],
             "sources": [], "until": None}
     monkeypatch.setattr(forestry, "options", lambda *a, **k: [pine])
+    # Open call in the fixture table: the shipped PT call closed 2025-09-15.
+    monkeypatch.setattr(grants, "GRANTS_FILE",
+                        write(tmp_path / "open.csv",
+                              row(measure="C.3.2.1", species="other", premium_years="15")))
     plan = forestry.project_plan(plot(), 100_000)
     assert plan["crop"] == "maritime pine"
     line = next(l for l in plan["lines"] if l["label"] == "Grants that may apply")
@@ -126,6 +150,15 @@ def test_the_plan_names_a_grant_that_may_apply_and_never_counts_it(monkeypatch):
     assert any("ICNF" in s and "Count it only once it is approved" in s for s in plan["steps"])
     assert "3.5%" in plan["note"]
     assert plan["acquire"] == forestry.project_plan(plot(), 100_000)["acquire"]
+
+
+def test_the_plan_says_when_the_pepac_call_has_closed(monkeypatch):
+    pine = {"crop": "maritime pine", "eur_ha_year": 100, "carbon_eur_ha_year": 0, "note": "", "limits": [],
+            "sources": [], "until": None}
+    monkeypatch.setattr(forestry, "options", lambda *a, **k: [pine])
+    plan = forestry.project_plan(plot(), 100_000)
+    line = next(l for l in plan["lines"] if l["label"] == "Grants that may apply")
+    assert line["value"] == "none known" and "closed on 2025-09-15" in line["note"]
 
 
 def test_an_orchard_plan_says_why_no_forest_grant_applies():

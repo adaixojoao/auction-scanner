@@ -763,3 +763,48 @@ def test_purge_orphan_scores_drops_rows_without_listings(db, add):
     assert "fotocasa:gone" not in dbmod._SCORED["land"]
     assert alive["id"] in dbmod._SCORED["land"]
     assert purge_orphan_scores(db) == 0
+
+
+def test_load_best_excludes_expired_sales(db, add):
+    """Alerts / Offers / report tops must not rank a sale whose deadline has passed."""
+    from datetime import datetime, timezone
+
+    from db import load_best, load_listings
+    add(external_id="live", title="Moradia T3 em bom estado", price=25000, area_m2=90,
+        date_end="2030-06-01T12:00:00")
+    add(external_id="gone", title="Moradia T3 em bom estado", price=20000, area_m2=90,
+        date_end="2020-01-01T12:00:00")
+    now = datetime(2026, 11, 12, tzinfo=timezone.utc)
+    hidden = {it["id"]: it.get("hidden_reason")
+              for it in load_listings(db, include_hidden=True, apply_min_score=False, now=now)}
+    assert hidden.get("eleiloes:gone") == "expired"
+    ids = {it["id"] for it in load_best(db, now=now, filters={"min_score": 0})}
+    assert "eleiloes:gone" not in ids
+    assert "eleiloes:live" in ids
+
+
+def test_load_best_drops_a_dangerous_evaluator_fail(db, add, monkeypatch):
+    """A stated legal FAIL leaves publication; UNKNOWN evidence must not."""
+    import json
+
+    import db as dbmod
+    from db import load_best
+    # Shadow eval would rewrite the Decision on load; keep the stored FAIL.
+    monkeypatch.setattr(dbmod, "_shadow_evaluate", lambda *a, **k: None)
+    add(external_id="ok", title="Moradia T3 em bom estado", price=25000, area_m2=90,
+        date_end="2030-06-01T12:00:00")
+    bad = add(external_id="blocked", title="Moradia T3 em bom estado", price=22000, area_m2=90,
+              date_end="2030-06-01T12:00:00")
+    db.execute(
+        """INSERT INTO evaluator_decisions
+           (listing_id, state, requirements_json, provenance_json, evidence_rev_sum, evaluated_at)
+           VALUES (?, 'research', ?, '{}', 0, ?)""",
+        (bad["id"],
+         json.dumps([{"key": "title_status", "outcome": "fail", "dangerous": True,
+                      "code": "LEGAL_TITLE", "message": "title blocked"}]),
+         "2026-11-12T00:00:00+00:00"),
+    )
+    db.commit()
+    ids = {it["id"] for it in load_best(db, filters={"min_score": 0})}
+    assert bad["id"] not in ids
+    assert "eleiloes:ok" in ids

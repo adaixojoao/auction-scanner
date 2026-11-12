@@ -15,11 +15,12 @@ from __future__ import annotations
 import csv
 import functools
 import os
+from datetime import date
 
 GRANTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "forest_grants.csv")
 FIELDS = ("country", "region", "measure", "name", "case", "species", "rate", "bonus_max", "cost_cap_eur_ha",
           "premium_eur_ha_year", "premium_years", "income_loss_years", "min_ha", "max_timber_x_cost",
-          "conditions", "legal_text", "source_url", "checked_on", "status")
+          "call_closes", "conditions", "legal_text", "source_url", "checked_on", "status")
 STATUSES = ("partial", "confirmed")
 CASES = ("planting", "replanting")
 # The broadleaves Portugal's regional forest plans (PROF) normally favour. Which
@@ -121,6 +122,15 @@ def for_project(country: str | None, crop: str | None, case: str | None, *, hect
             out["refused"].append(f"{r['measure']}: a {crop} orchard is normally a farm investment, "
                                   "not forest planting — check which measure applies")
             break
+        closes = (r.get("call_closes") or "").strip()
+        if closes:
+            try:
+                if date.fromisoformat(closes) < date.today():
+                    out["refused"].append(
+                        f"{r['measure']}: the call closed on {closes}; wait for the next aviso")
+                    continue
+            except ValueError:
+                pass
         min_ha = _number(r["min_ha"])
         if min_ha and hectares < min_ha:
             out["refused"].append(f"{r['measure']}: needs at least {min_ha:g} ha")
@@ -134,7 +144,8 @@ def for_project(country: str | None, crop: str | None, case: str | None, *, hect
         out["grants"].append({"measure": r["measure"], "name": r["name"], "what": _what(r),
                               "eur_ha_year": _value(r, plant_eur_ha), "legal_text": r["legal_text"],
                               "source_url": r["source_url"], "checked_on": r["checked_on"],
-                              "status": r["status"], "conditions": r["conditions"]})
+                              "status": r["status"], "conditions": r["conditions"],
+                              "call_closes": closes or None})
     if out["grants"]:
         out["text"] = "; ".join(f"{g['name']} ({g['measure']}): {g['what']}" for g in out["grants"])
     elif out["refused"]:

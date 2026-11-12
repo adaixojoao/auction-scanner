@@ -3218,6 +3218,11 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
     only interesting as a let or as a plot is not judged as somewhere to live
     and silently dropped. `modes` limits which goals compete: Offers passes
     the ones that can return cash.
+
+    Uncleared extreme discounts and Decisions with a dangerous FAIL (legal /
+    title) are dropped. Expired and other hidden rows are dropped unless the
+    caller passes include_hidden=True (the report's count pass). UNKNOWN
+    evaluator evidence does not drop a listing — that would empty the tops.
     """
     from common import mode_max_price
     from config import load_config
@@ -3274,7 +3279,44 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
         }
     cleared = _extreme_clearances(db, extreme_ids, ev_rev_sums=ev_rev_sums_best)
     blocked = extreme_ids - cleared
-    return [it for it in best.values() if it["id"] not in blocked]
+    # Dangerous evaluator FAILs (legal/title) leave publication the same way as
+    # uncleared extreme discounts. UNKNOWN evidence stays — scrapers rarely fill
+    # ownership/title yet, so gating on UNKNOWN would empty the tops (F01).
+    out = [it for it in best.values() if it["id"] not in blocked]
+    blocked_legal = _dangerous_fail_ids(db, {it["id"] for it in out})
+    out = [it for it in out if it["id"] not in blocked_legal]
+    # Callers that want hidden counts pass include_hidden=True (the report).
+    # Alerts and Offers omit that flag: closed sales must not be a top candidate.
+    if not kw.get("include_hidden"):
+        out = [it for it in out if not it.get("hidden_reason")]
+    return out
+
+
+def _dangerous_fail_ids(db: sqlite3.Connection, listing_ids: set[str]) -> set[str]:
+    """Listings whose stored Decision has a dangerous FAIL (legal/title blocker).
+
+    UNKNOWN on a dangerous requirement is not enough to drop a listing: that is
+    the common case until scrapers fill ownership and title. A stated FAIL is.
+    """
+    if not listing_ids:
+        return set()
+    bad: set[str] = set()
+    ids = tuple(listing_ids)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for row in db.execute(
+            "SELECT listing_id, requirements_json FROM evaluator_decisions "
+            f"WHERE listing_id IN ({','.join('?' * len(chunk))})",
+            chunk,
+        ):
+            try:
+                reqs = json.loads(row["requirements_json"] or "[]")
+            except (TypeError, ValueError):
+                continue
+            if any(isinstance(r, dict) and r.get("dangerous") and r.get("outcome") == "fail"
+                   for r in reqs):
+                bad.add(row["listing_id"])
+    return bad
 
 
 # ─── Publication snapshot (F15) ─────────────────────────────────────────────

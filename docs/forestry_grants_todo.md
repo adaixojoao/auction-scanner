@@ -10,25 +10,26 @@ decision from the owner.
 
 ## Needs the official texts
 
-1. **Portugal, C.3.2.1 amounts.** Checked 2026-11-09: the Diário da República page returned no article text. The call notice (Aviso 01/C.3.2.1/2025) was reached and says unit costs sit in its Annex I and in Portaria 124/2025/1 Annex I, but the extracted table is not readable as one cap per species and slope. Rows stay `partial`. Do not type a figure from that extract. Read Annex II of Portaria n.º 124/2025/1 (as
-   amended by 313/2025/1 and 281-B/2026/1) and the call notice
-   Aviso 01/C.3.2.1/2025. Fill `cost_cap_eur_ha` by slope band (needs a
-   `slope_min`/`slope_max` pair of columns), `premium_eur_ha_year` for favoured
-   broadleaves and for other species, and the income-loss premium. Then mark the
-   rows `confirmed`.
+1. **Portugal, C.3.2.1 amounts.** Checked 2026-11-12: Portaria 124/2025/1 Anexo II
+   states support rates 75–100% by beneficiary type (kept `rate=0.75` as the
+   floor for restantes beneficiários). Aviso 01/C.3.2.1/2025 Anexo I is a
+   **schedule of unit costs by operation and slope** (€/ha or €/plant), not one
+   `cost_cap_eur_ha`. Rows stay `partial` until slope bands
+   (`slope_min`/`slope_max`) model a package. Premiums are C.3.2.8 (separate).
    - <https://diariodarepublica.pt/dr/detalhe/portaria/124-2025-911850388>
    - <https://pepacc.pt/wp-content/uploads/2025/03/Aviso-01-C321-2025.pdf>
    - <https://pepacc.pt/wp-content/uploads/2025/03/Ficha-de-intervencao-C.3.2.1.-%E2%80%93-Florestacao-de-terras-agricolas-e-nao-agricolas.pdf>
 2. **Portugal, the indicative maintenance figures** (€125 / €100 a hectare a
    year under 25% slope, €165 / €135 above) come from a 2022 GPP guide and may
    belong to C.3.2.8. Confirm which measure they are for before using them.
-3. **Portugal, eucalyptus.** Confirm C.3.2.1 excludes it (`grants.NEVER`
-   already does, as the repo's rule).
+3. **Portugal, eucalyptus.** Confirmed 2026-11-12: Portaria 124/2025/1 Anexo I
+   excludes fast-growth species (talhadia <20 years, Christmas trees, energy
+   crops). `grants.NEVER` already blocks eucalyptus.
 4. **Portugal, which species each PROF favours.** `grants.FAVOURED` is cork oak
    and a native mix; the regional plans decide. Map district → PROF region.
 5. **Portugal, replanting existing forest** (not C.3.2.1). Find the measure and
    add a `replanting` row.
-6. **France, décret n° 2026-937.** Checked 2026-11-09: articles D156-6 to D156-11 say replanting subsidies for full planting follow a national schedule set by ministerial order. They do not state a euro amount. The row stays `partial`. Read the decree and its planting schedule
+6. **France, décret n° 2026-937.** Checked 2026-11-12: articles D156-6 to D156-11 say replanting subsidies for full planting follow a national schedule set by ministerial order. They do not state a euro amount. The row stays `partial`. Read the decree and its planting schedule
    annex. Fix the base rate (sources say 37.5–50%), the certification bonus and
    the per-hectare schedule, and check that the 2025 conditions still hold
    (timber worth under 3× the replanting cost, species mix above 4 ha).
@@ -37,7 +38,9 @@ decision from the owner.
    (productive investment) per comunidad: at least Galicia, Castilla y León,
    Extremadura, Andalucía. Needs a district → comunidad map and a `region` per row.
 8. **Belgium, Netherlands, Luxembourg.** Not researched.
-9. **Call deadlines.** Add a `call_closes` column so a closed call says so.
+9. **Call deadlines.** Done 2026-11-12: `call_closes` column; PT C.3.2.1 call
+   01/C.3.2.1/2025 closed **2025-09-15** (pepacc.pt). A closed call is refused,
+   not scored.
 
 ## Decided
 
