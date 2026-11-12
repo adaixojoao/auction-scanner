@@ -375,6 +375,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         LOG.exception("Joining Citius to e-leilões failed")
                     mark_duplicates(db)
                     try:
+                        from db import purge_orphan_scores
+                        purge_orphan_scores(db)
+                    except Exception:  # noqa: BLE001 — a cache tidy must never fail the scan
+                        LOG.exception("Dropping orphan scores failed")
+                    try:
                         import outcomes
                         outcomes.record_results(db)      # ended sales and their last bid
                     except Exception:  # noqa: BLE001
@@ -384,25 +389,33 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                     # below reads afresh, with what the lookups found.
                     from db import reuse_lists
                     with reuse_lists():
-                        _set_state(db, current="map positions")
                         both = None                  # Live and invest list, shared below
                         try:
                             import geo
+                            _set_state(db, current="map: shortlist")
                             best = enrich_order(db, cfg)
                             session = make_session()
+                            _set_state(db, current="map: towns")
                             geo.locate_towns(db, session, best)
+                            _set_state(db, current="map: sale pins")
                             geo.check_sale_pins(db, session, best, geo.town_index(db))
+                            _set_state(db, current="map: geocode")
                             geo.geocode_pending(db, session, best, towns=geo.town_index(db))
                             import cadastre
+                            _set_state(db, current="map: cadastre")
                             cadastre.locate_pending(db, session, best, geo.town_index(db))
+                            _set_state(db, current="map: water")
                             geo.check_water_pending(db, session, best)
                             import outline                    # the house and its plot on the map
+                            _set_state(db, current="map: outline")
                             outline.check_pending(db, session, best)
                             # Live and invest once: surroundings, seaside and stale share it.
                             both = both_rows(db, cfg)
                             import surroundings              # noise, quakes, amenities, zoning, sold prices
+                            _set_state(db, current="map: surroundings")
                             surroundings.check_pending(db, session, both_first(db, cfg, best, both=both))
                             import climate                   # heat by 2090, water, fire, flood: local files
+                            _set_state(db, current="map: climate")
                             climate.assess_pending(db, best, geo.town_index(db), seaside_first=True)
                         except Exception:  # noqa: BLE001 — a map position must never fail the scan
                             LOG.exception("Locating listings failed")
@@ -410,14 +423,17 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                             if both is None:
                                 both = both_rows(db, cfg)
                             from sources.pt import read_imovirtual_details
+                            _set_state(db, current="map: imovirtual")
                             read_imovirtual_details(db, make_session(timeout=30),
                                                     sorted((it for it in both if not it.get("hidden_reason")),
                                                            key=lambda it: -(it.get("rank") or 0)))
+                            _set_state(db, current="map: seaside")
                             locate_seaside(db, cfg, make_session(), rows=both)
                         except Exception:  # noqa: BLE001
                             LOG.exception("Locating seaside homes failed")
                         try:
                             import site_check                 # slope, forest type, Natura: land and forestry
+                            _set_state(db, current="map: site check")
                             plots = _plots_for_site_check(db, cfg)
                             site_check.check_pending(db, plots)
                         except Exception:  # noqa: BLE001
@@ -428,6 +444,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                             photos.check_pending(db, cfg, photos.queue(db, cfg))
                         except Exception:  # noqa: BLE001 — a photo check must never fail the scan
                             LOG.exception("Photo check failed")
+                        _set_state(db, current="perizia")
                         try:
                             import perizia                   # the expert's report of the best Italian sales
                             ranked = sorted(both or [], key=lambda it: -(it.get("rank") or 0))
@@ -445,6 +462,7 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                             confirm.check_stale(db, cfg, make_session(), rows=both)
                         except Exception:  # noqa: BLE001
                             LOG.exception("Stale check failed")
+                    _set_state(db, current="scoring")
                     if not rescore(db, cfg):
                         raise RuntimeError("Post-enrichment rescoring failed; reports and alerts not published")
                     publication_rescored = True

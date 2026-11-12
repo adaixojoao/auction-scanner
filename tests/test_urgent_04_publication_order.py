@@ -71,3 +71,28 @@ def test_disabled_publication_remains_disabled(db, monkeypatch):
     assert "report" not in events
     assert "alerts" not in events
     assert "requests" not in events
+
+
+def test_enrichment_writes_scan_state_current_labels(db, monkeypatch):
+    prepare_fake_scan(db, monkeypatch)
+    seen = []
+    real = pipeline._set_state
+
+    def track(conn, **fields):
+        if fields.get("current"):
+            seen.append(fields["current"])
+        return real(conn, **fields)
+
+    monkeypatch.setattr(pipeline, "_set_state", track)
+    monkeypatch.setattr("geo.check_sale_pins", lambda *a, **k: None)
+    monkeypatch.setattr("surroundings.check_pending", lambda *a, **k: 0)
+    monkeypatch.setattr("sources.pt.read_imovirtual_details", lambda *a, **k: 0)
+    monkeypatch.setattr(pipeline, "locate_seaside", lambda *a, **k: 0)
+    monkeypatch.setattr("perizia.check_pending", lambda *a, **k: 0)
+    monkeypatch.setattr("confirm.check_stale", lambda *a, **k: None)
+    monkeypatch.setattr("db.purge_orphan_scores", lambda *a, **k: 0)
+    pipeline.run_scan(db=db, cfg={"max_price": 100000}, report=False, alerts=False)
+    for label in ("de-duplicating", "map: shortlist", "map: towns", "map: geocode",
+                  "map: site check", "photo check", "perizia", "checking links",
+                  "scoring", "refreshing the lists"):
+        assert label in seen, label
