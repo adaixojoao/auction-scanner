@@ -149,6 +149,22 @@ def test_percent_share_of_solar_or_inmueble_is_caught():
     assert is_percent_share("VENDA DE 50% DO DIREITO DA PROPRIEDADE DA MORADIA")
     assert is_percent_share("Em venda apenas 50% do imóvel")
     assert not is_percent_share("Abre a 50% do valor base")
+    assert is_percent_share("Subasta del 50% sobre vivienda unifamiliar")
+    assert is_percent_share("8,333333% NUDA PROP. VIVIENDA EN CADIZ")
+    assert is_percent_share("33,33% PLENO DOMINIO VIVIENDA EN MADRID")
+
+
+def test_a_leilosoc_proportion_of_land_is_not_the_whole():
+    from scoring import is_percent_share, score_detail
+    title = "Proporção de Terreno com 23 Hectares · Quinta do Anjo, Palmela"
+    desc = ("Proporção de Terreno de mato com Área Total de 23 hectares. "
+            "O bem em venda não constitui uma propriedade plena, apenas uma parte do mesmo.")
+    assert is_percent_share(title)
+    assert is_percent_share(desc)
+    sc, reasons = score_detail(item(title=title, description=desc, price=52500,
+                                    area_m2=230000, source="leilosoc", country="PT",
+                                    tipo="terreno"))
+    assert sc == 0 and "fractional" in reasons[0]
 
 
 def test_vacant_is_not_occupied():

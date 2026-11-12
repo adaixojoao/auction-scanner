@@ -56,6 +56,21 @@ def test_tgss_finca_urbana_title_with_local_comercial_body_is_not_a_home():
     assert scoring.score(item, mode="bare")[0] == 0
 
 
+def test_tgss_truncated_nuda_and_pleno_dominio_percent_are_shares():
+    # TGSS drops "de/del" and abbreviates: these used to rank as whole homes.
+    assert scoring.is_percent_share("8,333333% NUDA PROP. VIVI ENDA CL DOCTOR FLEMING")
+    assert scoring.is_percent_share("33,33% PLENO DOMINIO VIVI ENDA EN MADRID F.R. 7740")
+    assert not scoring.is_percent_share("100% PLENO DOMINIO VIVIENDA EN MADRID")
+
+
+def test_eactivos_percent_sobre_vivienda_is_a_share():
+    title = ("Subasta del 50% sobre vivienda unifamiliar aislada con garaje "
+             "en Barberà del Vallés (Barcelona)")
+    assert scoring.is_percent_share(title)
+    sc, reasons = scoring.score(_sale("eactivos", title, title=title))
+    assert sc == 0 and "fractional" in reasons[0]
+
+
 def test_an_ava_parte_indivisa_with_a_week_is_a_timeshare():
     text = ("UNA CINCUENTA Y DOS AVA PARTE INDIVISA QUE DA DERECHO DE PROPIEDAD Y USO EXCLUSIVO "
             "DURANTE EL PERIODO SEMANAL NUM 24 DEL CALENDARIO DEL APARTAMENTO NUM 61")
