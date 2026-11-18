@@ -104,7 +104,12 @@ def _num(v) -> float:
 
 
 def spain_charges(raw: dict) -> tuple[str, float]:
-    """("none" | "stated" | "unknown", amount) from the BOE "Cargas" field."""
+    """("none" | "stated" | "unknown", amount): the registry certificate when it
+    was read (registry_charges), else the BOE "Cargas" field."""
+    from registry_charges import summary
+    read = summary(raw.get("cert"))
+    if read and (read[0] != "unknown" or raw.get("cert", {}).get("status") == "read"):
+        return read[0], read[1]
     text = str(raw.get("cargas") or "").strip()
     # Only a figure with a currency marker: "Ejecución 922/2014" is not €922.
     amount = _num(raw.get("charges_eur")) or float(find_price(text) or 0)
@@ -154,10 +159,15 @@ def _spain(item: dict, raw: dict, base: float) -> dict | None:
                        "approves a bid that covers the claim (LEC art. 670.4), even under half the value.")
         out["caveats"].append("the owner can pay the claim and stop the sale until the last moment — "
                               "small claims are often paid off")
+        from registry_charges import summary
+        read = summary(raw.get("cert"))
+        if read:
+            out["caveats"].append(read[2])
         if state == "stated":
             out["charges"] = charges
-            out["caveats"].append(f"charges of {_eur(charges)} stay with the property and are paid on top")
-        elif state == "unknown":
+            if not read:
+                out["caveats"].append(f"charges of {_eur(charges)} stay with the property and are paid on top")
+        elif state == "unknown" and not (read and raw["cert"].get("status") == "read"):
             out["caveats"].append("a small claim is often a junior creditor's (community fees, a second loan): "
                                   "older charges such as the mortgage stay with the property and are not "
                                   "stated here — read the edict and the registry certificate")

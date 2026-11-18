@@ -129,6 +129,7 @@ def scrape_spain(db, max_price: float = 50000, **_):
         total, full, pages = total + got, full and whole, pages + read
 
     enrich_spain_details(db, session)
+    fetch_spain_certificates(db, session)
     fetch_catastro(db, session)
     return ScanCount(total, "full" if full else "partial", pages)
 
@@ -301,8 +302,9 @@ def clear_step_min_price(db, row: dict) -> None:
 BOE_DETAIL = "https://subastas.boe.es/detalleSubasta.php"
 BOE_TABS = (("general", 1), ("authority", 2), ("goods", 3))
 # Raised when the tabs are read for something new, so sales already opened
-# are read once more (2: the amount claimed and the valuation, 2026-11-18).
-BOE_DETAIL_VERSION = 2
+# are read once more (2: the amount claimed and the valuation; 3: the list of
+# documents, 2026-11-18).
+BOE_DETAIL_VERSION = 3
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
@@ -315,9 +317,11 @@ def _spain_parse_general(html: str) -> dict:
     """The general tab. "Cantidad reclamada" is what the execution is for: a bid
     that covers it can be approved under half the value (LEC art. 670.4; see
     sale_floors). A valuation of €0 means none was given."""
-    f = _spain_table_fields(BeautifulSoup(html, "html.parser"))
+    soup = BeautifulSoup(html, "html.parser")
+    f = _spain_table_fields(soup)
     lots = re.match(r"\s*(\d+)", _spain_field(f, "Lotes") or "")
     return {
+        "boe_docs": boe_documents(soup) or None,
         "tipo_subasta": _spain_field(f, "Tipo de subasta"),
         "expediente": _spain_field(f, "Cuenta expediente", "Expediente"),
         "deposito": parse_price(_spain_field(f, "Importe del depósito", "depósito", "deposito")),
@@ -325,6 +329,23 @@ def _spain_parse_general(html: str) -> dict:
         "tasacion_eur": parse_price(_spain_field(f, "Tasación", "Tasacion")),
         "lotes": int(lots.group(1)) if lots else None,
     }
+
+
+def boe_documents(soup) -> list[dict]:
+    """The "Documentos" box of a BOE auction: the court notice, the registry's
+    charges certificate, the valuation… [{"title", "path", "kind"}] (photos are
+    not documents). Titles are the court's own and vary ("certificacion cargas",
+    "CERTIFICADO DE CARGAS ART. 688 LEC"): registry_charges.classify reads them."""
+    from registry_charges import classify
+    out = []
+    for box in soup.select("div.caja"):
+        legend = box.select_one("h5")
+        if not legend or "documento" not in normalize(legend.get_text()):
+            continue
+        for a in box.select("a[href*='verDocumento.php']"):
+            title = a.get_text(" ", strip=True)[:160]
+            out.append({"title": title, "path": a["href"].lstrip("./"), "kind": classify(title)})
+    return out[:20]
 
 
 def _spain_parse_authority(html: str) -> dict:
@@ -367,6 +388,70 @@ def spain_details(pages: dict[str, str]) -> tuple[dict, dict]:
     for tab, html in pages.items():
         extra.update({k: v for k, v in _TAB_PARSERS[tab](html).items() if v})
     return fields, extra
+
+
+# ─── The registry certificate of a small-claim sale ─────────────────
+BOE_BASE = "https://subastas.boe.es/"
+CERTIFICATES_PER_SCAN = 40
+
+
+def fetch_spain_certificates(db, session, limit: int = CERTIFICATES_PER_SCAN) -> int:
+    """Read the registry's charges certificate of each open small-claim court
+    sale (sale_floors), once: what passes to the buyer besides the bid
+    (registry_charges). Only these sales: the claim is what makes the charges
+    decide the deal. Returns how many were read as text."""
+    import sale_floors
+    import registry_charges
+    from common import patch_raw
+    rows = db.execute("""
+        SELECT * FROM listings WHERE source = 'spain'
+          AND raw_json LIKE ? AND raw_json NOT LIKE '%"cert_checked"%'
+          AND (date_end IS NULL OR date_end >= ?)
+        ORDER BY date_end IS NULL, date_end""",
+        # Read with the documents box (a sale with no documents has no "boe_docs").
+        (f'%"detail_v": {BOE_DETAIL_VERSION}%', datetime.now().strftime("%Y-%m-%d"))).fetchall()
+    done = tried = 0
+    for row in rows:
+        item = dict(row)
+        if tried >= limit or not sale_floors.floor_price(item):
+            continue
+        raw = json.loads(item["raw_json"])
+        doc = next((d for d in raw.get("boe_docs") or [] if d.get("kind") == "charges"), None)
+        today = datetime.now().strftime("%Y-%m-%d")
+        if not doc:
+            patch_raw(db, item["id"], {"cert": {"status": "not_published"}, "cert_checked": today})
+            db.commit()
+            continue
+        url = safe_url(BOE_BASE + doc["path"])
+        tried += 1
+        try:
+            resp = session.get(url, timeout=60)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.info(f"  Spain certificate {item['external_id']}: {type(e).__name__}; next scan")
+            continue
+        if len(resp.content) > registry_charges.MAX_PDF_BYTES:
+            cert = {"status": "unclear", "why": "the file is too large to read here"}
+        else:
+            text = registry_charges.pdf_text(resp.content)
+            if text is None:
+                LOG.warning("  Spain certificates: pypdf is not installed; not read")
+                return done
+            if len(text.strip()) < registry_charges.MIN_TEXT:
+                cert = {"status": "scanned"}
+            else:
+                case = registry_charges.case_from_account(raw.get("expediente"))
+                cert = registry_charges.read_certificate(text, {case} if case else None)
+                if cert["status"] == "unreadable":
+                    cert = {"status": "unclear", "why": "its text is too garbled (an OCR scan)"}
+                done += cert["status"] == "read"
+        cert.update(url=url, title=doc.get("title"), read_on=today)
+        patch_raw(db, item["id"], {"cert": cert, "cert_checked": today})
+        db.commit()
+        time.sleep(0.4)
+    if tried:
+        LOG.info(f"  Spain certificates: {tried} opened, {done} read as text")
+    return done
 
 
 # ─── Catastro: Spain's land registry, free and public ───────────────

@@ -61,6 +61,13 @@ def _floor(item: dict, key: str):
     return floor.get(key) if floor else None
 
 
+def _certificate(raw: dict) -> str | None:
+    """What the registry certificate says passes to the buyer (registry_charges)."""
+    from registry_charges import summary
+    read = summary(raw.get("cert"))
+    return read[2] if read else None
+
+
 def _budget_note(item: dict) -> str | None:
     from common import scrape_max_price
     from config import load_config
@@ -93,6 +100,7 @@ _FACTS = [
     ("Valuation", lambda it, r: _money(r.get("tasacion_eur")) if r.get("tasacion_eur") != it.get("price") else None),
     ("How low it can go", lambda it, r: _floor(it, "rule")),
     ("Against your budget", lambda it, r: _budget_note(it)),
+    ("Registry certificate", lambda it, r: _certificate(r)),
     ("If it does not sell", lambda it, r: _floor(it, "next_round")),
     ("Before you count on it", lambda it, r: "; ".join(_floor(it, "caveats") or []) or None),
     ("Ends", lambda it, r: (
@@ -333,6 +341,16 @@ def related(db, item: dict) -> list[dict]:
     original = safe_url(raw.get("original_url"))
     if original and original != item.get("url"):
         out.append({"label": f"Seller's page ({raw.get('site_name') or 'original'})", "url": original})
+    # A Spanish court sale's own documents on the BOE: the notice, the registry's
+    # charges certificate, the valuation.
+    labels = {"charges": "Registry charges certificate", "notice": "Court notice (edicto)",
+              "valuation": "Valuation report", "order": "Court order"}
+    for doc in raw.get("boe_docs") or []:
+        if not isinstance(doc, dict) or doc.get("kind") not in labels:
+            continue
+        url = safe_url("https://subastas.boe.es/" + str(doc.get("path") or "").lstrip("./"))
+        if url:
+            out.append({"label": f"{labels[doc['kind']]} (BOE): {str(doc.get('title') or '')[:60]}", "url": url})
     public = safe_url(raw.get("publicUrl"))
     if public and public != item.get("url"):
         out.append({"label": "Court notice", "url": public})

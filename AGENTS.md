@@ -118,6 +118,15 @@ so; it is still priced at its value. Spain's BOE is read every day
 (`es_every_hours`), sales not open yet ("PU") included, and each new
 small-claim sale is alerted once (`telegram_alert.alert_small_claims`).
 
+For those sales the registry's charges certificate is read from the BOE once
+(`sources.es.fetch_spain_certificates` → `registry_charges`). Its reading is
+conservative and says it was automatic: only a charge naming this sale's case
+(from the BOE account number) or "la entidad actora" is the creditor's own;
+every other mortgage or seizure counts as passing to the buyer; a garbled
+amount makes the total unknown, never smaller; a scan, a bundle of properties or
+a list it cannot follow is "unclear" and left to the person. Fixtures are
+made up: real certificates name people.
+
 ## A position is not a fact about the building
 
 `geo.py` says where a listing is and how exact that is ("sale", "street",

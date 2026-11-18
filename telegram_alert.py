@@ -194,7 +194,15 @@ def format_small_claim(item: dict) -> str:
         f"The court may approve a bid that covers the claim if no one bids 70% and neither the "
         f"debtor nor the creditor steps in. It is not a bid to make.\n{caveats}\n\n"
         f"<a href=\"{_esc(item.get('url') or '')}\">View on the BOE →</a>"
+        + _certificate_link(item)
     )
+
+
+def _certificate_link(item: dict) -> str:
+    from common import safe_url
+    from listing_info import raw_of
+    url = safe_url((raw_of(item).get("cert") or {}).get("url"))
+    return f"\n<a href=\"{_esc(url)}\">Registry charges certificate →</a>" if url else ""
 
 
 def alert_small_claims(db, cfg: dict) -> int:
