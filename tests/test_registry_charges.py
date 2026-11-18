@@ -128,7 +128,8 @@ def test_document_titles():
                         "Certificación de dominio y cargas.": "charges", "NOTA SIMPLE ACTUALIZADA": "charges",
                         "0 - GUIA para comprender el contenido de la certificación de cargas": "other",
                         "EDICTO SUBASTA": "notice", "INFORME VALORACIÓN DEL PERITO": "valuation",
-                        "Decreto despacho ejecucion": "order"}.items():
+                        "Decreto despacho ejecucion": "order", "CARGAS": "charges",
+                        "PERICIAL": "valuation"}.items():
         assert rc.classify(title) == kind, title
 
 

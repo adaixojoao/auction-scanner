@@ -255,7 +255,9 @@ def _spain_parse_detail(html: str) -> dict:
         h = soup.select_one("#contenido h3, h3")
         if h:
             ht = h.get_text(" ", strip=True)
-            if ht and not ht.upper().startswith("SUBASTA SUB-"):
+            # A tab's own heading ("Datos de la subasta") is not the property.
+            if ht and not ht.upper().startswith("SUBASTA SUB-") and not re.match(
+                    r"(datos|informaci[oó]n)\b", ht, re.I):
                 title = ht[:120]
 
     am = re.search(r"(\d{1,3}(?:[.\s]\d{3})+,\d{1,2}|\d+,\d{1,2}|\d+)\s*m[²2]", text, re.I)

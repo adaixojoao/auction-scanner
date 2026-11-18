@@ -46,12 +46,12 @@ def classify(title: str) -> str:
     t = normalize(title)
     if re.search(r"\bgu[i]a\b", t):
         return "other"                   # the registrars' guide to reading a certificate
-    if re.search(r"\bnota simple\b", t) or (
+    if re.search(r"\bnota simple\b|\bcargas?\b", t) or (
             re.search(r"certific|certificad|registral", t) and re.search(r"carga|dominio|titularidad|registral", t)):
         return "charges"
     if re.search(r"\bedicto\b|condiciones|convocatoria|\banuncio\b", t):
         return "notice"
-    if re.search(r"tasaci|valoraci|perit|avaluo", t):
+    if re.search(r"tasaci|valoraci|perit|pericial|avaluo", t):
         return "valuation"
     if re.search(r"\bauto\b|\bdecreto\b|mandamiento|oficio", t):
         return "order"
