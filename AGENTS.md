@@ -101,6 +101,16 @@ from a stored `site_check` (Natura 2000 / ZNIEFF), never invent a designation.
 A map miss is not "not protected". Eucalyptus is fire-prone and new planting
 is normally restricted in Portugal (DL 96/2013) — it is not a timber crop.
 
+## How low a forced sale may go: one place, never a bid
+
+`sale_floors.legal_floor()` holds each country's rule for the lowest price a
+court or tax sale may accept (Spain's LEC 670.4 claim rule, Germany's ZVG value
+limits, Portugal's 85% and the tax ladder, Italy's 75%…), hedged and with what
+to check. Only a floor well under the price (`RANK_AT_MOST`) adds to a rank,
+through `rank_share()`; a Spanish claim with charges not stated ranks only as the
+half-value rule. `bidcap`, the evaluator and `price_to_pay()` never read it.
+Add a country there, with a test, not in a scorer.
+
 ## A position is not a fact about the building
 
 `geo.py` says where a listing is and how exact that is ("sale", "street",

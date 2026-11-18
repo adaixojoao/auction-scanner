@@ -275,6 +275,9 @@ def clear_step_min_price(db, row: dict) -> None:
 # optional.
 BOE_DETAIL = "https://subastas.boe.es/detalleSubasta.php"
 BOE_TABS = (("general", 1), ("authority", 2), ("goods", 3))
+# Raised when the tabs are read for something new, so sales already opened
+# are read once more (2: the amount claimed and the valuation, 2026-11-18).
+BOE_DETAIL_VERSION = 2
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
@@ -284,11 +287,18 @@ def _spain_occupation(text: str | None) -> str | None:
 
 
 def _spain_parse_general(html: str) -> dict:
+    """The general tab. "Cantidad reclamada" is what the execution is for: a bid
+    that covers it can be approved under half the value (LEC art. 670.4; see
+    sale_floors). A valuation of €0 means none was given."""
     f = _spain_table_fields(BeautifulSoup(html, "html.parser"))
+    lots = re.match(r"\s*(\d+)", _spain_field(f, "Lotes") or "")
     return {
         "tipo_subasta": _spain_field(f, "Tipo de subasta"),
         "expediente": _spain_field(f, "Cuenta expediente", "Expediente"),
         "deposito": parse_price(_spain_field(f, "Importe del depósito", "depósito", "deposito")),
+        "claim_eur": parse_price(_spain_field(f, "Cantidad reclamada")),
+        "tasacion_eur": parse_price(_spain_field(f, "Tasación", "Tasacion")),
+        "lotes": int(lots.group(1)) if lots else None,
     }
 
 
@@ -428,7 +438,8 @@ def enrich_spain_details(db, session, limit: int = 300):
     clause, extra = still_worth_a_page_sql()
     rows = db.execute(f"""
         SELECT * FROM listings WHERE source='spain'
-          AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
+          AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%'
+               OR raw_json NOT LIKE '%"detail_v": {BOE_DETAIL_VERSION}%')
           AND (date_end IS NULL OR date_end >= ?)
           {clause}
         ORDER BY (raw_json LIKE '%"detail_checked"%'), date_end IS NULL, date_end LIMIT ?
@@ -459,6 +470,7 @@ def enrich_spain_details(db, session, limit: int = 300):
             raw = {}
         raw.update(extra)
         raw["detail_checked"] = datetime.now().strftime("%Y-%m-%d")
+        raw["detail_v"] = BOE_DETAIL_VERSION
         fields = {k: item.get(k) for k in (
             "title", "description", "tipo", "area_m2", "price", "current_bid", "min_price",
             "district", "concelho", "freguesia", "url", "image_url", "date_end")}

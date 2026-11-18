@@ -54,6 +54,13 @@ def _energy(value) -> str | None:
     return text[:1].upper() + text[1:]
 
 
+def _floor(item: dict, key: str):
+    """One part of what the law says about how low this sale may go (sale_floors)."""
+    from sale_floors import legal_floor
+    floor = legal_floor(item)
+    return floor.get(key) if floor else None
+
+
 def case_number(item: dict) -> str | None:
     """The court case ("3841/03.3TBBRR"), without the court that Citius appends."""
     raw = raw_of(item)
@@ -74,6 +81,11 @@ _FACTS = [
     ("Current bid", lambda it, r: _money(it.get("current_bid"))),
     ("Deposit", lambda it, r: _money(r.get("deposito"))),
     ("Mise à prix", lambda it, r: _money(r.get("mise_a_prix"))),
+    ("Amount claimed", lambda it, r: _money(r.get("claim_eur"))),
+    ("Valuation", lambda it, r: _money(r.get("tasacion_eur")) if r.get("tasacion_eur") != it.get("price") else None),
+    ("How low it can go", lambda it, r: _floor(it, "rule")),
+    ("If it does not sell", lambda it, r: _floor(it, "next_round")),
+    ("Before you count on it", lambda it, r: "; ".join(_floor(it, "caveats") or []) or None),
     ("Ends", lambda it, r: (
         "date unknown" if not it.get("date_end") or str(it.get("date_end")).startswith("9999")
         else str(it.get("date_end")).replace("T", " ")[:16])),

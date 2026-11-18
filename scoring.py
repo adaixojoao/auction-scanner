@@ -303,6 +303,20 @@ def forced_sale(item: dict) -> bool:
 
 TAX_SOURCES = {"financas", "anaf", "aeat"}
 
+# A forced sale the law lets go well under what it is listed at (sale_floors):
+# up to this many points, scaled by how far under. A floor is never a bid.
+LEGAL_FLOOR_POINTS = 12
+
+
+def _legal_floor_points(item: dict, pay: float, reasons: list[str]) -> float:
+    import sale_floors
+    got = sale_floors.rank_share(item, pay)
+    if not got:
+        return 0.0
+    share, why = got
+    reasons.append(why)
+    return LEGAL_FLOOR_POINTS * max(0.0, 1.0 - share)
+
 # ─── What we are looking for ────────────────────────────────────────
 # Homes and plots at ridiculous prices. Urban plots are fine; rural plots only
 # when they are big AND cheap; homes in a good location that do not need heavy
@@ -1028,6 +1042,16 @@ _OUTLOOK_NOTE = (
 )
 
 
+# The same rule as _legal_floor_points, in words for the AI check.
+_FLOOR_NOTE = (
+    " At a court sale the listed value is not always the lowest price that can win: in Spain a "
+    "bid that covers the amount claimed can normally be approved under half the value, and in "
+    "Germany the value limits fall away once a hearing was refused for them. That ranks a sale "
+    "higher, but the owner can pay off a small claim and stop the sale, and older charges (such "
+    "as a mortgage) can pass to the buyer: name both, and never treat the floor as a bid."
+)
+
+
 def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
     """One goal in words, for the AI check: the same rules as score(mode=…).
 
@@ -1049,13 +1073,13 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
             "by the sea fails. A home that cannot be visited is out. French farm (A) or natural "
             "(N) zoning and a site patrimonial remarquable cut the rank: rebuild and outside "
             "works are restricted."
-        ) + _OUTLOOK_NOTE
+        ) + _FLOOR_NOTE + _OUTLOOK_NOTE
     if mode == "invest":
-        return _INVEST_PRIORITIES + _OUTLOOK_NOTE
+        return _INVEST_PRIORITIES + _FLOOR_NOTE + _OUTLOOK_NOTE
     if mode == "land":
         return _LAND_PRIORITIES.format(min_m2=f"{t['rural_min_m2']:,.0f}",
                                        max_eur_m2=f"{t['rural_max_eur_m2']:.2f}",
-                                       max_eur_ha=f"{t['rural_max_eur_m2'] * 10000:,.0f}") + _OUTLOOK_NOTE
+                                       max_eur_ha=f"{t['rural_max_eur_m2'] * 10000:,.0f}") + _FLOOR_NOTE + _OUTLOOK_NOTE
     if mode == "forest":
         # No population note: a project the owner runs is not waiting on a local buyer.
         import forestry
@@ -1094,7 +1118,7 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         "private-negotiation sale where you name the offer — the listing cannot be judged for "
         "cheapness and stays out of the top. Water is only a plus where the land does not flood; "
         "a home in a flood zone is a risk."
-    ) + _OUTLOOK_NOTE
+    ) + _FLOOR_NOTE + _OUTLOOK_NOTE
 
 
 _BARE_PRIORITIES = (
@@ -2605,6 +2629,7 @@ def _score_detail(item: dict, now: datetime | None, targets: dict | None) -> tup
     if is_forced:
         s += 6 * w("sale")
         reasons.append("forced sale (must sell)")
+        s += _legal_floor_points(item, pay, reasons) * w("sale")
     if source in TAX_SOURCES:
         s += 4
         reasons.append("tax seizure — no reserve")
@@ -3238,6 +3263,7 @@ def _score_land(item: dict, now: datetime | None, targets: dict | None) -> tuple
     if is_forced:
         s += 6 * w("sale")
         reasons.append("forced sale (must sell)")
+        s += _legal_floor_points(item, pay, reasons) * w("sale")
     if source in TAX_SOURCES:
         s += 4
         reasons.append("tax seizure — no reserve")
@@ -3965,6 +3991,7 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if forced_sale(item):
         s += INVEST_FORCED_SALE * w("sale")
         reasons.append("forced sale (court, tax or social security)")
+        s += _legal_floor_points(item, pay, reasons) * w("sale")
     elif kind_of_source == "official":
         # The state selling its own building, or an auctioneer's mixed catalogue: official, not forced.
         s += INVEST_BANK_SALE * w("sale")
