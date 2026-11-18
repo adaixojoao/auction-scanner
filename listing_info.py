@@ -61,6 +61,14 @@ def _floor(item: dict, key: str):
     return floor.get(key) if floor else None
 
 
+def _budget_note(item: dict) -> str | None:
+    from common import scrape_max_price
+    from config import load_config
+    from sale_floors import budget_note
+    cfg = load_config()
+    return budget_note(item, scrape_max_price(cfg, cfg.get("max_price") or 0))
+
+
 def case_number(item: dict) -> str | None:
     """The court case ("3841/03.3TBBRR"), without the court that Citius appends."""
     raw = raw_of(item)
@@ -84,6 +92,7 @@ _FACTS = [
     ("Amount claimed", lambda it, r: _money(r.get("claim_eur"))),
     ("Valuation", lambda it, r: _money(r.get("tasacion_eur")) if r.get("tasacion_eur") != it.get("price") else None),
     ("How low it can go", lambda it, r: _floor(it, "rule")),
+    ("Against your budget", lambda it, r: _budget_note(it)),
     ("If it does not sell", lambda it, r: _floor(it, "next_round")),
     ("Before you count on it", lambda it, r: "; ".join(_floor(it, "caveats") or []) or None),
     ("Ends", lambda it, r: (

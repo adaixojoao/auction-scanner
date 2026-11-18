@@ -111,6 +111,13 @@ through `rank_share()`; a Spanish claim with charges not stated ranks only as th
 half-value rule. `bidcap`, the evaluator and `price_to_pay()` never read it.
 Add a country there, with a test, not in a scorer.
 
+A Spanish court sale whose claim (plus the charges it states) fits a budget is
+kept in view though its value does not (`sale_floors.fits_budget`, in
+`load_listings`, `load_best` and the Listings price filter), with a note saying
+so; it is still priced at its value. Spain's BOE is read every day
+(`es_every_hours`), sales not open yet ("PU") included, and each new
+small-claim sale is alerted once (`telegram_alert.alert_small_claims`).
+
 ## A position is not a fact about the building
 
 `geo.py` says where a listing is and how exact that is ("sale", "street",

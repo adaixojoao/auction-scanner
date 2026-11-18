@@ -17,18 +17,20 @@ from sources import ScanCount, SourceUnavailable, register
 BOE_SEARCH = "https://subastas.boe.es/subastas_ava.php"
 
 
-@register("spain", "ES")
-def scrape_spain(db, max_price: float = 50000, **_):
-    """subastas.boe.es — Spanish judicial auctions (search + detail pages)."""
-    session = make_session(timeout=30)
-    session.get(BOE_SEARCH, timeout=15).raise_for_status()
+# "EJ" is open for bids; "PU" is published and opens soon. Reading the second
+# finds a sale days before anyone can bid: time to read the edict and the
+# registry before the 20 days run.
+BOE_STATES = ("EJ", "PU")
+BOE_PAGE_SIZE = 200          # the form offers 50, 100, 200 or 500
+BOE_MAX_PAGES = 20
 
-    page_size = 50
-    # POST the search form — exact field layout from the live form
-    form_data = [
+
+def _boe_form(state: str, page_size: int) -> list[tuple[str, str]]:
+    """The search form, field for field as the live form posts it."""
+    return [
         ("campo[0]", "SUBASTA.ORIGEN"), ("dato[0]", ""),
         ("campo[1]", "SUBASTA.AUTORIDAD"), ("dato[1]", ""),
-        ("campo[2]", "SUBASTA.ESTADO.CODIGO"), ("dato[2]", "EJ"),
+        ("campo[2]", "SUBASTA.ESTADO.CODIGO"), ("dato[2]", state),
         ("campo[3]", "BIEN.TIPO"), ("dato[3]", "I"),
         ("dato[4]", ""),  # subtype radio — no campo[4] hidden field
         ("campo[5]", "BIEN.DIRECCION"), ("dato[5]", ""),
@@ -52,7 +54,11 @@ def scrape_spain(db, max_price: float = 50000, **_):
         ("sort_order[0]", "asc"),
         ("accion", "Buscar"),
     ]
-    resp = session.post(BOE_SEARCH, data=form_data)
+
+
+def _spain_search(session, db, max_price, state: str, page_size: int) -> tuple[int, bool, int]:
+    """One state's results, every page. (listings, read in full, pages)."""
+    resp = session.post(BOE_SEARCH, data=_boe_form(state, page_size))
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -69,19 +75,19 @@ def scrape_spain(db, max_price: float = 50000, **_):
         m = re.search(r'de\s+(\d+)', total_text.get_text())
         if m:
             total_results = int(m.group(1))
-    LOG.info(f"  Spain: {total_results} total active inmuebles")
+    LOG.info(f"  Spain ({state}): {total_results} inmuebles")
 
     total_scraped = _spain_parse_page(soup, db, max_price)
     db.commit()
 
-    # A later page that fails, or the 20-page cap, is not the whole site.
+    # A later page that fails, or the page cap, is not the whole site.
     # Recording it as a full read would hide sales that were simply not reached.
     incomplete = False
     pages = 1
     if id_busqueda and total_results > page_size:
         pages_needed = (total_results // page_size) + 1
-        max_pages = min(pages_needed, 20)
-        if pages_needed > 20:
+        max_pages = min(pages_needed, BOE_MAX_PAGES)
+        if pages_needed > BOE_MAX_PAGES:
             incomplete = True
         for page_num in range(1, max_pages):
             offset = page_num * page_size
@@ -102,10 +108,29 @@ def scrape_spain(db, max_price: float = 50000, **_):
             time.sleep(1)
     elif total_results > page_size:
         incomplete = True
+    return total_scraped, not incomplete, pages
+
+
+@register("spain", "ES")
+def scrape_spain(db, max_price: float = 50000, **_):
+    """subastas.boe.es — Spanish judicial auctions (search + detail pages)."""
+    session = make_session(timeout=30)
+    session.get(BOE_SEARCH, timeout=15).raise_for_status()
+    total, full, pages = 0, True, 0
+    for i, state in enumerate(BOE_STATES):
+        try:
+            got, whole, read = _spain_search(session, db, max_price, state, BOE_PAGE_SIZE)
+        except Exception:
+            if i == 0:
+                raise                    # the first request's failure is the source's
+            LOG.warning(f"Spain: sales not open yet ({state}) not read this time")
+            full = False
+            continue
+        total, full, pages = total + got, full and whole, pages + read
 
     enrich_spain_details(db, session)
     fetch_catastro(db, session)
-    return ScanCount(total_scraped, "partial" if incomplete else "full", pages)
+    return ScanCount(total, "full" if full else "partial", pages)
 
 
 def _spain_parse_page(soup, db, max_price) -> int:

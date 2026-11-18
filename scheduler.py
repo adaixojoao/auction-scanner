@@ -22,6 +22,7 @@ keeps running those short jobs while a scan is going.
 Timetable (config.json → "schedule"; these are the defaults):
   pt_every_hours       168    PT sources, once a week
   eu_every_hours       336    every other country, once a fortnight
+  es_every_hours        24    Spain's court sales (BOE) every day: they run 20 days
   retry_every_hours      2    sources whose last scrape failed
   fotocasa_every_hours 168    fotocasa, all of it, at least once a week
   check_times     ["08:00", "20:00"]   deadline alerts
@@ -53,6 +54,9 @@ LOG = logging.getLogger("scheduler")
 DEFAULT_SCHEDULE = {
     "pt_every_hours": 168,
     "eu_every_hours": 336,
+    # Spain's court auctions are open for 20 days and a small claim can be paid
+    # off: a fortnightly read found some with days left. Only the BOE source.
+    "es_every_hours": 24,
     "retry_every_hours": 2,          # a source that failed, on the next short scan
     # 0: fotocasa is an agency portal, not a forced sale — listings are hidden
     # from ordinary scoring (db._switched_off_sources). Keep the job callable
@@ -64,8 +68,8 @@ DEFAULT_SCHEDULE = {
     "closing_every_minutes": 25,     # every tick (30 min): the e-leilões sales ending now (outcomes.py)
 }
 _WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-JOBS = ("pt", "eu", "retry", "fotocasa", "backup", "morning", "report", "closing")
-SCAN_JOBS = ("pt", "eu", "retry", "fotocasa")   # long scrapes: their own lock, so a tick is not stuck behind one
+JOBS = ("pt", "eu", "es", "retry", "fotocasa", "backup", "morning", "report", "closing")
+SCAN_JOBS = ("pt", "eu", "es", "retry", "fotocasa")   # long scrapes: their own lock, so a tick is not stuck behind one
 _scan_guard = threading.Lock()
 _scan_thread: threading.Thread | None = None
 
@@ -101,7 +105,7 @@ def due_jobs(now: datetime, last_runs: dict, schedule: dict | None = None) -> li
     sched = {**DEFAULT_SCHEDULE, **(schedule or {})}
     due = []
 
-    for job, key in (("pt", "pt_every_hours"), ("eu", "eu_every_hours"),
+    for job, key in (("pt", "pt_every_hours"), ("eu", "eu_every_hours"), ("es", "es_every_hours"),
                      ("retry", "retry_every_hours"), ("fotocasa", "fotocasa_every_hours"),
                      ("backup", "backup_every_hours")):
         every = sched.get(key)
@@ -160,6 +164,15 @@ def run_eu_scrape():
     LOG.info("=== EU scan starting ===")
     from common import COUNTRY_NAMES
     _scan([c for c in COUNTRY_NAMES if c != "PT"], "other countries (scheduled)")
+
+
+SPAIN_DAILY_SOURCES = ["spain"]
+
+
+def run_es_scrape():
+    """Spain's court sales on the BOE, every day (the fortnightly EU scan reads them too)."""
+    LOG.info("=== Spain court sales (daily) ===")
+    return _scan(None, "Spain court sales (daily)", source_names=SPAIN_DAILY_SOURCES)
 
 
 # A source whose last read stopped early (refused, time limit) is read again
@@ -301,6 +314,7 @@ JOB_FUNCS = {
     "closing": run_closing_watch,
     "pt": run_pt_scrape,
     "eu": run_eu_scrape,
+    "es": run_es_scrape,
     "retry": run_retry,
     "fotocasa": run_fotocasa,
     "backup": run_backup,

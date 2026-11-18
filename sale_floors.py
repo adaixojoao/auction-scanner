@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import re
 
-from common import find_terms, normalize, parse_price
+from common import find_price, find_terms, normalize, parse_price
 
 # Spain, LEC art. 670: approved outright from 70% of the value; from 50% (or
 # the claim, when lower) unless the debtor or the creditor steps in.
@@ -71,8 +71,16 @@ DE_LIMITS_LIFTED = [
     "5/10 und 7/10 grenze entfallen", "5/10- und 7/10-grenze entfallen",
     "zuschlag wurde versagt", "zuschlag versagt worden",
 ]
-# A charges field that says there are none.
-_NO_CHARGES = re.compile(r"^\s*(no|sin|ninguna|libre|0[.,]?0*\s*(€|eur)?\s*$)")
+# BOE writes €1 or a few euros where no real claim applies (seen live, 2026-11-18).
+MIN_REAL_CLAIM = 100
+# A charges field that says nothing ranks ahead of the buyer. Read on the BOE
+# (2026-11-18): "No constan", "SIN CARGAS.", "libre de cargas, salvo afecciones
+# fiscales", "anteriores no tiene, posteriores sí". The boilerplate "se
+# mantendrán las cargas anteriores" says nothing either way: unknown.
+_NO_CHARGES = re.compile(
+    r"^\s*(?:no|ninguna)\b|\bsin cargas\b|\blibre de cargas\b|\bno constan\b"
+    r"|\bno (?:existen|hay|tiene|tienen) cargas\b|\banteriores,? no (?:tiene|tienen|constan|existen|hay)\b"
+    r"|\bno (?:existen|constan|hay) cargas anteriores\b|\bsin cargas anteriores\b")
 
 
 def _raw(item: dict) -> dict:
@@ -98,10 +106,11 @@ def _num(v) -> float:
 def spain_charges(raw: dict) -> tuple[str, float]:
     """("none" | "stated" | "unknown", amount) from the BOE "Cargas" field."""
     text = str(raw.get("cargas") or "").strip()
-    amount = _num(raw.get("charges_eur")) or _num(text)
+    # Only a figure with a currency marker: "Ejecución 922/2014" is not €922.
+    amount = _num(raw.get("charges_eur")) or float(find_price(text) or 0)
     if amount > 0:
         return "stated", amount
-    if text and _NO_CHARGES.match(normalize(text)):
+    if text and _NO_CHARGES.search(normalize(text)):
         return "none", 0.0
     return "unknown", 0.0
 
@@ -110,6 +119,9 @@ def _spain(item: dict, raw: dict, base: float) -> dict | None:
     tipo = normalize(raw.get("tipo_subasta") or "")
     if tipo and "judicial" not in tipo:
         return None                      # AEAT, TGSS and notarial sales follow other rules
+    # The claim rule is for an execution ("en vía de apremio"). A voluntary sale
+    # (co-owners dividing a house) or an insolvency follows its own terms.
+    execution = not tipo or "apremio" in tipo
     value = _num(raw.get("tasacion_eur")) or base
     if not value:
         return None
@@ -123,7 +135,9 @@ def _spain(item: dict, raw: dict, base: float) -> dict | None:
                  f"50% of the valuation ({_eur(value * ES_APPROVAL)}) or one that covers the amount claimed."),
         "caveats": [],
     }
-    claim = _num(raw.get("claim_eur"))
+    claim = _num(raw.get("claim_eur")) if execution else 0
+    if claim < MIN_REAL_CLAIM:
+        claim = 0
     lots = _num(raw.get("lotes") or raw.get("lots"))
     if claim and lots > 1:
         out["caveats"].append("the amount claimed is for the whole sale, which has several lots — "
@@ -269,3 +283,34 @@ def rank_share(item: dict, pay: float) -> tuple[float, str] | None:
     if share > RANK_AT_MOST:
         return None
     return share, f"the law lets a bid of {_eur(amount)} ({share:.0%}) be accepted ({floor['law']})"
+
+
+def floor_price(item: dict) -> float | None:
+    """What a Spanish court sale with a small claim could go for if the court
+    approves a bid covering it: the claim plus the charges the notice states.
+    None for every other sale. Used to decide what is shown against a budget,
+    never as a price to pay or a bid."""
+    if item.get("source") not in ES_COURT_SOURCES or (item.get("current_bid") or 0) > 0:
+        return None
+    floor = legal_floor(item)
+    if not floor or floor["basis"] != "claim":
+        return None
+    return float(floor["amount"] + floor.get("charges", 0))
+
+
+def fits_budget(item: dict, budget: float) -> bool:
+    """A small-claim sale is kept in view when the claim (plus stated charges)
+    is within the budget, even if its value is not."""
+    fp = item.get("floor_price")
+    if fp is None and "floor_price" not in item:
+        fp = floor_price(item)
+    return bool(budget and fp and fp <= budget)
+
+
+def budget_note(item: dict, budget: float) -> str | None:
+    """The reason a sale over the budget is still shown, or None."""
+    pay = item.get("price") or 0
+    if not (budget and pay > budget and fits_budget(item, budget)):
+        return None
+    return (f"over your budget at its value ({_eur(pay)}); within it only if the court approves "
+            f"a bid covering the claim ({_eur(item.get('floor_price') or floor_price(item) or 0)})")

@@ -2923,6 +2923,7 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     cash = _cash_on_hand()
     _cfg = _load_config_safe()
     from common import price_to_pay
+    import sale_floors
     cap = _work_limits()[0]
     # New filters (with the weights) or new scoring code score again; new towns,
     # auction results or land prices (a scan adds some every few minutes) do not
@@ -2973,7 +2974,11 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
         item["investigation_cleared"] = item["id"] in _investigation_cleared
         # Over common.check_max_price: kept so the scanner knows it, never scored,
         # checked or shown. One you shortlisted or made an offer on stays.
-        if cap and item["status"] != "shortlisted" and offer is None and price_to_pay(dict(item)) > cap:
+        # A Spanish court sale with a small claim (sale_floors) stays when the
+        # claim fits, though its value does not: that is the sale worth finding.
+        item["floor_price"] = sale_floors.floor_price(item)
+        if (cap and item["status"] != "shortlisted" and offer is None and price_to_pay(dict(item)) > cap
+                and not sale_floors.fits_budget(item, cap)):
             continue
         reason = None
 
@@ -3227,6 +3232,7 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
     from common import mode_max_price
     from config import load_config
     from scoring import FAMILY_GOALS, MODES, goal_family
+    import sale_floors
     kw.pop("mode", None)
     chosen = tuple(m for m in (modes or MODES) if m in MODES) or tuple(MODES)
     # Live and invest is a tab. It is the worse of two scores, so it is not a
@@ -3246,7 +3252,7 @@ def load_best(db: sqlite3.Connection, modes: tuple[str, ...] | None = None, **kw
         for item in publication_snapshot(db, mode=mode, **kw):
             # Each goal pays its own price: a listing over this goal's budget
             # cannot be bought for it, whatever it scores.
-            if budget and (item.get("price") or 0) > budget:
+            if budget and (item.get("price") or 0) > budget and not sale_floors.fits_budget(item, budget):
                 continue
             if item.get("extreme_discount"):
                 extreme_ids.add(item["id"])

@@ -156,6 +156,71 @@ def alert_new_listings(db, cfg: dict, score_fn=None):
         LOG.info(f"Telegram: alerted {len(sent)} new listings")
 
 
+# ─── Spanish court sales with a small claim ─────────────────────────
+# The court may approve a bid that covers the amount claimed (LEC art. 670.4,
+# sale_floors). The 20 days to bid are the time to read the edict and the
+# registry, and a small claim can be paid off, so each new one is told about
+# once, whatever its score: the score ranks it on its value, not the claim.
+
+CLAIM_CHANNEL = "telegram-claim"
+
+
+def small_claim_sales(db, cfg: dict) -> list[dict]:
+    """Open Spanish court sales whose claim (plus stated charges) is within
+    the highest budget, smallest share of the value first."""
+    from common import scrape_max_price
+    cap = scrape_max_price(cfg, cfg.get("max_price") or 0)
+    items = load_best(db, filters=cfg.get("filters"), apply_min_score=False,
+                      where="source = ?", params=("spain",))
+    found = [it for it in items if it.get("floor_price") and (not cap or it["floor_price"] <= cap)
+             and it.get("status") != "dismissed"]
+    return sorted(found, key=lambda it: it["floor_price"] / (it.get("price") or it["floor_price"]))
+
+
+def format_small_claim(item: dict) -> str:
+    from sale_floors import legal_floor
+    floor = legal_floor(item) or {}
+    loc = ", ".join(filter(None, [item.get("concelho"), item.get("district")]))
+    ends = (item.get("date_end") or "")[:10]
+    claim, value = floor.get("claim") or 0, item.get("price") or 0
+    share = f" ({claim / value:.0%} of the value)" if claim and value else ""
+    caveats = "\n".join(f"• {_esc(c)}" for c in floor.get("caveats") or [])
+    return (
+        f"\U0001f1ea\U0001f1f8 <b>Small claim — court sale</b>\n\n"
+        f"<b>{_esc((item.get('title') or '?')[:80])}</b>\n"
+        f"\U0001f4cd {_esc(loc)}\n"
+        f"\U0001f4b6 Value {_money(value)} · claimed {_money(claim)}{share}"
+        f"{f'  ·  Ends {_esc(ends)}' if ends else ''}\n"
+        f"The court may approve a bid that covers the claim if no one bids 70% and neither the "
+        f"debtor nor the creditor steps in. It is not a bid to make.\n{caveats}\n\n"
+        f"<a href=\"{_esc(item.get('url') or '')}\">View on the BOE →</a>"
+    )
+
+
+def alert_small_claims(db, cfg: dict) -> int:
+    """Each new small-claim Spanish court sale, once (Telegram)."""
+    tg = _tg(cfg)
+    if not tg:
+        return 0
+    found = small_claim_sales(db, cfg)
+    fresh_ids = not_yet_alerted(db, CLAIM_CHANNEL, [it["id"] for it in found])
+    fresh = [it for it in found if it["id"] in fresh_ids]
+    sent = [it["id"] for it in fresh[:MAX_INDIVIDUAL]
+            if send_telegram(tg["token"], tg["chat_id"], format_small_claim(it))]
+    if len(fresh) > MAX_INDIVIDUAL:
+        rest = fresh[MAX_INDIVIDUAL:]
+        lines = [f"\U0001f1ea\U0001f1f8 <b>{len(rest)} more small-claim court sales</b>"]
+        lines += [f"• {_esc((it.get('title') or '?')[:60])} — claimed {_money(it['floor_price'])} "
+                  f"of {_money(it.get('price'))}" for it in rest[:15]]
+        lines.append(f"\nListings → Small claim only: {_dashboard_url(cfg)}")
+        if send_telegram(tg["token"], tg["chat_id"], "\n".join(lines)):
+            sent += [it["id"] for it in rest]
+    if sent:
+        mark_alerted(db, CLAIM_CHANNEL, sent)
+        LOG.info(f"Telegram: alerted {len(sent)} small-claim court sales")
+    return len(sent)
+
+
 # ─── Price cuts ──────────────────────────────────────────────────────
 # A cut is what turns a listing anyone would ignore into one worth a letter,
 # and it happens quietly between scans. Only the valor base counts: a bid

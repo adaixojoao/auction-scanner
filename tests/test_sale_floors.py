@@ -46,6 +46,20 @@ def test_stated_charges_are_added_to_the_claim():
     assert spain_charges({"cargas": "Ver edicto"}) == ("unknown", 0.0)
 
 
+def test_charges_texts_seen_on_the_boe():
+    seen = {
+        "No constan": "none", "SIN CARGAS.": "none", "libre de cargas, salvo afecciones fiscales": "none",
+        "ver certificación de cargas, anteriores no tiene , posteriores sí": "none",
+        "Se cancelan la carga registral que da lugar a esta subasta y todas las posteriores. Se mantendrán "
+        "las cargas o gravámenes anteriores o del mismo rango": "unknown",
+        "subsiste la siguiente carga anterior: ANOTACIÓN DE EMBARGO letra E, Ejecución 922/2014": "unknown",
+        "VER CERTIFICADO DE CARGAS ADJUNTO": "unknown",
+        "Hipoteca anterior por 45.000,00 €": "stated",
+    }
+    for text, state in seen.items():
+        assert spain_charges({"cargas": text})[0] == state, text
+
+
 def test_a_large_claim_leaves_the_seventy_percent_rule():
     floor = legal_floor(_es(claim=120000))
     assert floor["basis"] == "outright" and floor["amount"] == 105000
@@ -143,3 +157,68 @@ def test_sales_opened_before_the_claim_was_read_are_opened_once_more(db, add, fa
     calls = len(session.calls)
     enrich_spain_details(db, session)
     assert len(session.calls) == calls          # read once, not every scan
+
+
+# ── Spain, found fast (2026-11-18) ────────────────────────────────────
+
+def _court_sale(add, ext, *, value=230000, claim=None, cargas="ver certificado de cargas"):
+    raw = {"tipo_subasta": "JUDICIAL EN VÍA DE APREMIO", "tasacion_eur": 0, "cargas": cargas, "detail_v": 2}
+    if claim is not None:
+        raw["claim_eur"] = claim
+    return add("spain", ext, "ES", title="Vivienda en Almería, 90 m²", description="Vivienda unifamiliar",
+               tipo="inmueble", price=value, date_end="2099-12-01T18:00:00+01:00",
+               url=f"https://subastas.boe.es/detalleSubasta.php?idSub={ext}", raw_json=json.dumps(raw))
+
+
+def _budget(db, amount=100000):
+    import config
+    config.save_config({"filters": {}, "max_price": amount, "cash_on_hand": 10_000_000})
+
+
+def test_a_placeholder_claim_and_a_voluntary_sale_are_not_claims():
+    assert legal_floor(_es(claim=1))["basis"] == "outright"
+    assert legal_floor(_es(claim=8000, tipo="JUDICIAL VOLUNTARIA"))["basis"] == "outright"
+
+
+def test_a_small_claim_sale_over_budget_stays_in_view(db, add):
+    from db import load_listings
+    _budget(db)
+    _court_sale(add, "SUB-JA-2026-1", claim=8000)
+    _court_sale(add, "SUB-JA-2026-2", claim=150000)        # an ordinary claim: over budget, out
+    ids = {it["external_id"] for it in load_listings(db, mode="invest", apply_min_score=False)}
+    assert "SUB-JA-2026-1" in ids and "SUB-JA-2026-2" not in ids
+    item = next(it for it in load_listings(db, mode="invest", apply_min_score=False)
+                if it["external_id"] == "SUB-JA-2026-1")
+    assert item["floor_price"] == 8000
+    from listing_info import facts
+    shown = {f["label"]: f["value"] for f in facts(item)}
+    assert "over your budget at its value" in shown["Against your budget"]
+
+
+def test_the_small_claim_filter(db, add):
+    import dashboard
+    _budget(db)
+    _court_sale(add, "SUB-JA-2026-1", value=60000, claim=8000)
+    _court_sale(add, "SUB-JA-2026-2", value=60000)
+    dashboard.app.config["TESTING"] = True
+    client = dashboard.app.test_client()
+    every = client.get("/api/listings?per_page=100&mode=invest&min_score=0").get_json()
+    only = client.get("/api/listings?per_page=100&mode=invest&min_score=0&small_claim=1").get_json()
+    assert {"spain:SUB-JA-2026-1", "spain:SUB-JA-2026-2"} <= {it["id"] for it in every["items"]}
+    assert [it["id"] for it in only["items"]] == ["spain:SUB-JA-2026-1"]
+
+
+def test_each_small_claim_sale_is_alerted_once(db, add, monkeypatch):
+    import config
+    import telegram_alert
+    config.save_config({"filters": {}, "max_price": 100000, "cash_on_hand": 10_000_000,
+                        "telegram": {"enabled": True, "token": "t", "chat_id": "1", "min_score": 99}})
+    sent = []
+    monkeypatch.setattr(telegram_alert, "send_telegram",
+                        lambda token, chat, msg, reply_markup=None: sent.append(msg) or True)
+    _court_sale(add, "SUB-JA-2026-1", claim=8000)
+    _court_sale(add, "SUB-JA-2026-2")
+    cfg = config.load_config()
+    assert telegram_alert.alert_small_claims(db, cfg) == 1
+    assert "claimed €8,000" in sent[0] and "not a bid" in sent[0] and "mortgage" in sent[0]
+    assert telegram_alert.alert_small_claims(db, cfg) == 0 and len(sent) == 1
