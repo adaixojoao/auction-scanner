@@ -17,18 +17,20 @@ from sources import ScanCount, SourceUnavailable, register
 BOE_SEARCH = "https://subastas.boe.es/subastas_ava.php"
 
 
-@register("spain", "ES")
-def scrape_spain(db, max_price: float = 50000, **_):
-    """subastas.boe.es — Spanish judicial auctions (search + detail pages)."""
-    session = make_session(timeout=30)
-    session.get(BOE_SEARCH, timeout=15).raise_for_status()
+# "EJ" is open for bids; "PU" is published and opens soon. Reading the second
+# finds a sale days before anyone can bid: time to read the edict and the
+# registry before the 20 days run.
+BOE_STATES = ("EJ", "PU")
+BOE_PAGE_SIZE = 200          # the form offers 50, 100, 200 or 500
+BOE_MAX_PAGES = 20
 
-    page_size = 50
-    # POST the search form — exact field layout from the live form
-    form_data = [
+
+def _boe_form(state: str, page_size: int) -> list[tuple[str, str]]:
+    """The search form, field for field as the live form posts it."""
+    return [
         ("campo[0]", "SUBASTA.ORIGEN"), ("dato[0]", ""),
         ("campo[1]", "SUBASTA.AUTORIDAD"), ("dato[1]", ""),
-        ("campo[2]", "SUBASTA.ESTADO.CODIGO"), ("dato[2]", "EJ"),
+        ("campo[2]", "SUBASTA.ESTADO.CODIGO"), ("dato[2]", state),
         ("campo[3]", "BIEN.TIPO"), ("dato[3]", "I"),
         ("dato[4]", ""),  # subtype radio — no campo[4] hidden field
         ("campo[5]", "BIEN.DIRECCION"), ("dato[5]", ""),
@@ -52,7 +54,11 @@ def scrape_spain(db, max_price: float = 50000, **_):
         ("sort_order[0]", "asc"),
         ("accion", "Buscar"),
     ]
-    resp = session.post(BOE_SEARCH, data=form_data)
+
+
+def _spain_search(session, db, max_price, state: str, page_size: int) -> tuple[int, bool, int]:
+    """One state's results, every page. (listings, read in full, pages)."""
+    resp = session.post(BOE_SEARCH, data=_boe_form(state, page_size))
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -69,19 +75,19 @@ def scrape_spain(db, max_price: float = 50000, **_):
         m = re.search(r'de\s+(\d+)', total_text.get_text())
         if m:
             total_results = int(m.group(1))
-    LOG.info(f"  Spain: {total_results} total active inmuebles")
+    LOG.info(f"  Spain ({state}): {total_results} inmuebles")
 
     total_scraped = _spain_parse_page(soup, db, max_price)
     db.commit()
 
-    # A later page that fails, or the 20-page cap, is not the whole site.
+    # A later page that fails, or the page cap, is not the whole site.
     # Recording it as a full read would hide sales that were simply not reached.
     incomplete = False
     pages = 1
     if id_busqueda and total_results > page_size:
         pages_needed = (total_results // page_size) + 1
-        max_pages = min(pages_needed, 20)
-        if pages_needed > 20:
+        max_pages = min(pages_needed, BOE_MAX_PAGES)
+        if pages_needed > BOE_MAX_PAGES:
             incomplete = True
         for page_num in range(1, max_pages):
             offset = page_num * page_size
@@ -102,10 +108,30 @@ def scrape_spain(db, max_price: float = 50000, **_):
             time.sleep(1)
     elif total_results > page_size:
         incomplete = True
+    return total_scraped, not incomplete, pages
+
+
+@register("spain", "ES")
+def scrape_spain(db, max_price: float = 50000, **_):
+    """subastas.boe.es — Spanish judicial auctions (search + detail pages)."""
+    session = make_session(timeout=30)
+    session.get(BOE_SEARCH, timeout=15).raise_for_status()
+    total, full, pages = 0, True, 0
+    for i, state in enumerate(BOE_STATES):
+        try:
+            got, whole, read = _spain_search(session, db, max_price, state, BOE_PAGE_SIZE)
+        except Exception:
+            if i == 0:
+                raise                    # the first request's failure is the source's
+            LOG.warning(f"Spain: sales not open yet ({state}) not read this time")
+            full = False
+            continue
+        total, full, pages = total + got, full and whole, pages + read
 
     enrich_spain_details(db, session)
+    fetch_spain_certificates(db, session)
     fetch_catastro(db, session)
-    return ScanCount(total_scraped, "partial" if incomplete else "full", pages)
+    return ScanCount(total, "full" if full else "partial", pages)
 
 
 def _spain_parse_page(soup, db, max_price) -> int:
@@ -229,7 +255,9 @@ def _spain_parse_detail(html: str) -> dict:
         h = soup.select_one("#contenido h3, h3")
         if h:
             ht = h.get_text(" ", strip=True)
-            if ht and not ht.upper().startswith("SUBASTA SUB-"):
+            # A tab's own heading ("Datos de la subasta") is not the property.
+            if ht and not ht.upper().startswith("SUBASTA SUB-") and not re.match(
+                    r"(datos|informaci[oó]n)\b", ht, re.I):
                 title = ht[:120]
 
     am = re.search(r"(\d{1,3}(?:[.\s]\d{3})+,\d{1,2}|\d+,\d{1,2}|\d+)\s*m[²2]", text, re.I)
@@ -275,6 +303,10 @@ def clear_step_min_price(db, row: dict) -> None:
 # optional.
 BOE_DETAIL = "https://subastas.boe.es/detalleSubasta.php"
 BOE_TABS = (("general", 1), ("authority", 2), ("goods", 3))
+# Raised when the tabs are read for something new, so sales already opened
+# are read once more (2: the amount claimed and the valuation; 3: the list of
+# documents, 2026-11-18).
+BOE_DETAIL_VERSION = 3
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
@@ -284,12 +316,38 @@ def _spain_occupation(text: str | None) -> str | None:
 
 
 def _spain_parse_general(html: str) -> dict:
-    f = _spain_table_fields(BeautifulSoup(html, "html.parser"))
+    """The general tab. "Cantidad reclamada" is what the execution is for: a bid
+    that covers it can be approved under half the value (LEC art. 670.4; see
+    sale_floors). A valuation of €0 means none was given."""
+    soup = BeautifulSoup(html, "html.parser")
+    f = _spain_table_fields(soup)
+    lots = re.match(r"\s*(\d+)", _spain_field(f, "Lotes") or "")
     return {
+        "boe_docs": boe_documents(soup) or None,
         "tipo_subasta": _spain_field(f, "Tipo de subasta"),
         "expediente": _spain_field(f, "Cuenta expediente", "Expediente"),
         "deposito": parse_price(_spain_field(f, "Importe del depósito", "depósito", "deposito")),
+        "claim_eur": parse_price(_spain_field(f, "Cantidad reclamada")),
+        "tasacion_eur": parse_price(_spain_field(f, "Tasación", "Tasacion")),
+        "lotes": int(lots.group(1)) if lots else None,
     }
+
+
+def boe_documents(soup) -> list[dict]:
+    """The "Documentos" box of a BOE auction: the court notice, the registry's
+    charges certificate, the valuation… [{"title", "path", "kind"}] (photos are
+    not documents). Titles are the court's own and vary ("certificacion cargas",
+    "CERTIFICADO DE CARGAS ART. 688 LEC"): registry_charges.classify reads them."""
+    from registry_charges import classify
+    out = []
+    for box in soup.select("div.caja"):
+        legend = box.select_one("h5")
+        if not legend or "documento" not in normalize(legend.get_text()):
+            continue
+        for a in box.select("a[href*='verDocumento.php']"):
+            title = a.get_text(" ", strip=True)[:160]
+            out.append({"title": title, "path": a["href"].lstrip("./"), "kind": classify(title)})
+    return out[:20]
 
 
 def _spain_parse_authority(html: str) -> dict:
@@ -332,6 +390,70 @@ def spain_details(pages: dict[str, str]) -> tuple[dict, dict]:
     for tab, html in pages.items():
         extra.update({k: v for k, v in _TAB_PARSERS[tab](html).items() if v})
     return fields, extra
+
+
+# ─── The registry certificate of a small-claim sale ─────────────────
+BOE_BASE = "https://subastas.boe.es/"
+CERTIFICATES_PER_SCAN = 40
+
+
+def fetch_spain_certificates(db, session, limit: int = CERTIFICATES_PER_SCAN) -> int:
+    """Read the registry's charges certificate of each open small-claim court
+    sale (sale_floors), once: what passes to the buyer besides the bid
+    (registry_charges). Only these sales: the claim is what makes the charges
+    decide the deal. Returns how many were read as text."""
+    import sale_floors
+    import registry_charges
+    from common import patch_raw
+    rows = db.execute("""
+        SELECT * FROM listings WHERE source = 'spain'
+          AND raw_json LIKE ? AND raw_json NOT LIKE '%"cert_checked"%'
+          AND (date_end IS NULL OR date_end >= ?)
+        ORDER BY date_end IS NULL, date_end""",
+        # Read with the documents box (a sale with no documents has no "boe_docs").
+        (f'%"detail_v": {BOE_DETAIL_VERSION}%', datetime.now().strftime("%Y-%m-%d"))).fetchall()
+    done = tried = 0
+    for row in rows:
+        item = dict(row)
+        if tried >= limit or not sale_floors.floor_price(item):
+            continue
+        raw = json.loads(item["raw_json"])
+        doc = next((d for d in raw.get("boe_docs") or [] if d.get("kind") == "charges"), None)
+        today = datetime.now().strftime("%Y-%m-%d")
+        if not doc:
+            patch_raw(db, item["id"], {"cert": {"status": "not_published"}, "cert_checked": today})
+            db.commit()
+            continue
+        url = safe_url(BOE_BASE + doc["path"])
+        tried += 1
+        try:
+            resp = session.get(url, timeout=60)
+            resp.raise_for_status()
+        except Exception as e:
+            LOG.info(f"  Spain certificate {item['external_id']}: {type(e).__name__}; next scan")
+            continue
+        if len(resp.content) > registry_charges.MAX_PDF_BYTES:
+            cert = {"status": "unclear", "why": "the file is too large to read here"}
+        else:
+            text = registry_charges.pdf_text(resp.content)
+            if text is None:
+                LOG.warning("  Spain certificates: pypdf is not installed; not read")
+                return done
+            if len(text.strip()) < registry_charges.MIN_TEXT:
+                cert = {"status": "scanned"}
+            else:
+                case = registry_charges.case_from_account(raw.get("expediente"))
+                cert = registry_charges.read_certificate(text, {case} if case else None)
+                if cert["status"] == "unreadable":
+                    cert = {"status": "unclear", "why": "its text is too garbled (an OCR scan)"}
+                done += cert["status"] == "read"
+        cert.update(url=url, title=doc.get("title"), read_on=today)
+        patch_raw(db, item["id"], {"cert": cert, "cert_checked": today})
+        db.commit()
+        time.sleep(0.4)
+    if tried:
+        LOG.info(f"  Spain certificates: {tried} opened, {done} read as text")
+    return done
 
 
 # ─── Catastro: Spain's land registry, free and public ───────────────
@@ -428,7 +550,8 @@ def enrich_spain_details(db, session, limit: int = 300):
     clause, extra = still_worth_a_page_sql()
     rows = db.execute(f"""
         SELECT * FROM listings WHERE source='spain'
-          AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%')
+          AND (price IS NULL OR raw_json IS NULL OR raw_json NOT LIKE '%"detail_checked"%'
+               OR raw_json NOT LIKE '%"detail_v": {BOE_DETAIL_VERSION}%')
           AND (date_end IS NULL OR date_end >= ?)
           {clause}
         ORDER BY (raw_json LIKE '%"detail_checked"%'), date_end IS NULL, date_end LIMIT ?
@@ -459,6 +582,7 @@ def enrich_spain_details(db, session, limit: int = 300):
             raw = {}
         raw.update(extra)
         raw["detail_checked"] = datetime.now().strftime("%Y-%m-%d")
+        raw["detail_v"] = BOE_DETAIL_VERSION
         fields = {k: item.get(k) for k in (
             "title", "description", "tipo", "area_m2", "price", "current_bid", "min_price",
             "district", "concelho", "freguesia", "url", "image_url", "date_end")}

@@ -139,24 +139,54 @@ def test_full_scrape_still_makes_unseen_listings_stale(db, add):
     assert _hidden_reason(db).startswith("stale:")
 
 
+def _boe_state(kw) -> str:
+    return dict(kw.get("data") or []).get("dato[2]", "")
+
+
 def test_spain_is_partial_when_a_later_page_fails(db, fake_http):
     from sources.es import scrape_spain
     first = ('<a href="?id_busqueda=abc">next</a>'
-             '<div class="paginar">Resultados de 100</div>')
-    fake_http(lambda m, u, kw: FakeResponse("", status=500) if "id_busqueda" in u
-              else FakeResponse(first if m == "POST" else "<html></html>"))
+             '<div class="paginar">Resultados de 500</div>')
+
+    def handler(m, u, kw):
+        if "id_busqueda" in u:
+            return FakeResponse("", status=500)
+        if m == "POST" and _boe_state(kw) == "EJ":
+            return FakeResponse(first)
+        return FakeResponse("<html></html>")        # nothing about to open
+    fake_http(handler)
     result = scrape_spain(db, max_price=100000)
-    assert result == 0 and result.scope == "partial" and result.pages_seen == 1
+    # One page of open sales, then the (empty) page of sales not open yet.
+    assert result == 0 and result.scope == "partial" and result.pages_seen == 2
 
 
 def test_spain_is_partial_when_the_page_cap_stops_it(db, fake_http):
-    from sources.es import scrape_spain
+    from sources.es import BOE_MAX_PAGES, BOE_PAGE_SIZE, scrape_spain
     card = '<div id="contenido"><h3>SUBASTA SUB-JA-2024-1</h3></div>'
     first = ('<a href="?id_busqueda=abc">next</a>'
-             '<div class="paginar">Resultados de 5000</div>' + card)
-    fake_http(lambda m, u, kw: FakeResponse(first if m == "POST" else card))
+             f'<div class="paginar">Resultados de {BOE_PAGE_SIZE * BOE_MAX_PAGES + 1}</div>' + card)
+
+    def handler(m, u, kw):
+        if m == "POST":
+            return FakeResponse(first if _boe_state(kw) == "EJ" else "<html></html>")
+        return FakeResponse(card)
+    fake_http(handler)
     result = scrape_spain(db, max_price=100000)
-    assert result.scope == "partial" and result.pages_seen == 20
+    assert result.scope == "partial" and result.pages_seen == BOE_MAX_PAGES + 1
+
+
+def test_spain_reads_sales_not_open_yet(db, fake_http):
+    from sources.es import scrape_spain
+    pages = {"EJ": '<div id="contenido"><h3>SUBASTA SUB-JA-2026-1</h3></div>',
+             "PU": '<div id="contenido"><h3>SUBASTA SUB-JA-2026-2</h3></div>'}
+
+    def handler(m, u, kw):
+        return FakeResponse(pages[_boe_state(kw)] if m == "POST" else "<html></html>")
+    fake_http(handler)
+    result = scrape_spain(db, max_price=100000)
+    assert result == 2 and result.scope == "full"
+    ids = {r[0] for r in db.execute("SELECT external_id FROM listings WHERE source = 'spain'")}
+    assert ids == {"SUB-JA-2026-1", "SUB-JA-2026-2"}
 
 
 def test_france_is_partial_when_a_tribunal_page_fails(db, fake_http):

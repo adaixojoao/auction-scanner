@@ -148,6 +148,7 @@ DEFAULTS = {
         "while_app_open": True,
         "pt_every_hours": 168,        # once a week
         "eu_every_hours": 336,        # every other country, once a fortnight
+        "es_every_hours": 24,         # Spain's court sales (BOE), every day
         "retry_every_hours": 2,       # sources whose last scrape failed
         "fotocasa_every_hours": 0,    # agency portal; 0 = off the timetable (run by name)
         "backup_every_hours": 24,

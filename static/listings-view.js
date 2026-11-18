@@ -32,7 +32,7 @@ const MODE_INTRO = {
 // Browsing state only: never notes, buyer details or anything secret.
 const VIEW_STORAGE_KEY = "auction-scanner:listings-view:v1";
 const VIEW_KEYS = ["mode", "country", "source", "kind", "status", "max_price", "min_score", "search",
-                   "properties", "forced", "climate", "climate_exact", "sale_method", "sort", "dir", "page"];
+                   "properties", "forced", "small_claim", "climate", "climate_exact", "sale_method", "sort", "dir", "page"];
 const VALID_MODES = new Set(Object.keys(MODE_NOTE));
 const VALID_KINDS = new Set(["", "home", "urban_plot", "rural_plot", "other"]);
 const VALID_STATUSES = new Set(["", "shortlisted", "hidden"]);
@@ -45,7 +45,7 @@ const SALE_METHOD_LABEL = {};
 function goalDefaults(goal) {
   const budget = GOAL_BUDGETS[goal];
   return {mode: goal, country: "", source: "", kind: "", status: "", max_price: budget ? budget : "",
-          min_score: 0, search: "", properties: true, forced: false, climate: "", climate_exact: false,
+          min_score: 0, search: "", properties: true, forced: false, small_claim: false, climate: "", climate_exact: false,
           sale_method: "", sort: "score", dir: "desc", page: 1};
 }
 
@@ -89,6 +89,7 @@ function normalizeView(raw, fallbackMode, dropped = []) {
     search: typeof raw.search === "string" ? raw.search.trim() : defaults.search,
     properties: booleanValue(raw.properties, defaults.properties),
     forced: booleanValue(raw.forced, defaults.forced),
+    small_claim: booleanValue(raw.small_claim, defaults.small_claim),
     climate: pick("climate", v => VALID_CLIMATES.has(v)),
     climate_exact: booleanValue(raw.climate_exact, defaults.climate_exact),
     sale_method: pick("sale_method", v => allowed.saleMethods.has(v), "Sale method"),
@@ -130,6 +131,7 @@ function validateSavedView(raw) {
   out.search = out.search.trim();
   flag("properties", "Property only");
   flag("forced", "Forced sales only");
+  flag("small_claim", "Small claim only");
   flag("climate_exact", "Exact climate data only");
   const price = raw.max_price == null ? defaults.max_price : raw.max_price;
   if (!(price === "" || (typeof price === "number" && Number.isFinite(price) && price >= 0))) {
@@ -264,6 +266,7 @@ function readControls() {
     max_price: price === "" ? "" : Number(price),
     min_score: score === "" ? 0 : Number(score),
     search: $("f-search").value.trim(), properties: $("f-properties").checked, forced: $("f-forced").checked,
+    small_claim: $("f-small-claim").checked,
     climate: $("f-climate").value, climate_exact: $("f-climate-exact").checked,
   };
 }
@@ -277,6 +280,7 @@ function restoreControls() {
   $("f-search").value = view.search;
   $("f-properties").checked = view.properties;
   $("f-forced").checked = view.forced;
+  $("f-small-claim").checked = view.small_claim;
   $("f-climate").value = view.climate;
   $("f-climate-exact").checked = view.climate_exact;
   $("f-minscore").value = String(view.min_score);
@@ -317,6 +321,7 @@ function activeFilters() {
   if (view.search !== d.search) add("search", "Search", view.search);
   if (view.properties !== d.properties) add("properties", "Property only", "off");
   if (view.forced !== d.forced) add("forced", "Forced sales only", "");
+  if (view.small_claim !== d.small_claim) add("small_claim", "Small claim only", "");
   return chips;
 }
 
