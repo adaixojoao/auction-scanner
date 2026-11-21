@@ -1868,6 +1868,14 @@ def bid_warning(item: dict, bid: str, letter_type: str | None = None) -> str | N
         if value < minimum:
             return (f"This offer is below the minimum of EUR {minimum:,.0f} (85% of the base value), "
                     "so it will normally not be accepted. Confirm the sale type with the agente de execução.")
+    if letter_type == "pt_acordo":
+        current = item.get("current_bid") or 0
+        if value <= current:
+            return (f"The auction already has a bid of EUR {current:,.0f}. A firm offer outside it "
+                    "only interests the parties if it beats what the auction is already offering.")
+        if value < price:
+            return (f"Below the base value of EUR {price:,.0f}: the parties would be agreeing to less "
+                    "than the court set, which they rarely do while the auction can still reach it.")
     if letter_type == "fr_mandat" and value < price:
         return (f"Bidding starts at the mise à prix of EUR {price:,.0f}, so a maximum below it "
                 "cannot win. Final prices are usually well above it.")

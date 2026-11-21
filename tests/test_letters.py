@@ -23,7 +23,8 @@ def test_letters_follow_how_each_sale_is_bid():
     assert keys(item("citius", "PT", raw=carta)) == ["pt_carta_fechada", "pt_info"]
     assert keys(item("citius", "PT", raw={"modalidade": "Negociação particular"}))[0] == "pt_negociacao"
     assert keys(item("novobanco", "PT")) == ["pt_banco"]
-    assert keys(item("eleiloes", "PT")) == ["pt_info"]          # the bid itself goes in online
+    # the bid itself goes in online; a firm offer outside the auction is a letter
+    assert keys(item("eleiloes", "PT")) == ["pt_info", "pt_acordo"]
     assert keys(item("financas", "PT")) == []                   # online only, nothing to write
     assert keys(item("idealista", "PT")) == ["pt_carta_fechada"]  # unknown PT seller: plain offer
     assert keys(item("spain", "ES")) == ["es_info"]
@@ -185,3 +186,54 @@ def test_information_requests_in_german_italian_and_dutch():
                                    url="https://www.openbareverkoop.nl/9"), "", "", ME)
     assert nl.recipient == ["Aan de behandelend notaris"] and "veilingvoorwaarden" in nl.body
     assert nl.subject_line == "Onderwerp: Verzoek om informatie – executieveiling Woonhuis"
+
+
+BELEM = {"processo": "8292/22.8T8LSB", "tribunal": "Lisboa - JL Cível - Juiz 23",
+         "agente_nome": "Agente Exemplo", "agente_email": "ae@exemplo.pt", "referencia": "LO1"}
+
+
+def test_firm_offer_by_agreement_goes_to_the_people_who_can_agree():
+    inventario = item("eleiloes", "PT", title="Loja em Belém", price=52941.18, current_bid=48246.09,
+                      description="A VENDA DECORRE EM PROCESSO DE INVENTÁRIO. Devoluto.",
+                      date_end="2999-01-01T11:00:00", raw=BELEM)
+    t = letters.get_type("pt_acordo", inventario)
+    assert t.is_offer and t.public(inventario)["suggested"] == "53.000,00"   # ≥ base, 5% over the bid
+    letter = letters.build_letter(inventario, "55.000,00", "", ME, "pt_acordo")
+    assert letter.to_email == "ae@exemplo.pt" and "Agente Exemplo" in letter.recipient
+    assert "aos interessados no inventário" in letter.body
+    assert "EUR 55.000,00 (cinquenta e cinco mil euros)" in letter.body
+    assert "não obriga" in letter.body                     # asks, never claims a right
+    assert "(leilão LO1)" in letter.body and letter.subject.startswith("Proposta firme")
+
+    execucao = dict(inventario, description="Penhora no processo executivo.",
+                    raw_json=json.dumps(dict(BELEM, tribunal="Oeiras - Juízo Execução - Juiz 1")))
+    assert "ao exequente, ao executado e aos credores" in letters.build_letter(
+        execucao, "55.000,00", "", ME, "pt_acordo").body
+
+    insolv = dict(inventario, description="Visitas agendadas com o Administrador da Insolvência.",
+                  raw_json=json.dumps(dict(BELEM, tribunal="Coimbra - Juízo Comércio - Juiz 2")))
+    letter = letters.build_letter(insolv, "55.000,00", "", ME, "pt_acordo")
+    assert letter.recipient[0].endswith("Administrador(a) da Insolvência")
+    assert "massa insolvente" in letter.body
+
+
+def test_process_kind_ignores_the_stock_list_of_risks():
+    stock = ("Pode haver um desfecho diverso do expectável, a saber: a) Exercício do direito de remição; "
+             "c) Insolvência do executado; d) Pagamento da dívida")
+    it = item("eleiloes", "PT", description=stock, raw={"tribunal": "Melgaço - Juízo C. Genérica"})
+    assert letters.pt_process_kind(it) == "execucao"
+    assert letters.pt_process_kind(item("eleiloes", "PT", raw={})) == "unknown"
+
+
+def test_no_firm_offer_once_the_sale_has_ended():
+    ended = item("eleiloes", "PT", price=50000, date_end="2020-01-01T10:00:00", raw=BELEM)
+    assert "pt_acordo" not in keys(ended)
+    assert "pt_acordo" not in keys(item("financas", "PT", date_end="2999-01-01"))   # tax sales: no such route
+
+
+def test_firm_offer_warnings():
+    import dashboard
+    it = item("eleiloes", "PT", price=52941.18, current_bid=48246.09, raw=BELEM)
+    assert "already has a bid" in dashboard.bid_warning(it, "48.000,00", "pt_acordo")
+    assert "base value" in dashboard.bid_warning(it, "50.000,00", "pt_acordo")
+    assert dashboard.bid_warning(it, "55.000,00", "pt_acordo") is None
