@@ -20,7 +20,9 @@ def client(db):
 def _home(**kw):
     base = {"source": "whitestar", "country": "PT", "title": "Moradia T2",
             "description": "Estado: Novo. Em bom estado.", "price": 15000, "area_m2": 144,
-            "tipo": "moradia", "raw_json": "{}"}
+            "tipo": "moradia", "raw_json": "{}",
+            # A cutoff keeps it off the open-ended portal cap, so the work recorded still shows.
+            "date_end": "2030-06-01T10:00:00"}
     base.update(kw)
     return base
 

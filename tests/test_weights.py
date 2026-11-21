@@ -14,7 +14,8 @@ def client(db):
 
 # Not a forced sale: its bonus would put the doubled-beach score at the 200 cap.
 HOME = dict(source="leilosoc", country="PT", title="Moradia T3", tipo="moradia", area_m2=120, price=20000,
-            beach={"km": 0.3, "text": "0.3 km from the beach"})
+            beach={"km": 0.3, "text": "0.3 km from the beach"},
+            date_end="2030-06-01T10:00:00")   # a cutoff keeps it off the open-ended ad cap
 
 
 def test_weights_scale_bonuses_not_rules():

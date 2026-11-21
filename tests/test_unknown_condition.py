@@ -88,7 +88,8 @@ def test_squatted_or_deedless_homes_are_out():
 def test_a_silent_portal_ad_ranks_under_one_that_states_its_state():
     # At a believable price: much lower, "good condition" is itself too cheap to be true.
     silent = item(title="Casa en Siero", price=60000, area_m2=105, concelho="Siero", district="Asturias",
-                  description="Casa de tres plantas con finca, agua y luz, en una zona tranquila.")
+                  description="Casa de tres plantas con finca, agua y luz, en una zona tranquila.",
+                  date_end="2030-06-01T10:00:00")    # off the open-ended cap, so the gap shows
     stated = {**silent, "raw_json": json.dumps({"conservation": 2})}
     for mode in ("home", "invest"):
         raw_silent, why = score_detail(silent, mode=mode)
