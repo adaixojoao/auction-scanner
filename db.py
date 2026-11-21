@@ -1664,13 +1664,17 @@ def dropped_twins(db: sqlite3.Connection, statuses: dict[str, str],
             out.setdefault(b, a)
         else:
             out.setdefault(a, b)
-    # The same court case and property, in any round.
+    # The same court case and property in another round (another sale date).
+    # Lots of one case sold on the same date are different properties.
     gone = set(dropped)
     for lots in cases.values():
         mine = [lot for lot in lots if lot["id"] in gone]
         for lot in mine:
+            day = (lot.get("date_end") or "")[:10]
             for other in lots:
-                if other["id"] not in gone and rounds.same_property(other, lot):
+                other_day = (other.get("date_end") or "")[:10]
+                if (other["id"] not in gone and day and other_day and other_day != day
+                        and rounds.same_property(other, lot)):
                     out.setdefault(other["id"], lot["id"])
     return {k: v for k, v in out.items() if k not in gone}
 

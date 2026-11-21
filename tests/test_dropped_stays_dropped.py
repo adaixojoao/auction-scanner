@@ -52,10 +52,14 @@ def test_a_new_round_of_the_same_case_and_property_stays_dropped(db, add):
     # Another lot of the same case (a different size) is another property.
     add("eleiloes", "lot", title="T0 - MACEIRA", price=15000, area_m2=325, concelho="Leiria",
         date_end="2026-12-03T10:30:00", raw_json=case)
+    # Two lots of the case on the same date, alike on paper, are still two lots.
+    add("eleiloes", "twin", title="T0 - MACEIRA", price=17000, area_m2=48, concelho="Leiria",
+        date_end="2026-12-03T10:30:00", raw_json=case)
     set_listing_status(db, "eleiloes:r1", "dismissed")
     got = _shown(db)
     assert got["eleiloes:r2"] == "dismissed: same property as eleiloes:r1"
     assert not (got["eleiloes:lot"] or "").startswith("dismissed")
+    assert not (got["eleiloes:twin"] or "").startswith("dismissed")
 
 
 def test_a_starred_twin_stays_shown(db, add):
