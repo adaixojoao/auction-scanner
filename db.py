@@ -1630,6 +1630,51 @@ def listing_statuses(db: sqlite3.Connection) -> dict[str, str]:
     return dict(db.execute("SELECT listing_id, status FROM listing_status").fetchall())
 
 
+def dropped_twins(db: sqlite3.Connection, statuses: dict[str, str],
+                  cases: dict[str, list[dict]]) -> dict[str, str]:
+    """Listings that are the same property as one you dropped: {id: the dropped id}.
+
+    Dropping is per listing, but a property comes back under other ids: the same
+    house on another site (2026-11-21: dropped on Licitor, still shown from Vench
+    as only a possible match), a copy that becomes the kept one after a later
+    de-duplication, or the same court case and property in another round.
+    A possible match counts only with the same price and sale date.
+    """
+    import rounds
+    dropped = [i for i, s in statuses.items() if s == "dismissed"]
+    if not dropped:
+        return {}
+    marks = ",".join("?" * len(dropped))
+    out: dict[str, str] = {}
+    # The copy you dropped and the listing kept in its place, either way round.
+    for kept, gone in db.execute(f"SELECT duplicate_of, id FROM listings WHERE id IN ({marks}) "
+                                 "AND duplicate_of IS NOT NULL", dropped):
+        out.setdefault(kept, gone)
+    for copy, gone in db.execute(f"SELECT id, duplicate_of FROM listings WHERE duplicate_of IN ({marks})",
+                                 dropped):
+        out.setdefault(copy, gone)
+    # A possible match with the same price and the same sale date.
+    for a, b in db.execute(f"""
+            SELECT a.id, b.id FROM listings a JOIN listings b ON b.id = a.possible_match
+            WHERE (a.id IN ({marks}) OR b.id IN ({marks}))
+              AND ABS(COALESCE(a.price, -1) - COALESCE(b.price, -2)) < 1
+              AND a.date_end IS NOT NULL AND b.date_end IS NOT NULL
+              AND substr(a.date_end, 1, 10) = substr(b.date_end, 1, 10)""", dropped + dropped):
+        if a in statuses and statuses[a] == "dismissed":
+            out.setdefault(b, a)
+        else:
+            out.setdefault(a, b)
+    # The same court case and property, in any round.
+    gone = set(dropped)
+    for lots in cases.values():
+        mine = [lot for lot in lots if lot["id"] in gone]
+        for lot in mine:
+            for other in lots:
+                if other["id"] not in gone and rounds.same_property(other, lot):
+                    out.setdefault(other["id"], lot["id"])
+    return {k: v for k, v in out.items() if k not in gone}
+
+
 FOLLOW_UP_DAYS = 10   # a letter with no answer after this long deserves a phone call or a reminder
 
 
@@ -2916,6 +2961,7 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
     # first prices; rounds (all listings: they span sites and dates); where each
     # municipality's town is; what ended sales closed at. Shared, rebuilt when their tables change.
     first_price, cases, towns, closes, land_market, floor_market = _shared_lookups(db, now)
+    twins = dropped_twins(db, statuses, cases)
     import climate                 # heat in 2081-2100, water, fire, flood (public datasets)
     climate_on = climate.available()
     maps_before = climate.maps_loaded()
@@ -2984,6 +3030,9 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             why = why_dismissed.get(item["id"])
             item["dismiss_reason"] = why
             reason = f"dismissed: {why}" if why else "dismissed"
+        elif item["id"] in twins and item["status"] != "shortlisted" and offer is None:
+            # The same property as one you dropped stays dropped (a star or an offer wins).
+            reason = f"dismissed: same property as {twins[item['id']]}"
         elif end is not None and end <= now:
             reason = "expired"
         elif item.get("duplicate_of"):
