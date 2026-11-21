@@ -1277,7 +1277,7 @@ def test_tgss_reads_the_table_adds_charges_and_drops_the_owner():
     assert rows == [{"id": "901", "kind": "Finca Rústica", "address": "YERA (VEGA DE PAS)", "valuation": 16863.24,
                      "charges": 2000.0, "price": 16863.24, "date": "15/12/2026 12:00"}]
     listing = parse_tgss(rows[0], tgss_detail(TGSS_DETAIL))
-    assert listing["id"] == "tgss:901" and listing["tipo"] == "terreno"
+    assert listing["id"].startswith("tgss:901-") and listing["tipo"] == "terreno"
     assert listing["area_m2"] == 12089.0 and listing["concelho"] == "Vega De Pas"
     assert "12345678Z" not in listing["description"] and "NOMBRE" not in listing["description"]
     assert price_to_pay(listing) == 18863.24          # the debts stay with the land
@@ -1292,6 +1292,25 @@ def test_a_tgss_urban_finca_is_a_home_only_when_it_says_so():
     flat = parse_tgss(row, {"description": "VIVIENDA EN C CARMEN 1, Descripción Detallada: URBANA"})
     assert garage["tipo"] == "inmueble" and scoring.property_kind(garage) == "other"
     assert flat["tipo"] == "vivienda" and scoring.property_kind(flat) == "home"
+
+
+def test_a_reused_tgss_lot_number_is_a_new_listing_with_its_own_town():
+    """EMB_ID 300 was a Marbella lot, then a 170 m² plot in Murcia; the update kept
+    Marbella's map point and the plot ranked on Málaga's prices (2026-11-21)."""
+    from sources.es import parse_tgss
+    row = {"id": "440", "kind": "Finca Urbana", "address": "CL LAS MATILLAS", "valuation": 13865.09,
+           "price": 13865.09, "date": "17/12/2026 12:00"}
+    house = parse_tgss(row, {"description": "100% PLENO DOMINIO (FINCA 227 PUEBLA DEL MAESTRE) Descripción "
+                                            "Detallada: URBANA.- CASA SITA EN PUEBLA DEL MAESTRE, EN CALLE LAS "
+                                            "MATILLAS, NÚMERO 58.", "location": "CL LAS MATILLAS 58 (06906)"})
+    plot = parse_tgss(row, {"description": "FINCA 1623 SECCION 7 Descripción Detallada: MUNICIPIO DE MURCIA SOLAR "
+                                           "EN SITIO YESERA DE SAN ROQUE", "location": "CL YESERA 0 (30157)"})
+    assert house["id"] != plot["id"] and house["id"].startswith("tgss:440-")
+    assert house["concelho"] == "Puebla Del Maestre" and plot["concelho"] == "Murcia"
+    same = parse_tgss(row, {"description": "100% PLENO DOMINIO (FINCA 227 PUEBLA DEL MAESTRE) Descripción "
+                                           "Detallada: URBANA.- CASA SITA EN PUEBLA DEL MAESTRE, EN CALLE LAS "
+                                           "MATILLAS, NÚMERO 58.", "location": "CL LAS MATILLAS 58 (06906)"})
+    assert same["id"] == house["id"]          # the same lot keeps its id from scan to scan
 
 
 PISOS_CARD = """<div id="675.105" class="ad-preview ad-preview--has-desc">

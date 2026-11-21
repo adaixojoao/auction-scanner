@@ -1110,3 +1110,15 @@ def test_listing_traps_seen_in_the_top_15():
     assert not score(street)[1][0].startswith("cannot be visited")
     prose = item(title="Piso", description="Piso de 3 dormitorios. No visitable.", price=20000, area_m2=70)
     assert score(prose)[0] == 0 and score(prose)[1][0].startswith("cannot be visited")
+
+
+def test_a_portuguese_unit_registered_for_services_is_not_a_home():
+    """Finanças Olhão 1104.2026: "destinada a Serviços … 2º andar" ranked as a home."""
+    from scoring import property_kind as kind
+    office = ("Fração autónoma designada pela letra J que faz parte do prédio constituído em propriedade "
+              "horizontal, destinada a Serviços e descrito na Conservatória, correspondente ao 2º andar do prédio")
+    flat = "Fração autónoma destinada a habitação, tipo T3, composto por 4 assoalhadas, 4.º andar direito"
+    house = "Moradia de rés-do-chão e 1º andar com loja destinada a comércio"
+    assert kind({"title": office[:120], "description": office, "tipo": "imovel", "country": "PT"}) == "other"
+    assert kind({"title": flat[:120], "description": flat, "tipo": "imovel", "country": "PT"}) == "home"
+    assert kind({"title": house, "description": house, "tipo": "imovel", "country": "PT"}) == "home"
