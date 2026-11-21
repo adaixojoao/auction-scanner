@@ -327,6 +327,26 @@ def test_open_ended_portal_home_is_capped_below_dated_court_sales():
     assert dated_portal > sc_p
 
 
+def test_open_ended_portal_invest_is_capped_below_dated_court_sales():
+    """Whitestar-style ads with no deadline used to fill Invest at display 100."""
+    from scoring import OPEN_ENDED_INVEST_CAP
+    portal = item(source="whitestar", country="PT", title="Apartamento T3",
+                  description="Apartamento em bom estado", price=40000, area_m2=100,
+                  concelho="Lisboa")
+    court = item(source="financas", country="PT", title="Apartamento T3 em bom estado",
+                 description="Fração habitação", price=50000, area_m2=120,
+                 concelho="Lisboa", date_end="2030-06-01T10:00:00")
+    sc_p, why_p = score(portal, mode="invest")
+    sc_c, why_c = score(court, mode="invest")
+    assert any("open-ended sale ad" in r for r in why_p)
+    assert not any("open-ended sale ad" in r for r in why_c)
+    assert 0 < sc_p <= OPEN_ENDED_INVEST_CAP
+    assert sc_c > sc_p
+    dated_portal, why_d = score({**portal, "date_end": "2030-06-01T10:00:00"}, mode="invest")
+    assert not any("open-ended sale ad" in r for r in why_d)
+    assert dated_portal > sc_p
+
+
 def test_no_bids_yet_is_only_for_auctions_not_portal_asking_prices():
     portal, why_p = score_detail(item(source="pisos", country="ES", title="Casa",
                                       price=40000, area_m2=100))
@@ -536,12 +556,24 @@ def test_italian_condition_words_and_silent_cards():
     assert condition({"title": "Casa", "description": "fabbricato pericolante, in rovina"}) == "heavy"
     assert condition({"title": "Abitazione (collabente)", "description": ""}) == "heavy"
     assert condition({"title": "Abitazione", "description": "intera proprietà di un rustico di 121 mq"}) == "heavy"
+    # Plural shells (Albosaggia): "n. 2 rustici" is not a liveable home.
+    assert condition({"title": "Abitazione",
+                      "description": "n. 2 rustici e n. 1 terreno agricolo"}) == "heavy"
     assert condition({"title": "Casa", "description": "fabbricato incompiuto, non ultimato"}) == "heavy"
     assert condition({"title": "Appartamento",
                       "description": "Stato di manutenzione scadente. Presenza di abusi"}) == "some"
     # "sottotetto abitabile" is a room, not proof the house is sound.
     assert condition({"title": "Casa", "description": "con seminterrato e sottotetto abitabile"}) == "unknown"
     assert condition({"title": "Casa", "description": "appartamento abitabile in buono stato"}) == "good"
+    # Fener trap: the building was renovated, not this flat's finish.
+    assert condition({
+        "title": "Appartamento",
+        "description": "Piano secondo di edificio ristrutturato. Condizioni buone",
+    }) == "unknown"
+    assert condition({
+        "title": "Appartamento",
+        "description": "appartamento ristrutturato in buono stato",
+    }) == "good"
     base = dict(source="pvp_giustizia", country="IT", title="Abitazione di tipo civile",
                 price=8000, area_m2=90, concelho="Talamona")
     silent, r_silent = score(item(**base))
@@ -617,6 +649,10 @@ def test_the_ai_check_is_told_the_same_goal():
     assert "at least 20,000 m²" in text and "€0.30/m²" in text and "heavy work" in text
     assert "western continental Europe" in text
     assert "open-ended portal asking ad" in text
+    assert "edificio" in text
+    invest = buyer_priorities(mode="invest")
+    assert "open-ended portal asking ad" in invest
+    assert "edificio" in invest
 
 
 def test_off_western_continental_europe_costs_a_flat_ten():

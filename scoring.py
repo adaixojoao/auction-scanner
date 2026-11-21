@@ -426,10 +426,12 @@ NO_PRICE_CAP = 55    # no figure at all, and not a sale where you name the price
 NO_PRICE_OFFER_CAP = 80
 # Court/offer homes with no established floor: under mid-board until sized.
 MISSING_FLOOR_CAP = 75
-# Asking ads with no hearing or offer cutoff (Pisos, Idealista, …): climate and
-# size used to push them to display 100 while court/tax sales with a date sat
-# lower (2026-11-12). Mid-board until a deadline appears or it is a forced sale.
+# Asking ads with no hearing or offer cutoff (Pisos, Idealista, Whitestar, …):
+# climate and size used to push them to display 100 while court/tax sales with
+# a date sat lower (2026-11-12). Same trap on Invest (portal banks without a
+# cutoff). Mid-board until a deadline appears or it is a forced sale.
 OPEN_ENDED_HOME_CAP = 55
+OPEN_ENDED_INVEST_CAP = 55
 
 # The long run (climate.py): summers no hotter than 35 °C in 50-70 years, water
 # all year round, no fires, no floods. Heat is the mean daily maximum of the
@@ -654,6 +656,9 @@ HEAVY_WORK = [
     "pessime condizion*", "da rifare", "al grezzo", "allo stato grezzo",
     "al rustico", "allo stato rustico", "un rustico", "di un rustico", "di rustico",
     "fabbricato rustico", "immobile rustico",
+    # Plural shells (Albosaggia-style "n. 2 rustici e terreno"): not a liveable home.
+    "2 rustici", "due rustici", "tre rustici", "di rustici", "dei rustici",
+    "n. 2 rustici", "n.2 rustici", "n° 2 rustici", "nº 2 rustici",
     "priva di tramezzatura", "prive di tramezzature",
     "pericolo di crollo", "parzialmente crollat*", "crollat*",
     "dirut*", "semidirut*", "semi-dirut*", "cadente", "pericolante", "collabente",
@@ -1087,7 +1092,8 @@ def buyer_priorities(targets: dict | None = None, mode: str = "home") -> str:
         "the condition, treat it as needing work (not as a sound home); on a sale portal or a bank's "
         "site a low price with no word on the state usually hides work, occupants or that it is not a "
         "home at all, so say what to check. Good condition said of one part — the roof, the bathroom, "
-        "the common parts — is not the home's condition. A plot is judged on the "
+        "the common parts — or of the building's renovation history (edificio / fabbricato "
+        "ristrutturato) is not the home's condition. A plot is judged on the "
         "Investment land goal instead, where land of at least "
         f"{t['rural_min_m2']:,.0f} m² at most €{t['rural_max_eur_m2']:.2f}/m² (about "
         f"€{t['rural_max_eur_m2'] * 10000:,.0f} per hectare) is what counts. Not wanted: small or partial homes; "
@@ -1152,9 +1158,13 @@ _INVEST_PRIORITIES = (
     "since 2025, F from 2028) until energy works are done; French farm (A) or natural (N) zoning "
     "or a site patrimonial remarquable, which restrict rebuild and outside works; a price that is "
     "only the down payment of "
-    "a viager or vente à terme. When the "
+    "a viager or vente à terme. Prefer a court, tax or other forced sale, or any sale with a "
+    "published auction or offer deadline, over an open-ended portal asking ad (those stay "
+    "under the mid-board until a deadline appears). When the "
     "listing does not say the condition, treat it as needing work; on a sale portal or a bank's site "
-    "a price far below the local one with no word on the state is a warning, not a bargain. Do not "
+    "a price far below the local one with no word on the state is a warning, not a bargain. "
+    "Good condition said of the building's history — an edificio / fabbricato / immeuble "
+    "ristrutturato decades ago — is not the flat's condition. Do not "
     "work out a rent on a plot's area. Judge the money, not whether "
     "the buyer would enjoy living there."
 )
@@ -1527,13 +1537,15 @@ _PHOTO_ROOF_SOME = ["uralita", "asbestos", "fibre-cement", "fiber-cement", "fibr
                     "fiber cement", "fibrocement"]
 
 
-# "Toiture en très bon état", "salle de bains rénové", "elementos comunes reformados":
-# one part of the building, not the home. Checked in the words just before.
+# "Toiture en très bon état", "salle de bains rénové", "elementos comunes reformados",
+# "Piano secondo di edificio ristrutturato": one part / the building's history, not
+# the home you buy. Checked in the words just before the good-condition term.
 _PART_OF_HOUSE = re.compile(
     r"\b(?:toiture|toit|couverture|charpente|gros (?:oe|œ)uvre|structure|murs?|facade|menuiseries|fenetres|"
     r"salle de bains?|salle d'eau|cuisine|chaudiere|tejado|cubierta|estructura|fachada|ventanas|"
     r"elementos comunes|zonas comunes|portal|bano|cocina|telhado|cobertura|estrutura|caixilharia|janelas|"
-    r"partes comuns|casa de banho|cozinha|tetto|copertura|facciata|infissi|bagno|parti comuni)\b"
+    r"partes comuns|casa de banho|cozinha|tetto|copertura|facciata|infissi|bagno|parti comuni|"
+    r"edificio|fabbricato|immeuble|b[aâ]timent|building)\b"
     r"[^.;,]{0,25}$")
 # The portal's own state, when the text says nothing: fotocasa's conservationStatus
 # (1 casi nuevo, 2 muy bien, 3 bien, 4 a reformar, 8 reformado — read off its pages,
@@ -4037,6 +4049,11 @@ def _score_invest(item: dict, now: datetime | None, targets: dict | None) -> tup
     if pay and not (item.get("min_price") or 0) and forced_sale(item):
         s += 4
         reasons.append("no minimum bid")
+    # Open-ended asking ad (portal/bank without a cutoff): not an Invest top.
+    from common import action_deadline
+    if not forced_sale(item) and not action_deadline(item):
+        caps.append(OPEN_ENDED_INVEST_CAP)
+        reasons.append("open-ended sale ad — no auction or offer deadline")
     others = item.get("open_homes_here") or 0
     if others >= INVEST_SUPPLY_NOTE:
         reasons.append(f"{others} other homes still listed in this district on the sites scanned — "
