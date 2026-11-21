@@ -34,7 +34,8 @@ def test_a_scan_covers_only_the_chosen_countries(db, monkeypatch):
     monkeypatch.setattr("sources.run_source", lambda db, s, **kw: ran.append(s.country) or {"count": 0, "status": "empty"})
     cfg = {**config.DEFAULTS, "filters": {"countries": ["PT", "IT"]}}
     pipeline.run_scan(cfg=cfg, report=False, alerts=False, db=db)
-    assert set(ran) == {"PT", "IT"}
+    # Pan-European portals (Troostwijk) ride along: each lot carries its own country.
+    assert set(ran) == {"PT", "IT", "EU"}
     ran.clear()
     pipeline.run_scan(["HR", "IT"], cfg=cfg, report=False, alerts=False, db=db)
     assert set(ran) == {"IT"}
