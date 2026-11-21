@@ -1725,6 +1725,43 @@ _TGSS_HOME = re.compile(r"\s*(?:\d+(?:[.,]\d+)?\s*%\s*(?:pleno dominio\s*)?(?:de
                         r"(?:vivienda|casa|piso|chalet|apartamento|d[uú]plex|[aá]tico|adosado)\b", re.I)
 
 
+# Where the registry text puts the property, for a location that gives only a
+# postcode: "CASA SITA EN PUEBLA DEL MAESTRE, EN CALLE…", "MUNICIPIO DE MURCIA SOLAR…".
+_TGSS_TOWN = re.compile(r"\b(?:SITA EN|MUNICIPIO DE|T[ÉE]RMINO(?: MUNICIPAL)? DE)\s+([A-ZÁÉÍÓÚÑÜ' ]{3,40}?)"
+                        r"(?=\s*[,.(]|\s+(?:EN|CALLE|SOLAR|URBANA|R[ÚU]STICA|SITIO|PARAJE|JUNTO|CON)\b)")
+
+
+def _tgss_lot_id(emb_id: str, description: str | None) -> str:
+    """The TGSS hands an EMB_ID to a new lot once the old one is gone (2026-11-21:
+    EMB_ID 300 was a Marbella lot, then a plot in Murcia), and an update keeps
+    fields the new scrape leaves empty — the old lot's town and map point stayed
+    on the new one. The registry text tells the lots apart."""
+    text = normalize(description or "")[:200]
+    return f"{emb_id}-{stable_id(text)[:8]}" if text else emb_id
+
+
+def _tgss_keep_old_id(db, listing: dict, emb_id: str) -> dict:
+    """A lot stored before ids carried the registry text keeps "tgss:<EMB_ID>"
+    while it is still the same lot (AGENTS.md: keep the old form)."""
+    old_id = f"tgss:{emb_id}"
+    if listing["id"] == old_id:
+        return listing
+    row = db.execute("SELECT description, raw_json FROM listings WHERE id = ?", (old_id,)).fetchone()
+    if not row or normalize(row[0] or "")[:120] != normalize(listing.get("description") or "")[:120]:
+        return listing
+    # Rows already overwritten by a new lot have its text but the old lot's map
+    # point (EMB_ID 300: Murcia text, Marbella point): those start afresh.
+    try:
+        geo = (json.loads(row[1] or "{}") or {}).get("geo") or {}
+    except ValueError:
+        geo = {}
+    town = normalize(listing.get("concelho") or "")
+    placed = normalize(f"{geo.get('query') or ''} {geo.get('label') or ''}")
+    if geo and town and town not in placed:
+        return listing
+    return {**listing, "id": old_id, "external_id": emb_id}
+
+
 def _tgss_area(text: str) -> float | None:
     m = _TGSS_HECTARES.search(text or "")
     if m:
@@ -1741,6 +1778,10 @@ def parse_tgss(row: dict, detail: dict) -> dict | None:
     postcode = re.search(r"\((\d{5})\)\s*(.+)$", location)
     if postcode:
         town = postcode.group(2).strip().title()
+    elif re.search(r"\(\d{5}\)\s*$", location):
+        # Only a postcode: the row's "(…)" is the office's area, not the town.
+        named = _TGSS_TOWN.search(detail.get("description") or "")
+        town = named.group(1).strip().title() if named else None
     rural = "stica" in row["kind"]
     description = " · ".join(x for x in (detail.get("description"), location,
                                          f"Tasación {row['valuation']:,.2f} €" if row.get("valuation") else None,
@@ -1750,7 +1791,8 @@ def parse_tgss(row: dict, detail: dict) -> dict | None:
     description = re.sub(r"\s{2,}", " ", _TGSS_OWNER.sub(" ", description)).strip()
     raw = {"charges_eur": row["charges"]} if row.get("charges") else {}
     return make_listing(
-        "tgss", row["id"], "ES", title=f"{row['kind']} en {town or row['address']}",
+        "tgss", _tgss_lot_id(row["id"], detail.get("description")), "ES",
+        title=f"{row['kind']} en {town or row['address']}",
         # A "finca urbana" is as often a garage, a shop or a plot as a home: only
         # a description that opens with a home says "vivienda".
         description=description, tipo="terreno" if rural else "vivienda" if _TGSS_HOME.match(description)
@@ -1783,7 +1825,7 @@ def scrape_tgss(db, max_price: float = 50000, **_):
                                                    "tipoOperacion": "1"})
             listing = parse_tgss(row, tgss_detail(detail.text) if detail.ok else {})
             if listing:
-                upsert_listing(db, listing)
+                upsert_listing(db, _tgss_keep_old_id(db, listing, row["id"]))
                 total += 1
             time.sleep(0.4)
         db.commit()

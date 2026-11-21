@@ -1361,6 +1361,14 @@ def _sold_as_outbuilding(desc: str) -> bool:
     return has_term(desc, OUTBUILDING_WORDS, negations=False)
 
 
+# The use a Portuguese registry entry gives a unit ("destinada a habitação",
+# "afeta a comércio"), on normalized text.
+_PT_REGISTERED_USE = re.compile(
+    r"\b(?:destinad[ao]s?|afet[ao]s?|afect[ao]s?) (?:a |ao |à |para )?"
+    r"(habitacao|servicos|comercio|escritorios?|industria|armazem|armazens|arrumos|estacionamento|garagem|"
+    r"restauracao|similares de hotelaria)\b")
+
+
 def property_kind(item: dict) -> str | None:
     """"home", "urban_plot", "rural_plot", "other" (shop, garage, storage…) or
     None when the listing does not say. The title and the portal's own type
@@ -1419,6 +1427,13 @@ def property_kind(item: dict) -> str | None:
     if _sold_as_outbuilding(desc):
         return "other"
     if _SHOP_TEMPLATE.search(ndesc):
+        return "other"
+    # Finanças "Fração autónoma … destinada a Serviços … 2º andar": the registered
+    # use, not the floor word, says what it is (Olhão 1104.2026, 2026-11-21).
+    # A house that also has a shop "destinada a comércio" stays a house.
+    use = _PT_REGISTERED_USE.search(ndesc[:500])
+    if (use and use.group(1) != "habitacao" and "habitacao" not in ndesc[:500]
+            and not has_term(desc[:500], ["moradia", "moradias", "apartamento", "vivenda"], negations=False)):
         return "other"
     if has_term(desc, NEW_BUILD_PROJECT, negations=False):
         return "urban_plot"
