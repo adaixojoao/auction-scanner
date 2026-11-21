@@ -1313,6 +1313,25 @@ def test_a_reused_tgss_lot_number_is_a_new_listing_with_its_own_town():
     assert same["id"] == house["id"]          # the same lot keeps its id from scan to scan
 
 
+def test_a_tgss_lot_stored_under_the_old_id_keeps_it(db):
+    """AGENTS.md: keep the old id form while it is still the same lot."""
+    from db import upsert_listing
+    from sources.es import _tgss_keep_old_id, parse_tgss
+    row = {"id": "440", "kind": "Finca Urbana", "address": "CL LAS MATILLAS", "valuation": 13865.09,
+           "price": 13865.09, "date": "17/12/2026 12:00"}
+    house = parse_tgss(row, {"description": "URBANA.- CASA SITA EN PUEBLA DEL MAESTRE, EN CALLE LAS MATILLAS",
+                             "location": "CL LAS MATILLAS 58 (06906)"})
+    upsert_listing(db, {**house, "id": "tgss:440", "external_id": "440"})
+    assert _tgss_keep_old_id(db, house, "440")["id"] == "tgss:440"
+    plot = parse_tgss(row, {"description": "MUNICIPIO DE MURCIA SOLAR EN SITIO YESERA DE SAN ROQUE",
+                            "location": "CL YESERA 0 (30157)"})
+    assert _tgss_keep_old_id(db, plot, "440")["id"] == plot["id"] != "tgss:440"
+    # Overwritten before this fix: the new lot's text, the old lot's map point.
+    upsert_listing(db, {**plot, "id": "tgss:300", "external_id": "300",
+                        "raw_json": '{"geo": {"query": "Marbella", "precision": "municipality"}}'})
+    assert _tgss_keep_old_id(db, plot, "300")["id"] == plot["id"] != "tgss:300"
+
+
 PISOS_CARD = """<div id="675.105" class="ad-preview ad-preview--has-desc">
 <div class="ad-preview__bottom"><div class="ad-preview__info">
 <a href="/comprar/casa_rustica-ortigueira-675_105/" class="ad-preview__title">Casa r&#xFA;stica en calle Lugar Veiga, 4</a>

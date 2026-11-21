@@ -1,7 +1,6 @@
 """Spain: BOE judicial auctions, AEAT tax auctions, bad-bank / servicer portals."""
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import time
@@ -1738,7 +1737,29 @@ def _tgss_lot_id(emb_id: str, description: str | None) -> str:
     fields the new scrape leaves empty — the old lot's town and map point stayed
     on the new one. The registry text tells the lots apart."""
     text = normalize(description or "")[:200]
-    return f"{emb_id}-{hashlib.sha1(text.encode()).hexdigest()[:8]}" if text else emb_id
+    return f"{emb_id}-{stable_id(text)[:8]}" if text else emb_id
+
+
+def _tgss_keep_old_id(db, listing: dict, emb_id: str) -> dict:
+    """A lot stored before ids carried the registry text keeps "tgss:<EMB_ID>"
+    while it is still the same lot (AGENTS.md: keep the old form)."""
+    old_id = f"tgss:{emb_id}"
+    if listing["id"] == old_id:
+        return listing
+    row = db.execute("SELECT description, raw_json FROM listings WHERE id = ?", (old_id,)).fetchone()
+    if not row or normalize(row[0] or "")[:120] != normalize(listing.get("description") or "")[:120]:
+        return listing
+    # Rows already overwritten by a new lot have its text but the old lot's map
+    # point (EMB_ID 300: Murcia text, Marbella point): those start afresh.
+    try:
+        geo = (json.loads(row[1] or "{}") or {}).get("geo") or {}
+    except ValueError:
+        geo = {}
+    town = normalize(listing.get("concelho") or "")
+    placed = normalize(f"{geo.get('query') or ''} {geo.get('label') or ''}")
+    if geo and town and town not in placed:
+        return listing
+    return {**listing, "id": old_id, "external_id": emb_id}
 
 
 def _tgss_area(text: str) -> float | None:
@@ -1804,7 +1825,7 @@ def scrape_tgss(db, max_price: float = 50000, **_):
                                                    "tipoOperacion": "1"})
             listing = parse_tgss(row, tgss_detail(detail.text) if detail.ok else {})
             if listing:
-                upsert_listing(db, listing)
+                upsert_listing(db, _tgss_keep_old_id(db, listing, row["id"]))
                 total += 1
             time.sleep(0.4)
         db.commit()
