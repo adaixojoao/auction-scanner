@@ -3,7 +3,10 @@ from scoring import score_detail
 
 
 def listing(**kw):
-    base = {"source": "fotocasa", "country": "ES", "title": "Casa en Foz", "description": "", "price": 30000}
+    # A published cutoff keeps these off the open-ended portal cap so ranking
+    # tests still see differences above mid-board (Invest and My home).
+    base = {"source": "fotocasa", "country": "ES", "title": "Casa en Foz", "description": "",
+            "price": 30000, "date_end": "2030-06-01T10:00:00"}
     base.update(kw)
     return base
 
@@ -126,7 +129,7 @@ def test_an_earlier_cheap_plot_ranks_above_a_later_one():
     assert any(r.endswith("— soon") for r in r_soon)
     assert any("before long" in r for r in r_later)
     assert not any("not this year" in r for r in r_later)
-    private = score_detail(listing(**base), now=now, mode="forest")[1]
+    private = score_detail(listing(**base, date_end=None), now=now, mode="forest")[1]
     assert any("private sale" in r for r in private)
     # €1,000/ha closing in 2028 beats €4,000/ha closing next month.
     cheap_later = score_detail(listing(title="Finca rústica forestal", tipo="terreno",

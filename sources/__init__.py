@@ -88,6 +88,7 @@ DEFAULT_SOURCES = frozenset({
     "athome", "wortimmo",                                          # LU
     "kleinanzeigen", "immowelt",                                   # DE
     "willhaben", "wohnnet",                                        # AT
+    "troostwijk",                                                  # EU (Troostwijk/BVA real estate)
 })
 
 

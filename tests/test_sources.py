@@ -19,7 +19,9 @@ def test_registry_is_complete():
     # Agency portals whose search was seen to list cheap homes are in the default set.
     assert {s.name for s in REGISTRY.values() if s.default} == DEFAULT_SOURCES
     assert {s.country for s in sources_for(None)} == {
-        "PT", "ES", "FR", "NL", "IT", "BE", "LU", "DE", "AT"}
+        "PT", "ES", "FR", "NL", "IT", "BE", "LU", "DE", "AT", "EU"}
+    # Troostwijk/BVA real estate (houses and land across Europe) is read on ordinary scans.
+    assert "troostwijk" in {s.name for s in sources_for(["EU"])}
     assert sources_for(None)[0].country == "PT"
     assert {s.name for s in sources_for(["PT"])} == {"eleiloes", "leilosoc", "citius", "financas", "bidleiloeira",
                                                      "bcp", "bpi", "cgd", "santander", "whitestar",
