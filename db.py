@@ -2255,6 +2255,65 @@ def purge_orphan_scores(db) -> int:
     return len(orphans)
 
 
+def zero_closed_scores(db, now: datetime | None = None) -> int:
+    """Write rank 0 into score_cache for ended / dismissed sales.
+
+    Visible loads skip ended rows in SQL, so they never rewrote the cache and
+    offline tops kept showing Hennebont / Bobbio as live (2026-11-22).
+    """
+    import pickle
+    now = now or utcnow()
+    sdb = _score_db(db)
+    if sdb is None:
+        return 0
+    day = now.date().isoformat()
+    closed = {row[0] for row in db.execute(
+        "SELECT id FROM listings WHERE date_end IS NOT NULL AND date_end != '' "
+        "AND substr(date_end, 1, 10) < ?",
+        (day,),
+    )}
+    closed |= {row[0] for row in db.execute(
+        "SELECT listing_id FROM listing_status WHERE status = 'dismissed'"
+    )}
+    if not closed:
+        return 0
+    zero = pickle.dumps({"score": 0, "rank": 0, "reasons": [], "excellent": False,
+                         "hidden_reason": "expired"})
+    n = 0
+    with _SCORE_LOCK, sdb:
+        for i in range(0, len(closed), 500):
+            chunk = list(closed)[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            rows = sdb.execute(
+                f"SELECT mode, id, key, data FROM score_cache WHERE id IN ({marks})",
+                chunk,
+            ).fetchall()
+            updates = []
+            for mode, lid, key, data in rows:
+                try:
+                    cur = pickle.loads(data)
+                except Exception:
+                    cur = {}
+                if isinstance(cur, dict) and (cur.get("rank") or cur.get("score") or 0) == 0:
+                    continue
+                updates.append((mode, lid, key, None, zero))
+            if updates:
+                sdb.executemany(
+                    "INSERT OR REPLACE INTO score_cache VALUES (?, ?, ?, ?, ?)",
+                    updates,
+                )
+                n += len(updates)
+    for mode, kept in _SCORED.items():
+        for lid in closed:
+            if lid in kept:
+                key = kept[lid][0]
+                kept[lid] = (key, {"score": 0, "rank": 0, "reasons": [], "excellent": False,
+                                   "hidden_reason": "expired"}, None)
+    if n:
+        LOG.info(f"Zeroed kept scores for {n} closed listing×mode rows")
+    return n
+
+
 # Scores are also kept on disk, so a restart or a new window does not score
 # 60,000 listings again: only listings whose row (or the day, or the filters) changed.
 _LOADED_MODES: set = set()
@@ -3066,24 +3125,41 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
             if seen and failed and failed > seen and now - seen > UNCONFIRMED_AFTER:
                 item["unconfirmed_since"] = f"{seen:%Y-%m-%d}"
 
-        if reason and not include_hidden:
-            continue
-
         # A closed listing (dismissed, ended, a duplicate) is still listed but
         # never bought: scoring it was wasted work (8,000 ended sales scored on
         # every hidden-inclusive read, 2026-10-30). One asked for by id (where=)
-        # is still scored in full.
+        # is still scored in full. Persist score 0 into score_cache even when
+        # hidden rows are skipped, so a raw cache read cannot keep a live rank
+        # for an expired sale (Hennebont / Bobbio still topping tops, 2026-11-22).
         if reason and not where and reason.startswith(CLOSED_REASONS):
             from scoring import categorize, property_kind
             item.update({k: None for k in _DERIVED})
             item.update(score=0, rank=0, reasons=[], excellent=False,
                         category=categorize(item), kind=property_kind(item))
             item["hidden_reason"] = reason
+            row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],
+                                         item["offer_outcome"], context, _time_key(item, now),
+                                         item.get("unconfirmed_since"),
+                                         ev_rev_sums.get(item["id"], 0))).encode()).hexdigest()
+            data = {k: item.get(k) for k in _DERIVED}
+            data.update(score=0, rank=0, reasons=[], excellent=False,
+                        category=item["category"], kind=item["kind"],
+                        hidden_reason=reason)
+            kept = scored.get(item["id"])
+            if not kept or kept[0] != row_key or (isinstance(kept[1], dict) and (kept[1].get("rank") or 0) != 0):
+                new_scores.append((item["id"], row_key, None, data))
+                if _kept_in_memory(mode):
+                    scored[item["id"]] = (row_key, data, None)
+            if not include_hidden:
+                continue
             seen_first = parse_dt(item.get("first_seen"))
             item["is_recent"] = bool(seen_first and now - seen_first <= RECENT)
             if slim_hidden:
                 item = {**{k: item[k] for k in _SLIM if k in item}, "_slim": True}
             items.append(item)
+            continue
+
+        if reason and not include_hidden:
             continue
 
         row_key = hashlib.sha1(repr((tuple(r[i] for i in scored_cols), item["status"],

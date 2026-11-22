@@ -1398,6 +1398,10 @@ def property_kind(item: dict) -> str | None:
                 or norm.startswith("predio rustico") and not has_term(text, ["com casa", "com moradia"],
                                                                      negations=False))):
             # The title says land; whether rural often only the description says.
+            # "Terreno Urbano …" must stay urban even when area ≥ 5000 m²
+            # (Imovirtual Pico 1.2M m² topped Forestry as rural_plot, 2026-11-22).
+            if has_term(f"{text} {desc}", urban_words, negations=False):
+                return "urban_plot"
             if has_term(f"{text} {desc}", RURAL_WORDS, negations=False) or area >= 5000:
                 return "rural_plot"
             return "urban_plot"
@@ -1422,6 +1426,9 @@ def property_kind(item: dict) -> str | None:
     if ((_DESC_OPENS_AS_FINCA.match(ndesc) or _SELLS_A_PLOT.search(ndesc[:300]))
             and not _FINCA_WITH_HOUSE.search(ndesc[:300])):
         big = max(area, find_area(desc) or 0)       # the ad's area is often the cabin's
+        # "Terreno Urbano pronto a construir" opens like a finca but is building land.
+        if has_term(f"{title} {desc}", urban_words, negations=False):
+            return "urban_plot"
         return "rural_plot" if big >= 1000 or has_term(desc, RURAL_WORDS, negations=False) else "urban_plot"
     # "Vivienda en Villaviciosa" whose text is only "antigua cuadra y pajar".
     if _sold_as_outbuilding(desc):
@@ -1446,6 +1453,8 @@ def property_kind(item: dict) -> str | None:
     if _LAND_TYPE.match(tipo) and not has_term(title, _HOUSE_WORDS_NOT_TYPOLOGY + ["com casa", "com moradia"],
                                                 negations=False) or _PLOT_FOR_A_HOUSE.search(normalize(title)):
         # The portal says land (or "Lote Moradia"): a plot, whatever house word follows.
+        if has_term(f"{title} {desc}", urban_words, negations=False):
+            return "urban_plot"
         if has_term(f"{title} {desc}", RURAL_WORDS, negations=False) or area >= 5000:
             return "rural_plot"
         return "urban_plot"

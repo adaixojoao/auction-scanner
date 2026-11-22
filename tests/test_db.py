@@ -783,6 +783,32 @@ def test_load_best_excludes_expired_sales(db, add):
     assert "eleiloes:live" in ids
 
 
+def test_expired_sales_write_zero_into_score_cache(db, add):
+    """A visible load must not leave a live rank in score_cache for an ended sale."""
+    import pickle
+    from datetime import datetime, timezone
+
+    import db as dbmod
+    from db import load_listings
+    add(external_id="gone", title="Moradia T3 em bom estado", price=20000, area_m2=90,
+        date_end="2020-01-01T12:00:00")
+    # Score while the sale is still open, then load again after the deadline
+    # without include_hidden (SQL skips ended rows; zero_closed_scores must still run).
+    load_listings(db, apply_min_score=False,
+                  now=datetime(2019, 12, 1, tzinfo=timezone.utc))
+    kept = dbmod._SCORED["home"]["eleiloes:gone"][1]
+    assert isinstance(kept, dict) and (kept.get("rank") or kept.get("score") or 0) > 0
+    assert dbmod.zero_closed_scores(db, datetime(2026, 11, 12, tzinfo=timezone.utc)) >= 1
+    row = dbmod._score_db(db).execute(
+        "SELECT data FROM score_cache WHERE mode='home' AND id='eleiloes:gone'"
+    ).fetchone()
+    assert pickle.loads(row[0]).get("rank") == 0
+    zeroed = dbmod._SCORED["home"]["eleiloes:gone"][1]
+    if isinstance(zeroed, bytes):
+        zeroed = pickle.loads(zeroed)
+    assert zeroed.get("rank") == 0
+
+
 def test_load_best_drops_a_dangerous_evaluator_fail(db, add, monkeypatch):
     """A stated legal FAIL leaves publication; UNKNOWN evidence must not."""
     import json
