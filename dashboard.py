@@ -33,6 +33,7 @@ from flask import (Flask, Response, abort, g, has_request_context, jsonify, redi
                    send_file)
 
 import geo
+import sale_floors
 from common import COUNTRY_NAMES, FLAGS, LOG, make_session, mode_max_price, price_to_pay, safe_url
 from locks import lock_holder
 from db import (DISMISS_REASONS, attention_reason, connect, hidden_category, keep_scores_for, load_best,
@@ -547,7 +548,7 @@ def _matches(it: dict, country, source, tipo, max_price, search) -> bool:
     # A listed figure that is "Not a purchase price" (a deposit or a minimum bid)
     # says nothing about the price, so it is treated like a missing one.
     if (max_price and it.get("price") is not None and not it.get("price_unusable")
-            and it["price"] > max_price):
+            and it["price"] > max_price and not sale_floors.fits_budget(it, max_price)):
         return False
     if search:
         s = search.lower()
@@ -723,6 +724,8 @@ def _view_filters(args) -> dict | str:
          "properties_only": args.get("properties", "0") == "1",
          # Court, tax, social-security and bank sales (source_validation kind official / bank).
          "forced_only": args.get("forced", "0") == "1",
+         # Spanish court sales the court may approve for the amount claimed (sale_floors).
+         "small_claim_only": args.get("small_claim", "0") == "1",
          "climate": args.get("climate", ""),   # excellent / good / caution: at least; poor / unknown: exactly
          "climate_exact": args.get("climate_exact", "0") == "1", "sale_method": args.get("sale_method", "")}
     if f["max_price"] is None or f["min_score"] is None:
@@ -761,6 +764,7 @@ def _view_matched(rows: list, f: dict, mode: str, show_hidden: bool) -> list:
                and (show_hidden or not it.get("date_end") or it["date_end"][:10] >= yesterday)
                and (not f["properties_only"] or it["category"] == "imoveis")
                and (not f["forced_only"] or _forced_sale(it))
+               and (not f["small_claim_only"] or bool(it.get("floor_price")))
                and (not status or it["status"] == status)
                and (not kind or it["kind"] == kind)
                # Wrong-kind rows stay out of the open tops; show_hidden still
@@ -2649,7 +2653,7 @@ EDITABLE = {
     "filters": ("countries", "exclude_keywords", "min_score", "min_area_m2", "rural_min_m2",
                 "rural_max_eur_m2", "avoid_heavy_pollution", "weights"),
     "proponente": PROPONENTE_KEYS,
-    "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours",
+    "schedule": ("while_app_open", "pt_every_hours", "eu_every_hours", "es_every_hours",
                  "retry_every_hours", "fotocasa_every_hours"),
     "telegram": ("enabled", "token", "chat_id", "min_score", "deadline_min_score", "source_alerts",
                  "cut_min_pct", "cut_min_score"),

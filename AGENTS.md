@@ -101,6 +101,32 @@ from a stored `site_check` (Natura 2000 / ZNIEFF), never invent a designation.
 A map miss is not "not protected". Eucalyptus is fire-prone and new planting
 is normally restricted in Portugal (DL 96/2013) — it is not a timber crop.
 
+## How low a forced sale may go: one place, never a bid
+
+`sale_floors.legal_floor()` holds each country's rule for the lowest price a
+court or tax sale may accept (Spain's LEC 670.4 claim rule, Germany's ZVG value
+limits, Portugal's 85% and the tax ladder, Italy's 75%…), hedged and with what
+to check. Only a floor well under the price (`RANK_AT_MOST`) adds to a rank,
+through `rank_share()`; a Spanish claim with charges not stated ranks only as the
+half-value rule. `bidcap`, the evaluator and `price_to_pay()` never read it.
+Add a country there, with a test, not in a scorer.
+
+A Spanish court sale whose claim (plus the charges it states) fits a budget is
+kept in view though its value does not (`sale_floors.fits_budget`, in
+`load_listings`, `load_best` and the Listings price filter), with a note saying
+so; it is still priced at its value. Spain's BOE is read every day
+(`es_every_hours`), sales not open yet ("PU") included, and each new
+small-claim sale is alerted once (`telegram_alert.alert_small_claims`).
+
+For those sales the registry's charges certificate is read from the BOE once
+(`sources.es.fetch_spain_certificates` → `registry_charges`). Its reading is
+conservative and says it was automatic: only a charge naming this sale's case
+(from the BOE account number) or "la entidad actora" is the creditor's own;
+every other mortgage or seizure counts as passing to the buyer; a garbled
+amount makes the total unknown, never smaller; a scan, a bundle of properties or
+a list it cannot follow is "unclear" and left to the person. Fixtures are
+made up: real certificates name people.
+
 ## A position is not a fact about the building
 
 `geo.py` says where a listing is and how exact that is ("sale", "street",

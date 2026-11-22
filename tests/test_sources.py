@@ -409,6 +409,9 @@ def test_spain_detail_parser():
     assert _spain_parse_detail(step)["min_price"] is None
     real = html.replace("Sin puja mínima", "25.000,00 €")
     assert _spain_parse_detail(real)["min_price"] == 25000
+    # The general tab's heading is not a title: the goods tab's description is.
+    heading = "<div id='contenido'><h3>Datos de la subasta</h3><table></table></div>"
+    assert _spain_parse_detail(heading)["title"] is None
 
 
 def test_netherlands_and_croatia_mappers():
