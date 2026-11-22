@@ -3174,6 +3174,12 @@ def _load_listings(db: sqlite3.Connection, *, filters: dict | None = None,
                 results = _unpack(results)
                 if results is not None and _kept_in_memory(mode):
                     scored[item["id"]] = (kept[0], results, kept[2])
+            # A closed-path zero in the cache must not replace a by-id full score
+            # (test_a_closed_listing_is_listed_but_not_scored; opened alone still ranks).
+            if (where and isinstance(results, dict)
+                    and (results.get("hidden_reason") or "").startswith(CLOSED_REASONS)
+                    and (results.get("rank") or results.get("score") or 0) == 0):
+                results = None
         if results is not None:
             item.update(results)
         else:
