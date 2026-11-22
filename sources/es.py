@@ -1731,6 +1731,17 @@ _TGSS_TOWN = re.compile(r"\b(?:SITA EN|MUNICIPIO DE|T[ÉE]RMINO(?: MUNICIPAL)? D
                         r"(?=\s*[,.(]|\s+(?:EN|CALLE|SOLAR|URBANA|R[ÚU]STICA|SITIO|PARAJE|JUNTO|CON)\b)")
 
 
+def _tgss_registry_town(description: str | None) -> str | None:
+    """Town from the deed text, not from the TGSS office's area in the address.
+
+    EMB rows often end "(Valencia)" / "(Madrid)" for the managing office while
+    the house is elsewhere (Puebla del Maestre, 2026-11-22). Prefer SITA EN /
+    MUNICIPIO DE when the description states them.
+    """
+    named = _TGSS_TOWN.search(description or "")
+    return named.group(1).strip().title() if named else None
+
+
 def _tgss_lot_id(emb_id: str, description: str | None) -> str:
     """The TGSS hands an EMB_ID to a new lot once the old one is gone (2026-11-21:
     EMB_ID 300 was a Marbella lot, then a plot in Murcia), and an update keeps
@@ -1780,8 +1791,9 @@ def parse_tgss(row: dict, detail: dict) -> dict | None:
         town = postcode.group(2).strip().title()
     elif re.search(r"\(\d{5}\)\s*$", location):
         # Only a postcode: the row's "(…)" is the office's area, not the town.
-        named = _TGSS_TOWN.search(detail.get("description") or "")
-        town = named.group(1).strip().title() if named else None
+        town = _tgss_registry_town(detail.get("description"))
+    # Deed text beats the office area in the address ("(Valencia)" ≠ the house).
+    town = _tgss_registry_town(detail.get("description")) or town
     rural = "stica" in row["kind"]
     description = " · ".join(x for x in (detail.get("description"), location,
                                          f"Tasación {row['valuation']:,.2f} €" if row.get("valuation") else None,
@@ -1804,9 +1816,50 @@ def parse_tgss(row: dict, detail: dict) -> dict | None:
     )
 
 
+def repair_tgss_places(db) -> int:
+    """Fix towns taken from the office area, and drop the map/climate they pulled.
+
+    Listings stored as València / Madrid while the deed says Puebla del Maestre
+    (etc.) keep scoring on the wrong coast until concelho and geo are reset.
+    """
+    from common import normalize
+    fixed = 0
+    rows = db.execute(
+        "SELECT id, title, description, concelho, raw_json FROM listings WHERE source = 'tgss'"
+    ).fetchall()
+    for lid, title, description, concelho, raw_json in rows:
+        town = _tgss_registry_town(description)
+        if not town:
+            continue
+        if normalize(town) == normalize(concelho or ""):
+            continue
+        new_title = None
+        if title and concelho and normalize(concelho) in normalize(title):
+            new_title = re.sub(re.escape(concelho), town, title, count=1, flags=re.I)
+        db.execute(
+            "UPDATE listings SET concelho = ?, title = COALESCE(?, title) WHERE id = ?",
+            (town, new_title, lid),
+        )
+        # Stale pin/climate for the office city must not rank the real town.
+        try:
+            raw = json.loads(raw_json or "{}") if raw_json else {}
+        except ValueError:
+            raw = {}
+        drop_keys = ("geo", "climate", "geo_checked", "verified_geo",
+                     "geo_tried", "geo_street_tried", "bad_sale_pin",
+                     "sale_pin_checked", "surroundings")
+        if isinstance(raw, dict) and any(k in raw for k in drop_keys):
+            cleaned = {k: v for k, v in raw.items() if k not in drop_keys}
+            db.execute("UPDATE listings SET raw_json = ? WHERE id = ?",
+                       (json.dumps(cleaned, ensure_ascii=False), lid))
+        fixed += 1
+    return fixed
+
+
 @register("tgss", "ES", description="Seguridad Social auctions of seized property (all of Spain)")
 def scrape_tgss(db, max_price: float = 50000, **_):
     """TGSS — property seized for social-security debts, all of Spain."""
+    repair_tgss_places(db)
     session = make_session(timeout=60)
     session.get(TGSS).raise_for_status()
     session.get(TGSS_APP, params=[("opcion", "10")] + TGSS_TYPES).raise_for_status()

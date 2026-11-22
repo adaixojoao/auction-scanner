@@ -381,10 +381,11 @@ def run_scan(countries=None, source_names=None, *, cfg: dict | None = None,
                         LOG.exception("Joining Citius to e-leilões failed")
                     mark_duplicates(db)
                     try:
-                        from db import purge_orphan_scores
+                        from db import purge_orphan_scores, zero_closed_scores
                         purge_orphan_scores(db)
+                        zero_closed_scores(db)  # ended sales must not keep a live rank in score_cache
                     except Exception:  # noqa: BLE001 — a cache tidy must never fail the scan
-                        LOG.exception("Dropping orphan scores failed")
+                        LOG.exception("Dropping orphan / closed scores failed")
                     try:
                         import outcomes
                         outcomes.record_results(db)      # ended sales and their last bid

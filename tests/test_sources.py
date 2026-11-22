@@ -1315,6 +1315,33 @@ def test_a_reused_tgss_lot_number_is_a_new_listing_with_its_own_town():
     assert same["id"] == house["id"]          # the same lot keeps its id from scan to scan
 
 
+def test_tgss_deed_town_beats_the_office_area_in_the_address():
+    """The address parenthesis is often the TGSS office (Valencia), not the house
+    (Puebla del Maestre) — that put inland Extremadura on the Mediterranean rank."""
+    from sources.es import parse_tgss
+    row = {"id": "440", "kind": "Finca Urbana", "address": "CL LAS MATILLAS (VALENCIA)",
+           "valuation": 13865.09, "price": 13865.09, "date": "17/12/2026 12:00"}
+    house = parse_tgss(row, {"description": "URBANA.- CASA SITA EN PUEBLA DEL MAESTRE, EN CALLE LAS MATILLAS",
+                             "location": "CL LAS MATILLAS (VALENCIA)"})
+    assert house["concelho"] == "Puebla Del Maestre"
+    assert "Puebla Del Maestre" in house["title"]
+
+
+def test_repair_tgss_places_fixes_office_town_and_drops_stale_geo(db):
+    from common import make_listing
+    from db import upsert_listing
+    from sources.es import repair_tgss_places
+    upsert_listing(db, make_listing(
+        "tgss", "440", "ES", title="Finca Urbana en València",
+        description="URBANA.- CASA SITA EN PUEBLA DEL MAESTRE, EN CALLE LAS MATILLAS",
+        concelho="València", price=13865, tipo="vivienda",
+        raw_json='{"geo": {"query": "València", "precision": "municipality"}, "climate": {"x": 1}}'))
+    assert repair_tgss_places(db) == 1
+    row = db.execute("SELECT concelho, title, raw_json FROM listings WHERE id='tgss:440'").fetchone()
+    assert row[0] == "Puebla Del Maestre" and "Puebla Del Maestre" in row[1]
+    assert "geo" not in row[2] and "climate" not in row[2]
+
+
 def test_a_tgss_lot_stored_under_the_old_id_keeps_it(db):
     """AGENTS.md: keep the old id form while it is still the same lot."""
     from db import upsert_listing

@@ -24,6 +24,19 @@ def test_investment_takes_only_homes_and_forestry_only_land():
     assert score_detail(home, mode="forest") == (0.0, ["not land"])
 
 
+def test_terreno_urbano_pronto_a_construir_is_not_forestry():
+    """Imovirtual 'Terreno Urbano pronto a construir' topped Forestry on a stale
+    rural_plot cache (2026-11-22); live kind must keep it out."""
+    import scoring
+    plot = listing(title="Terreno Urbano pronto a construir. Ilha do Pico, São João.",
+                   tipo="terreno", area_m2=1_200_000, price=100_000,
+                   description="Terreno Urbano pronto a construir. Ilha do Pico, São João.")
+    assert scoring.property_kind(plot) == "urban_plot"
+    rank, reasons = score_detail(plot, mode="forest")
+    assert rank == 0.0
+    assert any("building land" in r for r in reasons)
+
+
 def test_urbanizable_and_a_national_park_are_not_forestry():
     sector = listing(title="Terreno en Turre", tipo="terreno", area_m2=200000, price=40000,
                      description="Suelo urbanizable. Futuros desarrollos residenciales.")
