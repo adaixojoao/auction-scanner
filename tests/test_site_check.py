@@ -1,3 +1,5 @@
+import pytest
+
 import site_check
 
 
@@ -90,3 +92,73 @@ def test_check_pending_walks_past_listings_already_checked(db, add, monkeypatch)
     stored = json.loads(db.execute("SELECT raw_json FROM listings WHERE id='eleiloes:p3'").fetchone()[0])
     assert stored["site_check"]["eucalyptus"] == 0.7
     assert stored["site_check"]["at"] == at
+
+
+# ─── Slope, read online without GDAL ────────────────────────────────
+class _RangeServer:
+    """Serves local files by URL with HTTP Range requests, as the AWS bucket does."""
+
+    def __init__(self, files):
+        self.files, self.requests = files, []
+
+    def get(self, url, headers=None, timeout=None):
+        from conftest import FakeResponse
+        self.requests.append(url)
+        if url not in self.files:
+            return FakeResponse(status=404)
+        data = open(self.files[url], "rb").read()
+        start, end = (int(x) for x in headers["Range"].split("=")[1].split("-"))
+        r = FakeResponse(status=206, headers={"Content-Range": f"bytes {start}-{min(end, len(data) - 1)}/{len(data)}"})
+        r.content = data[start:end + 1]
+        return r
+
+
+CELLS = 1200                       # a test tile: 1° over 1200 cells (~93 m), 64-cell blocks
+
+
+def _plane_tile(path, lat, lon, rise, start_col=0):
+    import numpy as np
+    import geotiff
+    cols = np.arange(start_col, start_col + CELLS, dtype="float32")
+    z = np.tile(cols * rise, (CELLS, 1)).astype("float32")
+    geotiff.write(path, z, x0=lon, y0=lat + 1, pixel=1 / CELLS, compress=True, tile=64)
+
+
+def test_an_online_file_reads_by_ranges(tmp_path):
+    import geotiff
+    data = bytes(range(256)) * 4000
+    (tmp_path / "f.bin").write_bytes(data)
+    server = _RangeServer({"u": tmp_path / "f.bin"})
+    f = geotiff.HttpFile("u", server)
+    f.seek(1000)
+    assert f.read(10) == data[1000:1010]
+    f.seek(-5, 2)
+    assert f.read() == data[-5:] and f.read(3) == b""
+    f.seek(3)
+    assert f.read(len(data)) == data[3:]                  # a big read: one request
+    with pytest.raises(FileNotFoundError):
+        geotiff.HttpFile("missing", server)
+
+
+def test_slope_is_read_across_two_tiles_without_rasterio(tmp_path, monkeypatch):
+    """A plane rising 20% to the east, split over two DEM tiles at 4°E/5°E."""
+    import math
+    import sys
+    monkeypatch.setitem(sys.modules, "rasterio", None)   # as when Smart App Control refuses it
+    lat = 45
+    rise = 0.20 * (1 / CELLS) * 111320.0 * math.cos(math.radians(lat + 0.3))     # metres per cell for 20%
+    _plane_tile(tmp_path / "a.tif", lat, 4, rise)
+    _plane_tile(tmp_path / "b.tif", lat, 5, rise, start_col=CELLS)
+    server = _RangeServer({site_check._dem_url(lat, 4): tmp_path / "a.tif",
+                           site_check._dem_url(lat, 5): tmp_path / "b.tif"})
+    land = site_check.circle(lat + 0.3, 5.0, 800)              # on the seam
+    s = site_check.slope_stats(land, server)
+    assert abs(s["mean_pct"] - 20) < 0.5 and abs(s["p90_pct"] - 20) < 0.5
+    assert s["shares"]["wheeled machines"] == 1.0
+    assert s["min_m"] < (CELLS - 5) * rise < (CELLS + 5) * rise < s["max_m"]
+    assert len(set(server.requests)) == 2
+
+
+def test_no_tile_is_the_sea(tmp_path):
+    server = _RangeServer({})
+    assert site_check.slope_stats(site_check.circle(45.3, -20.0, 300), server) is None

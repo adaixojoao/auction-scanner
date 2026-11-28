@@ -15,6 +15,7 @@ unread. Building the layers (scripts/update_climate.py) still uses rasterio.
 """
 from __future__ import annotations
 
+import io
 import logging
 import math
 import threading
@@ -35,10 +36,11 @@ SEGMENTS_KEPT = 16          # decoded strips/tiles kept per map (the water searc
 class Raster:
     """One GeoTIFF: `index(x, y)` → (row, col), `read(row, col, h, w)` → band 1."""
 
-    def __init__(self, path: str):
+    def __init__(self, path, name: str | None = None):
+        """`path`: a file name, or an open binary file (an HttpFile for a map online)."""
         import tifffile
-        self.path = path
-        self._tif = tifffile.TiffFile(path)
+        self.path = name or str(path)
+        self._tif = tifffile.TiffFile(path, name=name) if name else tifffile.TiffFile(path)
         page = self._tif.pages[0]
         self._page = page
         tags = page.tags
@@ -168,6 +170,80 @@ class Raster:
         return arr[:, :, 0]
 
 
+class HttpFile(io.RawIOBase):
+    """A file online read with HTTP Range requests, block by block, so a
+    cloud-optimised GeoTIFF gives only the tiles a window needs."""
+
+    BLOCK = 256 * 1024
+
+    def __init__(self, url: str, session=None, timeout: float = 60):
+        import requests
+        self.url, self.timeout = url, timeout
+        self._s = session or requests.Session()
+        self._pos = 0
+        self._blocks: OrderedDict[int, bytes] = OrderedDict()
+        first = self._get(0, self.BLOCK - 1)
+        self._blocks[0] = first.content
+        rng = first.headers.get("Content-Range", "")
+        if first.status_code == 200:                     # no range support: it sent the whole file
+            self._size = len(first.content)
+        elif "/" in rng:
+            self._size = int(rng.rsplit("/", 1)[1])
+        else:
+            raise OSError(f"{url}: no Content-Range in the answer")
+
+    def _get(self, start: int, end: int):
+        r = self._s.get(self.url, headers={"Range": f"bytes={start}-{end}"}, timeout=self.timeout)
+        if r.status_code == 404:
+            raise FileNotFoundError(self.url)
+        r.raise_for_status()
+        return r
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self._pos
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        base = {io.SEEK_SET: 0, io.SEEK_CUR: self._pos, io.SEEK_END: self._size}[whence]
+        self._pos = max(0, base + offset)
+        return self._pos
+
+    def read(self, n=-1):
+        end = self._size if n is None or n < 0 else min(self._size, self._pos + n)
+        if self._pos >= end:
+            return b""
+        if end - self._pos > 4 * self.BLOCK:             # a whole tile: one request, not kept
+            data = self._get(self._pos, end - 1).content
+        else:
+            parts = []
+            for b in range(self._pos // self.BLOCK, (end - 1) // self.BLOCK + 1):
+                block = self._block(b)
+                lo = max(self._pos - b * self.BLOCK, 0)
+                parts.append(block[lo:end - b * self.BLOCK])
+            data = b"".join(parts)
+        self._pos += len(data)
+        return data
+
+    def readinto(self, buf):
+        data = self.read(len(buf))
+        buf[:len(data)] = data
+        return len(data)
+
+    def _block(self, b: int) -> bytes:
+        if b not in self._blocks:
+            start = b * self.BLOCK
+            self._blocks[b] = self._get(start, min(self._size, start + self.BLOCK) - 1).content
+            if len(self._blocks) > 64:
+                self._blocks.popitem(last=False)
+        self._blocks.move_to_end(b)
+        return self._blocks[b]
+
+
 def _geokeys(values) -> dict[int, int]:
     """{key id: value} of the GeoKey directory's short values (the EPSG codes)."""
     v = list(values)
@@ -219,7 +295,7 @@ def lzw_decode(data: bytes) -> bytes:
 
 
 def write(path, arr, *, x0: float, y0: float, pixel: float, epsg: int = 4326, nodata=None,
-          compress: bool = False) -> None:
+          compress: bool = False, tile: int | None = None) -> None:
     """A small single-band north-up GeoTIFF (tests and hand-made layers)."""
     import tifffile
     model = 1 if epsg not in _GEOGRAPHIC else 2
@@ -231,4 +307,4 @@ def write(path, arr, *, x0: float, y0: float, pixel: float, epsg: int = 4326, no
     if nodata is not None:
         extra.append((_NODATA, "s", 0, str(nodata), False))
     tifffile.imwrite(str(path), np.asarray(arr), extratags=extra, compression="zlib" if compress else None,
-                     photometric="minisblack", metadata=None)
+                     photometric="minisblack", metadata=None, tile=(tile, tile) if tile else None)

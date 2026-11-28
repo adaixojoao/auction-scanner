@@ -3,7 +3,7 @@
 For a shortlisted listing, given its cadastral parcels (France) or a position and
 a radius, this reports:
   - slope and altitude: Copernicus DEM GLO-30 (30 m, read tile by tile from the
-    public AWS bucket, only the window needed);
+    public AWS bucket, only the window needed, without GDAL: geotiff.py);
   - forest type: France, IGN BD Forêt v2; Portugal, DGT's COS 2025 land cover
     (montados of cork and holm oak included); elsewhere Copernicus forest type
     and tree cover (2018);
@@ -97,28 +97,74 @@ def _dem_url(lat: int, lon: int) -> str:
     return DEM_TILE.format(ns="N" if lat >= 0 else "S", lat=abs(lat), ew="E" if lon >= 0 else "W", lon=abs(lon))
 
 
-def slope_stats(shape_wgs84) -> dict | None:
+def _dem_tile(session, url: str):
+    """One Copernicus DEM tile online, or None where there is none (the sea)."""
+    import geotiff
+    try:
+        return geotiff.Raster(geotiff.HttpFile(url, session), name=url)
+    except FileNotFoundError:
+        return None
+
+
+def dem_window(bounds: tuple, session=None):
+    """Altitude over a lon/lat box at the DEM's own resolution, across tiles,
+    read online tile by tile (only the 1024-cell blocks needed). Where there is
+    no tile (open sea) it is 0 m, as on the DEM. Returns (z, left, top, xres, yres).
+
+    Not rasterio: Windows Smart App Control blocks its GDAL (geotiff.py)."""
+    import numpy as np
+    session = session or _session()
+    minx, miny, maxx, maxy = bounds
+    tiles = {(la, lo): _dem_tile(session, _dem_url(la, lo))
+             for la in range(math.floor(miny), math.floor(maxy) + 1)
+             for lo in range(math.floor(minx), math.floor(maxx) + 1)}
+    first = next((t for t in tiles.values() if t is not None), None)
+    if first is None:
+        return None
+    xres, yres = first.sx, first.sy
+    width, height = max(1, round((maxx - minx) / xres)), max(1, round((maxy - miny) / yres))
+    lons = minx + (np.arange(width) + 0.5) * xres
+    lats = maxy - (np.arange(height) + 0.5) * yres
+    z = np.zeros((height, width))
+    for (la, lo), src in tiles.items():
+        if src is None:
+            continue
+        rows_in = (lats >= la) & (lats < la + 1)
+        cols_in = (lons >= lo) & (lons < lo + 1)
+        if not rows_in.any() or not cols_in.any():
+            continue
+        r = np.floor((src.y0 - lats[rows_in]) / src.sy).astype(int).clip(0, src.height - 1)
+        c = np.floor((lons[cols_in] - src.x0) / src.sx).astype(int).clip(0, src.width - 1)
+        block = src.read(int(r.min()), int(c.min()), int(r.max() - r.min()) + 1, int(c.max() - c.min()) + 1)
+        z[np.ix_(rows_in, cols_in)] = block[np.ix_(r - r.min(), c - c.min())]
+    return z, minx, maxy, xres, yres
+
+
+def _cells_touched(shape_wgs84, left: float, top: float, xres: float, yres: float, shape: tuple):
+    """The cells the land touches (as GDAL's all_touched mask)."""
+    import numpy as np
+    import shapely
+    h, w = shape
+    x0 = left + np.arange(w) * xres
+    y0 = top - (np.arange(h) + 1) * yres
+    xs, ys = np.meshgrid(x0, y0)
+    cells = shapely.box(xs, ys, xs + xres, ys + yres)
+    return shapely.intersects(shape_wgs84, cells)
+
+
+def slope_stats(shape_wgs84, session=None) -> dict | None:
     """{"min_m", "max_m", "mean_pct", "p90_pct", "shares": {class: share}} over the land."""
     import numpy as np
-    import rasterio
-    from rasterio.features import geometry_mask
-    from rasterio.merge import merge
     minx, miny, maxx, maxy = shape_wgs84.bounds
     bounds = (minx - 0.001, miny - 0.001, maxx + 0.001, maxy + 0.001)
-    tiles = [_dem_url(la, lo) for la in range(math.floor(bounds[1]), math.floor(bounds[3]) + 1)
-             for lo in range(math.floor(bounds[0]), math.floor(bounds[2]) + 1)]
-    with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", AWS_NO_SIGN_REQUEST="YES"):
-        sources = [rasterio.open("/vsicurl/" + t) for t in tiles]
-        try:
-            mosaic, transform = merge(sources, bounds=bounds)    # reads only the window it needs
-        finally:
-            for src in sources:
-                src.close()
-    z = mosaic[0].astype("float64")
-    dy = abs(transform.e) * 111320.0
-    dx = transform.a * 111320.0 * math.cos(math.radians((miny + maxy) / 2))
+    got = dem_window(bounds, session)
+    if got is None:
+        return None
+    z, left, top, xres, yres = got
+    dy = yres * 111320.0
+    dx = xres * 111320.0 * math.cos(math.radians((miny + maxy) / 2))
     gy, gx = np.gradient(z, dy, dx)
-    inside = ~geometry_mask([shape_wgs84], out_shape=z.shape, transform=transform, all_touched=True)
+    inside = _cells_touched(shape_wgs84, left, top, xres, yres, z.shape)
     slope, elev = (np.hypot(gx, gy) * 100)[inside], z[inside]
     if not slope.size:
         return None
@@ -332,7 +378,7 @@ def check(lat: float | None = None, lon: float | None = None, radius_m: float = 
     lat, lon = c.y, c.x
     out = {"lat": lat, "lon": lon, "hectares": area_ha(land), "exact": bool(parcels),
            "satellite": satellite_url({"lat": lat, "lon": lon})}
-    steps = [("slope", lambda: slope_stats(land)), ("natura2000", lambda: natura2000(session, land)),
+    steps = [("slope", lambda: slope_stats(land, session)), ("natura2000", lambda: natura2000(session, land)),
              ("national_parks", lambda: national_parks(session, land))]
     if country.upper() == "FR":
         steps += [("forest", lambda: forest_types(session, land)), ("extraction", lambda: extraction(session, land)),
