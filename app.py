@@ -343,6 +343,12 @@ def warm_up():
     goes first: it reads the climate of seaside homes. The other goals are
     scored when their tab is opened. The log then records the most memory the
     process has held and how much is still free."""
+    if _scan_about_to_start():
+        # Scoring here while the scan scrapes held the database and the
+        # memory both want (2026-11-18: the scan lost 8 sources). The scan
+        # rebuilds the open lists when it ends (pipeline.run_scan_apart).
+        LOG.info("Warm-up skipped: a scan is running or due now")
+        return
     try:
         import dashboard
         from scoring import MODES
@@ -357,6 +363,21 @@ def warm_up():
             LOG.info(f"Memory peaked at {_mem_text(peak)}, {_mem_text(free)} free")
     except Exception as e:  # noqa: BLE001 — only a speed-up
         LOG.info(f"Warm-up skipped ({type(e).__name__}: {e})")
+
+
+def _scan_about_to_start() -> bool:
+    """A scan is running, or the timetable will start one at its first check."""
+    try:
+        if scan_running():
+            return True
+        from config import load_config
+        import scheduler
+        if not load_config().get("schedule", {}).get("while_app_open", True):
+            return False
+        return scheduler.scan_due()
+    except Exception:  # noqa: BLE001 — when in doubt, warm up as before
+        LOG.exception("Could not tell whether a scan is due")
+        return False
 
 
 def auto_scan_loop(stop: threading.Event):

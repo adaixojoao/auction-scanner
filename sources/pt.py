@@ -290,6 +290,7 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
     """, (DETAIL_VERSION, max_price, max_price, utcnow_iso()[:10], *_NOT_PROPERTY, limit)).fetchall()
 
     count = 0
+    db.commit()     # nothing of ours may stay open while we wait on the site
     for listing_id, raw_text in rows:
         try:
             raw = json.loads(raw_text or "{}")
@@ -301,12 +302,16 @@ def fetch_eleiloes_details(db, limit: int = 80, max_price: float = 50000):
                 raw["detail_checked"] = DETAIL_VERSION  # gone or withdrawn: do not ask again
                 db.execute("UPDATE listings SET raw_json=? WHERE id=?",
                            (json.dumps(raw, ensure_ascii=False), listing_id))
+                db.commit()
                 continue
             fields, extra = eleiloes_detail_fields(item)
             sets = {k: v for k, v in fields.items() if v is not None}
             sets["raw_json"] = json.dumps({**raw, **extra}, ensure_ascii=False)
             db.execute(f"UPDATE listings SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?",
                        (*sets.values(), listing_id))
+            # Saved now, not after the loop: 80 requests of up to 15 s each held
+            # the database from every other writer (the app, the closing watch).
+            db.commit()
             count += 1
             time.sleep(0.3)
         except Exception as e:
