@@ -248,8 +248,10 @@ def guidance(item: dict) -> str:
         return _citius_guidance(item)
     if src == "eleiloes":
         return ("Online auction on e-leiloes.pt: bids are placed on the site (Cartão de Cidadão or Chave "
-                "Móvel Digital). Log your bid here to track it; a letter to the court can only ask for "
-                "information.")
+                "Móvel Digital). Log your bid here to track it. A letter cannot bid in the auction, but "
+                "while it runs you can send a firm offer to the agente de execução (or the insolvency "
+                "administrator), asking the parties to agree to sell to you outside the auction. Nobody "
+                "has to accept it, and the auction normally goes on meanwhile.")
     if src == "financas":
         return "Tax-authority sale: offers are submitted electronically on Portal das Finanças."
     if src in ("leilosoc", "centroleiloes", "bidleiloeira"):
@@ -621,6 +623,104 @@ def _pt_info(c: Ctx):
             f"Pedido de informação – Processo n.º {c.processo or '____'} – Venda de imóvel", body)
 
 
+# A firm offer outside the auction, by agreement ------------------------
+# While a court sale runs, the people the sale is for (the creditor and the
+# debtor in an execution, the heirs in an inventory, the creditors in an
+# insolvency) can agree to sell to one buyer at one price instead of waiting
+# for the auction. Nobody is obliged to: the letter asks, it never claims a right.
+
+_INSOLVENCY_WORDS = ("administrador da insolvencia", "administrador de insolvencia",
+                     "massa insolvente", "processo de insolvencia")
+_INVENTORY_WORDS = ("processo de inventario", "venda em inventario")
+
+
+def pt_process_kind(item: dict, raw: dict | None = None) -> str:
+    """What kind of court case a PT sale belongs to, from its own words:
+    "insolvencia", "inventario", "execucao" or "unknown". Only the notice and
+    the court's name are read; a stock sentence such as "c) insolvência do
+    executado" (a risk the notice lists) does not make it an insolvency."""
+    from common import normalize
+    raw = _raw(item) if raw is None else raw
+    text = normalize(" ".join(str(x or "") for x in (item.get("title"), item.get("description"))))
+    court = normalize(str(raw.get("tribunal") or ""))
+    if any(w in text for w in _INSOLVENCY_WORDS) or ("comercio" in court and "insolv" in text):
+        return "insolvencia"
+    if any(w in text for w in _INVENTORY_WORDS):
+        return "inventario"
+    if "execuc" in court or "execut" in text:
+        return "execucao"
+    return "unknown"
+
+
+def _sale_still_open(item: dict) -> bool:
+    from common import days_left
+    left = days_left(item.get("date_end"))
+    return left is None or left > 0
+
+
+def _acordo_applies(item: dict, raw: dict) -> bool:
+    """e-leilões only: it states the case, the agente and the end of the sale.
+    A Citius notice offers exactly the one letter its explicit method allows
+    (tests/test_pt_sale_method_contract.py), so it gets no second offer here."""
+    if (item.get("country") or "PT") != "PT" or item.get("source") != "eleiloes":
+        return False
+    return _sale_still_open(item)
+
+
+def _acordo_suggest(item: dict) -> str:
+    """At least the base value and 5% over the current bid, rounded up to 500:
+    a firm offer below what the auction already offers persuades nobody."""
+    floor = max(item.get("price") or 0, (item.get("current_bid") or 0) * 1.05)
+    if not floor:
+        return ""
+    return format_bid(-(-int(floor) // 500) * 500)
+
+
+def _pt_acordo(c: Ctx):
+    kind = pt_process_kind(c.item, c.raw)
+    agente = c.raw.get("agente_nome")
+    tribunal = f", que corre termos no {c.raw['tribunal']}" if c.raw.get("tribunal") else ""
+    ref = c.raw.get("referencia") or c.item.get("external_id") or ""
+    if kind == "insolvencia":
+        whom = "Exmo(a). Sr(a). Administrador(a) da Insolvência"
+        partes = ("à comissão de credores ou, não existindo, aos credores, e ao tribunal, "
+                  "conforme o processo exija")
+        venda = "a venda por negociação particular, se o entenderem conveniente para a massa insolvente"
+    elif kind == "inventario":
+        whom = "Exmo(a). Sr(a). Agente de Execução / Encarregado(a) da Venda"
+        partes = "aos interessados no inventário"
+        venda = "a venda por negociação particular, havendo acordo dos interessados"
+    else:
+        whom = "Exmo(a). Sr(a). Agente de Execução / Encarregado(a) da Venda"
+        partes = "ao exequente, ao executado e aos credores reclamantes"
+        venda = ("a venda por negociação particular, havendo acordo entre eles, "
+                 "nos termos que a lei permita")
+    body = (
+        "Exmo(a). Sr(a),\n\n"
+        f"Tenho interesse na aquisição do imóvel em venda no âmbito do processo "
+        f"n.º {c.processo or '____'}{tribunal}"
+        f"{f' (leilão {ref})' if ref and c.item.get('source') == 'eleiloes' else ''}.\n\n"
+        f"Descrição do bem: {c.title}\n"
+        f"Localização: {c.loc}\n"
+        f"Área: {c.area}\n\n"
+        "Apresento uma proposta firme de aquisição, fora do leilão:\n\n"
+        f"   Valor: EUR {c.bid} ({c.bid_text})\n\n"
+        f"Solicito que a presente proposta seja dada a conhecer {partes}, para que "
+        f"possa ser ponderada {venda}. Tenho consciência de que a proposta não obriga "
+        "ninguém a aceitá-la e de que a venda em curso segue os seus termos até "
+        "decisão em contrário.\n\n"
+        "Agradeço que me informem:\n"
+        "   1. Se a proposta pode ser considerada e em que prazo;\n"
+        "   2. Que caução ou garantia seria exigida e as condições de pagamento do preço;\n"
+        "   3. Se é possível visitar o imóvel antes da decisão.\n\n"
+        f"Dados do proponente:\n   Nome: {c.nome}\n{_contact_lines(c, 'NIF')}\n\n"
+        "Com os melhores cumprimentos,\n\n\n\n"
+        f"{c.nome}\nNIF: {c.nif}"
+    )
+    recipient = [whom, *([agente] if agente else []), *([c.raw["tribunal"]] if c.raw.get("tribunal") else [])]
+    return recipient, f"Proposta firme de aquisição por acordo - Processo {c.processo or '____'}", body
+
+
 def _reference(c: Ctx) -> str:
     return c.item.get("url") or c.item.get("external_id") or ""
 
@@ -944,6 +1044,8 @@ LETTER_TYPES: list[LetterType] = [
                suggest=_pct_suggest(75), presets=lambda i: _percent_presets(i.get("price"))),
     LetterType("pt_info", "PT", "Information request to the court", False,
                _is("PT", PT_COURT_SOURCES | {"eleiloes"}), _pt_info),
+    LetterType("pt_acordo", "PT", "Firm offer outside the auction, by agreement (negociação particular)",
+               True, _acordo_applies, _pt_acordo, suggest=_acordo_suggest),
     LetterType("es_oferta", "ES", "Purchase offer to the servicer (oferta de compra)", True,
                _is("ES", ES_SERVICER_SOURCES), _es_servicer,
                suggest=_pct_suggest(75), presets=lambda i: _percent_presets(i.get("price"))),
