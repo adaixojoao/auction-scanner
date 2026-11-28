@@ -126,17 +126,14 @@ def test_clean_air_earns_points_and_bad_air_costs_them():
 
 def test_the_air_layers_are_read_at_the_position(tmp_path, monkeypatch):
     np = pytest.importorskip("numpy")
-    rasterio = pytest.importorskip("rasterio")
-    from rasterio.transform import from_origin
-
     import climate
+    import geotiff
+    climate._raster.cache_clear()
     layers = tmp_path / "layers"
     layers.mkdir()
     for name, value in (("pm25", 7.25), ("no2", 18.0)):
-        with rasterio.open(layers / f"air_{name}.tif", "w", driver="GTiff", height=10, width=10, count=1,
-                           dtype="float32", crs="EPSG:4326", nodata=np.nan,
-                           transform=from_origin(-9.0, 39.0, 0.1, 0.1)) as dst:
-            dst.write(np.full((10, 10), value, dtype="float32"), 1)
+        geotiff.write(layers / f"air_{name}.tif", np.full((10, 10), value, dtype="float32"),
+                      x0=-9.0, y0=39.0, pixel=0.1, nodata="nan")
     monkeypatch.setattr(climate, "_layers", lambda: str(layers))
     assert climate.air_quality(38.5, -8.5) == {"pm25": 7.2, "no2": 18.0}
     assert climate.air_quality(50.0, 2.0) == {}                     # off the map

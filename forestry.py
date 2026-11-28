@@ -431,10 +431,9 @@ def _tree_layer(species: str, period: str) -> str:
 @functools.lru_cache(maxsize=4096)
 def trees_at(lat: float, lon: float) -> dict | None:
     """{species: {period: True/False}} at a place; None without the layers."""
-    from rasterio.warp import transform
     import climate
     out = {}
-    xs, ys = transform("EPSG:4326", "EPSG:3035", [lon], [lat])
+    x, y = climate._transformer("EPSG:4326", "EPSG:3035").transform(lon, lat)
     for species in sorted({s for names in EUTREES.values() for s in names}):
         row = {}
         for period in PERIODS:
@@ -442,12 +441,10 @@ def trees_at(lat: float, lon: float) -> dict | None:
             src = climate._raster(path)
             if src is None:
                 return None
-            r, c = src.index(xs[0], ys[0])
-            if not (0 <= r < src.height and 0 <= c < src.width):
+            r, c = src.index(x, y)
+            if not src.contains(r, c):
                 return {}
-            import rasterio.windows
-            v = int(src.read(1, window=rasterio.windows.Window(c, r, 1, 1))[0, 0])
-            row[period] = v == 1
+            row[period] = int(src.read(r, c)[0, 0]) == 1
         out[species] = row
     return out
 
@@ -472,7 +469,7 @@ def trees_for_item(item: dict) -> dict | None:
         return None
     try:
         return trees_at(round(lat, 2), round(lon, 2))
-    except Exception:  # noqa: BLE001 — no rasterio or layers: the heat rule decides
+    except Exception:  # noqa: BLE001 — no layers: the heat rule decides
         return None
 
 

@@ -3,9 +3,12 @@
 # Kept out of requirements.txt so the updater does not reinstall a heavy geo
 # stack on every PC. Building the layers (scripts/update_climate.py) also
 # needs pandas, xarray, netCDF4 and cdsapi, and pyarrow for the island air
-# stations (the "air" part). fiona is for building only: the
-# app reads the GeoPackages with sqlite3 and shapely (climate._read_gpkg).
+# stations (the "air" part). fiona and rasterio are for building only:
+# Windows Smart App Control blocks their GDAL, so the app reads the
+# GeoPackages with sqlite3 and shapely (climate._read_gpkg) and the GeoTIFFs
+# with tifffile and numpy (geotiff.py), site_check's DEM tiles online too.
 numpy>=2.0
+tifffile>=2024.1
 rasterio>=1.4
 geopandas>=1.0
 fiona>=1.10
