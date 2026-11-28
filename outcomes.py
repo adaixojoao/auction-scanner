@@ -116,6 +116,7 @@ def watch_closing(db, session=None, now=None) -> int:
                        (now + timedelta(minutes=WATCH_BEFORE_MIN)).strftime("%Y-%m-%dT%H:%M:%S"))).fetchall()
     session = session or _eleiloes_session()
     read = 0
+    db.commit()   # ensure_table may have opened a write; never wait on the site holding one
     for listing_id, raw_text in rows:
         try:
             raw = json.loads(raw_text or "{}")
@@ -128,6 +129,9 @@ def watch_closing(db, session=None, now=None) -> int:
             continue                          # gone at the end: the scans' last bid stands
         db.execute("UPDATE listings SET current_bid = ?, date_end = COALESCE(?, date_end), last_seen = ? WHERE id = ?",
                    (item.get("lanceAtual") or None, item.get("dataFim"), now.strftime("%Y-%m-%dT%H:%M:%S"), listing_id))
+        # Saved before the next request: on 2026-11-18 this loop held the
+        # database through 128 requests and the scan starting then lost 8 sources.
+        db.commit()
         read += 1
     db.commit()
     record_results(db, now)

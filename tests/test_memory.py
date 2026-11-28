@@ -50,9 +50,10 @@ def _drop_kept_lists() -> None:
     dbmod._SCORE_DBS.clear()
 
 
-def test_startup_scoring_of_20000_listings_stays_under_the_memory_limit(db):
+def test_startup_scoring_of_20000_listings_stays_under_the_memory_limit(db, monkeypatch):
     import app
     import dashboard
+    monkeypatch.setattr(app, "_scan_about_to_start", lambda: False)   # no scan due in this test
     _insert_listings(db, LISTINGS)
     gc.collect()
     held: dict = {}

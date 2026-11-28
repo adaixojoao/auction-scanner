@@ -343,13 +343,29 @@ def _last_runs(db) -> dict:
     return {job: job_last_run(db, job) for job in JOBS}
 
 
+RECORD_ATTEMPTS = 3
+RECORD_WAIT_S = 10
+
+
 def _record(job: str) -> None:
+    """Write down that `job` ran. A busy database is waited out a few times; it
+    never stops the tick, whose other jobs would then not run (2026-11-18)."""
+    import sqlite3
     from db import connect, set_job_last_run
-    db = connect()
-    try:
-        set_job_last_run(db, job)
-    finally:
-        db.close()
+    for attempt in range(1, RECORD_ATTEMPTS + 1):
+        try:
+            db = connect()
+            try:
+                set_job_last_run(db, job)
+                return
+            finally:
+                db.close()
+        except sqlite3.OperationalError as e:
+            if attempt == RECORD_ATTEMPTS:
+                LOG.error(f"Could not record that {job} ran ({e}); it may run again at the next tick")
+                return
+            LOG.warning(f"Recording {job} waited on the database ({e}); trying again")
+            time.sleep(RECORD_WAIT_S)
 
 
 def _run_recorded(job: str) -> bool:
@@ -401,6 +417,19 @@ def _start_scan_jobs(jobs: list[str]) -> list[str]:
         _scan_thread = threading.Thread(target=work, name="scheduled-scan", daemon=True)
         _scan_thread.start()
         return list(jobs)
+
+
+def scan_due(now: datetime | None = None) -> bool:
+    """Will the next tick start a scan? (The app asks before scoring at start.)"""
+    from config import load_config
+    from db import connect
+    db = connect()
+    try:
+        due = due_jobs(now or datetime.now().astimezone(), _last_runs(db),
+                       load_config().get("schedule", {}))
+    finally:
+        db.close()
+    return any(job in SCAN_JOBS for job in due)
 
 
 def tick(dry_run: bool = False, telegram: bool = True, block_scans: bool = True) -> list[str]:

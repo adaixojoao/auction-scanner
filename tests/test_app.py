@@ -1,3 +1,5 @@
+import pytest
+
 import app
 
 
@@ -73,6 +75,12 @@ def test_one_copy_starts_at_a_time(tmp_path, monkeypatch):
     assert app.claim_start() is True           # a lock left behind by a crash is taken over
     app.release_start()
     assert not os.path.exists(app.STARTING_LOCK)
+
+
+@pytest.fixture(autouse=True)
+def _no_scan_due(monkeypatch):
+    """The warm-up tests below run with no scan running or due."""
+    monkeypatch.setattr(app, "_scan_about_to_start", lambda: False)
 
 
 def test_the_warm_up_scores_the_open_goals_and_leaves_the_rest(monkeypatch):
