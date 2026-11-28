@@ -127,6 +127,11 @@ congruent — one way to do each thing:
 - **One scan routine:** `pipeline.run_scan()`. The app's "Scan now", the
   timetable and `scraper.py` all call it; it holds `scan.lock` and writes
   progress to `scan_state`, which is how the app shows scans started elsewhere.
+  To finish a scan that was cut off in its scoring, run `python pipeline.py
+  --rescore` (`pipeline.run_rescore()`), which holds the same lock. Never
+  rescore or write to `auctions.db` in bulk from a script outside that lock,
+  and never delete `scan.lock` by hand: on 2026-11-22 that made 15 sources of a
+  running scan fail with "database is locked".
 - **One letter builder:** `letters.build_letter()`. The Offers preview, its PDF,
   its e-mail (sent or opened in a mail app) and `--cartas` all use it. Never
   write letter text in JavaScript or a second template. Which letters a sale

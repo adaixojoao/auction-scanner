@@ -551,14 +551,54 @@ def run_scan_apart(countries=None, source_names=None, label: str | None = None) 
     return code
 
 
-def _scan_main(argv: list[str]) -> int:
+def run_rescore(*, cfg: dict | None = None, db=None) -> bool:
+    """Rescore every goal under scan.lock, as its own job.
+
+    For finishing a scan that was cut off in its scoring. Rescoring writes for
+    many minutes; on 2026-11-22 a rescore run beside a scan made 15 sources
+    fail with "database is locked". Raises ScanBusy if a scan is running."""
+    from config import load_config
+    from db import connect, zero_closed_scores
+    cfg = cfg or load_config()
+    own_db = db is None
+    db = db or connect()
+    try:
+        with scan_lock(), _below_other_programs():
+            # A rescore is not a scan: "Last scan" keeps the last scan's time and summary.
+            prev = db.execute("SELECT finished_at, summary FROM scan_state WHERE id = 1").fetchone()
+            _set_state(db, running=1, stop=0, label="rescoring", total=1, done=0, current="scoring",
+                       started_at=utcnow_iso())
+            ok = False
+            try:
+                zero_closed_scores(db)
+                ok = rescore(db, cfg)
+            finally:
+                try:
+                    import dashboard
+                    dashboard.refresh_cached_lists(utcnow_iso())
+                except Exception:  # noqa: BLE001 — the open page keeps the list it has
+                    LOG.exception("Refreshing the lists failed")
+                _set_state(db, running=0, stop=0, current=None, done=1,
+                           finished_at=prev[0] if prev else None, summary=prev[1] if prev else None)
+            LOG.info(f"Rescore {'finished' if ok else 'failed'}")
+            return ok
+    finally:
+        if own_db:
+            db.close()
+
+
+def _log_to(name: str) -> None:
     import logging
     import logging.handlers
-    handler = logging.handlers.RotatingFileHandler(os.path.join(HERE, "scan.log"), maxBytes=2_000_000,
+    handler = logging.handlers.RotatingFileHandler(os.path.join(HERE, name), maxBytes=2_000_000,
                                                    backupCount=2, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
     logging.getLogger().addHandler(handler)
     logging.getLogger().setLevel(logging.INFO)
+
+
+def _scan_main(argv: list[str]) -> int:
+    _log_to("scan.log")
     args = json.loads(argv[argv.index("--scan") + 1])
     try:
         run_scan(**args)
@@ -567,5 +607,16 @@ def _scan_main(argv: list[str]) -> int:
     return 0
 
 
+def _rescore_main() -> int:
+    _log_to("scan.log")
+    try:
+        return 0 if run_rescore() else 1
+    except ScanBusy:
+        LOG.error("A scan is running; rescore not started")
+        return _BUSY_EXIT
+
+
 if __name__ == "__main__" and "--scan" in sys.argv:
     sys.exit(_scan_main(sys.argv))
+if __name__ == "__main__" and "--rescore" in sys.argv:
+    sys.exit(_rescore_main())

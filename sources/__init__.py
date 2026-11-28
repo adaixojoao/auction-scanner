@@ -186,11 +186,38 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
     Counts must be non-negative integers; missing counts, None, booleans and
     coerced strings/floats are invalid and recorded as errors.
     """
-    from common import SourceTimeLimit, past_source_deadline, source_deadline
     from db import record_scrape
 
     started_iso = utcnow_iso()
     t0 = time.monotonic()
+    count, status, scope, pages_seen, message = _run_once(db, source, max_price, config, started_iso)
+    if status == "error" and _database_was_locked(message):
+        # Another writer held the database (2026-11-22: a rescore beside a scan
+        # lost 15 sources). It is not the site's fault: wait and read it again.
+        LOG.warning(f"Source {source.name}: database busy, trying again in {LOCKED_RETRY_WAIT_S}s")
+        time.sleep(LOCKED_RETRY_WAIT_S)
+        count, status, scope, pages_seen, message = _run_once(db, source, max_price, config, started_iso)
+    duration = round(time.monotonic() - t0, 1)
+    record_scrape(db, source.name, count=count, status=status, message=message,
+                  duration_s=duration, timestamp=started_iso, scope=scope,
+                  pages_seen=pages_seen)
+    LOG.info(f"{source.name}: {count} listings ({status}, {duration}s)")
+    return {"source": source.name, "count": count, "status": status,
+            "message": message, "duration_s": duration}
+
+
+# How long a source waits before its one retry when the database was locked.
+LOCKED_RETRY_WAIT_S = 60
+
+
+def _database_was_locked(message: str | None) -> bool:
+    return bool(message) and "database is locked" in message
+
+
+def _run_once(db, source: Source, max_price: float, config: dict | None, started_iso: str):
+    """One attempt at a source: (count, status, scope, pages_seen, message)."""
+    from common import SourceTimeLimit, past_source_deadline, source_deadline
+
     message = None
     scope: str | None = None
     pages_seen: int | None = None
@@ -233,10 +260,4 @@ def run_source(db, source: Source, *, max_price: float, config: dict | None = No
         count, status, scope = 0, "error", "partial"
         message = describe_error(e)
         LOG.error(f"Source {source.name} failed: {type(e).__name__}: {e}")
-    duration = round(time.monotonic() - t0, 1)
-    record_scrape(db, source.name, count=count, status=status, message=message,
-                  duration_s=duration, timestamp=started_iso, scope=scope,
-                  pages_seen=pages_seen)
-    LOG.info(f"{source.name}: {count} listings ({status}, {duration}s)")
-    return {"source": source.name, "count": count, "status": status,
-            "message": message, "duration_s": duration}
+    return count, status, scope, pages_seen, message
