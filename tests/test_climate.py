@@ -3,10 +3,8 @@ import sys
 
 import numpy as np
 import pytest
-import rasterio
-from rasterio.transform import from_origin
-
 import climate
+import geotiff
 from scoring import score_detail
 
 HOME = dict(source="eleiloes", country="PT", title="Moradia T3", tipo="moradia", area_m2=120, price=20000)
@@ -69,12 +67,8 @@ def layers(tmp_path, monkeypatch):
     climate._CACHE.clear()
     (tmp_path / "layers").mkdir()
     (tmp_path / "jrc_flood").mkdir()
-    t = from_origin(-8.0, 41.0, 0.01, 0.01)          # 100 x 100 cells over (-8, 40)..(-7, 41)
-
-    def write(path, arr):
-        with rasterio.open(path, "w", driver="GTiff", height=100, width=100, count=1, dtype="float32",
-                           crs="EPSG:4326", transform=t, nodata=-9999) as dst:
-            dst.write(arr.astype("float32"), 1)
+    def write(path, arr):                            # 100 x 100 cells over (-8, 40)..(-7, 41)
+        geotiff.write(path, arr.astype("float32"), x0=-8.0, y0=41.0, pixel=0.01, nodata=-9999)
     write(tmp_path / "layers" / "heat_ssp245_2081-2100.tif", np.full((100, 100), 33.26))
     water = np.zeros((100, 100))
     water[50, 60] = 1                                  # one wet cell at (40.495, -7.395)
@@ -367,7 +361,7 @@ def test_a_layer_that_cannot_be_read_stores_nothing(layers, db, add, monkeypatch
 
 
 def test_a_layer_not_on_this_pc_is_skipped_not_a_failure(tmp_path, monkeypatch):
-    monkeypatch.setitem(sys.modules, "rasterio", None)          # would not even load
+    monkeypatch.setitem(sys.modules, "tifffile", None)          # would not even load
     climate._raster.cache_clear()
     try:
         assert climate._raster(str(tmp_path / "not-here.tif")) is None
@@ -474,6 +468,9 @@ def test_flood_nodata_inside_the_map_is_dry(monkeypatch):
         height = width = 10
         def index(self, lon, lat):
             return (int(lat), int(lon))
+
+        def contains(self, row, col):
+            return 0 <= row < self.height and 0 <= col < self.width
     monkeypatch.setattr(climate, "_sample", lambda *a: None)
     monkeypatch.setattr(climate, "_raster", lambda p: Src())
     assert climate.flood_depth(5, 5) == 0.0        # on the map, not flooded

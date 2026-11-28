@@ -63,8 +63,8 @@ def _layers() -> str:
 def _raster(path: str):
     if not os.path.exists(path):
         return None                  # not on this PC: skipped, not a failure
-    import rasterio
-    return rasterio.open(path)
+    import geotiff                   # not rasterio: Smart App Control blocks its GDAL (geotiff.py)
+    return geotiff.Raster(path)
 
 
 # ─── GeoPackages, read without GDAL ─────────────────────────────────
@@ -185,17 +185,10 @@ def _sample(path: str, lat: float, lon: float) -> float | None:
     if src is None:
         return None
     try:
-        row, col = src.index(lon, lat)
-        if not (0 <= row < src.height and 0 <= col < src.width):
-            return None
-        import rasterio.windows
-        val = src.read(1, window=rasterio.windows.Window(col, row, 1, 1))[0, 0]
+        val = src.value(*src.index(lon, lat))
     except Exception:  # noqa: BLE001 — outside the grid
         return None
-    val = float(val)
-    if math.isnan(val) or (src.nodata is not None and val == src.nodata):
-        return None
-    return val
+    return None if val is None else float(val)
 
 
 # The islands the EEA air maps leave out (south, west, north, east).
@@ -303,7 +296,7 @@ def flood_depth(lat: float, lon: float) -> float | None:
             row, col = src.index(lon, lat)
         except Exception:  # noqa: BLE001
             return None
-        return 0.0 if 0 <= row < src.height and 0 <= col < src.width else None
+        return 0.0 if src.contains(row, col) else None
     return round(v, 2) if v > 0 else 0.0
 
 
@@ -313,16 +306,12 @@ def permanent_water_km(lat: float, lon: float, max_km: float = WATER_KM) -> floa
     if src is None:
         return None
     import numpy as np
-    import rasterio.windows
-    from rasterio.warp import transform as warp
-    xs, ys = warp("EPSG:4326", src.crs, [lon], [lat]) if src.crs and src.crs.to_epsg() != 4326 else ([lon], [lat])
-    row, col = src.index(xs[0], ys[0])
-    px_m = abs(src.transform.a) if src.crs and src.crs.is_projected else abs(src.transform.a) * 111_000 * math.cos(
-        math.radians(lat))
+    x, y = (lon, lat) if src.epsg in (None, 4326) else _transformer("EPSG:4326", f"EPSG:{src.epsg}").transform(lon, lat)
+    row, col = src.index(x, y)
+    px_m = src.sx if src.is_projected else src.sx * 111_000 * math.cos(math.radians(lat))
     r = max(1, int(max_km * 1000 / max(px_m, 1)))
-    win = rasterio.windows.Window(col - r, row - r, 2 * r + 1, 2 * r + 1)
     try:
-        block = src.read(1, window=win, boundless=True, fill_value=0)
+        block = src.read(row - r, col - r, 2 * r + 1, 2 * r + 1, fill=0)
     except Exception:  # noqa: BLE001
         return None
     wet = np.argwhere(block > 0)
@@ -581,7 +570,7 @@ def assess(lat: float, lon: float) -> dict:
 def _libraries() -> bool:
     """requirements-climate.txt is optional: without it the scan must not fail."""
     import importlib.util
-    return all(importlib.util.find_spec(name) is not None for name in ("numpy", "rasterio"))
+    return all(importlib.util.find_spec(name) is not None for name in ("numpy", "tifffile"))
 
 
 def available() -> bool:
